@@ -45,3 +45,29 @@ export function prepareApprovedMainnetPsbt(input:unknown,approval:unknown){
  tx.updateInput(1,{nonWitnessUtxo:hex.decode(c.fundingPreviousTxHex)},true);
  return {psbt:tx.toPSBT(),intentHash,broadcastAuthorized:false as const};
 }
+/** Fields the approval screen shows. Validation failure must not render a partial intent. */
+export function exactSigningIntentDisplay(input: unknown) {
+  const validated = validateMainnetIntent(input);
+  const manifest = validated.contract.manifest;
+  return {
+    ...validated,
+    broadcastAuthorized: false as const,
+    lines: [
+      { label: "Chain", value: "Bitcoin mainnet" },
+      {
+        label: "Helper outpoint",
+        value: `${manifest.helper.txid}:${manifest.helper.vout}`,
+      },
+      {
+        label: "Funding outpoint",
+        value: `${manifest.funding.txid}:${manifest.funding.vout}`,
+      },
+      { label: "Helper input (sats)", value: manifest.helper.value },
+      { label: "Vault input (sats)", value: manifest.funding.value },
+      { label: "Destination", value: manifest.destination },
+      { label: "Output (sats)", value: manifest.outputValue },
+      { label: "Fee (sats)", value: manifest.fee },
+      { label: "Exact intent hash", value: validated.intentHash },
+    ],
+  };
+}

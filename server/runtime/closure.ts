@@ -18,6 +18,7 @@ export const requiredReleasePaths = [
   "server/store.ts",
   "server/transaction-checks.ts",
   "server/validation-search.ts",
+  "server/runtime/activation.ts",
   "server/runtime/capability.ts",
   "server/runtime/closure.ts",
   "server/runtime/coverage-ledger.ts",
@@ -148,7 +149,11 @@ export const componentForPath = (relativePath: string): string => {
     relativePath === "server/runtime/core-binary.json"
   )
     return "fresh-proof";
-  if (relativePath === "server/runtime/miner-inclusion.ts") return "api";
+  if (
+    relativePath === "server/runtime/miner-inclusion.ts" ||
+    relativePath === "server/runtime/activation.ts"
+  )
+    return "api";
   if (
     relativePath.startsWith("server/runtime/") ||
     relativePath === "server/coordinator.ts" ||

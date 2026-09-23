@@ -570,6 +570,7 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
       "Native binary hashes and OCI config, index, and registry manifest digests remain unproduced.",
       "Section 6 fresh optimized withdrawal was not run from this checkout. Proof-runner, freshness, bundle, drain, and Core-report gates do not close it.",
       "Section 7 external miner inclusion was not run from this checkout. Chain-agreement, spent-fixture, exact-spend, and preflight gates do not close it.",
+      "Section 8 production activation is not approved. Decision, deployment, and runbook gates do not enable mainnet or authorize a spend.",
     ],
   };
   assertCompatibleStages(manifest);
