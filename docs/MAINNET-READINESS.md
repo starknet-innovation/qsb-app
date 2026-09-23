@@ -16,7 +16,7 @@ The repository is a curated research snapshot. Some integration work and evidenc
 | Queue/runtime | Bounded actual GPU/OCI queue execution and cancellation/drain tests; immutable package identities recorded locally. | A complete fresh pinning-to-both-subsets search through the final application and runtime. |
 | Durable coordination | Local database transactions, concurrent claims, uncertain submissions, restart recovery, publication and session/replacement handoff tests. Some tests use actual Linux processes and CPU verification. | Production AWS permissions, complete production migration, or live-provider facts where tests supplied simulated responses. |
 | Browser/API | Backup encryption, one-time intent handling, wallet-lifetime guards, existing-job selection, authenticated route and configuration tests. | Successful final deployed UI/API/runtime composition; browser tests mock wallet, chain or QSB operations where stated. |
-| Public checkout | 134 unit tests and TypeScript/Vite build passed after pinned dependency preparation. | Browser/GPU tests, deployment, or a fresh withdrawal reproduced from this public checkout. |
+| Public checkout | 152 unit tests and the TypeScript/Vite build passed in this checkout after pinned dependency preparation. The initial public export recorded 134. | Browser/GPU tests, deployment, or a fresh withdrawal reproduced from this public checkout. |
 
 ## 1. Complete and freeze the distributable release
 
@@ -52,29 +52,52 @@ The source package and in-process handoff in this branch are reproducible from t
 
 ## 3. Select and validate the production execution host
 
-**Status: open for production; isolated native installation passed.** The [24 September x86_64 host validation](runtime-installation/20260924-linux-validation.md) passed pinned installation, encrypted dummy credential delivery and Unix-socket watchdog tests. The host was stopped after evidence collection. Real credential/endpoint enrollment, production configuration alignment and a full provider-backed lifecycle remain open.
+**Status: open for production; isolated native installation passed.** The [24 September x86_64 host validation](runtime-installation/20260924-linux-validation.md) passed pinned installation, encrypted dummy credential delivery and Unix-socket watchdog tests. The host was stopped after evidence collection. Real credential/endpoint enrollment, production configuration alignment and a full provider-backed lifecycle remain open. Local process-identity recovery and a labeled lifecycle rehearsal also run on this checkout's machine. No production host is selected, no image is enrolled, and no runtime credential is provisioned. Local container and process tests do not certify a selected deployment host.
 
 - [ ] Select a host compatible with the reviewed Linux process-ownership, private credential channel, persistent evidence and owned CPU-container requirements.
 - [ ] Validate exact runtime paths, immutable preloaded images, execution architecture, restricted child-container permissions and the Docker/host privilege boundary.
-- [ ] Preserve process/engine identity across recovery. Loss of a local process or directory is not proof that remote GPU work stopped.
+- [x] Preserve process/engine identity across recovery. Loss of a local process or directory is not proof that remote GPU work stopped. Evidence: `recordLocalLoss` / `applyLocalLoss` keep `providerId`, `providerOutcome`, `providerSubmissions`, and the bound evidence-directory identity when the local pid is gone or the directory is replaced or missing. `remoteWorkStopProven` stays false, and `submitProviderOnce` is not called again. Terminal evidence already in the store is kept. `tests/host-requirements.test.ts` also kills a real local OS process in `rehearseLocalLifecycle`. This does not prove remote GPU work stopped and does not select a production host.
 - [ ] Protect runtime/configuration mounts and evidence directories against replacement or tampering; resolver checks do not replace host permissions.
 - [ ] Provision runtime credentials privately through the approved channel. Never place them in browser requests, public configuration, source, logs or issues.
 - [ ] Run a real lifecycle check on the selected host, including forced interruption, recovery, deadline handling and evidence availability after shutdown.
 
 **Acceptance evidence:** reviewed host configuration and an actual owned-lifecycle record on that configuration. The current short-lived historical Lambda deployment cannot be assumed to host the longer Linux-owned runtime unchanged; API hosting and search execution may require separate components.
 
+### Public checkout progress (23 September 2026)
+
+`probeLocalHost`, `acceptCredentialReference`, and `rehearseLocalLifecycle` are source-controlled rehearsals. `productionHostSelected` and `certifiesProductionHost` stay false. `release.mainnetEnabled` and `broadcastAuthorized` stay false.
+
+Still open:
+
+- **3.1** Select a Linux host that can own the search process, keep a private credential channel, persist an evidence directory, and run the CPU verifier as an owned container. Record that choice outside this repository. Do not reuse the historical Lambda as that host.
+- **3.2** On that host, verify runtime paths, preload the immutable image built from the frozen commit, and record architecture plus the image config, index, and registry manifest digests. Keep the child unprivileged and do not mount the Docker socket. The historical `000000000000` ECR reference is not that image. No digest is invented here.
+- **3.4** Set host mount permissions on the runtime configuration and evidence directories. `compareDirectoryIdentity` can see a replaced or missing rehearsal directory, and `acceptHostPermissionClaim` rejects resolver and path-string claims, but those checks do not replace host permissions.
+- **3.5** Put the runtime secret in the operator secret store and pass only its reference. `acceptCredentialReference` accepts a reference and resolves no secret. Do not place the value in a browser request, public configuration, source, log, or issue.
+- **3.6** Repeat forced interruption, recovery, deadline handling, and post-shutdown evidence checks on the selected host and retain that record. The local rehearsal in `tests/host-requirements.test.ts` does not.
+
 ## 4. Establish durable storage authority and safe cutover
 
-**Status: local transaction/migration preparation tested; production enforcement remains open.**
+**Status: local transaction/migration preparation tested; production enforcement remains open.** In-process writer exclusion, supplied-row inventory, permission separation, memory-store migration, and rollback refusal are rehearsed here. Regional IAM and a complete production inventory are not.
 
 - [ ] Complete the inventory of existing commitments, reservations, jobs, provider identities and releases. A partial public exclusion list is not global freshness proof.
 - [ ] Technically exclude conflicting legacy writers before enabling the new canonical reservation authority. A frontend flag, capability marker or paused workflow is insufficient.
 - [ ] Review separate API, runtime and operator permissions, including required database transactions and evidence access.
 - [ ] Validate migration and concurrency against the selected real regional backend and permissions. DynamoDB Local does not certify IAM behavior or a production cutover.
-- [ ] Preserve one-time commitments, original requests, completed coverage, unknown submissions and cleanup history across migration/restarts.
-- [ ] Define a rollback procedure that cannot revive conflicting writers, release consumed commitments or duplicate paid work.
+- [x] Preserve one-time commitments, original requests, completed coverage, unknown submissions and cleanup history across migration/restarts. Evidence: `importSnapshot` copies a MemoryStore snapshot into an empty MemoryStore and `preservationFailures` is empty after a second export/import. Consumed commitments, request hashes, `wholeRangeCovered: false`, uncertain provider submissions, cleanup history, reservations, and unclassified rows are retained. `tests/storage-authority.test.ts`. This is not a regional migration; see 4.4.
+- [x] Define a rollback procedure that cannot revive conflicting writers, release consumed commitments or duplicate paid work. Evidence: `rollbackCanonicalAcceptance` sets `canonicalAccepting: false` and leaves `legacyExcluded: true`. Deleting the authority row or setting `legacyExcluded: false` throws `RollbackWouldReviveWriters`. Further legacy and canonical reservation writes throw `ReservationAuthorityStopped`. Consumed commitments and provider submissions stay in place. `inferDrainFromAggregate` never reports drain or completion. `tests/storage-authority.test.ts`. This is a local dry-run, not a production cutover.
 
 **Acceptance evidence:** complete inventory, reviewed permissions/exclusion controls, migration reconciliation, concurrency tests and rollback rehearsal. Never infer drain or completion from aggregate provider counters alone.
+
+### Public checkout progress (23 September 2026)
+
+`npm run inventory:storage -- snapshot.json` inventories a caller-supplied row export. `globalFreshness` is always false. `assessMigrationBackend("dynamodb-local")` refuses IAM and production-cutover certification.
+
+Still open:
+
+- **4.1** Export the selected regional table without secrets and inventory that file. A partial public exclusion list, including any export from this checkout, is not global freshness proof.
+- **4.2** Deny the already deployed legacy writer roles `dynamodb:PutItem` and `dynamodb:TransactWriteItems` before enabling canonical acceptance in that account. This checkout rejects a frontend flag, capability marker, and paused workflow, and its store rejects the old reservation shape once `legacyExcluded` is set. That in-process condition does not stop an old binary.
+- **4.3** The source model in `permissionModel` separates API, runtime, and operator data, secret, and evidence actions, and canonical reservation writes use a transaction. `productionIamReviewed` and `livePermissionsVerified` stay false. Review the real roles against that model.
+- **4.4** Re-run migration and the authority-generation concurrency check with the selected region's IAM. DynamoDB Local does not certify that behavior. MemoryStore concurrency in `tests/storage-authority.test.ts` is only a rehearsal.
 
 ## 5. Close final solver and coverage review
 

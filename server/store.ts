@@ -7,6 +7,14 @@ import {
   QueryCommand,
   TransactWriteCommand,
 } from "@aws-sdk/lib-dynamodb";
+import {
+  AUTHORITY_PK,
+  AUTHORITY_SK,
+  dynamoReservationTransaction,
+  isAuthorityRow,
+  isReservationRow,
+  reservationBatchRejection,
+} from "./runtime/reservation-guard";
 export type Row = {
   pk: string;
   sk: string;
@@ -22,9 +30,24 @@ export interface Store {
   atomicPut(writes: { row: Row; expected?: number }[]): Promise<void>;
 }
 export class Conflict extends Error {}
+
+function rejectGuarded(
+  existing: Row | undefined,
+  writes: { row: Row; expected?: number }[],
+) {
+  const rejection = reservationBatchRejection(existing, writes);
+  if (rejection) throw new Conflict(rejection);
+}
+
 export class MemoryStore implements Store {
   readonly rows = new Map<string, Row>();
+  private authority(): Row | undefined {
+    const row = this.rows.get(`${AUTHORITY_PK}|${AUTHORITY_SK}`);
+    if (row?.expiresAt && row.expiresAt < Date.now() / 1000) return;
+    return row;
+  }
   async atomicPut(writes: { row: Row; expected?: number }[]) {
+    rejectGuarded(this.authority(), writes);
     const seen = new Set<string>();
     for (const { row, expected } of writes) {
       const key = `${row.pk}|${row.sk}`,
@@ -45,6 +68,8 @@ export class MemoryStore implements Store {
     return r ? structuredClone(r) : undefined;
   }
   async put(row: Row, expected?: number) {
+    if (isReservationRow(row) || isAuthorityRow(row))
+      rejectGuarded(this.authority(), [{ row, expected }]);
     const k = `${row.pk}|${row.sk}`,
       old = this.rows.get(k);
     if (expected === undefined ? old !== undefined : old?.version !== expected)
@@ -53,8 +78,14 @@ export class MemoryStore implements Store {
   }
   async delete(pk: string, sk: string, expected: number) {
     const k = `${pk}|${sk}`;
-    if (this.rows.get(k)?.version !== expected)
-      throw new Conflict("Concurrent update");
+    const current = this.rows.get(k);
+    if (
+      pk === AUTHORITY_PK &&
+      sk === AUTHORITY_SK &&
+      current?.legacyExcluded === true
+    )
+      throw new Conflict("RollbackWouldReviveWriters");
+    if (current?.version !== expected) throw new Conflict("Concurrent update");
     this.rows.delete(k);
   }
   async list(pk: string, prefix: string) {
@@ -70,26 +101,56 @@ export class DynamoStore implements Store {
   );
   constructor(private table: string) {}
   async atomicPut(writes: { row: Row; expected?: number }[]) {
+    if (
+      writes.some((write) => isReservationRow(write.row) || isAuthorityRow(write.row))
+    )
+      rejectGuarded(await this.get(AUTHORITY_PK, AUTHORITY_SK), writes);
+    const steps = dynamoReservationTransaction(writes);
+    const authorityCheck = steps.find((step) => step.kind === "authority-absent");
     try {
       await this.client.send(
         new TransactWriteCommand({
-          TransactItems: writes.map(({ row, expected }) => ({
-            Put: {
-              TableName: this.table,
-              Item: row,
-              ConditionExpression:
-                expected === undefined ? "attribute_not_exists(pk)" : "#v = :v",
-              ...(expected === undefined
-                ? {}
-                : {
-                    ExpressionAttributeNames: { "#v": "version" },
-                    ExpressionAttributeValues: { ":v": expected },
-                  }),
-            },
-          })),
+          TransactItems: steps.map((step) =>
+            step.kind === "put"
+              ? {
+                  Put: {
+                    TableName: this.table,
+                    Item: writes.find(
+                      (write) => write.row.pk === step.pk && write.row.sk === step.sk,
+                    )!.row,
+                    ConditionExpression:
+                      step.condition === "attribute_not_exists(pk)"
+                        ? "attribute_not_exists(pk)"
+                        : "#v = :v",
+                    ...(step.condition === "version"
+                      ? {
+                          ExpressionAttributeNames: { "#v": "version" },
+                          ExpressionAttributeValues: { ":v": step.expectedVersion },
+                        }
+                      : {}),
+                  },
+                }
+              : {
+                  ConditionCheck: {
+                    TableName: this.table,
+                    Key: { pk: step.pk, sk: step.sk },
+                    ConditionExpression: "attribute_not_exists(pk)",
+                  },
+                },
+          ),
         }),
       );
     } catch (e) {
+      const reasons = (
+        e as { CancellationReasons?: { Code?: string }[] }
+      ).CancellationReasons;
+      const authorityIndex = steps.findIndex((step) => step.kind === "authority-absent");
+      if (
+        authorityCheck &&
+        (e as Error).name === "TransactionCanceledException" &&
+        reasons?.[authorityIndex]?.Code === "ConditionalCheckFailed"
+      )
+        throw new Conflict("LegacyWriterExcluded");
       if ((e as Error).name === "TransactionCanceledException")
         throw new Conflict("Input reserved or concurrent update");
       throw e;
@@ -108,6 +169,14 @@ export class DynamoStore implements Store {
     return item;
   }
   async put(row: Row, expected?: number) {
+    if (isReservationRow(row)) {
+      await this.atomicPut([{ row, expected }]);
+      return;
+    }
+    if (isAuthorityRow(row))
+      rejectGuarded(await this.get(AUTHORITY_PK, AUTHORITY_SK), [
+        { row, expected },
+      ]);
     try {
       await this.client.send(
         new PutCommand({
@@ -130,6 +199,11 @@ export class DynamoStore implements Store {
     }
   }
   async delete(pk: string, sk: string, expected: number) {
+    if (pk === AUTHORITY_PK && sk === AUTHORITY_SK) {
+      const current = await this.get(pk, sk);
+      if (current?.legacyExcluded === true)
+        throw new Conflict("RollbackWouldReviveWriters");
+    }
     try {
       await this.client.send(
         new DeleteCommand({

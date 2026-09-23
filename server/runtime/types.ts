@@ -99,6 +99,33 @@ export const launchStateSchema = z.enum([
 ]);
 export type LaunchState = z.infer<typeof launchStateSchema>;
 
+export const localLossKindSchema = z.enum([
+  "process-not-alive",
+  "evidence-directory-replaced",
+  "evidence-directory-missing",
+]);
+export type LocalLossKind = z.infer<typeof localLossKindSchema>;
+
+export const localLossSchema = z
+  .object({
+    kind: localLossKindSchema,
+    remoteStopProven: z.literal(false),
+    providerIdentityPreserved: z.literal(true),
+  })
+  .strict();
+export type LocalLoss = z.infer<typeof localLossSchema>;
+
+export const evidenceDirectorySchema = z
+  .object({
+    device: z.number().int().nonnegative(),
+    inode: z.number().int().nonnegative(),
+    mode: z.number().int().nonnegative(),
+    uid: z.number().int().nonnegative(),
+    gid: z.number().int().nonnegative(),
+  })
+  .strict();
+export type EvidenceDirectoryIdentity = z.infer<typeof evidenceDirectorySchema>;
+
 export const launchRecordSchema = z
   .object({
     bindings: launchBindingsSchema,
@@ -111,6 +138,8 @@ export const launchRecordSchema = z
     processStarts: z.number().int().nonnegative(),
     acknowledgement: acknowledgementSchema.optional(),
     evidence: terminalEvidenceSchema.optional(),
+    evidenceDirectory: evidenceDirectorySchema.optional(),
+    localLoss: localLossSchema.optional(),
     replacement: z.enum(["starting", "uncertain"]).optional(),
     submission: z.literal("in-progress").optional(),
     stdoutProtocol: z.literal("violated").optional(),
@@ -135,6 +164,20 @@ export const runtimeViewSchema = z
   })
   .strict();
 export type RuntimeView = z.infer<typeof runtimeViewSchema>;
+
+/** Local process, directory, and terminal evidence never prove remote GPU work stopped. */
+export function remoteWorkStopProven(record: LaunchRecord): boolean {
+  switch (record.providerOutcome) {
+    case "not-submitted":
+    case "uncertain":
+    case "submitted":
+      return false;
+    default: {
+      const neverOutcome: never = record.providerOutcome;
+      throw new Error(`Unhandled provider outcome: ${neverOutcome}`);
+    }
+  }
+}
 
 export function isSearchRunning(record: LaunchRecord): boolean {
   switch (record.state) {

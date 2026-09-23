@@ -18,6 +18,7 @@ import {
   type SupervisedJob,
 } from "./host-bridge";
 import { coreSourceDigest } from "./package-release";
+import { canonicalReservationWrites } from "./storage-authority";
 import { RELEASE_MANIFEST_FORMAT, type LaunchBindings } from "./types";
 import {
   canonicalOutpointKey,
@@ -249,20 +250,25 @@ export async function admitSupervisedJob(
   try {
     await store.atomicPut([
       { row: { pk, sk: `JOB#${id}`, version: 0, job: stored } },
-      ...[request.manifest.funding, request.manifest.helper].map((point) => ({
-        row: {
-          pk: canonicalOutpointKey(point.txid, point.vout),
-          sk: "RESERVATION",
-          version: 0,
+      ...(await canonicalReservationWrites(
+        store,
+        [request.manifest.funding, request.manifest.helper].map((point) => ({
           owner,
           jobId: id,
-        },
-      })),
+          txid: point.txid,
+          vout: point.vout,
+        })),
+      )),
       { row: capability, expected: capability.version },
       { row: authority, expected: authority.version },
     ]);
   } catch (error) {
     if (error instanceof Conflict) {
+      if (
+        error.message === "LegacyWriterExcluded" ||
+        error.message === "ReservationAuthorityStopped"
+      )
+        throw new GateError(409, error.message);
       const raced = await store.get(pk, `JOB#${id}`);
       if (raced) {
         const racedJob = raced.job as SupervisedJob;
