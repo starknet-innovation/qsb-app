@@ -1434,14 +1434,24 @@ __global__ void kernel_verify_pair_hits(
     if(threadIdx.x==0)*((uint32_t*)verified)=0;
     __syncthreads(); // One block; all lanes participate before the loop.
     const uint32_t count=*((const uint32_t*)tentative);
-    const uint32_t limit=count<1024u?count:1024u;
-    for(uint32_t i=threadIdx.x;i<limit;i+=blockDim.x){
+    // The device buffer holds 1024 records. Clamping and continuing would omit
+    // candidates, so the raw count is published and the host fails the range.
+    if(count>1024u){
+        if(threadIdx.x==0)*((uint32_t*)verified)=count;
+        return;
+    }
+    for(uint32_t i=threadIdx.x;i<count;i+=blockDim.x){
         const uint8_t*record=tentative+4+(size_t)i*ZLAB_HIT_REC;
         const uint32_t index=*((const uint32_t*)record)&0x3fffffffu;
         const uint32_t ep=index>>8,lane=index&255u;
         if(ep>=(uint32_t)epochs_in_batch)continue;
         const int encoded=qsb_pair_verify_candidate(
             epochs+ep,first+(size_t)ep*QSB_FIRST_SLOTS*8,lane,gtable);
+        // Negative means the exact denominator vanished. That is not a miss.
+        if(encoded<0){
+            atomicOr((uint32_t*)verified,0x80000000u);
+            continue;
+        }
         if(!encoded)continue;
         const uint32_t slot=atomicAdd((uint32_t*)verified,1u);
         if(slot<1024u){
@@ -2489,6 +2499,15 @@ int main(int argc, char **argv) {
     }
 
     if (ranked_work && (total_gpus_override != 1 || global_offset != 0 || tile_path || easy || calibrate || !single_hash)) return 2;
+#if QSB_PAIR_SHARED || ZLAB_TRIM
+    /* Ranked batches are the generic enum kernel: QSB_PAIR_SHARED=0 and
+     * ZLAB_TRIM=0. The short-epoch pair build is different geometry. It must
+     * not inherit that path's coverage or its exceptional-point recovery. */
+    if (ranked_work) {
+        fprintf(stderr, "QSB_RANGE_INCOMPLETE: unsupported geometry for the ranked generic path\n");
+        return 2;
+    }
+#endif
     QSB_CUDA_REQUIRE(cudaSetDevice(gpu_index));
     cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Digest Search [GPU %d]\n", gpu_index);
@@ -3148,17 +3167,29 @@ int main(int argc, char **argv) {
             kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-            total_searched += (uint64_t)epochs_in_batch*QSB_SE_PER_EPOCH;
-            epoch_base += epochs_in_batch;
+            if (err != cudaSuccess) {
+                fprintf(stderr, "QSB_RANGE_INCOMPLETE: CUDA error: %s\n", cudaGetErrorString(err));
+                return 2;
+            }
 #if ZLAB_HITPATH
             err = cudaMemcpy(zh_host, d_verified_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
-            if (err != cudaSuccess) { fprintf(stderr, "Hit read failed: %s\n", cudaGetErrorString(err)); return 1; }
-            // Publish only completed batches to the termination-time diagnostic.
-            g_total_searched = total_searched;
+            if (err != cudaSuccess) {
+                fprintf(stderr, "QSB_RANGE_INCOMPLETE: hit read failed: %s\n", cudaGetErrorString(err));
+                return 2;
+            }
             memcpy(&h_hit, zh_host, 4);
+            /* 64 is the supported retained-hit capacity, not an unlimited buffer.
+             * The high bit marks an exceptional denominator this pair verifier
+             * did not recover. Either case stops before publication. */
+            if ((h_hit & 0x80000000u) || h_hit > 64u) {
+                fprintf(stderr, "QSB_RANGE_INCOMPLETE: %s\n",
+                    (h_hit & 0x80000000u)
+                        ? "exceptional point requires exact recovery"
+                        : "hit count exceeds host capacity");
+                return 2;
+            }
             if (h_hit > 0) {
-                int nh = (h_hit > 64) ? 64 : (int)h_hit;
+                int nh = (int)h_hit;
                 if (nh > ZLAB_HIT_FIRST)
                     QSB_CUDA_REQUIRE(cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
                                d_verified_hitbuf + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
@@ -3176,7 +3207,7 @@ int main(int argc, char **argv) {
                 const char *wp = wb;
                 while (wl > 0) {
                     ssize_t k = write(zh_fd, wp, (size_t)wl);
-                    if (k < 0) { if (errno == EINTR) continue; fprintf(stderr, "ERROR: hit write failed\n"); return 1; }
+                    if (k < 0) { if (errno == EINTR) continue; fprintf(stderr, "QSB_RANGE_INCOMPLETE: hit write failed\n"); return 2; }
                     wp += k; wl -= (int)k;
                 }
                 hit_counter += (uint64_t)nh;
@@ -3185,11 +3216,14 @@ int main(int argc, char **argv) {
             if (0) {
 #else
             QSB_CUDA_REQUIRE(cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost));
-            g_total_searched = total_searched;
+            if (h_hit > 64) {
+                fprintf(stderr, "QSB_RANGE_INCOMPLETE: hit count exceeds host capacity\n");
+                return 2;
+            }
             if (h_hit > 0) {
 #endif
                 uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
+                int nh = (int)h_hit;
                 if(cudaMemcpy(hits,d_hit_idx,nh*4,cudaMemcpyDeviceToHost)!=cudaSuccess){fprintf(stderr,"QSB_RANGE_INCOMPLETE: cannot read hit tags\n");return 2;}
                 printf("\n  *** DIGEST HIT! ***\n");
                 mkdir("results", 0755);
@@ -3235,6 +3269,10 @@ int main(int argc, char **argv) {
                     if(output_failed){fprintf(stderr,"QSB_RANGE_INCOMPLETE: cannot write hit output\n");return 2;}
                 }
             }
+            // Publish this batch only after hit capacity, recovery, and output checks.
+            total_searched += (uint64_t)epochs_in_batch*QSB_SE_PER_EPOCH;
+            epoch_base += epochs_in_batch;
+            g_total_searched = total_searched;
             struct timespec t_now;
             clock_gettime(CLOCK_MONOTONIC, &t_now);
             double secs_since = (t_now.tv_sec - t_last_se.tv_sec)
@@ -3353,7 +3391,7 @@ int main(int argc, char **argv) {
             g_total_searched = total_searched;
             if (h_hit > 0) {
                 uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
+                int nh = (int)h_hit;
                 if(cudaMemcpy(hits,d_hit_idx,nh*4,cudaMemcpyDeviceToHost)!=cudaSuccess){fprintf(stderr,"QSB_RANGE_INCOMPLETE: cannot read hit tags\n");return 2;}
                 printf("\n  *** DIGEST HIT! ***\n");
                 mkdir("results", 0755);
@@ -3569,7 +3607,7 @@ int main(int argc, char **argv) {
             g_total_searched = total_searched;
             if (h_hit > 0) {
                 uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
+                int nh = (int)h_hit;
                 if(cudaMemcpy(hits,d_hit_idx,nh*4,cudaMemcpyDeviceToHost)!=cudaSuccess){fprintf(stderr,"QSB_RANGE_INCOMPLETE: cannot read hit tags\n");return 2;}
 
                 printf("\n  *** DIGEST HIT! ***\n");

@@ -5,6 +5,14 @@ import type { Row, Store } from "./store";
 import type { Runpod } from "./providers";
 import { release, type Job, type PublicVault } from "../src/lib/model";
 import { searchVersion, workRange, subsetRank } from "./search-ranges";
+import {
+  type CoverageScope,
+  type SearchStage,
+  applyRange,
+  coverageLedgerSchema,
+  emptyLedger,
+  publishedHitRecords,
+} from "./runtime/coverage-ledger";
 const slot = z.object({
   attempt: z.number().int().nonnegative(),
   id: z.string().optional(),
@@ -18,6 +26,7 @@ const stateSchema = z.object({
   interrupted: z.array(slot).max(32).default([]),
   completed: z.number().int().nonnegative(),
   candidatesChecked: z.number().int().nonnegative(),
+  coverageLedger: coverageLedgerSchema.optional(),
   nextPinAttempt: z.number().int().nonnegative().default(0),
   pinRestarts: z.number().int().nonnegative().default(0),
   parameters: z
@@ -132,7 +141,8 @@ export async function validationTick(
         workRange: z.record(z.string(), z.unknown()),
       })
       .parse(result.output);
-    const expected = workRange(job.stage, unit.attempt);
+    const stage = searchStage(job.stage);
+    const expected = workRange(stage, unit.attempt);
     if (
       output.stage !== job.stage ||
       output.manifestHash !== job.manifestHash ||
@@ -141,6 +151,22 @@ export async function validationTick(
         JSON.stringify(expected, Object.keys(expected).sort())
     )
       throw Error("ValidationRangeMismatch");
+    const records = publishedHitRecords(output.candidates);
+    const scope = coverageScope(event, job, selected.id);
+    if (records > 64) {
+      const decision = applyRange(
+        state.coverageLedger ?? emptyLedger(),
+        scope,
+        stage,
+        unit.attempt,
+        { kind: "hit-capacity", hitCount: records },
+      );
+      state.coverageLedger = decision.ledger;
+      job.status = "paused";
+      job.error = "Validation hit output exceeds supported capacity.";
+      await save();
+      return finish(false, 0);
+    }
     const checked = output.candidates.length
       ? await cpu({ ...input, action: "verify", candidates: output.candidates })
       : { valid: false };
@@ -200,13 +226,35 @@ export async function validationTick(
       output.status !== "completed" ||
       output.checkpoint !== "range-complete"
     ) {
+      const decision = applyRange(
+        state.coverageLedger ?? emptyLedger(),
+        scope,
+        stage,
+        unit.attempt,
+        { kind: "deterministic-failure" },
+      );
+      state.coverageLedger = decision.ledger;
       job.status = "paused";
       job.error = "Validation range or candidate needs independent review.";
       await save();
       return finish(false, 0);
     }
+    const decision = applyRange(
+      state.coverageLedger ?? emptyLedger(),
+      scope,
+      stage,
+      unit.attempt,
+      { kind: "range-complete", hitCount: records },
+    );
+    state.coverageLedger = decision.ledger;
+    if (decision.stop) {
+      job.status = "paused";
+      job.error = `Validation range stopped without credit: ${decision.reason}`;
+      await save();
+      return finish(false, 0);
+    }
     state.active = state.active.filter((x) => x.id !== unit.id);
-    state.completed++;
+    if (decision.credited) state.completed++;
   }
   job.updatedAt = new Date().toISOString();
   job.attempt = state.nextAttempt;
@@ -260,4 +308,24 @@ export async function validationTick(
   unit.id = response.id;
   await save();
   return finish(false, state.active.length < state.slots ? 0 : 5);
+}
+
+function searchStage(stage: string): SearchStage {
+  if (stage === "pinning" || stage === "round1" || stage === "round2") return stage;
+  throw new Error("InvalidValidationStage");
+}
+
+function coverageScope(
+  event: Event,
+  job: Job,
+  solverPin: string,
+): CoverageScope {
+  return {
+    sessionId: `${event.owner}/${event.jobId}`,
+    solverPin,
+    searchPin:
+      job.stage === "pinning" || !job.solution
+        ? null
+        : `${job.solution.sequence}:${job.solution.locktime}`,
+  };
 }

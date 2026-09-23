@@ -348,7 +348,10 @@ __device__ __noinline__ int qsb_pair_verify_candidate(
     uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
     uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
     uint64_t inv[5],m1[4],m2[4],x1[4],x2[4];
-    if(!qsb_k2s_front_exact(ep,first,lane,d_gt,rx,ry,inv,m1,m2))return 0;
+    // W = 0 is an exceptional denominator. Returning 0 would drop the candidate.
+    // The ranked generic kernel recovers these on the host; this pair verifier
+    // only signals, and the host must fail the range.
+    if(!qsb_k2s_front_exact(ep,first,lane,d_gt,rx,ry,inv,m1,m2))return -1;
     _ModInv(inv); // Nonzero canonical denominator; independent scalar inverse.
     uint32_t par=qsb_k2s_post(m1,m2,inv,rx,ry,x1,x2);
     int recid=0;
