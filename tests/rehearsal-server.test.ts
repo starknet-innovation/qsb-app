@@ -184,7 +184,7 @@ it("resumes a paused job when only another coverage account is stopped", async (
   });
 });
 
-it("blocks Teststream preflight and submit when miner reports a different chain", async () => {
+it("blocks Teststream preflight when the miner reports a different chain and does not submit without a permit", async () => {
   const request = vi
     .fn()
     .mockImplementation(async () => Response.json({ chain: "main" }));
@@ -193,10 +193,12 @@ it("blocks Teststream preflight and submit when miner reports a different chain"
   await expect(miner.test("00")).rejects.toThrow(
     "not serving Bitcoin testnet4",
   );
-  await expect(miner.submit("00")).rejects.toThrow(
-    "not serving Bitcoin testnet4",
-  );
   expect(
     request.mock.calls.every(([url]) => String(url).endsWith("/api/system")),
   ).toBe(true);
+  request.mockClear();
+  await expect(miner.submit("00", undefined)).rejects.toThrow(
+    "SpendAuthorizationRequired",
+  );
+  expect(request).not.toHaveBeenCalled();
 });

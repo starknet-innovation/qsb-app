@@ -162,7 +162,7 @@ These steps are still open. Do them on a reviewed isolated configuration. Do not
 
 ## 7. Establish chain-correct external miner inclusion
 
-**Status: NOT COMPLETE.** The earlier regtest transaction sent to a Testnet4 preflight returned missing inputs; that known chain mismatch is not a useful test to repeat.
+**Status: NOT COMPLETE.** Gates in this checkout reject a chain mismatch, reuse of a spent regtest fixture, a miner submit without an exact spend record, and any result that treats HTTP 200 or a mempool preflight as inclusion. They do not fund a wallet, broadcast a transaction, create a fresh fixture, or confirm a live block. The earlier regtest transaction sent to a Testnet4 preflight returned missing inputs; that known chain mismatch is not a useful test to repeat. `release.mainnetEnabled` stays false. `broadcastAuthorized` is not set. Installed Xverse Testnet4 compatibility has not been established by the existing evidence.
 
 - [ ] Select a supported external chain and verify wallet, transaction builder, chain provider and miner endpoint agree on it.
 - [ ] Create a separate chain-correct fixture and fresh commitments; do not reuse a spent regtest transaction or ask the user to fund an unsupported wallet/app configuration.
@@ -173,6 +173,31 @@ These steps are still open. Do them on a reviewed isolated configuration. Do not
 **Acceptance evidence:** matching network and input facts, exact authorized signed transaction, miner transport result and independent block confirmation. A successful HTTP response or mempool preflight alone is not inclusion.
 
 Testnet4 is an optional risk-reduction path, **not a mandatory Bitcoin prerequisite**. Direct mainnet testing is a separate explicitly authorized decision; it does not waive the applicable technical gates or authorize an arbitrary transaction. Installed Xverse Testnet4 compatibility has not been established by the existing evidence.
+
+### Public checkout progress (23 September 2026)
+
+`server/runtime/miner-inclusion.ts` is exercised by `tests/miner-inclusion.test.ts`. None of the checks below is external miner inclusion.
+
+- `agreeExternalMinerChain` accepts mainnet or Testnet4 only when the wallet, transaction builder, chain-provider genesis and base URL, and miner endpoint match that chain's catalog. A regtest party pointed at Testnet4 throws `RegtestOnTestnet4PreflightNotUseful`. `endpointsContacted` stays false. Testnet4 agreement sets `optionalRiskReduction` and keeps `mandatoryBitcoinPrerequisite` false. `xverseTestnet4CompatibilityEstablished` stays false. No host is contacted.
+- `assessWalletFundingRequest` keeps `askUserToFund` and `funded` false. Testnet4 and regtest are refused as unsupported funding configurations. Claiming that Xverse Testnet4 compatibility is established throws. Wallet-prompt tests are not that evidence. This checkout does not fund mainnet either.
+- `describeExternalInclusion` refuses the historical regtest fixture label, a regtest candidate, and any input or transaction id that overlaps a supplied spent regtest ref. An empty exclusion list throws `InventoryHasNoExclusionPower`. `globalFreshness`, `fixtureCreated`, and `freshCommitmentsCreated` stay false. The historical outpoints are not in this checkout.
+- `grantExactSpendPermit` requires one record with the same chain, txid, sha256 of the raw transaction bytes, amount, and fee. Mainnet also requires `directMainnetDecision: "explicit"`. Testnet4 requires `not-requested` and refuses wallet app `xverse`. `mainnetEnabled: true` or `broadcastAuthorized: true` throws `ActivationRefused`. The permit keeps both flags false, `inclusion` false, and `section7Closed` false.
+- `callMinerSubmit` and `Slipstream.submit` check that permit before the transport. A missing or cloned permit throws `SpendAuthorizationRequired` and does not call the transport. The vault fund and withdrawal submit routes use the same order, so a request without a matching record does not call miner preflight or submit. A transport result keeps `included` false. This checkout does not call a live miner.
+- `judgeInclusionEvidence` sets `independentlyConfirmed` only when the supplied record is confirmed, has at least one confirmation, a block hash, a block height, and the same transaction id. HTTP 200, `preflightAllowed`, `mempoolAccepted`, and a miner-reported confirmation do not qualify. `preflightIsInclusion`, `httpSuccessIsInclusion`, `observedByThisCheckout`, and `section7Closed` stay false. The helper does not fetch chain data. The transaction status route exposes that judgment as `section7Inclusion` and does not treat it as a closed gate.
+
+### Operator checklist for the live §7 steps
+
+These steps are still open. Do not broadcast from this checkout. Do not set `release.mainnetEnabled` or `broadcastAuthorized`.
+
+1. Choose one supported external chain, mainnet or Testnet4. Pass the wallet, builder, chain provider, and miner endpoint to `agreeExternalMinerChain`. The catalog is Bitcoin mainnet (`https://blockstream.info/api` and `https://slipstream.mara.com`) or Testnet4 (`https://mempool.space/testnet4/api` and `https://teststream.mara.com`), with those chains' genesis hashes. Do not contact those hosts from this gate. If any party is regtest and any party or endpoint is Testnet4, stop. That preflight returns missing inputs and is not a useful test to repeat.
+2. Treat Testnet4 as optional risk reduction, not a Bitcoin prerequisite. Do not ask the user to fund Xverse, or any other wallet, on Testnet4. `assessWalletFundingRequest` stays `askUserToFund: false`. Existing wallet-prompt tests do not establish that an installed Xverse build works on Testnet4.
+3. Create a separate chain-correct fixture and fresh commitments outside this repository. Export the spent regtest outpoints you know, including the historical Xverse regtest withdrawal, and pass them to `describeExternalInclusion`. This checkout does not contain that transaction. A clear result from a partial list is not global freshness. Do not restart or respend the historical fixture.
+4. Write an exact spend record: chain, txid, sha256 of the raw transaction bytes, amount, and fee, with `mainnetEnabled: false` and `broadcastAuthorized: false`. For mainnet, set `directMainnetDecision` to `explicit` only after a separate decision. That decision does not waive the other gates and does not authorize a different transaction. For Testnet4, set `directMainnetDecision` to `not-requested`. `grantExactSpendPermit` checks the record and still does not broadcast.
+5. Finish the fresh search and signing flow in section 6 for that same transaction. This module does not run a search or collect an Xverse signature.
+6. Only a granted permit may reach the miner transport. `Slipstream.submit` and the vault fund and job submit routes reject a missing permit before any miner HTTP. Do not point this checkout at a live miner. A success body from the miner is not inclusion.
+7. After a real broadcast made under a separate authorization, confirm the exact transaction from chain data. Preserve the block hash, block height, and transaction id. Pass that record to `judgeInclusionEvidence`. HTTP 200, a mempool preflight, and a miner-reported confirmation are not inclusion. Bring the evidence back for review. `section7Closed` stays false until that review records it. This checkout has no such evidence.
+
+Direct mainnet testing remains a separately authorized decision.
 
 ## 8. Review and activate the production release
 

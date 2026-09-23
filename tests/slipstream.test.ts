@@ -68,6 +68,11 @@ it("reconciles private miner visibility without rebroadcast or claiming confirma
     chain: null,
     miner: { visible: true, reportedConfirmed: true },
     retrySafe: false,
+    section7Inclusion: {
+      independentlyConfirmed: false,
+      section7Closed: false,
+      preflightIsInclusion: false,
+    },
   });
   expect(result).not.toHaveProperty("rawTxHex");
   expect(f.submit).not.toHaveBeenCalled();
@@ -91,13 +96,21 @@ it("requires chain confirmation and owner authentication", async () => {
     confirmed: true,
     confirmations: 2,
     blockHash: "33".repeat(32),
+    blockHeight: 100,
   });
   vi.spyOn(f.miner, "status").mockRejectedValue(Error("unavailable"));
   expect((await f.query(false)).status).toBe(401);
   expect((await f.query(true, "22".repeat(32))).status).toBe(404);
   expect(await (await f.query()).json()).toMatchObject({
     status: "confirmed",
-    chain: { confirmations: 2 },
+    chain: { confirmations: 2, blockHeight: 100 },
+    section7Inclusion: {
+      independentlyConfirmed: true,
+      section7Closed: false,
+      preflightIsInclusion: false,
+      httpSuccessIsInclusion: false,
+      observedByThisCheckout: false,
+    },
   });
   expect(f.submit).not.toHaveBeenCalled();
 });

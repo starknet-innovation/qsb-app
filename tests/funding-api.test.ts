@@ -9,7 +9,9 @@ import { MemoryStore } from "../server/store";
 import { Esplora } from "../server/chain";
 import { Slipstream } from "../server/providers";
 import { fundingPsbt } from "../src/lib/transactions";
-import type { PublicVault } from "../src/lib/model";
+import { release, type PublicVault } from "../src/lib/model";
+import { rawTransactionSha256 } from "../server/runtime/miner-inclusion";
+import { HISTORICAL_XVERSE_REGTEST_WITHDRAWAL } from "../server/runtime/fresh-proof";
 const key = new Uint8Array(32).fill(7),
   pub = secp256k1.getPublicKey(key),
   address = btc.p2wpkh(pub).address!;
@@ -76,6 +78,7 @@ async function setup(reject = false) {
   );
   tx.sign(key);
   tx.finalize();
+  const rawTxHex = hex.encode(tx.extract());
   const test = vi.spyOn(miner, "test").mockResolvedValue([
     {
       txid: tx.id,
@@ -86,7 +89,7 @@ async function setup(reject = false) {
   const submit = vi.spyOn(miner, "submit").mockImplementation(async () => {
     const row = await store.get("OWNER#" + address, "TX#" + tx.id);
     expect(row?.status).toBe("submitting");
-    expect(row?.rawTxHex).toBe(hex.encode(tx.extract()));
+    expect(row?.rawTxHex).toBe(rawTxHex);
     throw Error("Lost HTTP response");
   });
   const app = createApp(store, { chain, miner, enabled: true });
@@ -106,10 +109,30 @@ async function setup(reject = false) {
     submit,
     test,
     body: {
-      rawTxHex: hex.encode(tx.extract()),
+      rawTxHex,
       amount: "50000",
       fee: "10000",
-      costAccepted: true,
+      costAccepted: true as const,
+      exactSpend: {
+        format: "qsb-exact-spend-authorization-v1" as const,
+        chain: "mainnet" as const,
+        txid: tx.id,
+        rawTxSha256: rawTransactionSha256(rawTxHex),
+        amountSats: "50000",
+        feeSats: "10000",
+        directMainnetDecision: "explicit" as const,
+        mainnetEnabled: false as const,
+        broadcastAuthorized: false as const,
+      },
+      spentFixtureRefs: [
+        {
+          label: HISTORICAL_XVERSE_REGTEST_WITHDRAWAL.label,
+          chain: "regtest" as const,
+          txid: "ff".repeat(32),
+          vout: 0,
+          spent: true as const,
+        },
+      ],
     },
   };
 }
@@ -124,6 +147,63 @@ it("saves signed intent before submission and never blindly repeats an uncertain
   });
   expect((await f.app.request(req(path, f.body, f.token))).status).toBe(409);
   expect(f.submit).toHaveBeenCalledTimes(1);
+  expect(release.mainnetEnabled).toBe(false);
+  expect("broadcastAuthorized" in release).toBe(false);
+});
+it("does not preflight or broadcast without an exact spend record", async () => {
+  const f = await setup();
+  const body = { ...f.body, exactSpend: undefined };
+  const response = await f.app.request(
+    req("/vaults/" + f.vault.id + "/fund", body, f.token),
+  );
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({
+    error: "SpendAuthorizationRequired",
+  });
+  expect(f.submit).not.toHaveBeenCalled();
+  expect(f.test).not.toHaveBeenCalled();
+});
+it("does not broadcast when the authorized fee differs from the transaction", async () => {
+  const f = await setup();
+  const response = await f.app.request(
+    req(
+      "/vaults/" + f.vault.id + "/fund",
+      {
+        ...f.body,
+        exactSpend: { ...f.body.exactSpend, feeSats: "10001" },
+      },
+      f.token,
+    ),
+  );
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ error: "ExactSpendMismatch" });
+  expect(f.submit).not.toHaveBeenCalled();
+  expect(f.test).not.toHaveBeenCalled();
+});
+it("does not submit a withdrawal without an exact spend record", async () => {
+  const f = await setup();
+  const jobId = crypto.randomUUID();
+  await f.store.put({
+    pk: "OWNER#" + address,
+    sk: "JOB#" + jobId,
+    version: 0,
+    job: {
+      id: jobId,
+      vaultId: f.vault.id,
+      owner: address,
+      manifest: { outputValue: "50000", fee: "10000" },
+      status: "awaiting_authorization",
+    },
+  });
+  const response = await f.app.request(
+    req("/jobs/" + jobId + "/submit", { rawTxHex: f.body.rawTxHex }, f.token),
+  );
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({
+    error: "SpendAuthorizationRequired",
+  });
+  expect(f.submit).not.toHaveBeenCalled();
+  expect(f.test).not.toHaveBeenCalled();
 });
 it("miner rejection leaves no funding intent and never broadcasts", async () => {
   const f = await setup(true);

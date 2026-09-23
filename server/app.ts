@@ -30,7 +30,12 @@ import { checkFunding, checkWithdrawal } from "./transaction-checks";
 import { outputScript } from "../src/lib/transactions";
 import { hex } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
-import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
+import {
+  transactionsEnabled,
+  rehearsalAddressAllowed,
+  chainBase,
+  minerBase,
+} from "./network";
 import type { FundingLedger } from "./runtime/dispatcher";
 import { canonicalReservationWrites } from "./runtime/storage-authority";
 import {
@@ -38,6 +43,13 @@ import {
   coverageLedgerSchema,
 } from "./runtime/coverage-ledger";
 import { installSupervisedRoutes } from "./runtime/supervised-routes";
+import {
+  MinerInclusionError,
+  authorizeConfiguredSpend,
+  callMinerSubmit,
+  judgeInclusionEvidence,
+  transactionId,
+} from "./runtime/miner-inclusion";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -111,6 +123,8 @@ export function createApp(
   app.onError((e, c) => {
     if (e instanceof MinerAuthenticationError)
       return c.json({ error: e.message }, 503);
+    if (e instanceof MinerInclusionError)
+      return c.json({ error: e.message }, 409);
     if (e instanceof ChainError) return c.json({ error: e.message }, 409);
     if (e instanceof z.ZodError)
       return c.json(
@@ -297,6 +311,8 @@ export function createApp(
         amount: sats,
         fee: sats,
         costAccepted: z.literal(true),
+        exactSpend: z.unknown().optional(),
+        spentFixtureRefs: z.array(z.unknown()).max(32).optional(),
       })
       .strict()
       .parse(await c.req.json());
@@ -319,6 +335,19 @@ export function createApp(
         409,
       );
     assertVaultConfiguration(vault);
+    const permit = authorizeConfiguredSpend({
+      chain: NETWORK_ID,
+      chainBaseUrl: chainBase,
+      minerEndpoint: minerBase,
+      rawTxHex: body.rawTxHex,
+      txid: transactionId(body.rawTxHex),
+      amountSats: body.amount,
+      feeSats: body.fee,
+      exactSpend: body.exactSpend,
+      spentFixtureRefs: body.spentFixtureRefs ?? [],
+      release,
+      walletApp: "xverse",
+    });
     const funding = await checkFunding(
       body.rawTxHex,
       vault,
@@ -326,6 +355,8 @@ export function createApp(
       BigInt(body.fee),
       ledger,
     );
+    if (funding.txid !== permit.txid)
+      throw new MinerInclusionError("ExactSpendMismatch");
     await testMiner(body.rawTxHex, funding.txid);
     vault.funding = funding;
     vault.status = "submitted";
@@ -348,7 +379,12 @@ export function createApp(
         },
       },
     ]);
-    const submission = await submitMiner(body.rawTxHex, funding.txid, pk);
+    const submission = await submitMiner(
+      body.rawTxHex,
+      funding.txid,
+      pk,
+      permit,
+    );
     return c.json({ vault, submission }, 202);
   });
   async function testMiner(raw: string, id: string) {
@@ -366,16 +402,36 @@ export function createApp(
       throw new ChainError(
         `Miner preflight rejected transaction: ${result[0]["reject-reason"] || "not accepted"}`,
       );
+    const observation = judgeInclusionEvidence({
+      httpStatus: 200,
+      preflightAllowed: true,
+      expectedTxid: id,
+    });
+    if (observation.independentlyConfirmed)
+      throw new ChainError("Miner preflight is not inclusion.");
   }
-  async function submitMiner(raw: string, id: string, pk: string) {
+  async function submitMiner(
+    raw: string,
+    id: string,
+    pk: string,
+    permit: unknown,
+  ) {
     let status = "uncertain";
     try {
+      const sent = await callMinerSubmit({
+        permit,
+        rawTxHex: raw,
+        transport: (hex) => miner.submit(hex, permit),
+      });
+      if (sent.included !== false || sent.section7Closed !== false)
+        throw new MinerInclusionError("PreflightIsNotInclusion");
       const r = z
         .object({ status: z.string(), message: z.string() })
-        .parse(await miner.submit(raw));
+        .parse(sent.transportResult);
       if (r.status === "success" && r.message === id) status = "submitted";
-    } catch {
-      /* The intent remains available for explicit reconciliation. */
+    } catch (error) {
+      if (error instanceof MinerInclusionError) throw error;
+      /* A lost miner response stays uncertain. It is not a second broadcast. */
     }
     const row = await store.get(pk, `TX#${id}`);
     if (row)
@@ -415,6 +471,31 @@ export function createApp(
       { ...row, status, checkedAt, version: row.version + 1 },
       row.version,
     );
+    const section7Inclusion = judgeInclusionEvidence({
+      ...(inMiner
+        ? {
+            httpStatus: 200,
+            minerReportedConfirmed: inMiner.transaction.status.confirmed,
+          }
+        : {}),
+      ...(onChain
+        ? {
+            chain: {
+              confirmed: onChain.confirmed,
+              confirmations: onChain.confirmations,
+              ...("blockHash" in onChain && onChain.blockHash
+                ? { blockHash: onChain.blockHash }
+                : {}),
+              ...("blockHeight" in onChain &&
+              onChain.blockHeight !== undefined
+                ? { blockHeight: onChain.blockHeight }
+                : {}),
+              txid: id,
+            },
+          }
+        : {}),
+      expectedTxid: id,
+    });
     return c.json({
       txid: id,
       status,
@@ -427,6 +508,7 @@ export function createApp(
           }
         : { visible: null },
       retrySafe: false,
+      section7Inclusion,
     });
   });
   app.get("/api/vaults/:id/funding", async (c) => {
@@ -550,10 +632,15 @@ export function createApp(
   app.post("/api/jobs/:id/submit", async (c) => {
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
       return c.json({ error: `${NETWORK_ID} withdrawals are disabled.` }, 503);
-    const { rawTxHex } = z
-      .object({ rawTxHex: z.string().max(150000) })
+    const body = z
+      .object({
+        rawTxHex: z.string().max(150000),
+        exactSpend: z.unknown().optional(),
+        spentFixtureRefs: z.array(z.unknown()).max(32).optional(),
+      })
       .strict()
       .parse(await c.req.json());
+    const { rawTxHex } = body;
     const pk = `OWNER#${c.get("owner")}`,
       sk = `JOB#${c.req.param("id")}`,
       row = await store.get(pk, sk);
@@ -568,12 +655,31 @@ export function createApp(
         { error: "Vault belongs to a different Bitcoin network." },
         409,
       );
+    const amountSats = job.manifest?.outputValue;
+    const feeSats = job.manifest?.fee;
+    if (typeof amountSats !== "string" || typeof feeSats !== "string")
+      throw new MinerInclusionError("ExactSpendMismatch");
+    const permit = authorizeConfiguredSpend({
+      chain: NETWORK_ID,
+      chainBaseUrl: chainBase,
+      minerEndpoint: minerBase,
+      rawTxHex,
+      txid: transactionId(rawTxHex),
+      amountSats,
+      feeSats,
+      exactSpend: body.exactSpend,
+      spentFixtureRefs: body.spentFixtureRefs ?? [],
+      release,
+      walletApp: "xverse",
+    });
     const checked = await checkWithdrawal(
       rawTxHex,
       vaultRow.vault as PublicVault,
       job,
       ledger,
     );
+    if (checked.txid !== permit.txid)
+      throw new MinerInclusionError("ExactSpendMismatch");
     await testMiner(rawTxHex, checked.txid);
     job.status = "submitted";
     job.txid = checked.txid;
@@ -593,7 +699,10 @@ export function createApp(
       },
     ]);
     return c.json(
-      { job, submission: await submitMiner(rawTxHex, checked.txid, pk) },
+      {
+        job,
+        submission: await submitMiner(rawTxHex, checked.txid, pk, permit),
+      },
       202,
     );
   });
