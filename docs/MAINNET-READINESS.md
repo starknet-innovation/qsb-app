@@ -122,7 +122,7 @@ Still open:
 
 ## 6. Run a fresh optimized end-to-end withdrawal
 
-**Status: NOT COMPLETE for the final integrated optimized release.**
+**Status: NOT COMPLETE for the final integrated optimized release.** Gates in this checkout can reject a relabeled runner, a reused fixture, an unbound bundle, and a Core report that claims this section is closed. They do not run a GPU search, obtain an Xverse signature, or validate that signature in Core. `release.mainnetEnabled` and `broadcastAuthorized` stay false.
 
 - [ ] Create a new browser-generated public request and fresh commitments for a separate disposable proof. Never restart or respend historical completed fixtures.
 - [ ] Select a chain-correct proof runner and exact release enrollment. A mainnet-only service configuration must not be relabeled as a regtest runner.
@@ -135,6 +135,30 @@ Still open:
 - [ ] Validate the exact signed bytes with unmodified Core in the matching controlled chain context and preserve the result.
 
 **Acceptance evidence:** one coherent fresh request-to-search-to-signature-to-Core record for the final release, with no bypassed puzzle checks, no reused fixture and reconciled resource cleanup. Local regtest success closes this controlled proof gate, not the external miner gate below.
+
+### Public checkout progress (23 September 2026)
+
+`server/runtime/fresh-proof.ts` is exercised by `tests/fresh-proof.test.ts`. None of the checks below is the fresh optimized withdrawal.
+
+- `selectProofRunner` accepts only a service whose configured, advertised, and requested chain are regtest and whose source-manifest hash matches `enrolledReleaseIdentity`. A mainnet-only service, or a mainnet service advertised as regtest, throws `MainnetConfigRelabeledAsRegtest`. `liveRunnerContacted`, `nativeBinariesEnrolled`, `certifiesFreshOptimizedWithdrawal`, `mainnetEnabled`, and `broadcastAuthorized` stay false. No native binary is enrolled.
+- `assessProofFreshness` and `scaffoldDisposableProofRequest` scan a caller-supplied row export and spent-fixture list. `globalFreshness` stays false. An empty snapshot throws `InventoryHasNoExclusionPower`. The label `historical-xverse-regtest-withdrawal` is refused. That fixture's outpoints are not in this checkout; the operator must supply them. A scaffolded request has `browserGenerated: false`, `freshSearchPerformed: false`, and `awaitingBrowserRequest: true`.
+- `exportDisposableSigningBundle` binds the public bundle to the vault id, request hash, input outpoints, outputs, amount, and fee. `known-solution-replay`, `synthetic-no-hit`, and `mocked-success` keep `substitutesForFreshSearch: false`. There is no fresh-search evidence value. The bundle is not an Xverse signature and contains no backup or passphrase.
+- `reconcileSiblingDrain` requires per-job terminal records, including a non-primary slot, and ignores aggregate provider counters. `independentCpuVerificationOfFreshSearch` stays false, including when a record says `enrolled-cpu-verifier` or `simulated`.
+- `assessBoundedCompute` requires explicit authorization, zero minimum idle workers, a positive cost bound, a deadline, and a cleanup watchdog that is not the worker. `provisioned` and `liveComputeStarted` stay false. No compute is started.
+- `judgeCoreReport` and `admitCoreHarnessResult` refuse a report that sets a fresh-withdrawal flag, sets `section6Closed`, or names mainnet. A puzzle-relaxed regtest report stays `section6Closed: false`. `npm run harness:core` (`scripts/test-core.sh`) runs `tests/core_regtest.py` from this checkout only when `bitcoind` and `bitcoin-cli` are installed. Otherwise it writes a not-run report and exits 2. That launcher is not a packaged entry point: the script imports vendor modules and a fixture that are outside the release closure. The puzzle-relaxed spend bypasses three puzzle checks and is not this gate.
+
+### Operator checklist for the live §6 steps
+
+These steps are still open. Do them on a reviewed isolated configuration. Do not broadcast. Do not set `release.mainnetEnabled` or `broadcastAuthorized`.
+
+1. In the browser, create a new public request and fresh commitments for a disposable proof. Download only the public request. Keep the backup and passphrase local. Do not restart or respend the historical Xverse regtest withdrawal.
+2. Export the available inventory without secrets and pass it to `assessProofFreshness`, including the historical spent outpoints. A clear result from a partial export is not global freshness. `scaffoldDisposableProofRequest` only checks the rows and refs it is given.
+3. Select a regtest proof service whose release hash is the manifest from `enrolledReleaseIdentity` for the frozen checkout. Do not point a mainnet-only service at that regtest label. `selectProofRunner` does not contact a host. Native binaries are still unenrolled, so this checkout cannot name the exact optimized executable.
+4. Authorize a bounded compute plan with `minIdleWorkers: 0`, a cost bound, a deadline, and an independent cleanup watchdog. Provision that plan outside this repository. `assessBoundedCompute` does not start workers.
+5. Run a fresh search with the final pinning, subset, and runtime composition. Do not substitute a known-solution replay, a synthetic no-hit range, or a mocked success. Those labels remain `substitutesForFreshSearch: false`.
+6. CPU-verify every returned solution with the enrolled verifier. Reconcile each sibling job to a terminal provider state. Do not treat aggregate queue counters as drain. `reconcileSiblingDrain` can check records after that run; it cannot produce them.
+7. Export the public signing bundle with `exportDisposableSigningBundle` only after the fresh result exists, bound to the same vault, request, inputs, outputs, amount, and fee. The user unlocks locally and approves the exact Xverse signature. Only the public request and public result leave the browser.
+8. Validate those exact signed bytes with unmodified Bitcoin Core on regtest. Preserve the Core report. Run `npm run harness:core` only inside the isolated Core environment; a puzzle-relaxed or not-run report does not close this section. Keep the result. Do not submit it to a miner.
 
 ## 7. Establish chain-correct external miner inclusion
 

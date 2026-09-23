@@ -2,6 +2,9 @@
 
 Run inside the isolated container via scripts/test-core.sh. No mainnet RPC, keys,
 network peers, or real coins. Puzzle-relaxed fixtures are labelled explicitly.
+A passing run, including the puzzle-relaxed spend, does not close MAINNET-READINESS
+section 6. Known-solution replay, synthetic no-hit ranges, and mocked success are
+not a fresh optimized withdrawal.
 """
 import copy
 import hashlib
@@ -24,7 +27,37 @@ BIN = Path(os.environ.get('BITCOIN_BIN', '/bitcoin/bin'))
 REPORT = Path(os.environ.get('QSB_CORE_REPORT', '/results/results.json'))
 
 
+def section6_annotation():
+    return {
+        'fullProductionWithdrawalVerified': False,
+        'freshOptimizedWithdrawal': False,
+        'section6Closed': False,
+        'puzzleRelaxedIsNotFreshSearch': True,
+        'knownSolutionReplayIsNotFreshSearch': True,
+        'syntheticNoHitIsNotFreshSearch': True,
+        'mockedSuccessIsNotFreshSearch': True,
+    }
+
+
+def annotate_section6(result):
+    result.update(section6_annotation())
+    return result
+
+
 def main():
+    if os.environ.get('QSB_CORE_CLASSIFY_ONLY') == '1':
+        report = annotate_section6({
+            'harnessRan': False,
+            'network': None,
+            'reason': os.environ.get('QSB_CORE_NOT_RUN_REASON')
+            or 'Classification only. Bitcoin Core was not started.',
+        })
+        print(json.dumps(report, indent=2))
+        return
+    run_regtest()
+
+
+def run_regtest():
     with tempfile.TemporaryDirectory(prefix='qsb-core-') as data:
         node = subprocess.Popen([str(BIN / 'bitcoind'), f'-datadir={data}',
             '-regtest', '-server', '-listen=0', '-connect=0', '-dnsseed=0',
@@ -55,8 +88,8 @@ def main():
             address = rpc('getnewaddress', wallet=True)
             destination = bytes.fromhex(rpc('getaddressinfo', address, wallet=True)['scriptPubKey'])
             rpc('generatetoaddress', 101, address)
-            result = {'core': rpc('getnetworkinfo')['subversion'], 'network': 'regtest',
-                      'fullProductionWithdrawalVerified': False, 'tests': []}
+            result = {'harnessRan': True, 'core': rpc('getnetworkinfo')['subversion'], 'network': 'regtest',
+                      'tests': []}
 
             def mine(raw):
                 block = rpc('generateblock', address, [raw])['hash']
@@ -136,6 +169,10 @@ def main():
             result['tests'].append({'name': 'structural-destination-amount-tamper-rejected', 'passed': True, 'reason': rejection})
             result['tests'].append({'name': 'PUZZLE-RELAXED-structural-spend', 'passed': True,
                 'puzzleChecksBypassed': 3, 'txid': mine(tx.serialize().hex())})
+            result['puzzleChecksBypassed'] = sum(test.get('puzzleChecksBypassed', 0) for test in result['tests'])
+            annotate_section6(result)
+            if result['section6Closed'] or result['fullProductionWithdrawalVerified'] or result['freshOptimizedWithdrawal']:
+                raise SystemExit('Core report overclaims section 6')
             REPORT.parent.mkdir(parents=True, exist_ok=True)
             REPORT.write_text(json.dumps(result, indent=2) + '\n')
             print(json.dumps(result, indent=2))
