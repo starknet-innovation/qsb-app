@@ -11,7 +11,8 @@ A research application for constructing and recovering quantum-safe Bitcoin vaul
 - `worker/`: historical GPU worker build and public CPU verification code.
 - `tests/`: application unit tests, browser harnesses, and reference tests.
 - `research/optimized-subset/`: isolated optimized CUDA source with exact exceptional-point recovery and checked host operations. See its README before use.
-- `docs/STATUS.md`: achieved evidence and remaining release gates.
+- `docs/STATUS.md`: achieved evidence summary.
+- [Mainnet readiness checklist](docs/MAINNET-READINESS.md): remaining tasks, dependencies and acceptance evidence.
 
 This is a curated export, not the complete operational workspace. Cloud deployment settings, credentials, customer data, signed transactions, raw validation journals, compiled artifacts, one-off recovery scripts, and experimental operational service packages are excluded. The latter are not yet provided as a deployable integration here.
 

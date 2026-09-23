@@ -9,6 +9,8 @@ This snapshot presents research completed on 23 September 2026. It does not gran
 - Native differential, arithmetic, range-boundary, memory, exceptional-point, output-error, and host-error tests have provided scoped evidence. Finite tests do not prove all curve inputs or absence of missed candidates.
 - Isolated OCI queue execution and durable local-backend integration were exercised separately. These do not certify the deployed application as a whole.
 
+See the [complete known mainnet readiness checklist](MAINNET-READINESS.md) for task-level acceptance criteria, dependencies and deployment requirements.
+
 ## Remaining release work
 
 - Final integrated source/image identity, deployment isolation and permission review.
