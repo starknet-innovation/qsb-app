@@ -1,0 +1,38 @@
+{
+  "id": "qsb-config-a-ranked-v2-2791ed0",
+  "protocol": "qsb-config-a-v1",
+  "generatorCommit": "2c9172051d5c150ef0a994ca6b988a08a3ef9e85",
+  "kernelCommit": "2791ed0588f5014ccd688d48ba5502df2879f2f1",
+  "image": "000000000000.dkr.ecr.eu-west-1.amazonaws.com/qsb-vault-worker@sha256:6c0ba190306cfe78307aca4dd287b4c43b3ce92a2ab78050d7024adf44967abc",
+  "searchVersion": "ranked-v2",
+  "compiler": "CUDA 12.8.1 nvcc",
+  "flags": {
+    "pinning": ["-O3", "-arch=sm_89", "-DQSB_SLOTPIPE=0"],
+    "subset": ["-O3", "-arch=sm_89", "-DZLAB_TRIM=0", "-DZLAB_K2S=0"]
+  },
+  "sourceHashes": {
+    "worker/Dockerfile": "d0564275a83d812278d63a6965d114e2a6f475306f0d23ee20caca6a32b5bd77",
+    "worker/prepare_kernels.py": "689c6cd2b0667ef396e5f42efb126405a529625920028125276dd99a1e870ad9",
+    "worker/handler.py": "04746430c32a4970759c99a49e1ae499e1ba84b3ac9075ae1357c28714223850",
+    "worker/search_ranges.py": "07b0c2639e2a61b6a0306bed06a8f261f9f8c71ea1ee5d68806e3044a93c27df",
+    "server/search-ranges.ts": "91ef5ec81fc82868cd9c695410bbc069732c4fc34109db5a9b44de36b59039d7",
+    "vendor/challenge/candidates/pinning/GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "vendor/challenge/candidates/pinning/GPUMath.h": "e35303a35f8a93ea93543396ebc9e571869494c41e3004eff0d1d0e0e2aebc13",
+    "vendor/challenge/candidates/pinning/LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "vendor/challenge/candidates/pinning/PackedRecovery.cuh": "dc884771614339f5c2ba9732824252a514344605bf099ce6f4c759dae7674240",
+    "vendor/challenge/candidates/pinning/RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "vendor/challenge/candidates/pinning/cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "vendor/challenge/candidates/pinning/pinning.cu": "d60ac2ff0c675cc115731897dc3c2480a17d98e92c8152ed5af80cf7c98c7640",
+    "vendor/challenge/candidates/subset/GPUHash.h": "d29adbbdb331b164aa16f19611c9f95d412105febaef9417de185ba486a72692",
+    "vendor/challenge/candidates/subset/GPUMath.h": "b93fa266439d2b71d56f7ac85cea06460b92d8d9f5ec5281008d755bbd090b9c",
+    "vendor/challenge/candidates/subset/square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+    "vendor/challenge/candidates/subset/subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "vendor/challenge/candidates/subset/tests/gpu_epochs/dirdig_audit.cu": "5c0290f674063a2b793a26cafa0072b40bb9185ed3494af79d5c4ea6d30fe6a8",
+    "vendor/challenge/candidates/subset/tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "vendor/challenge/candidates/subset/tests/gpu_epochs/tree.cu": "608e7d04180c7e0140c7403cc5256408ec2f5bda2ef0e9799cb7373f80f9abf6",
+    "vendor/challenge/candidates/subset/tests/gpu_epochs/tree_audit.cu": "25ec22761b2724f62896c1a621516ca00ba5fe52d50f03239167ea7ea45034d4",
+    "vendor/challenge/candidates/subset/tests/gpu_epochs/tree_inverse.cuh": "afa07a330119b2bd55c01de275b1a78766e9d2026113acb8f658be7c9311d1a6",
+    "vendor/challenge/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh": "94aab78aa0ce08788b0c6cd2593e31be689d6b0363934f18085bae3779c97d0a",
+    "vendor/challenge/candidates/subset/tests/gpu_epochs/zinv32.cuh": "8249034e5bff1526de31ebd64efd923d0b0c18683d71f7f6c7ed4fe70ca31807"
+  }
+}

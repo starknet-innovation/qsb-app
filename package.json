@@ -1,0 +1,55 @@
+{
+  "name": "qsb-vault",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k 'tsx watch server/local.ts' 'vite --host 127.0.0.1'",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "vendor": "python3 scripts/vendor.py"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1000.0",
+    "@aws-sdk/client-lambda": "^3.1135.0",
+    "@aws-sdk/client-secrets-manager": "^3.1135.0",
+    "@aws-sdk/client-sfn": "^3.1000.0",
+    "@aws-sdk/lib-dynamodb": "^3.1000.0",
+    "@hono/node-server": "^1.19.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.0.0",
+    "@scure/base": "^2.4.0",
+    "@scure/btc-signer": "2.4.1",
+    "bip322-js": "4.0.0",
+    "hono": "^4.9.0",
+    "lucide-react": "^0.577.0",
+    "pyodide": "0.29.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "sats-connect": "4.2.1",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "aws-cdk": "^2.1100.0",
+    "aws-cdk-lib": "2.270.0",
+    "concurrently": "^9.2.0",
+    "constructs": "^10.4.0",
+    "esbuild": "^0.25.0",
+    "prettier": "^3.9.8",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0",
+    "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "axios": "1.20.0",
+    "valibot": "1.5.0"
+  }
+}

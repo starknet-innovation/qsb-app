@@ -1,0 +1,12 @@
+node_modules
+.git
+cdk.out
+cdk.verify
+dist
+public
+.local
+.env*
+test-results
+playwright-report
+worker/build
+**/__pycache__

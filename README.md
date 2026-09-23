@@ -1,0 +1,44 @@
+# QSB application and solver research
+
+A research application for constructing and recovering quantum-safe Bitcoin vaults, with local wallet signing, a public-data GPU search worker, and independently checked search results.
+
+**Research snapshot — not a production release. Mainnet operations are disabled by default.** The optimized research solver is not wired into the application's historical worker image. Do not use this repository to hold real funds.
+
+## What is included
+
+- `src/`: React application, encrypted local backups, wallet integration, and staged signing/recovery flows.
+- `server/`: API, durable storage interfaces, search coordination, and transaction checks.
+- `worker/`: historical GPU worker build and public CPU verification code.
+- `tests/`: application unit tests, browser harnesses, and reference tests.
+- `research/optimized-subset/`: isolated optimized CUDA source with exact exceptional-point recovery and checked host operations. See its README before use.
+- `docs/STATUS.md`: achieved evidence and remaining release gates.
+
+This is a curated export, not the complete operational workspace. Cloud deployment settings, credentials, customer data, signed transactions, raw validation journals, compiled artifacts, one-off recovery scripts, and experimental operational service packages are excluded. The latter are not yet provided as a deployable integration here.
+
+## Local development
+
+Requires Node.js 22 or newer, npm, Python 3, and curl.
+
+```sh
+npm ci
+npm run vendor
+npm test
+npm run typecheck
+npm run build
+```
+
+The preparation step supplies the pinned sources required by provenance tests and the browser Python transaction builder. Then start development:
+
+```sh
+npm run dev
+```
+
+`vendor` downloads two pinned upstream source archives and applies the checked-in patch; review `scripts/vendor.py` and `scripts/patch_upstream.py` before running it. It does not require wallet secrets. The local API uses an in-memory store. Do not put a real backup, recovery phrase, or passphrase into an issue or pull request.
+
+The build and unit tests do not establish successful GPU execution, a fresh end-to-end optimized withdrawal, or external miner acceptance. Browser tests also require Playwright browser installation and their configured local services.
+
+## Publication and provenance
+
+See [publication scope](docs/PUBLICATION.md) and [third-party notices](THIRD_PARTY_NOTICES.md). The historical private ECR account is replaced with a nonfunctional placeholder in the exported release descriptor; this snapshot is **not** an attestation of that deployable image. No infrastructure deploy command is provided.
+
+No project-wide license has been selected for original application code yet. Existing third-party licenses remain in their respective directories. Public visibility alone does not provide a broad reuse license for the original application code.

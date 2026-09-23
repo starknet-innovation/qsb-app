@@ -1,0 +1,616 @@
+import {fingerprint} from './lib/provenance';
+import {readSessionEpoch} from './lib/api';
+import {prepareMainnetSearchRequest,retainedMainnetSubmission} from './mainnet/submission';
+import {retainedRequests} from './mainnet/retainedRequest';
+import {supervisedSearchClient,type SupervisedSearch} from './mainnet/submissionClient';
+import { operationsAllowed } from "./lib/readiness";
+import { useEffect, useRef, useState } from "react";
+import "./styles.css";
+import { CostDisclosure } from "./Costs";
+import { base64, hex } from "@scure/base";
+import { api } from "./lib/api";
+import { signPsbt, type Wallet } from "./lib/wallet";
+import {
+  fundingPsbt,
+  helperPsbt,
+  verifySignedPsbt,
+  verifyWithdrawalCommitment,
+  outputScript,
+  type FundingInput,
+} from "./lib/transactions";
+import {
+  decryptRecovery,
+  encryptRecovery,
+  downloadBackup,
+  assertRecoveryAuthorization,
+  bindRecoveryAssembly,
+  assertRecoveryAssembly,
+} from "./lib/backup";
+import { assembleQsb, validateRecovery, lockQsb } from "./lib/qsb";
+import {
+  parseBtc,
+  formatBtc,
+  withdrawalSchema,
+  type PublicVault,
+  type Recovery,
+  type Withdrawal,
+  type Job,
+} from "./lib/model";
+
+type Point = { txid: string; vout: number; value: string };
+const digest = async (text: string) =>
+  hex.encode(
+    new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)),
+    ),
+  );
+export default function TransactionDialog({
+  vault,
+  wallet,
+  job,
+  onClose,
+  onUpdated,
+  supervisedSearch,
+}: {
+  vault: PublicVault;
+  wallet: Wallet;
+  job?: Job;
+  onClose: () => void;
+  onUpdated: () => void;
+  supervisedSearch?: SupervisedSearch;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const generation = useRef(0);
+  const submission = useRef<ReturnType<typeof retainedMainnetSubmission>|undefined>(undefined);
+  const lifetimeKey=fingerprint({vault,wallet,job:job?.id,supervisedSearch});
+  const lifetime=useRef(lifetimeKey);
+  if(lifetime.current!==lifetimeKey){lifetime.current=lifetimeKey;generation.current++;}
+
+  const [points, setPoints] = useState<Point[]>([]),
+    [selection, setSelection] = useState<string[]>([]),
+    [amount, setAmount] = useState(""),
+    [fee, setFee] = useState(""),
+    [destination, setDestination] = useState(wallet.address),
+    [accepted, setAccepted] = useState(false),
+    [file, setFile] = useState(""),
+    [pass, setPass] = useState(""),
+    [unlocked, setUnlocked] = useState<Recovery>(),
+    [busy, setBusy] = useState(""),
+    [error, setError] = useState(""),
+    [result, setResult] = useState(""),
+    [intentBackup, setIntentBackup] = useState(""),
+    [assemblyVerified, setAssemblyVerified] = useState(false);
+  const deposit = vault.status === "unfunded";
+  useEffect(() => {
+    generation.current++;
+    dialog.current?.showModal();
+    if (!job)
+      api<{ utxos: Point[] }>("/payment-utxos")
+        .then((x) => setPoints(x.utxos))
+        .catch((e) => setError(e.message));
+    return () => {
+      generation.current++;
+      lockQsb();
+    };
+  }, []);
+  const key = (p: Point) => `${p.txid}:${p.vout}`;
+  async function act(label: string, fn: (check: () => void) => Promise<void>) {
+    const active = generation.current;
+    const check = () => {
+      if (generation.current !== active || (supervisedSearch && readSessionEpoch()!==supervisedSearch.sessionEpoch))
+        throw Error("Wallet session changed. Reopen the transaction.");
+    };
+    setBusy(label);
+    setError("");
+    try {
+      await fn(check);
+    } catch (e) {
+      if(generation.current===active)setError(e instanceof Error ? e.message : "Transaction failed.");
+    } finally {
+      if(generation.current===active)setBusy("");
+    }
+  }
+  async function restore() {
+    await act("Checking recovery backup", async (check) => {
+      const r = await decryptRecovery(file, pass);
+      if (
+        r.vault.id !== vault.id ||
+        r.vault.scriptHash !== vault.scriptHash ||
+        (await validateRecovery(r.stateJson)) !== vault.scriptHash
+      )
+        throw Error("This backup belongs to a different vault.");
+      check();
+      setUnlocked(r);
+      setAssemblyVerified(!!r.authorization?.assembly);
+    });
+  }
+  async function input(p: Point): Promise<FundingInput> {
+    const data = await api<{ previousTxHex: string }>("/payment-input", p);
+    return {
+      ...p,
+      value: BigInt(p.value),
+      ...data,
+      publicKey: wallet.publicKey,
+      address: wallet.address,
+    };
+  }
+  async function assertOperations() {
+    if (!operationsAllowed(await api("/config")))
+      throw Error("Transactions are disabled or the server network changed. Reopen the rehearsal after it is enabled.");
+  }
+  async function depositFunds() {
+    if(supervisedSearch){setError("Supervised search cannot deposit or broadcast.");return;}
+    await act("Review and sign the deposit in Xverse", async (check) => {
+      if (!unlocked || !accepted)
+        throw Error("Verify your backup and accept the costs first.");
+      const selected = points.filter((p) => selection.includes(key(p)));
+      if (!selected.length || selected.length > 8)
+        throw Error("Select between one and eight payment outputs.");
+      const inputs = await Promise.all(selected.map(input));
+      const amountSats = parseBtc(amount),
+        feeSats = parseBtc(fee);
+      const expected = fundingPsbt(
+        inputs,
+        vault.scriptHex,
+        amountSats,
+        feeSats,
+        wallet.address,
+      );
+      check();
+      await assertOperations();
+      check();
+      const returned = await signPsbt(
+        wallet.address,
+        base64.encode(expected.toPSBT()),
+        inputs.map((_, i) => i),
+      );
+      check();
+      const signed = verifySignedPsbt(expected, base64.decode(returned));
+      signed.finalize();
+      const r = await api<{ submission: { txid: string; status: string } }>(
+        `/vaults/${vault.id}/fund`,
+        {
+          rawTxHex: hex.encode(signed.extract()),
+          amount: amountSats.toString(),
+          fee: feeSats.toString(),
+          costAccepted: true,
+        },
+      );
+      setResult(
+        `${r.submission.status}: ${r.submission.txid}. Wait for confirmation before withdrawing.`,
+      );
+      onUpdated();
+    });
+  }
+  async function beginWithdrawal() {
+    await act("Saving the withdrawal intent", async (check) => {
+      if(supervisedSearch&&(deposit||job||vault.network!=='mainnet'||!vault.funding))throw Error('Supervised creation requires a confirmed mainnet vault and no existing job.');
+      const supervisedClient=supervisedSearch?supervisedSearchClient(supervisedSearch):undefined;
+      if(supervisedClient)await supervisedClient.assertAllowed();else await assertOperations();
+      check();
+      if (!unlocked || !accepted)
+        throw Error("Verify your backup and accept the costs first.");
+      const helper = points.find((p) => selection.includes(key(p)));
+      if (!helper || selection.length !== 1)
+        throw Error("Choose one helper payment output.");
+      const confirmed = await api<{
+        vault: PublicVault;
+        status: { confirmed: boolean };
+      }>(`/vaults/${vault.id}/funding`);
+      if (!confirmed.status.confirmed || !confirmed.vault.funding)
+        throw Error("Wait for the deposit to confirm.");
+      const funding = confirmed.vault.funding,
+        feeSats = parseBtc(fee),
+        outputValue = BigInt(funding.value) + BigInt(helper.value) - feeSats;
+      if (outputValue <= 0n)
+        throw Error("The miner fee exceeds the available amount.");
+      const previousIntent = unlocked.authorization
+        ? withdrawalSchema.parse(
+            JSON.parse(unlocked.authorization.manifestJson),
+          )
+        : undefined;
+      const manifest: Withdrawal = {
+        vaultId: vault.id,
+        funding,
+        helper,
+        destination,
+        outputScript: hex.encode(outputScript(destination)),
+        outputValue: outputValue.toString(),
+        fee: feeSats.toString(),
+        idempotencyKey: previousIntent?.idempotencyKey || crypto.randomUUID(),
+        costAccepted: true,
+      };
+      const manifestJson = JSON.stringify(withdrawalSchema.parse(manifest)),
+        manifestHash = await digest(manifestJson),
+        storageKey = `qsb-intent:${vault.scriptHash}`;
+      const preserveBackup=async()=>{
+      const remembered = localStorage.getItem(storageKey);
+      await assertRecoveryAuthorization(unlocked, manifestHash);
+      if (remembered && remembered !== manifestHash)
+        throw Error(
+          "A withdrawal intent already exists for this vault. Resume it from Activity; do not reuse its one-time keys.",
+        );
+      const backup = await encryptRecovery(
+        {
+          ...unlocked,
+          authorization: {
+            ...unlocked.authorization,
+            manifestJson,
+            manifestHash,
+          },
+        },
+        pass,
+      );
+      // Save recovery before starting billable work. These public fields bind the
+      // destination even after the tab or the original device is lost.
+      check();
+      localStorage.setItem(storageKey, manifestHash);
+      if(supervisedClient&&localStorage.getItem(storageKey)!==manifestHash)throw Error('One-time intent was not retained.');
+      setUnlocked({
+        ...unlocked,
+        authorization: {
+          ...unlocked.authorization,
+          manifestJson,
+          manifestHash,
+        },
+      });
+      setIntentBackup(backup);
+      downloadBackup(backup, `${vault.id}-withdrawal`);
+      };
+      if(supervisedClient){if(!navigator.locks)throw Error('Browser request locking is unavailable.');await navigator.locks.request('qsb-mainnet-assembly:'+vault.scriptHash,{mode:'exclusive'},async()=>{check();supervisedClient.assertCurrent();await preserveBackup();});}else await preserveBackup();
+      check();
+      let r:{job:Job};
+      if(supervisedClient&&supervisedSearch){
+        const prepared=prepareMainnetSearchRequest({owner:wallet.address,vault:confirmed.vault,manifest,wallet,releaseId:supervisedSearch.releaseId});
+        if(submission.current&&fingerprint(submission.current.request)!==prepared.requestHash)throw Error('The original supervised request must be reconciled before a new search.');
+        if(!submission.current)submission.current=retainedMainnetSubmission(prepared,retainedRequests(localStorage,navigator.locks),()=>{try{check();supervisedClient.assertCurrent();return true;}catch{return false;}},supervisedClient.submit);
+        r=await submission.current.submit() as {job:Job};
+      }else r=await api<{job:Job}>('/jobs',manifest);
+      check();
+
+      setResult(
+        `Search ${r.job.id} created. Keep the updated withdrawal backup; you will need it to authorize the result.`,
+      );
+      onUpdated();
+    });
+  }
+  async function authorize() {
+    if(supervisedSearch){setError("Use the separately verified recovery flow for this search.");return;}
+    await act(
+      "Assembling locally, then signing the helper in Xverse",
+      async (check) => {
+        if (!job?.solution || !unlocked?.authorization || !accepted)
+          throw Error(
+            "Restore the updated withdrawal backup and approve the payout first.",
+          );
+        const intent = unlocked.authorization;
+        if (
+          (await digest(intent.manifestJson)) !== intent.manifestHash ||
+          (await digest(JSON.stringify(job.manifest))) !==
+            intent.manifestHash ||
+          job.manifestHash !== intent.manifestHash
+        )
+          throw Error(
+            "The job differs from the withdrawal intent in your backup.",
+          );
+        const old = localStorage.getItem(`qsb-intent:${vault.scriptHash}`);
+        if (old && old !== intent.manifestHash)
+          throw Error("This device remembers a different authorization.");
+        check();
+        localStorage.setItem(
+          `qsb-intent:${vault.scriptHash}`,
+          intent.manifestHash,
+        );
+        const { previousTxHex } = await api<{ previousTxHex: string }>(
+          `/vaults/${vault.id}/funding`,
+        );
+        const helper = await input(job.manifest.helper);
+        const raw = await assembleQsb(
+          unlocked.stateJson,
+          job.manifest,
+          job.solution,
+        );
+        verifyWithdrawalCommitment(raw, job.manifest, job.solution);
+        const bound = await bindRecoveryAssembly(unlocked, job.solution, raw);
+        const assemblyKey = `qsb-assembly:${vault.scriptHash}`;
+        const rememberedAssembly = localStorage.getItem(assemblyKey);
+        if (
+          rememberedAssembly &&
+          rememberedAssembly !== bound.authorization!.assembly!.rawTxHash
+        )
+          throw Error(
+            "This device already bound a different QSB solution. Restore the latest signing backup.",
+          );
+        check();
+        localStorage.setItem(
+          assemblyKey,
+          bound.authorization!.assembly!.rawTxHash,
+        );
+        if (!assemblyVerified) {
+          const backup = await encryptRecovery(bound, pass);
+          check();
+          setUnlocked(bound);
+          setIntentBackup(backup);
+          downloadBackup(backup, `${vault.id}-signing`);
+          return;
+        }
+        await assertRecoveryAssembly(unlocked, job.solution, raw);
+        const expected = helperPsbt(raw, helper, previousTxHex);
+        check();
+        await assertOperations();
+      check();
+      const returned = await signPsbt(
+          wallet.address,
+          base64.encode(expected.toPSBT()),
+          [0],
+        );
+        check();
+        const signed = verifySignedPsbt(expected, base64.decode(returned));
+        signed.finalize();
+        const r = await api<{ submission: { txid: string; status: string } }>(
+          `/jobs/${job.id}/submit`,
+          { rawTxHex: hex.encode(signed.extract()) },
+        );
+        setResult(
+          `${r.submission.status}: ${r.submission.txid}. The transaction may take time to be mined.`,
+        );
+        onUpdated();
+      },
+    );
+  }
+  async function verifyAssemblyBackup(file: File | undefined) {
+    if (!file || !unlocked?.authorization?.assembly) return;
+    await act("Verifying the signing backup", async (check) => {
+      if (file.size > 260000) throw Error("Recovery file is too large.");
+      const r = await decryptRecovery(await file.text(), pass);
+      if (
+        r.vault.id !== vault.id ||
+        r.stateJson !== unlocked.stateJson ||
+        JSON.stringify(r.authorization) !==
+          JSON.stringify(unlocked.authorization)
+      )
+        throw Error("Select the updated signing backup just downloaded.");
+      check();
+      setAssemblyVerified(true);
+    });
+  }
+  const payoutPreview = (() => {
+    if (deposit || job || !vault.funding) return undefined;
+    try {
+      const helper = points.find((p) => selection.includes(key(p)));
+      if (!helper) return undefined;
+      const value =
+        BigInt(vault.funding.value) + BigInt(helper.value) - parseBtc(fee);
+      return value > 0n ? formatBtc(value.toString()) : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  return (
+    <dialog
+      ref={dialog}
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!busy) onClose();
+      }}
+    >
+      <div className="dialog-content transaction-dialog">
+        <button
+          className="close-dialog"
+          disabled={!!busy}
+          onClick={onClose}
+          aria-label="Close transaction"
+        >
+          ×
+        </button>
+        <h2>
+          {job
+            ? "Authorize withdrawal"
+            : deposit
+              ? "Deposit into vault"
+              : "Prepare withdrawal"}
+        </h2>
+        <p>{vault.name}</p>
+        {result ? (
+          <>
+            <p role="status">{result}</p>
+            {intentBackup && (
+              <button
+                className="secondary"
+                onClick={() =>
+                  downloadBackup(intentBackup, `${vault.id}-withdrawal`)
+                }
+              >
+                Download withdrawal backup again
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            {!unlocked ? (
+              <>
+                <label>
+                  Recovery backup
+                  <input
+                    type="file"
+                    accept="application/json"
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        if (f.size > 260000) {
+                          setError("Recovery file is too large.");
+                          return;
+                        }
+                        setFile(await f.text());
+                      }
+                    }}
+                  />
+                </label>
+                <label>
+                  Backup passphrase
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={pass}
+                    onChange={(e) => setPass(e.target.value)}
+                  />
+                </label>
+                <button
+                  className="secondary"
+                  disabled={!!busy || !file || !pass}
+                  onClick={restore}
+                >
+                  Verify backup locally
+                </button>
+              </>
+            ) : (
+              <p>Recovery backup verified on this device.</p>
+            )}
+            {job ? (
+              <div className="info-note">
+                <p>
+                  Destination: {job.manifest.destination}
+                  <br />
+                  Payout: {formatBtc(job.manifest.outputValue)} BTC
+                  <br />
+                  Miner fee: {formatBtc(job.manifest.fee)} BTC
+                </p>
+              </div>
+            ) : (
+              <>
+                <fieldset>
+                  <legend>
+                    {deposit
+                      ? "Payment outputs (choose up to eight)"
+                      : "Helper output (choose one)"}
+                  </legend>
+                  {points.length === 0 && (
+                    <p>No confirmed payment outputs available.</p>
+                  )}
+                  {points.map((p) => (
+                    <label key={key(p)}>
+                      <input
+                        type={deposit ? "checkbox" : "radio"}
+                        name="payment-output"
+                        checked={selection.includes(key(p))}
+                        onChange={(e) =>
+                          setSelection(
+                            deposit
+                              ? e.target.checked
+                                ? [...selection, key(p)]
+                                : selection.filter((x) => x !== key(p))
+                              : [key(p)],
+                          )
+                        }
+                      />
+                      {formatBtc(p.value)} BTC · {p.txid.slice(0, 12)}…:{p.vout}
+                    </label>
+                  ))}
+                </fieldset>
+                {deposit ? (
+                  <label>
+                    Deposit amount (BTC)
+                    <input
+                      inputMode="decimal"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                    />
+                  </label>
+                ) : (
+                  <label>
+                    Withdrawal destination
+                    <input
+                      value={destination}
+                      onChange={(e) => setDestination(e.target.value)}
+                    />
+                  </label>
+                )}
+                <label>
+                  Miner fee (BTC, exact amount)
+                  <input
+                    inputMode="decimal"
+                    value={fee}
+                    onChange={(e) => setFee(e.target.value)}
+                  />
+                </label>
+              </>
+            )}
+            <CostDisclosure feeBtc={job ? formatBtc(job.manifest.fee) : fee || undefined} job={job} />
+            {payoutPreview && (
+              <p role="status">
+                Payout: {payoutPreview} BTC to {destination}. The selected
+                helper output is included in this amount.
+              </p>
+            )}
+            {job && intentBackup && !assemblyVerified && (
+              <div className="info-note">
+                <div>
+                  <p>
+                    Your signing backup binds the exact QSB solution. Keep this
+                    newest file and re-upload it before sending authorization to
+                    Xverse.
+                  </p>
+                  <button
+                    className="secondary"
+                    onClick={() =>
+                      downloadBackup(intentBackup, `${vault.id}-signing`)
+                    }
+                  >
+                    Download signing backup again
+                  </button>
+                  <label>
+                    Verify updated signing backup
+                    <input
+                      type="file"
+                      accept="application/json"
+                      disabled={!!busy}
+                      onChange={(e) =>
+                        verifyAssemblyBackup(e.target.files?.[0])
+                      }
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+            <label>
+              <input
+                type="checkbox"
+                checked={accepted}
+                onChange={(e) => setAccepted(e.target.checked)}
+              />
+              I have reviewed the itemized costs and experimental loss risk. Customer compute billing is not enabled; this is not authorization for unlimited charges. I authorize the stated Bitcoin fee only when signing the transaction in Xverse. A withdrawal may take a long time.
+              Recovery keys are one-time; the payout cannot be changed after
+              authorization.
+            </label>
+            <button
+              className="primary"
+              disabled={
+                !!busy ||
+                !unlocked ||
+                !accepted ||
+                (!!job && !!intentBackup && !assemblyVerified)
+              }
+              onClick={
+                job ? authorize : deposit ? depositFunds : beginWithdrawal
+              }
+            >
+              {busy ||
+                (job
+                  ? assemblyVerified
+                    ? "Authorize and sign"
+                    : "Save signing backup"
+                  : deposit
+                    ? "Review deposit in Xverse"
+                    : "Save intent and start search")}
+            </button>
+          </>
+        )}
+        {error && (
+          <p role="alert" className="error-message">
+            {error}
+          </p>
+        )}
+      </div>
+    </dialog>
+  );
+}

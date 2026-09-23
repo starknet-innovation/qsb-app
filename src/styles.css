@@ -1,0 +1,57 @@
+.transaction-dialog {
+  display: grid;
+  gap: 16px;
+  max-width: 620px;
+}
+.transaction-dialog label {
+  display: grid;
+  gap: 8px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.transaction-dialog label:has(input[type="checkbox"]),
+.transaction-dialog label:has(input[type="radio"]) {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 1.5;
+}
+.transaction-dialog input[type="checkbox"],
+.transaction-dialog input[type="radio"] {
+  width: auto;
+  flex-shrink: 0;
+}
+.transaction-dialog fieldset {
+  border: 1px solid #dce3d8;
+  border-radius: 12px;
+  padding: 16px;
+  max-height: 200px;
+  overflow: auto;
+}
+.transaction-dialog fieldset label {
+  margin-top: 10px;
+}
+.transaction-dialog input:not([type="checkbox"]):not([type="radio"]) {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #cdd5c8;
+  border-radius: 8px;
+}
+.transaction-dialog [role="status"],
+.transaction-dialog .info-note {
+  overflow-wrap: anywhere;
+}
+
+.cost-page { display: grid; gap: 24px; max-width: 1000px; }
+.cost-disclosure { padding: 24px; border: 1px solid #c9d9d2; border-radius: 14px; background: #f5f9f7; color: #243d33; }
+.cost-disclosure p, .cost-page p, .cost-page li { line-height: 1.6; }
+.cost-lines { margin: 20px 0; }
+.cost-lines > div { display: grid; grid-template-columns: minmax(150px, 1fr) 1.5fr; gap: 16px; padding: 12px 0; border-bottom: 1px solid #dce5df; }
+.cost-lines dt { font-weight: 600; }
+.cost-lines dd { margin: 0; }
+.cost-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.cost-page label { display: grid; gap: 8px; margin: 16px 0; }
+.cost-page input { width: 100%; padding: 12px; border: 1px solid #c9d9d2; border-radius: 8px; box-sizing: border-box; }
+.cost-planned { padding: 16px; background: #f5f6f5; border-radius: 12px; }
+.cost-page button:disabled { opacity: .6; cursor: not-allowed; }
+@media(max-width: 650px) { .cost-lines > div, .cost-inputs { grid-template-columns: 1fr; gap: 6px; } }
