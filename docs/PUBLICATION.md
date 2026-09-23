@@ -13,7 +13,7 @@ Publication-only changes:
 3. Redirected browser screenshot paths into local ignored `test-results/`.
 4. Added sharing documentation, licensing boundaries, and a restrictive ignore file.
 
-The optimized source is a separate research tree; the historical worker Dockerfile does not select it. Experimental service/host packages currently assembled from the private work directory are excluded pending a self-contained public packaging pass.
+The optimized source is a separate research tree; the historical worker Dockerfile does not select it. Experimental service/host packages assembled from the private work directory remain excluded. `release/source-manifest.json` is a later source closure built from this checkout after `npm run vendor`. It does not include a built worker image, native binaries, or an operator runtime.
 
 Security checks are static screening and review, not a guarantee that all possible sensitive content can be automatically detected. No upstream setup script or cloud deployment ran during export.
 

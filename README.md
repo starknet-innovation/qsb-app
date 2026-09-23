@@ -27,6 +27,7 @@ npm run vendor
 npm test
 npm run typecheck
 npm run build
+npm run package:release -- --check
 ```
 
 The preparation step supplies the pinned sources required by provenance tests and the browser Python transaction builder. Then start development:
@@ -36,6 +37,8 @@ npm run dev
 ```
 
 `vendor` downloads two pinned upstream source archives and applies the checked-in patch; review `scripts/vendor.py` and `scripts/patch_upstream.py` before running it. It does not require wallet secrets. The local API uses an in-memory store. Do not put a real backup, recovery phrase, or passphrase into an issue or pull request.
+
+`package:release --check` rebuilds `release/source-manifest.json` from this checkout. That manifest is a source closure. It does not build the CUDA image, and the historical image name in the archived solver descriptor is not a deployable registry identity. `research/optimized-subset` is not selected by `worker/Dockerfile`.
 
 The build and unit tests do not establish successful GPU execution, a fresh end-to-end optimized withdrawal, or external miner acceptance. Browser tests also require Playwright browser installation and their configured local services.
 

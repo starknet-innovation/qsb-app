@@ -30,6 +30,7 @@ import { outputScript } from "../src/lib/transactions";
 import { hex } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
+import { installSupervisedRoutes } from "./runtime/supervised-routes";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -646,20 +647,23 @@ export function createApp(
     ]);
     return c.json({ job, status });
   });
-  dependencies.installAuthenticatedJobRoutes?.({
+  const authenticatedGet = {
     get: ((path: string, ...handlers: any[]) => {
       if (path === "/api/jobs/:id/mainnet-solved-state" && handlers.length > 0)
         mainnetUiRoutes.admission = true;
       return (app.get.bind(app) as (...a: any[]) => any)(path, ...handlers);
     }) as typeof app.get,
-  });
-  dependencies.installAuthenticatedJobPostRoutes?.({
+  };
+  const authenticatedPost = {
     post: ((path: string, ...handlers: any[]) => {
       if (path === "/api/jobs/supervised" && handlers.length > 0)
         mainnetUiRoutes.creation = true;
       return (app.post.bind(app) as (...a: any[]) => any)(path, ...handlers);
     }) as typeof app.post,
-  });
+  };
+  installSupervisedRoutes(authenticatedGet, authenticatedPost, store);
+  dependencies.installAuthenticatedJobRoutes?.(authenticatedGet);
+  dependencies.installAuthenticatedJobPostRoutes?.(authenticatedPost);
   return app;
 }
 export const app = createApp();

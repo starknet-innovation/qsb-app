@@ -1,0 +1,114 @@
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { assertInsideRepo, certifyWrapper, sha256Hex } from "../server/runtime/identity";
+import {
+  assertCompatibleStages,
+  createSourceManifest,
+  serializeManifest,
+  verifyPackageTree,
+  writePackageTree,
+} from "../server/runtime/package-release";
+
+const root = process.cwd();
+
+describe("source release package", () => {
+  it("matches the committed manifest and keeps native and OCI identities unproduced", () => {
+    const manifest = createSourceManifest(root);
+    const committed = JSON.parse(
+      readFileSync(path.join(root, "release/source-manifest.json"), "utf8"),
+    );
+    expect(manifest).toEqual(committed);
+    expect(serializeManifest(manifest)).toBe(
+      readFileSync(path.join(root, "release/source-manifest.json"), "utf8"),
+    );
+    assertCompatibleStages(manifest);
+    expect(manifest.mainnetEnabled).toBe(false);
+    expect(manifest.broadcastAuthorized).toBe(false);
+    expect(manifest.sourceCommit).toEqual({
+      status: "unbound",
+      value: null,
+      reason: expect.stringContaining("does not invent a commit"),
+    });
+    expect(manifest.releases.optimizedSubset.selectedByWorkerDockerfile).toBe(
+      false,
+    );
+    expect(manifest.releases.optimizedSubset.replacesSolverPipeline).toBe(false);
+    expect(manifest.releases.pinning.compatiblePipelinePartner).toBe(
+      "historicalSubset",
+    );
+    expect(manifest.releases.historicalSubset.compatiblePipelinePartner).toBe(
+      "pinning",
+    );
+    expect(manifest.identities.nativeBinaries.pinning.value).toBeNull();
+    expect(manifest.identities.nativeBinaries.historicalSubset.value).toBeNull();
+    expect(manifest.identities.nativeBinaries.optimizedSubset.value).toBeNull();
+    expect(manifest.identities.imageConfig.value).toBeNull();
+    expect(manifest.identities.ociIndex.value).toBeNull();
+    expect(manifest.identities.registryManifest.value).toBeNull();
+    expect(manifest.identities.registryManifest.placeholderIsDeployable).toBe(
+      false,
+    );
+    expect(manifest.identities.registryManifest.historicalPlaceholder).toContain(
+      "000000000000.dkr.ecr",
+    );
+    expect(manifest.buildInputs.imageBuildStatus).toBe("not-produced");
+    expect(manifest.buildInputs.dockerfileFlags.pinning).toEqual([
+      "-O3",
+      "-arch=sm_${CUDA_ARCH}",
+      "-DQSB_SLOTPIPE=0",
+    ]);
+    expect(manifest.buildInputs.defaultArchFlags.historicalSubset).toContain(
+      "-arch=sm_89",
+    );
+    const dockerfile = readFileSync(path.join(root, "worker/Dockerfile"), "utf8");
+    expect(dockerfile).toContain("vendor/challenge/candidates");
+    expect(dockerfile).not.toMatch(
+      /^\s*(?:COPY|ADD)\s+\S*research\/optimized-subset/m,
+    );
+    expect(
+      certifyWrapper(
+        {
+          wrapperSha256: manifest.identities.sourceFiles["worker/handler.py"] ?? "",
+          nativeSha256: manifest.identities.nativeBinaries.pinning.value,
+        },
+        {
+          wrapperBytes: readFileSync(path.join(root, "worker/handler.py")),
+          nativeSha256: "cd".repeat(32),
+        },
+      ),
+    ).toEqual({ ok: false, reason: "native-not-enrolled" });
+  });
+
+  it("rejects a modified wrapper even when the native hash is unchanged", () => {
+    const manifest = createSourceManifest(root);
+    const directory = mkdtempSync(path.join(tmpdir(), "qsb-release-"));
+    writePackageTree(root, directory, manifest);
+    expect(verifyPackageTree(directory).format).toBe(
+      "qsb-source-release-manifest-v1",
+    );
+    const wrapper = path.join(directory, "tree/worker/handler.py");
+    const enrolled = {
+      wrapperSha256: sha256Hex(readFileSync(wrapper)),
+      nativeSha256: "ab".repeat(32),
+    };
+    writeFileSync(wrapper, `${readFileSync(wrapper, "utf8")}\n# wrapper changed\n`);
+    expect(() => verifyPackageTree(directory)).toThrow(/enrolled identity/);
+    expect(
+      certifyWrapper(enrolled, {
+        wrapperBytes: readFileSync(wrapper),
+        nativeSha256: enrolled.nativeSha256,
+      }),
+    ).toEqual({ ok: false, reason: "wrapper-changed" });
+  });
+
+  it("refuses release paths outside this checkout", () => {
+    expect(() => assertInsideRepo(root, "../etc/passwd")).toThrow(
+      /escapes the checkout/,
+    );
+    expect(() => assertInsideRepo(root, "/etc/passwd")).toThrow(
+      /escapes the checkout/,
+    );
+  });
+});
