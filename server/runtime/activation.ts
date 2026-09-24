@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { assertNoCredentialMaterial } from "./host-requirements";
+import { exactSpendAuthorizationSchema } from "./miner-inclusion";
 
 /**
  * Section 8 gates. Nothing here deploys, enables mainnet, or authorizes a
@@ -224,18 +225,6 @@ export type PaidOutcomeDisposition = {
   broadcastAuthorized: false;
 };
 
-const exactSpendPointerSchema = z
-  .object({
-    format: z.literal("qsb-exact-spend-authorization-v1"),
-    chain: z.enum(["mainnet", "testnet4"]),
-    txid: hash64,
-    amountSats: positiveUnits,
-    feeSats: positiveUnits,
-    mainnetEnabled: z.literal(false),
-    broadcastAuthorized: z.literal(false),
-  })
-  .strict();
-
 function fail(code: string): never {
   throw new ActivationError(code);
 }
@@ -338,7 +327,8 @@ export function evaluateActivation(input: unknown): ActivationEvaluation {
 
 /**
  * Feature enablement and spend authorization are different records.
- * Neither one broadcasts from this checkout.
+ * The spend record is the section 7 exact-spend authorization. Accepting it
+ * here does not broadcast and does not grant the section 7 permit.
  */
 export function requireExactSpendBesideActivation(input: {
   activation: unknown;
@@ -353,7 +343,7 @@ export function requireExactSpendBesideActivation(input: {
   if (!raw) fail("ExactTransactionAuthorizationRequired");
   if (raw.mainnetEnabled === true || raw.broadcastAuthorized === true)
     fail("ActivationRefused");
-  if (!exactSpendPointerSchema.safeParse(input.exactSpend).success)
+  if (!exactSpendAuthorizationSchema.safeParse(input.exactSpend).success)
     fail("ExactTransactionAuthorizationRequired");
   return {
     ...activation,

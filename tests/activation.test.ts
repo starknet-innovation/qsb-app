@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { hex } from "@scure/base";
+import * as btc from "@scure/btc-signer";
 import { describe, expect, it } from "vitest";
 import capability from "../server/mainnet-capability.json";
 import { release } from "../src/lib/model";
@@ -21,6 +23,13 @@ import {
   reconcilePaidOutcome,
   requireExactSpendBesideActivation,
 } from "../server/runtime/activation";
+import {
+  EXTERNAL_MINER_CATALOG,
+  HISTORICAL_REGTEST_FIXTURE_LABEL,
+  exactSpendAuthorizationSchema,
+  grantExactSpendPermit,
+  rawTransactionSha256,
+} from "../server/runtime/miner-inclusion";
 
 const root = process.cwd();
 const now = "2026-09-23T00:00:00.000Z";
@@ -102,11 +111,25 @@ function exactSpend(overrides: Record<string, unknown> = {}) {
     format: "qsb-exact-spend-authorization-v1" as const,
     chain: "mainnet" as const,
     txid: "11".repeat(32),
+    rawTxSha256: "22".repeat(32),
+    amountSats: "50000",
+    feeSats: "1000",
+    directMainnetDecision: "explicit" as const,
+    mainnetEnabled: false as const,
+    broadcastAuthorized: false as const,
+    ...overrides,
+  };
+}
+
+function reducedExactSpend() {
+  return {
+    format: "qsb-exact-spend-authorization-v1" as const,
+    chain: "mainnet" as const,
+    txid: "11".repeat(32),
     amountSats: "50000",
     feeSats: "1000",
     mainnetEnabled: false as const,
     broadcastAuthorized: false as const,
-    ...overrides,
   };
 }
 
@@ -189,6 +212,15 @@ describe("activation decision", () => {
         exactSpend: exactSpend({ broadcastAuthorized: true }),
       }),
     ).toThrow("ActivationRefused");
+    expect(() =>
+      requireExactSpendBesideActivation({
+        activation,
+        exactSpend: reducedExactSpend(),
+      }),
+    ).toThrow("ExactTransactionAuthorizationRequired");
+    expect(exactSpendAuthorizationSchema.safeParse(reducedExactSpend()).success).toBe(
+      false,
+    );
     expect(
       requireExactSpendBesideActivation({
         activation,
@@ -201,6 +233,82 @@ describe("activation decision", () => {
       featureEnabled: false,
       mainnetEnabled: false,
       section8Closed: false,
+    });
+  });
+
+  it("accepts the section 7 exact spend record and still does not broadcast", () => {
+    const tx = new btc.Transaction();
+    tx.addInput({
+      txid: "11".repeat(32),
+      index: 1,
+      sequence: 0xfffffffe,
+    });
+    tx.addOutputAddress(
+      btc.p2wpkh(
+        hex.decode(
+          "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        ),
+      ).address!,
+      1000n,
+    );
+    const rawTxHex = hex.encode(tx.toBytes(true, true));
+    const record = exactSpend({
+      txid: tx.id,
+      rawTxSha256: rawTransactionSha256(rawTxHex),
+    });
+    const activation = defaultActivationDecision();
+    const beside = requireExactSpendBesideActivation({
+      activation,
+      exactSpend: record,
+    });
+    const catalog = EXTERNAL_MINER_CATALOG.mainnet;
+    const permit = grantExactSpendPermit({
+      parties: {
+        wallet: { chain: "mainnet", app: "xverse" },
+        builder: { chain: "mainnet" },
+        chainProvider: {
+          chain: "mainnet",
+          genesisHash: catalog.genesisHash,
+          baseUrl: catalog.chainUrl,
+        },
+        miner: { chain: "mainnet", endpoint: catalog.minerUrl },
+      },
+      candidate: {
+        chain: "mainnet",
+        txid: tx.id,
+        rawTxHex,
+        amountSats: record.amountSats,
+        feeSats: record.feeSats,
+      },
+      exactSpend: record,
+      spentFixtureRefs: [
+        {
+          label: HISTORICAL_REGTEST_FIXTURE_LABEL,
+          chain: "regtest",
+          txid: "ff".repeat(32),
+          vout: 0,
+          spent: true,
+        },
+      ],
+      release: { mainnetEnabled: false, broadcastAuthorized: false },
+    });
+    expect(beside).toMatchObject({
+      exactSpendRecordPresent: true,
+      spendAuthorized: false,
+      broadcastAuthorized: false,
+      mainnetEnabled: false,
+      section8Closed: false,
+    });
+    expect(permit).toMatchObject({
+      format: "qsb-exact-spend-permit-v1",
+      txid: tx.id,
+      rawTxSha256: record.rawTxSha256,
+      inclusion: false,
+      section7Closed: false,
+      mainnetEnabled: false,
+      broadcastAuthorized: false,
+      transportCalled: false,
+      endpointsContacted: false,
     });
   });
 });
