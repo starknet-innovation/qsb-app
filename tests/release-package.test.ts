@@ -190,13 +190,60 @@ describe("source release package", () => {
       expect(paths).toContain(relativePath);
       expect(manifest.identities.sourceFiles[relativePath]).toMatch(/^[a-f0-9]{64}$/);
     }
-    expect(manifest.releases.pinning.sourcesEnrolled).toBe(false);
-    expect(manifest.releases.historicalSubset.sourcesEnrolled).toBe(false);
-    expect(
-      Object.keys(manifest.identities.sourceFiles).some((relativePath) =>
-        relativePath.startsWith("vendor/"),
-      ),
-    ).toBe(false);
+    expect(manifest.releases.pinning.sourcesEnrolled).toBe(true);
+    expect(manifest.releases.historicalSubset.sourcesEnrolled).toBe(true);
+    expect(manifest.identities.sourceFiles["vendor/challenge/candidates/pinning/pinning.cu"]).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
+    expect(manifest.identities.sourceFiles["vendor/challenge/candidates/subset/subset.cu"]).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
+  });
+
+  it("packages the Dockerfile historical inputs and checks the tree inside the checkout", () => {
+    const manifest = createSourceManifest(root);
+    for (const relativePath of [
+      "vendor/challenge/candidates/pinning/COPYING",
+      "vendor/challenge/candidates/pinning/RESEARCH.md",
+      "vendor/challenge/candidates/pinning/SOURCE-MANIFEST.json",
+      "vendor/challenge/candidates/pinning/pinning.cu",
+      "vendor/challenge/candidates/subset/COPYING",
+      "vendor/challenge/candidates/subset/TREE_INVERSE.md",
+      "vendor/challenge/candidates/subset/subset.cu",
+    ]) {
+      expect(manifest.identities.sourceFiles[relativePath]).toMatch(/^[a-f0-9]{64}$/);
+    }
+    const directory = path.join(root, "release/dist");
+    writePackageTree(root, directory, manifest);
+    const tree = path.join(directory, "tree");
+    for (const relativePath of [
+      "vendor/challenge/candidates/pinning/pinning.cu",
+      "vendor/challenge/candidates/subset/subset.cu",
+      "vendor/challenge/candidates/pinning/COPYING",
+      "vendor/challenge/candidates/subset/COPYING",
+    ]) {
+      expect(existsSync(path.join(tree, relativePath))).toBe(true);
+    }
+    const modules = path.join(tree, "node_modules");
+    symlinkSync(path.join(root, "node_modules"), modules, "dir");
+    try {
+      expect(
+        execFileSync(
+          process.execPath,
+          [path.join(root, "node_modules/tsx/dist/cli.mjs"), "scripts/package-release.ts", "--check"],
+          { cwd: tree, encoding: "utf8" },
+        ),
+      ).toContain("matches this checkout");
+    } finally {
+      rmSync(modules, { force: true });
+    }
+    const extra = path.join(root, "vendor/challenge/candidates/pinning/local-notes.txt");
+    writeFileSync(extra, "not allowlisted\n");
+    try {
+      expect(() => createSourceManifest(root)).toThrow(/Unexpected release input/);
+    } finally {
+      rmSync(extra, { force: true });
+    }
   });
 
   it("rejects an untracked optimized file and leaves ignored files out", () => {
@@ -213,10 +260,8 @@ describe("source release package", () => {
       const manifest = createSourceManifest(root);
       expect(manifest.identities.sourceFiles["research/optimized-subset/.env"]).toBeUndefined();
       expect(
-        Object.keys(manifest.identities.sourceFiles).some((relativePath) =>
-          relativePath.startsWith("vendor/"),
-        ),
-      ).toBe(false);
+        manifest.identities.sourceFiles["vendor/challenge/candidates/pinning/pinning.cu"],
+      ).toMatch(/^[a-f0-9]{64}$/);
       expect(
         Object.keys(manifest.identities.sourceFiles).some(
           (relativePath) =>

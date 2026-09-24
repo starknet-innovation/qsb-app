@@ -76,6 +76,14 @@ export class OwnedProcessError extends Error {
   }
 }
 
+/** Spawn failed before a child existed. Any other pid-less failure stays stuck. */
+export class SpawnNotStarted extends Error {
+  constructor() {
+    super("ProcessIdentityMissing");
+    this.name = "SpawnNotStarted";
+  }
+}
+
 export type OwnedProcessStart = () => Promise<{
   processId: string;
   /** Rejects if stdout is not exactly the acknowledgement for the process lifetime. */
@@ -185,23 +193,23 @@ function jobForLaunch(job: SupervisedJob, launch: LaunchRecord): SupervisedJob {
     case "replacing":
       next.status = isSearchRunning(launch) ? "searching" : "queued";
       delete next.error;
-      return next;
+      return withRefusedStdout(next, launch);
     case "uncertain":
       if (isSearchRunning(launch)) {
         next.status = "searching";
         delete next.error;
-        return next;
+        return withRefusedStdout(next, launch);
       }
       next.status = "paused";
       next.error =
         launch.providerSubmissions === 0
           ? "Submission outcome unknown. Reconcile the owned process before resuming."
           : "Submission outcome unknown. Reconcile the provider id before resuming.";
-      return next;
+      return withRefusedStdout(next, launch);
     case "running":
       next.status = isSearchRunning(launch) ? "searching" : "queued";
       delete next.error;
-      return next;
+      return withRefusedStdout(next, launch);
     case "terminal":
       if (launch.evidence?.outcome === "verified-hit" && launch.evidence.bundle) {
         next.status = "awaiting_authorization";
@@ -210,16 +218,25 @@ function jobForLaunch(job: SupervisedJob, launch: LaunchRecord): SupervisedJob {
         next.coverage = "verified-hit-not-whole-range";
         next.solution = validateSolvedState(launch.evidence.bundle).solution;
         delete next.error;
-        return next;
+        return withRefusedStdout(next, launch);
       }
       next.status = "paused";
       next.coverage = "none";
-      return next;
+      return withRefusedStdout(next, launch);
     default: {
       const neverState: never = launch.state;
       throw new Error(`Unhandled launch state: ${neverState}`);
     }
   }
+}
+
+function withRefusedStdout(job: SupervisedJob, launch: LaunchRecord): SupervisedJob {
+  if (launch.stdoutProtocol !== "violated") return job;
+  const providerId = launch.providerId ?? "unknown";
+  return {
+    ...job,
+    error: `stdout protocol violated; provider result refused; stop provider ${providerId}`,
+  };
 }
 
 type LoadedPair = Awaited<ReturnType<typeof loadPair>>;
@@ -332,7 +349,11 @@ function canStartOwnedProcess(launch: LaunchRecord): boolean {
     return false;
   if (launch.providerOutcome !== "not-submitted") return false;
   if (launch.state === "claimed" && launch.processStarts === 0) return true;
-  return launch.state === "uncertain" && launch.processId === undefined;
+  return (
+    launch.state === "uncertain" &&
+    launch.processId === undefined &&
+    launch.spawn === "not-started"
+  );
 }
 
 export async function launchOwnedProcess(
@@ -351,12 +372,14 @@ export async function launchOwnedProcess(
     throw new Error("ImmutableInputMismatch");
   for (;;) {
     if (!canStartOwnedProcess(loaded.launch)) throw new Error("LaunchRefused");
+    const launching: LaunchRecord = {
+      ...loaded.launch,
+      state: "launching",
+      processStarts: loaded.launch.processStarts + 1,
+    };
+    delete launching.spawn;
     try {
-      await commit(store, loaded, {
-        ...loaded.launch,
-        state: "launching",
-        processStarts: loaded.launch.processStarts + 1,
-      });
+      await commit(store, loaded, launching);
       break;
     } catch (error) {
       if (!(error instanceof Conflict)) throw error;
@@ -386,16 +409,20 @@ export async function launchOwnedProcess(
     const processId =
       started?.processId ??
       (error instanceof OwnedProcessError ? error.processId : undefined);
+    const notStarted = !processId && error instanceof SpawnNotStarted;
     for (;;) {
       const current = await loadPair(store, owner, requestId, slot);
       if (processId && current.launch.processId === processId) break;
       if (current.launch.state !== "launching") break;
+      const uncertain: LaunchRecord = {
+        ...current.launch,
+        state: "uncertain",
+        ...(processId ? { processId } : {}),
+      };
+      if (notStarted) uncertain.spawn = "not-started";
+      else delete uncertain.spawn;
       try {
-        await commit(store, current, {
-          ...current.launch,
-          state: "uncertain",
-          ...(processId ? { processId } : {}),
-        });
+        await commit(store, current, uncertain);
         break;
       } catch (persistError) {
         if (persistError instanceof Conflict) continue;
@@ -634,6 +661,9 @@ export async function replaceOwnedProcess(
   // would re-open a result that a stdout violation refused. Reconcile it first.
   if (launch.providerOutcome === "uncertain")
     throw new Error("ProviderSubmissionUnresolved");
+  // A violated paid launch stays refused. Replacement must not clear that marker.
+  if (launch.stdoutProtocol === "violated" && launch.providerOutcome === "submitted")
+    throw new Error("ReplaceRefused");
   const priorState = launch.state;
   const providerSubmissions = launch.providerSubmissions;
   const providerId = launch.providerId;
@@ -941,7 +971,7 @@ export function localAckStarter(
       const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
       if (!child.pid) {
         child.once("error", () => undefined);
-        reject(new Error("ProcessIdentityMissing"));
+        reject(new SpawnNotStarted());
         return;
       }
       const processId = String(child.pid);

@@ -171,45 +171,96 @@ function gitNullOutput(root: string, args: string[], input?: string): string {
     });
   } catch (error) {
     const failed = error as { status?: number; stdout?: string };
-    if (failed.status === 1 && args[0] === "check-ignore") return failed.stdout ?? "";
+    if (failed.status === 1 && args.includes("check-ignore")) return failed.stdout ?? "";
     throw new Error("Release inventory is not tracked");
   }
 }
 
+function repositoryTopLevel(root: string): string {
+  try {
+    return execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  } catch {
+    throw new Error("Release inventory is not tracked");
+  }
+}
+
+function rootPrefix(toplevel: string, root: string): string {
+  const relative = path.relative(toplevel, path.resolve(root));
+  if (relative.startsWith("..") || path.isAbsolute(relative))
+    throw new Error("Release inventory is not tracked");
+  if (relative === "") return "";
+  return `${relative.split(path.sep).join("/")}/`;
+}
+
 function trackedReleaseFiles(root: string, relativeDir: string): string[] {
-  return gitNullOutput(root, ["ls-files", "-z", "--", relativeDir])
+  const toplevel = repositoryTopLevel(root);
+  const prefix = rootPrefix(toplevel, root);
+  const pathspec = `${prefix}${relativeDir}`;
+  return gitNullOutput(toplevel, ["-C", toplevel, "ls-files", "-z", "--", pathspec])
     .split("\0")
     .filter((relativePath) => relativePath.length > 0)
+    .map((listed) =>
+      prefix.length > 0 && listed.startsWith(prefix) ? listed.slice(prefix.length) : listed,
+    )
+    .filter(
+      (relativePath) =>
+        relativePath === relativeDir || relativePath.startsWith(`${relativeDir}/`),
+    )
     .sort();
 }
 
 function ignoredReleaseFiles(root: string, files: readonly string[]): Set<string> {
   if (files.length === 0) return new Set();
+  const toplevel = repositoryTopLevel(root);
+  const prefix = rootPrefix(toplevel, root);
   return new Set(
-    gitNullOutput(root, ["check-ignore", "-z", "--stdin"], files.join("\0"))
+    gitNullOutput(
+      toplevel,
+      ["-C", toplevel, "check-ignore", "-z", "--stdin"],
+      files.map((relativePath) => `${prefix}${relativePath}`).join("\0"),
+    )
       .split("\0")
-      .filter((relativePath) => relativePath.length > 0),
+      .filter((relativePath) => relativePath.length > 0)
+      .map((listed) =>
+        prefix.length > 0 && listed.startsWith(prefix) ? listed.slice(prefix.length) : listed,
+      ),
   );
 }
 
-function insideGitWorkTree(root: string): boolean {
-  try {
-    return (
-      execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
-        cwd: root,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      }).trim() === "true"
-    );
-  } catch {
-    return false;
-  }
+/** A packaged tree checks the sibling manifest. A checkout uses git from the repository toplevel. */
+function packagedSourceFiles(root: string): Record<string, string> | undefined {
+  if (existsSync(path.join(root, "release", "source-manifest.json"))) return undefined;
+  const sibling = path.resolve(root, "..", "release-manifest.json");
+  if (!existsSync(sibling)) return undefined;
+  const parsed = JSON.parse(readFileSync(sibling, "utf8")) as {
+    identities?: { sourceFiles?: Record<string, string> };
+  };
+  if (!parsed.identities?.sourceFiles) throw new Error("Release manifest is not enrolled");
+  return parsed.identities.sourceFiles;
 }
 
 /** Enroll only the tracked inventory. Ignored files stay out, and any other file is refused. */
 export function reviewedTreeFiles(root: string, relativeDir: string): string[] {
+  const packaged = packagedSourceFiles(root);
+  if (packaged) {
+    const enrolled = Object.keys(packaged)
+      .filter((relativePath) => relativePath.startsWith(`${relativeDir}/`))
+      .sort();
+    const allowed = new Set(enrolled);
+    for (const relativePath of walkFiles(root, relativeDir, false)) {
+      if (!allowed.has(relativePath))
+        throw new Error(`Unexpected release input ${relativePath}`);
+    }
+    for (const relativePath of enrolled) {
+      if (!existsSync(assertInsideRepo(root, relativePath)))
+        throw new Error(`Missing release input ${relativePath}`);
+    }
+    return enrolled;
+  }
   const walked = walkFiles(root, relativeDir, true);
-  if (!insideGitWorkTree(root)) return walked;
   const tracked = trackedReleaseFiles(root, relativeDir);
   const allowed = new Set(tracked);
   const ignored = ignoredReleaseFiles(root, walked);
@@ -225,6 +276,25 @@ export function reviewedTreeFiles(root: string, relativeDir: string): string[] {
 function hashFile(root: string, relativePath: string): string {
   const absolute = assertInsideRepo(root, relativePath);
   return sha256Hex(readFileSync(absolute));
+}
+
+/** Historical Dockerfile inputs come from the tracked sourceHashes allowlist, not git. */
+export function reviewedVendorFiles(root: string, relativeDir: string): string[] {
+  const pinned = Object.entries(archived.sourceHashes)
+    .filter(([relativePath]) => relativePath.startsWith(`${relativeDir}/`))
+    .sort(([left], [right]) => left.localeCompare(right));
+  const allowed = new Set(pinned.map(([relativePath]) => relativePath));
+  for (const relativePath of walkFiles(root, relativeDir, false)) {
+    if (!allowed.has(relativePath))
+      throw new Error(`Unexpected release input ${relativePath}`);
+  }
+  for (const [relativePath, digest] of pinned) {
+    if (!existsSync(assertInsideRepo(root, relativePath)))
+      throw new Error(`Missing release input ${relativePath}`);
+    if (hashFile(root, relativePath) !== digest)
+      throw new Error(`Historical source hash mismatch ${relativePath}`);
+  }
+  return pinned.map(([relativePath]) => relativePath);
 }
 
 const NODE_REQUIREMENT_SENTENCE = "Requires Node.js 22 or newer";
@@ -380,12 +450,9 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
     if (!existsSync(assertInsideRepo(root, relativePath)))
       throw new Error(`Missing release input ${relativePath}`);
   }
-  const pinningFiles = reviewedTreeFiles(root, historicalCandidateRoots[0]);
-  const subsetFiles = reviewedTreeFiles(root, historicalCandidateRoots[1]);
-  const enrolled =
-    pinningFiles.length === 0 && subsetFiles.length === 0
-      ? { pinning: false, historicalSubset: false }
-      : enrollHistoricalPair(pinningFiles, subsetFiles);
+  const pinningFiles = reviewedVendorFiles(root, historicalCandidateRoots[0]);
+  const subsetFiles = reviewedVendorFiles(root, historicalCandidateRoots[1]);
+  const enrolled = enrollHistoricalPair(pinningFiles, subsetFiles);
   const historical = [...pinningFiles, ...subsetFiles];
   const optimized = reviewedTreeFiles(root, optimizedSubsetRoot);
   if (!optimized.length)
@@ -775,14 +842,9 @@ export function verifyPackageTree(outDir: string): SourceReleaseManifest {
         throw new Error(`Unexpected release input ${relativePath}`);
     }
   }
-  const pinningFiles = enrolledPaths.filter((relativePath) =>
-    relativePath.startsWith(`${historicalCandidateRoots[0]}/`),
-  );
-  const subsetFiles = enrolledPaths.filter((relativePath) =>
-    relativePath.startsWith(`${historicalCandidateRoots[1]}/`),
-  );
-  if (pinningFiles.length > 0 || subsetFiles.length > 0)
-    enrollHistoricalPair(pinningFiles, subsetFiles);
+  const pinningFiles = reviewedVendorFiles(treeRoot, historicalCandidateRoots[0]);
+  const subsetFiles = reviewedVendorFiles(treeRoot, historicalCandidateRoots[1]);
+  enrollHistoricalPair(pinningFiles, subsetFiles);
   const optimized = enrolledPaths.filter((relativePath) =>
     relativePath.startsWith(`${optimizedSubsetRoot}/`),
   );

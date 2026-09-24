@@ -114,6 +114,7 @@ export const launchRecordSchema = z
     replacement: z.enum(["starting", "uncertain"]).optional(),
     submission: z.literal("in-progress").optional(),
     stdoutProtocol: z.literal("violated").optional(),
+    spawn: z.literal("not-started").optional(),
   })
   .strict();
 export type LaunchRecord = z.infer<typeof launchRecordSchema>;

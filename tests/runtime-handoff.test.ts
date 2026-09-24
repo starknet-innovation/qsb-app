@@ -524,9 +524,10 @@ describe("supervised runtime handoff", () => {
     ).rejects.toThrow(/ProcessIdentityMissing/);
     const launch = (
       await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
-    )?.launch as { state: string; processId?: string };
+    )?.launch as { state: string; processId?: string; spawn?: string };
     expect(launch.state).toBe("uncertain");
     expect(launch.processId).toBeUndefined();
+    expect(launch.spawn).toBe("not-started");
     const retried = await launchOwnedProcess(
       store,
       address,
@@ -539,6 +540,87 @@ describe("supervised runtime handoff", () => {
     );
     expect(retried.state).toBe("acknowledged");
     expect(retried.processId).toBe("retried-after-missing-child");
+    expect(retried.spawn).toBeUndefined();
+  });
+
+  it("does not start a second process when start returns no pid", async () => {
+    const { store, admitted } = await claimedFixture();
+    let starts = 0;
+    const start: OwnedProcessStart = async () => {
+      starts += 1;
+      return { processId: "" };
+    };
+    await expect(
+      launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        start,
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/ProcessIdentityMissing/);
+    const launch = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+    )?.launch as { state: string; processId?: string; spawn?: string };
+    expect(launch.state).toBe("uncertain");
+    expect(launch.processId).toBeUndefined();
+    expect(launch.spawn).toBeUndefined();
+    await expect(
+      launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        start,
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/LaunchRefused/);
+    expect(starts).toBe(1);
+  });
+
+  it("does not start a second process when spawn fails without a no-child marker", async () => {
+    const { store, admitted } = await claimedFixture();
+    let starts = 0;
+    const start: OwnedProcessStart = async () => {
+      starts += 1;
+      throw new Error("ack rpc timed out");
+    };
+    await expect(
+      launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        start,
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/ack rpc timed out/);
+    const launch = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+    )?.launch as { state: string; processId?: string; spawn?: string };
+    expect(launch.state).toBe("uncertain");
+    expect(launch.processId).toBeUndefined();
+    expect(launch.spawn).toBeUndefined();
+    await expect(
+      launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        start,
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/LaunchRefused/);
+    expect(starts).toBe(1);
   });
 
   it("treats stdout that follows the ack as a violation after the pipe closes", async () => {
@@ -2334,6 +2416,35 @@ describe("supervised runtime handoff", () => {
     expect(launch.submission).toBeUndefined();
     expect(launch.state).toBe("uncertain");
     expect(launch.state).not.toBe("running");
+    const job = (await store.get(`OWNER#${address}`, `JOB#${admitted.job.id}`))?.job as {
+      status: string;
+      error?: string;
+      runtime: { searchRunning: boolean };
+    };
+    expect(job.runtime.searchRunning).toBe(true);
+    expect(job.status).toBe("searching");
+    expect(job.error).toBe(
+      "stdout protocol violated; provider result refused; stop provider should-not-publish",
+    );
+    await expect(
+      replaceOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => ({ processId: "should-not-replace-violated" }),
+        new Date(),
+        2000,
+        async () => undefined,
+      ),
+    ).rejects.toThrow(/ReplaceRefused/);
+    const stillRefused = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+    )?.launch as { state: string; stdoutProtocol?: string; providerId?: string };
+    expect(stillRefused.stdoutProtocol).toBe("violated");
+    expect(stillRefused.providerId).toBe("should-not-publish");
+    expect(stillRefused.state).not.toBe("running");
   });
 
   it("refuses a sibling after the primary launch is terminal", async () => {
@@ -2736,17 +2847,24 @@ describe("supervised runtime handoff", () => {
     );
     rejectStdout(new Error("AcknowledgementRejected"));
     const started = Date.now();
-    let searchRunning = false;
-    while (!searchRunning && Date.now() - started < 2000) {
+    let sawViolation = false;
+    while (!sawViolation && Date.now() - started < 2000) {
       const job = (await store.get(`OWNER#${address}`, `JOB#${admitted.job.id}`))?.job as {
         status: string;
+        error?: string;
         runtime: { state: string; searchRunning: boolean };
       };
-      searchRunning = job.runtime.searchRunning;
-      if (searchRunning) expect(job.status).toBe("searching");
+      if (
+        job.runtime.searchRunning &&
+        job.error?.includes("stdout protocol violated")
+      ) {
+        expect(job.status).toBe("searching");
+        expect(job.error).toContain("still-billed");
+        sawViolation = true;
+      }
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    expect(searchRunning).toBe(true);
+    expect(sawViolation).toBe(true);
     const launch = (
       await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
     )?.launch as Parameters<typeof isSearchRunning>[0];
