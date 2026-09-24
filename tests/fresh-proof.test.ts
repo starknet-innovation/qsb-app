@@ -16,6 +16,7 @@ import {
   HISTORICAL_XVERSE_REGTEST_WITHDRAWAL,
   NOT_A_FRESH_SEARCH,
   admitCoreHarnessResult,
+  assessCoreReportEnrollment,
   assessBoundedCompute,
   assessProofFreshness,
   classifySearchEvidence,
@@ -280,7 +281,7 @@ describe("proof runner selection", () => {
     writeFileSync(
       exercise,
       [
-        'import { readFileSync } from "node:fs";',
+        'import { appendFileSync, readFileSync } from "node:fs";',
         'import { enrolledReleaseIdentity, selectProofRunner } from "./tree/server/runtime/fresh-proof.ts";',
         'const committed = JSON.parse(readFileSync(new URL("./release-manifest.json", import.meta.url), "utf8"));',
         "const enrolled = enrolledReleaseIdentity(committed);",
@@ -304,6 +305,12 @@ describe("proof runner selection", () => {
         "if (selected.mainnetEnabled !== false || selected.broadcastAuthorized !== false) throw new Error(\"activation\");",
         "if (selected.liveRunnerContacted !== false || selected.nativeBinariesEnrolled !== false) throw new Error(\"runner\");",
         "console.log(selected.sourceManifestSha256);",
+        'appendFileSync(new URL("./tree/server/runtime/types.ts", import.meta.url), "\\n");',
+        "let rejected = false;",
+        "try { enrolledReleaseIdentity(committed); } catch (error) {",
+        '  rejected = error instanceof Error && error.message === "ReleaseEnrollmentMismatch";',
+        "}",
+        'if (!rejected) throw new Error("stale-enrollment");',
         "",
       ].join("\n"),
     );
@@ -770,23 +777,27 @@ describe("core harness judgment", () => {
         enrolled: true,
       }),
     );
-    const admitted = admitCoreHarnessResult(
-      {
-        harnessRan: true,
-        network: "regtest",
-        fullProductionWithdrawalVerified: false,
-        freshOptimizedWithdrawal: false,
-        section6Closed: false,
-        tests: [{ name: "regtest-report", passed: true }],
-        coreBinaries: { bitcoindSha256, bitcoinCliSha256 },
-      },
-      enrolledFile,
+    const matchingReport = {
+      harnessRan: true,
+      network: "regtest",
+      fullProductionWithdrawalVerified: false,
+      freshOptimizedWithdrawal: false,
+      section6Closed: false,
+      tests: [{ name: "regtest-report", passed: true }],
+      coreBinaries: { bitcoindSha256, bitcoinCliSha256 },
+    };
+    expect(() => admitCoreHarnessResult(matchingReport)).toThrow(
+      /CoreBinaryNotEnrolled/,
+    );
+    const admitted = assessCoreReportEnrollment(
+      matchingReport,
+      loadCoreBinaryEnrollment(enrolledFile),
     );
     expect(admitted.harnessRan).toBe(true);
     expect(admitted.section6Closed).toBe(false);
     expect(admitted.freshOptimizedWithdrawal).toBe(false);
     expect(() =>
-      admitCoreHarnessResult(
+      assessCoreReportEnrollment(
         {
           harnessRan: true,
           network: "regtest",
@@ -796,7 +807,7 @@ describe("core harness judgment", () => {
             bitcoinCliSha256,
           },
         },
-        enrolledFile,
+        loadCoreBinaryEnrollment(enrolledFile),
       ),
     ).toThrow(/CoreBinaryMismatch/);
     expect(() => loadCoreBinaryEnrollment(enrolledFile + ".missing")).toThrow(

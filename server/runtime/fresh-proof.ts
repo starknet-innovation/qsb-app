@@ -102,9 +102,7 @@ function readCommittedManifest(root: string): ParsedReleaseManifest {
   }
 }
 
-let verifiedCheckout: { root: string; serialized: string } | undefined;
-
-/** The presented manifest must be the committed file and the hashed checkout. */
+/** The presented manifest must be the committed file and the current checkout. */
 function assertBoundReleaseManifest(
   manifest: ParsedReleaseManifest,
   root: string,
@@ -115,17 +113,32 @@ function assertBoundReleaseManifest(
     serialized
   )
     throw new Error("ReleaseEnrollmentMismatch");
-  if (!verifiedCheckout || verifiedCheckout.root !== root)
-    verifiedCheckout = {
-      root,
-      serialized: serializeManifest(createSourceManifest(root)),
-    };
-  if (verifiedCheckout.serialized !== serialized)
+  if (serializeManifest(createSourceManifest(root)) !== serialized)
     throw new Error("ReleaseEnrollmentMismatch");
 }
 
+/**
+ * Dependency map keys are npm package names, including
+ * `@aws-sdk/client-secrets-manager`. Scan their versions, not those names.
+ */
+function manifestForCredentialScan(manifest: unknown): unknown {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest))
+    return manifest;
+  const copy = structuredClone(manifest) as {
+    buildInputs?: { dependencies?: unknown; devDependencies?: unknown };
+  };
+  const inputs = copy.buildInputs;
+  if (!inputs || typeof inputs !== "object") return copy;
+  for (const field of ["dependencies", "devDependencies"] as const) {
+    const table = inputs[field];
+    if (!table || typeof table !== "object" || Array.isArray(table)) continue;
+    inputs[field] = Object.values(table);
+  }
+  return copy;
+}
+
 export function enrolledReleaseIdentity(manifest: unknown): EnrolledRelease {
-  assertNoCredentialMaterial(manifest);
+  assertNoCredentialMaterial(manifestForCredentialScan(manifest));
   const parsed = sourceReleaseManifestSchema.safeParse(manifest);
   if (!parsed.success) {
     const paths = parsed.error.issues.map((issue) => issue.path.join("."));
@@ -1055,16 +1068,10 @@ export function loadCoreBinaryEnrollment(
   return parsed.data;
 }
 
-export function admitCoreHarnessResult(
+function requireEnrolledCoreBinaries(
   value: unknown,
-  enrollmentPath?: string,
-): CoreJudgment {
-  const judgment = judgeCoreReport(value);
-  if (judgment.overclaim) throw new Error("CoreReportOverclaimsSection6");
-  if (!judgment.harnessRan) return judgment;
-  if (judgment.chain !== "regtest")
-    throw new Error("ControlledProofChainMustBeRegtest");
-  const enrollment = loadCoreBinaryEnrollment(enrollmentPath);
+  enrollment: CoreBinaryEnrollment,
+): void {
   if (
     !enrollment.enrolled ||
     enrollment.bitcoindSha256 === null ||
@@ -1077,5 +1084,26 @@ export function admitCoreHarnessResult(
     binaries?.bitcoinCliSha256 !== enrollment.bitcoinCliSha256
   )
     throw new Error("CoreBinaryMismatch");
+}
+
+/**
+ * Compares a report with an enrollment record already in memory.
+ * Public admission does not accept a caller-selected file.
+ */
+export function assessCoreReportEnrollment(
+  value: unknown,
+  enrollment: CoreBinaryEnrollment,
+): CoreJudgment {
+  const judgment = judgeCoreReport(value);
+  if (judgment.overclaim) throw new Error("CoreReportOverclaimsSection6");
+  if (!judgment.harnessRan) return judgment;
+  if (judgment.chain !== "regtest")
+    throw new Error("ControlledProofChainMustBeRegtest");
+  requireEnrolledCoreBinaries(value, enrollment);
   return judgment;
+}
+
+/** Always loads the committed `server/runtime/core-binary.json` shared with the shell harness. */
+export function admitCoreHarnessResult(value: unknown): CoreJudgment {
+  return assessCoreReportEnrollment(value, loadCoreBinaryEnrollment());
 }
