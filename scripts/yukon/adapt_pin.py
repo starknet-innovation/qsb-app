@@ -8,7 +8,8 @@ from validate import LOCK, check_source_lock, function
 
 FLAGS = {name: 0 for name in (
     'QSB_C31', 'QSB_SHORT_CARRY', 'QSB_CARRY62', 'QSB_FIELD_SC',
-    'QSB_SAS_Z9SUB_ALL', 'QSB_MUL_FOLD8_CUT', 'QSB_SQR_FOLD8_CUT', 'QSB_X3_TAIL')}
+    'QSB_SAS_Z9SUB_ALL', 'QSB_MUL_FOLD8_CUT', 'QSB_SQR_FOLD8_CUT', 'QSB_X3_TAIL',
+    'QSB_NEG_Y_MAC', 'QSB_PARITY_WINDOW')}
 
 
 def replace(text, old, new, count=1):
