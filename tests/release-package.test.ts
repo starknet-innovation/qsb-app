@@ -189,6 +189,25 @@ describe("source release package", () => {
     forged.identities.nativeBinaries.optimizedSubset.value = "cd".repeat(32);
     writeFileSync(manifestPath, JSON.stringify(forged));
     expect(() => verifyPackageTree(directory)).toThrow(/did not produce/);
+    writePackageTree(root, directory, manifest);
+    const bytecode = path.join(directory, "tree/injected/__pycache__/stale.pyc");
+    mkdirSync(path.dirname(bytecode), { recursive: true });
+    writeFileSync(bytecode, "bytecode");
+    expect(() => verifyPackageTree(directory)).toThrow(/path set/);
+    writePackageTree(root, directory, manifest);
+    const manifestPathAgain = path.join(directory, "release-manifest.json");
+    const components = JSON.parse(readFileSync(manifestPathAgain, "utf8")) as {
+      format: string;
+      identities: { components: Record<string, string> };
+    };
+    components.identities.components.api = "ab".repeat(32);
+    writeFileSync(manifestPathAgain, JSON.stringify(components));
+    expect(() => verifyPackageTree(directory)).toThrow(/component/);
+    components.identities.components.api =
+      manifest.identities.components.api ?? "";
+    components.format = "qsb-other";
+    writeFileSync(manifestPathAgain, JSON.stringify(components));
+    expect(() => verifyPackageTree(directory)).toThrow(/format/);
   });
 
   it("refuses release paths outside this checkout", () => {

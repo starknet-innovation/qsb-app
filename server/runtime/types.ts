@@ -138,9 +138,12 @@ export function isSearchRunning(record: LaunchRecord): boolean {
     case "launching":
     case "uncertain":
     case "acknowledged":
-    case "replacing":
     case "terminal":
       return false;
+    case "replacing":
+      return (
+        record.providerOutcome === "submitted" && record.providerId !== undefined
+      );
     case "running":
       return (
         record.providerOutcome === "submitted" && record.providerId !== undefined

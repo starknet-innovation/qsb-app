@@ -127,7 +127,11 @@ function expandArch(flags: string[], arch: string): string[] {
   return flags.map((flag) => flag.replace("${CUDA_ARCH}", arch.slice(3)));
 }
 
-function walkFiles(root: string, relativeDir: string): string[] {
+function walkFiles(
+  root: string,
+  relativeDir: string,
+  skipGeneratedBytecode: boolean,
+): string[] {
   const absolute = assertInsideRepo(root, relativeDir);
   if (!existsSync(absolute)) return [];
   const found: string[] = [];
@@ -139,7 +143,11 @@ function walkFiles(root: string, relativeDir: string): string[] {
       const full = path.join(current, entry.name);
       if (entry.isSymbolicLink())
         throw new Error("Release path escapes the checkout");
-      if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) continue;
+      if (
+        skipGeneratedBytecode &&
+        (entry.name === "__pycache__" || entry.name.endsWith(".pyc"))
+      )
+        continue;
       if (entry.isDirectory()) stack.push(full);
       else if (entry.isFile()) {
         const relative = path.relative(root, full).split(path.sep).join("/");
@@ -154,6 +162,26 @@ function walkFiles(root: string, relativeDir: string): string[] {
 function hashFile(root: string, relativePath: string): string {
   const absolute = assertInsideRepo(root, relativePath);
   return sha256Hex(readFileSync(absolute));
+}
+
+export function componentIdentities(
+  sourceFiles: Record<string, string>,
+): Record<string, string> {
+  const grouped = new Map<string, string[]>();
+  for (const relativePath of Object.keys(sourceFiles).sort()) {
+    const digest = sourceFiles[relativePath];
+    if (!digest) continue;
+    const component = componentForPath(relativePath);
+    const list = grouped.get(component) ?? [];
+    list.push(`${relativePath}:${digest}`);
+    grouped.set(component, list);
+  }
+  const components: Record<string, string> = {};
+  for (const [component, parts] of [...grouped.entries()].sort((a, b) =>
+    a[0].localeCompare(b[0]),
+  ))
+    components[component] = sha256Hex(parts.sort().join("\n"));
+  return components;
 }
 
 export function enrollHistoricalPair(
@@ -200,29 +228,18 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
     if (!existsSync(assertInsideRepo(root, relativePath)))
       throw new Error(`Missing release input ${relativePath}`);
   }
-  const pinningFiles = walkFiles(root, historicalCandidateRoots[0]);
-  const subsetFiles = walkFiles(root, historicalCandidateRoots[1]);
+  const pinningFiles = walkFiles(root, historicalCandidateRoots[0], true);
+  const subsetFiles = walkFiles(root, historicalCandidateRoots[1], true);
   const enrolled = enrollHistoricalPair(pinningFiles, subsetFiles);
   const historical = [...pinningFiles, ...subsetFiles];
-  const optimized = walkFiles(root, optimizedSubsetRoot);
+  const optimized = walkFiles(root, optimizedSubsetRoot, true);
   if (!optimized.length)
     throw new Error("Optimized subset source is not in this checkout");
   const sourcePaths = [...required, ...historical, ...optimized].sort();
   const sourceFiles: Record<string, string> = {};
-  const componentHashes = new Map<string, string[]>();
-  for (const relativePath of sourcePaths) {
-    const digest = hashFile(root, relativePath);
-    sourceFiles[relativePath] = digest;
-    const component = componentForPath(relativePath);
-    const list = componentHashes.get(component) ?? [];
-    list.push(`${relativePath}:${digest}`);
-    componentHashes.set(component, list);
-  }
-  const components: Record<string, string> = {};
-  for (const [component, parts] of [...componentHashes.entries()].sort((a, b) =>
-    a[0].localeCompare(b[0]),
-  ))
-    components[component] = sha256Hex(parts.sort().join("\n"));
+  for (const relativePath of sourcePaths)
+    sourceFiles[relativePath] = hashFile(root, relativePath);
+  const components = componentIdentities(sourceFiles);
   const manifest: SourceReleaseManifest = {
     format: RELEASE_MANIFEST_FORMAT,
     mainnetEnabled: false,
@@ -359,6 +376,8 @@ export function verifyPackageTree(outDir: string): SourceReleaseManifest {
   const manifest = JSON.parse(
     readFileSync(path.join(outDir, "release-manifest.json"), "utf8"),
   ) as SourceReleaseManifest;
+  if (manifest.format !== RELEASE_MANIFEST_FORMAT)
+    throw new Error("Release manifest format is not enrolled");
   assertCompatibleStages(manifest);
   const absent = [
     manifest.identities.nativeBinaries.pinning,
@@ -376,7 +395,7 @@ export function verifyPackageTree(outDir: string): SourceReleaseManifest {
   )
     throw new Error("Release manifest claims an identity this checkout did not produce");
   const treeRoot = path.resolve(outDir, "tree");
-  const walked = walkFiles(treeRoot, ".");
+  const walked = walkFiles(treeRoot, ".", false);
   const enrolledPaths = Object.keys(manifest.identities.sourceFiles).sort();
   if (walked.join("\n") !== enrolledPaths.join("\n"))
     throw new Error("Packaged tree does not match the manifest path set");
@@ -390,6 +409,17 @@ export function verifyPackageTree(outDir: string): SourceReleaseManifest {
       throw new Error("Release path escapes the checkout");
     if (sha256Hex(readFileSync(absolute)) !== digest)
       throw new Error(`Packaged content does not match enrolled identity: ${relativePath}`);
+  }
+  const components = componentIdentities(manifest.identities.sourceFiles);
+  const componentNames = [
+    ...new Set([
+      ...Object.keys(components),
+      ...Object.keys(manifest.identities.components),
+    ]),
+  ].sort();
+  for (const name of componentNames) {
+    if (components[name] !== manifest.identities.components[name])
+      throw new Error(`Packaged component does not match enrolled identity: ${name}`);
   }
   return manifest;
 }

@@ -5,7 +5,7 @@ import {
   type SolverPin,
 } from "../../src/lib/provenance";
 import type { PublicVault, Withdrawal } from "../../src/lib/model";
-import type { Store } from "../store";
+import { Conflict, type Store } from "../store";
 import { validateSolvedState } from "../../src/mainnet/solvedContract";
 import {
   type LaunchBindings,
@@ -81,19 +81,24 @@ function watchExclusiveStdout(
 ): void {
   if (!started.stdoutExclusive) return;
   void started.stdoutExclusive.catch(async () => {
-    try {
-      const current = await loadPair(store, owner, requestId, slot);
-      if (
-        current.launch.processId !== started.processId ||
-        current.launch.bindings.inputHash !== inputHash ||
-        current.launch.state === "terminal" ||
-        current.launch.state === "replacing" ||
-        current.launch.replacement
-      )
+    for (;;) {
+      try {
+        const current = await loadPair(store, owner, requestId, slot);
+        if (
+          current.launch.processId !== started.processId ||
+          current.launch.bindings.inputHash !== inputHash ||
+          current.launch.state === "terminal" ||
+          current.launch.state === "uncertain" ||
+          current.launch.state === "replacing" ||
+          current.launch.replacement
+        )
+          return;
+        await commit(store, current, { ...current.launch, state: "uncertain" });
         return;
-      await commit(store, current, { ...current.launch, state: "uncertain" });
-    } catch {
-      return;
+      } catch (error) {
+        if (error instanceof Conflict) continue;
+        return;
+      }
     }
   });
 }
@@ -139,7 +144,7 @@ function jobForLaunch(job: SupervisedJob, launch: LaunchRecord): SupervisedJob {
     case "launching":
     case "acknowledged":
     case "replacing":
-      next.status = "queued";
+      next.status = isSearchRunning(launch) ? "searching" : "queued";
       delete next.error;
       return next;
     case "uncertain":
@@ -412,6 +417,7 @@ export async function replaceOwnedProcess(
   start: OwnedProcessStart,
   now: Date,
   boundMs: number,
+  stop: ProcessStop,
 ): Promise<LaunchRecord> {
   const loaded = await loadPair(store, owner, requestId, slot);
   const { launch } = loaded;
@@ -435,10 +441,13 @@ export async function replaceOwnedProcess(
     replacement: "starting",
     processStarts: launch.processStarts + 1,
   });
+  let startedId: string | undefined;
   try {
     const started = await start();
+    startedId = started.processId;
     if (!started.processId || started.processId === launch.processId)
       throw new Error("ProcessIdentityMissing");
+    await stop(launch.processId);
     const current = await loadPair(store, owner, requestId, slot);
     if (
       current.launch.state !== "replacing" ||
@@ -469,6 +478,13 @@ export async function replaceOwnedProcess(
     watchExclusiveStdout(store, owner, requestId, slot, inputHash, started);
     return replaced;
   } catch (error) {
+    if (startedId && startedId !== launch.processId) {
+      try {
+        await stop(startedId);
+      } catch {
+        // The new process is not current. The launch stays uncertain below.
+      }
+    }
     const current = await loadPair(store, owner, requestId, slot);
     if (current.launch.replacement === "starting") {
       await commit(store, current, {

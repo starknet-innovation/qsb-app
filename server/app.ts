@@ -34,6 +34,11 @@ import { installSupervisedRoutes } from "./runtime/supervised-routes";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
+function supervisedServiceJob(job: unknown): boolean {
+  if (!job || typeof job !== "object") return false;
+  const execution = (job as { execution?: { kind?: string } }).execution;
+  return execution?.kind === "qsb-supervised-service-v1";
+}
 type Env = { Variables: { owner: string } };
 export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
 export type AuthenticatedJobPostRoutes = Pick<Hono<Env>, "post">;
@@ -542,8 +547,10 @@ export function createApp(
       sk = `JOB#${c.req.param("id")}`,
       row = await store.get(pk, sk);
     if (!row) return c.json({ error: "Job not found" }, 404);
-    const job = row.job as Job,
-      vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
+    const job = row.job as Job;
+    if (supervisedServiceJob(job))
+      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
+    const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
     if (!vaultRow) return c.json({ error: "Vault not found" }, 404);
     if (((vaultRow.vault as PublicVault).network ?? "mainnet") !== NETWORK_ID)
       return c.json(
@@ -585,6 +592,8 @@ export function createApp(
     const r = await store.get(pk, sk);
     if (!r) return c.json({ error: "Job not found" }, 404);
     const job = r.job as Job;
+    if (supervisedServiceJob(job))
+      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
     if (!["searching", "queued"].includes(job.status))
       return c.json({ error: "This job cannot be paused." }, 409);
     if (job.status === "searching" && !job.runpodId)
@@ -603,6 +612,8 @@ export function createApp(
       row = await store.get(pk, sk);
     if (!row) return c.json({ error: "Job not found" }, 404);
     const job = row.job as Job;
+    if (supervisedServiceJob(job))
+      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
     if (job.status !== "paused")
       return c.json({ error: "Only a paused job can be resumed." }, 409);
     if (job.error?.includes("Submission outcome unknown"))
@@ -630,6 +641,8 @@ export function createApp(
       row = await store.get(pk, sk);
     if (!row) return c.json({ error: "Job not found" }, 404);
     const job = row.job as Job;
+    if (supervisedServiceJob(job))
+      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
     if (!job.txid) return c.json({ job });
     const status = await ledger.status(job.txid),
       vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);

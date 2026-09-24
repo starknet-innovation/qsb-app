@@ -4,7 +4,7 @@ import * as btc from "@scure/btc-signer";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../server/app";
-import { Conflict, MemoryStore } from "../server/store";
+import { Conflict, MemoryStore, type Store } from "../server/store";
 import contract from "../server/mainnet-capability.json";
 import { release } from "../src/lib/model";
 import { fingerprint } from "../src/lib/provenance";
@@ -32,6 +32,7 @@ import {
   submitProviderOnce,
   type OwnedProcessStart,
 } from "../server/runtime/host-bridge";
+import { isSearchRunning } from "../server/runtime/types";
 import {
   address,
   privateKey,
@@ -548,6 +549,7 @@ describe("supervised runtime handoff", () => {
       replacement.start,
       new Date(),
       2000,
+      async () => undefined,
     );
     expect(replaced.previousProcessIds).toContain(acknowledged.processId);
     expect(replaced.providerSubmissions).toBe(1);
@@ -883,6 +885,7 @@ describe("supervised runtime handoff", () => {
         },
         new Date(),
         1000,
+        async () => undefined,
       ),
     ).rejects.toThrow(/ReplaceRefused/);
     expect(starts).toBe(0);
@@ -927,6 +930,7 @@ describe("supervised runtime handoff", () => {
       },
       new Date(),
       2000,
+      async () => undefined,
     );
     const started = Date.now();
     let state = "";
@@ -1083,6 +1087,7 @@ describe("supervised runtime handoff", () => {
       },
       new Date(),
       2000,
+      async () => undefined,
     );
     const started = Date.now();
     let state = "";
@@ -1106,5 +1111,242 @@ describe("supervised runtime handoff", () => {
     expect(replaced.state).toBe("acknowledged");
     expect(replaced.previousProcessIds).toContain(acknowledged.processId);
     await Promise.all(starter.exits);
+  });
+
+  it("refuses legacy pause, resume, and submit for a supervised job", async () => {
+    const store = new MemoryStore();
+    const app = createApp(store);
+    await seedCapability(store);
+    const fixture = simulatedMainnetRequest();
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    const token = await login(app);
+    const admitted = await (
+      await app.request(request("/jobs/supervised", fixture.prepared.body, token))
+    ).json();
+    const paused = await app.request(
+      request(`/jobs/${admitted.job.id}/pause`, {}, token),
+    );
+    expect(paused.status).toBe(409);
+    const resumed = await app.request(
+      request(`/jobs/${admitted.job.id}/resume`, {}, token),
+    );
+    expect(resumed.status).toBe(503);
+    const submitted = await app.request(
+      request(`/jobs/${admitted.job.id}/submit`, { rawTxHex: "00" }, token),
+    );
+    expect(submitted.status).toBe(503);
+    const status = await app.request(
+      request(`/jobs/${admitted.job.id}/status`, undefined, token),
+    );
+    expect(status.status).toBe(409);
+    expect(
+      (
+        (await store.get(`OWNER#${address}`, `JOB#${admitted.job.id}`))?.job as {
+          status: string;
+        }
+      ).status,
+    ).toBe("queued");
+  });
+
+  it("keeps an active search visible while replacing its process", async () => {
+    const { store, admitted } = await claimedFixture();
+    const line = acknowledgementLine(admitted.job.mainnetRequestHash);
+    const starter = localAckStarter(
+      process.execPath,
+      [
+        "-e",
+        `process.stdout.write(${JSON.stringify(line)}, () => process.exit(0))`,
+      ],
+      2000,
+      admitted.job.mainnetRequestHash,
+    );
+    await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      starter.start,
+      new Date(),
+      2000,
+    );
+    await submitProviderOnce(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ providerId: "simulated-provider" }),
+    );
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let sawOldPid = false;
+    const replacing = replaceOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => {
+        await gate;
+        return { processId: "replacement-search" };
+      },
+      new Date(),
+      2000,
+      async (processId) => {
+        const launch = (
+          await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+        )?.launch as {
+          state: string;
+          processId?: string;
+          providerOutcome: string;
+          providerId?: string;
+        };
+        expect(launch.state).toBe("replacing");
+        expect(launch.processId).toBe(processId);
+        expect(
+          isSearchRunning(
+            launch as Parameters<typeof isSearchRunning>[0],
+          ),
+        ).toBe(true);
+        sawOldPid = true;
+      },
+    );
+    const started = Date.now();
+    let jobStatus = "";
+    while (jobStatus !== "searching" && Date.now() - started < 2000) {
+      const job = (await store.get(`OWNER#${address}`, `JOB#${admitted.job.id}`))
+        ?.job as { status: string; runtime: { searchRunning: boolean } };
+      jobStatus = job.status;
+      if (jobStatus === "searching") expect(job.runtime.searchRunning).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(jobStatus).toBe("searching");
+    release();
+    const replaced = await replacing;
+    expect(sawOldPid).toBe(true);
+    expect(replaced.processId).toBe("replacement-search");
+    expect(replaced.state).toBe("running");
+    expect(isSearchRunning(replaced)).toBe(true);
+    await Promise.all(starter.exits);
+  });
+
+  it("does not publish a new pid when the old process cannot be stopped", async () => {
+    const { store, admitted } = await claimedFixture();
+    const line = acknowledgementLine(admitted.job.mainnetRequestHash);
+    const starter = localAckStarter(
+      process.execPath,
+      [
+        "-e",
+        `process.stdout.write(${JSON.stringify(line)}, () => process.exit(0))`,
+      ],
+      2000,
+      admitted.job.mainnetRequestHash,
+    );
+    const acknowledged = await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      starter.start,
+      new Date(),
+      2000,
+    );
+    await expect(
+      replaceOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => ({ processId: "orphaned-if-committed" }),
+        new Date(),
+        2000,
+        async () => {
+          throw new Error("stop failed");
+        },
+      ),
+    ).rejects.toThrow(/stop failed/);
+    const launch = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+    )?.launch as { state: string; processId?: string; replacement?: string };
+    expect(launch.state).toBe("uncertain");
+    expect(launch.processId).toBe(acknowledged.processId);
+    expect(launch.replacement).toBe("uncertain");
+    await Promise.all(starter.exits);
+  });
+
+  it("retries a conflicting stdout invalidation until the launch is uncertain", async () => {
+    const inner = new MemoryStore();
+    let conflicts = 1;
+    const store: Store = {
+      get: (pk, sk) => inner.get(pk, sk),
+      put: (row, expected) => inner.put(row, expected),
+      delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
+      list: (pk, prefix) => inner.list(pk, prefix),
+      atomicPut: async (writes) => {
+        const markingUncertain = writes.some((write) => {
+          const launch = write.row.launch as { state?: string } | undefined;
+          return launch?.state === "uncertain";
+        });
+        if (markingUncertain && conflicts > 0) {
+          conflicts -= 1;
+          throw new Conflict("forced");
+        }
+        await inner.atomicPut(writes);
+      },
+    };
+    await seedCapability(inner);
+    const fixture = simulatedMainnetRequest();
+    await inner.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    const admitted = await admitSupervisedJob(
+      store,
+      address,
+      "mainnet",
+      fixture.prepared.body,
+    );
+    await claimAdmittedLaunch(store, address, admitted.job.id);
+    let rejectStdout: (error: Error) => void = () => undefined;
+    const stdoutExclusive = new Promise<void>((_resolve, reject) => {
+      rejectStdout = reject;
+    });
+    stdoutExclusive.catch(() => undefined);
+    const acknowledged = await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ processId: "watched-process", stdoutExclusive }),
+      new Date(),
+      2000,
+    );
+    expect(acknowledged.state).toBe("acknowledged");
+    rejectStdout(new Error("AcknowledgementRejected"));
+    const started = Date.now();
+    let state = "acknowledged";
+    while (state !== "uncertain" && Date.now() - started < 2000) {
+      state = (
+        (await inner.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`))?.launch as {
+          state: string;
+        }
+      ).state;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(conflicts).toBe(0);
+    expect(state).toBe("uncertain");
   });
 });
