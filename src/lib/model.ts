@@ -100,6 +100,8 @@ export type Job = {
   runpodId?: string;
   txid?: string;
   retryRequested?: boolean;
+  /** Operator reconciliation found no Runpod request. Resume may submit once. */
+  oneSubmissionAllowed?: true;
   error?: string;
   computeSeconds: number;
   solution?: {

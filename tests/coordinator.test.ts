@@ -82,6 +82,37 @@ beforeEach(() => {
   }));
   mocks.run.mockResolvedValue({ id: "compute-1" });
 });
+it("does not submit a paused unknown job that already has one later submission allowed", async () => {
+  await seed({
+    status: "paused",
+    error: "Submission outcome unknown. Reconcile Runpod before resuming.",
+    oneSubmissionAllowed: true,
+  });
+  expect(await handler(event)).toMatchObject({ done: true });
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.cancel).not.toHaveBeenCalled();
+  expect((await store.get(pk, sk))?.job).toMatchObject({
+    status: "paused",
+    oneSubmissionAllowed: true,
+  });
+});
+it("consumes a one-submission allowance before the paid call and does not replay it", async () => {
+  await seed({ oneSubmissionAllowed: true });
+  mocks.run.mockRejectedValue(Error("timeout"));
+  await expect(handler(event)).rejects.toThrow("timeout");
+  expect(
+    ((await store.get(pk, sk))?.job as Job).oneSubmissionAllowed,
+  ).toBeUndefined();
+  expect(await handler(event)).toMatchObject({ done: true });
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+  expect((await store.get(pk, sk))?.job).toMatchObject({
+    status: "paused",
+    error: expect.stringContaining("outcome unknown"),
+  });
+  expect(
+    ((await store.get(pk, sk))?.job as Job).oneSubmissionAllowed,
+  ).toBeUndefined();
+});
 it("stops a stale workflow revision before any paid request", async () => {
   await seed({ revision: 1 });
   expect(await handler(event)).toMatchObject({ done: true });

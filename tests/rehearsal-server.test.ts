@@ -184,6 +184,63 @@ it("resumes a paused job when only another coverage account is stopped", async (
   });
 });
 
+it("resumes an unknown submission once after reconciliation and not before", async () => {
+  vi.stubEnv("QSB_REHEARSAL_ADDRESSES", address);
+  const store = new MemoryStore();
+  const app = createApp(store, { enabled: true });
+  const challenge = await (
+    await app.request(post("/auth/challenge", { address }))
+  ).json();
+  const signature = Signer.sign(
+    btc.WIF(btc.TEST_NETWORK).encode(key),
+    address,
+    challenge.message,
+  );
+  const { token } = await (
+    await app.request(post("/auth/verify", { id: challenge.id, signature }))
+  ).json();
+  const jobId = "unknown-job";
+  const job = {
+    id: jobId,
+    owner: address,
+    vaultId: "v",
+    createdAt: "2026-09-24T00:00:00.000Z",
+    updatedAt: "2026-09-24T00:00:00.000Z",
+    status: "paused",
+    stage: "pinning",
+    manifest: {},
+    manifestHash: "a".repeat(64),
+    attempt: 0,
+    computeSeconds: 0,
+    revision: 0,
+    error: "Submission outcome unknown. Reconcile Runpod before resuming.",
+  } as Job;
+  await store.put({
+    pk: `OWNER#${address}`,
+    sk: `JOB#${jobId}`,
+    version: 0,
+    job,
+  });
+  const blocked = await app.request(post(`/jobs/${jobId}/resume`, {}, token));
+  expect(blocked.status).toBe(409);
+  await store.put(
+    {
+      pk: `OWNER#${address}`,
+      sk: `JOB#${jobId}`,
+      version: 1,
+      job: { ...job, oneSubmissionAllowed: true },
+    },
+    0,
+  );
+  const resumed = await app.request(post(`/jobs/${jobId}/resume`, {}, token));
+  expect(resumed.status).toBe(202);
+  const body = await resumed.json();
+  expect(body.job.status).toBe("queued");
+  expect(body.job.oneSubmissionAllowed).toBeUndefined();
+  expect(body.job.error).toBeUndefined();
+  const again = await app.request(post(`/jobs/${jobId}/resume`, {}, token));
+  expect(again.status).toBe(409);
+});
 it("blocks Teststream preflight when the miner reports a different chain and does not submit without a permit", async () => {
   const request = vi
     .fn()

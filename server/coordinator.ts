@@ -156,10 +156,12 @@ export async function handler(event: Event | { action: "providerHealth" }) {
   };
   if (!job.runpodId) {
     // An uncertain billable submission is reconciled by an operator, never replayed.
+    // scripts/reconcile-submission.ts records a provider id or one later submission.
     if (job.status === "searching") {
       job.status = "paused";
       job.error =
         "Submission outcome unknown. Reconcile Runpod before resuming.";
+      delete job.oneSubmissionAllowed;
       await save();
       return { ...event, done: true };
     }
@@ -181,6 +183,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     };
     job.status = "searching";
     delete job.retryRequested;
+    delete job.oneSubmissionAllowed;
     await save();
     const result = await runpod.run({
       protocol: selected.protocol,

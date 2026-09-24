@@ -654,7 +654,10 @@ export function createApp(
         { error: "Stopped coverage cannot be resumed on this account." },
         409,
       );
-    if (job.error?.includes("Submission outcome unknown"))
+    if (
+      job.error?.includes("Submission outcome unknown") &&
+      job.oneSubmissionAllowed !== true
+    )
       return c.json(
         { error: "Reconcile the unknown Runpod submission before retrying." },
         409,
@@ -669,6 +672,7 @@ export function createApp(
     job.revision++;
     job.updatedAt = new Date().toISOString();
     delete job.error;
+    delete job.oneSubmissionAllowed;
     await store.put({ ...row, job, version: row.version + 1 }, row.version);
     await startWorkflow(job);
     return c.json({ job }, 202);
