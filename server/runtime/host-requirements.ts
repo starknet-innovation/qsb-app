@@ -138,11 +138,14 @@ export function assertNoCredentialMaterial(value: unknown, label = "value"): voi
   }
 }
 
+const credentialReferencePattern =
+  /^operator-secret-reference:[A-Za-z0-9][A-Za-z0-9._:-]{0,200}$/;
+
 export const credentialReferenceSchema = z
   .object({
     format: z.literal("qsb-private-credential-reference-v1"),
     channel: z.literal("operator-secret-reference"),
-    reference: z.string().min(1).max(512),
+    reference: z.string().regex(credentialReferencePattern),
   })
   .strict();
 
@@ -154,13 +157,6 @@ export function acceptCredentialReference(input: unknown): {
   resolvedSecret: null;
 } {
   const parsed = credentialReferenceSchema.parse(input);
-  assertNoCredentialMaterial(parsed);
-  if (
-    privateKeyPattern.test(parsed.reference) ||
-    awsAccessKeyPattern.test(parsed.reference) ||
-    parsed.reference.includes("apiKey=")
-  )
-    throw new Error("CredentialMaterialRejected:reference");
   return { ...parsed, provisioned: false, resolvedSecret: null };
 }
 

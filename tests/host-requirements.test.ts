@@ -129,6 +129,13 @@ describe("local execution host rehearsal", () => {
     });
     expect(accepted.provisioned).toBe(false);
     expect(accepted.resolvedSecret).toBeNull();
+    expect(() =>
+      acceptCredentialReference({
+        format: "qsb-private-credential-reference-v1",
+        channel: "operator-secret-reference",
+        reference: "sk-live-opaque-api-secret",
+      }),
+    ).toThrow();
     expect(credentialProvisioningGap().provisioned).toBe(false);
     expect(() =>
       assertNoCredentialMaterial({ browserRequest: { apiKey: "synthetic" } }),

@@ -8,7 +8,11 @@ import contract from "../server/mainnet-capability.json";
 import { MemoryStore, type Row } from "../server/store";
 import { AUTHORITY_PK, AUTHORITY_SK } from "../server/runtime/reservation-guard";
 import { inventorySnapshot } from "../scripts/storage-inventory";
-import { dynamoReservationTransaction } from "../server/runtime/reservation-guard";
+import {
+  authorityDeleteAllowed,
+  dynamoAuthorityDeleteCondition,
+  dynamoReservationTransaction,
+} from "../server/runtime/reservation-guard";
 import {
   assessMigrationBackend,
   assertPermissionSeparation,
@@ -143,6 +147,32 @@ describe("durable storage authority rehearsal", () => {
         productionIamReviewed: true,
       }),
     ).toThrow(/LiveIamNotReviewed/);
+    expect(permissionModel.roles.operator.data).toContain("TransactWriteItems");
+    expect(permissionModel.roles.operator.data).not.toContain("PutItem");
+    expect(() =>
+      assertPermissionSeparation({
+        ...permissionModel,
+        roles: {
+          ...permissionModel.roles,
+          operator: {
+            ...permissionModel.roles.operator,
+            data: ["GetItem", "Query", "Scan"],
+          },
+        },
+      }),
+    ).toThrow(/OperatorAuthorityMutationRequiresTransaction/);
+    expect(() =>
+      assertPermissionSeparation({
+        ...permissionModel,
+        roles: {
+          ...permissionModel.roles,
+          operator: {
+            ...permissionModel.roles.operator,
+            data: ["GetItem", "Query", "Scan", "PutItem", "TransactWriteItems"],
+          },
+        },
+      }),
+    ).toThrow(/OperatorPutItemIsNotAuthorityScoped/);
   });
 
   it("inventories supplied rows without treating them as global freshness", () => {
@@ -428,6 +458,14 @@ describe("durable storage authority rehearsal", () => {
     ]);
     expect(creation[0]?.pk).toBe(legacyWrite.at(-1)?.pk);
     expect(creation[0]?.sk).toBe(legacyWrite.at(-1)?.sk);
+    const excluded = durableRows().find((row) => row.pk === AUTHORITY_PK)!;
+    expect(authorityDeleteAllowed(excluded, 0)).toBe(false);
+    expect(authorityDeleteAllowed({ ...excluded, legacyExcluded: false }, 0)).toBe(true);
+    const deleteCondition = dynamoAuthorityDeleteCondition(0);
+    expect(deleteCondition.ConditionExpression).toContain("#v = :v");
+    expect(deleteCondition.ConditionExpression).toContain("#excluded");
+    expect(deleteCondition.ExpressionAttributeValues[":v"]).toBe(0);
+    expect(deleteCondition.ExpressionAttributeValues[":false"]).toBe(false);
   });
 
   it("runs the inventory command on a snapshot file", () => {

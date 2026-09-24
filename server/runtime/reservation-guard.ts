@@ -7,6 +7,28 @@ export function isReservationRow(row: Row): boolean {
   return row.sk === "RESERVATION" && row.pk.startsWith("OUTPOINT#");
 }
 
+/** Delete must fail when the authority row is excluded, even if the version matches. */
+export function authorityDeleteAllowed(
+  existing: Row | undefined,
+  expectedVersion: number,
+): boolean {
+  if (!existing || existing.version !== expectedVersion) return false;
+  return existing.legacyExcluded !== true;
+}
+
+export function dynamoAuthorityDeleteCondition(expectedVersion: number): {
+  ConditionExpression: string;
+  ExpressionAttributeNames: { "#v": "version"; "#excluded": "legacyExcluded" };
+  ExpressionAttributeValues: { ":v": number; ":false": false };
+} {
+  return {
+    ConditionExpression:
+      "#v = :v AND (attribute_not_exists(#excluded) OR #excluded = :false)",
+    ExpressionAttributeNames: { "#v": "version", "#excluded": "legacyExcluded" },
+    ExpressionAttributeValues: { ":v": expectedVersion, ":false": false },
+  };
+}
+
 export function isAuthorityRow(row: Row): boolean {
   return row.pk === AUTHORITY_PK && row.sk === AUTHORITY_SK;
 }

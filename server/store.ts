@@ -10,6 +10,8 @@ import {
 import {
   AUTHORITY_PK,
   AUTHORITY_SK,
+  authorityDeleteAllowed,
+  dynamoAuthorityDeleteCondition,
   dynamoReservationTransaction,
   isAuthorityRow,
   isReservationRow,
@@ -82,7 +84,9 @@ export class MemoryStore implements Store {
     if (
       pk === AUTHORITY_PK &&
       sk === AUTHORITY_SK &&
-      current?.legacyExcluded === true
+      current &&
+      !authorityDeleteAllowed(current, expected) &&
+      current.legacyExcluded === true
     )
       throw new Conflict("RollbackWouldReviveWriters");
     if (current?.version !== expected) throw new Conflict("Concurrent update");
@@ -199,24 +203,34 @@ export class DynamoStore implements Store {
     }
   }
   async delete(pk: string, sk: string, expected: number) {
-    if (pk === AUTHORITY_PK && sk === AUTHORITY_SK) {
-      const current = await this.get(pk, sk);
-      if (current?.legacyExcluded === true)
-        throw new Conflict("RollbackWouldReviveWriters");
-    }
+    const authorityKey = pk === AUTHORITY_PK && sk === AUTHORITY_SK;
+    const observed = authorityKey ? await this.get(pk, sk) : undefined;
+    const condition = authorityKey
+      ? dynamoAuthorityDeleteCondition(expected)
+      : {
+          ConditionExpression: "#v = :v",
+          ExpressionAttributeNames: { "#v": "version" as const },
+          ExpressionAttributeValues: { ":v": expected },
+        };
     try {
       await this.client.send(
         new DeleteCommand({
           TableName: this.table,
           Key: { pk, sk },
-          ConditionExpression: "#v = :v",
-          ExpressionAttributeNames: { "#v": "version" },
-          ExpressionAttributeValues: { ":v": expected },
+          ConditionExpression: condition.ConditionExpression,
+          ExpressionAttributeNames: condition.ExpressionAttributeNames,
+          ExpressionAttributeValues: condition.ExpressionAttributeValues,
         }),
       );
     } catch (e) {
-      if ((e as Error).name === "ConditionalCheckFailedException")
-        throw new Conflict("Concurrent update");
+      if ((e as Error).name === "ConditionalCheckFailedException") {
+        const after = authorityKey ? await this.get(pk, sk) : undefined;
+        const excluded =
+          observed?.legacyExcluded === true || after?.legacyExcluded === true;
+        throw new Conflict(
+          excluded ? "RollbackWouldReviveWriters" : "Concurrent update",
+        );
+      }
       throw e;
     }
   }

@@ -90,6 +90,10 @@ export function assertPermissionSeparation(
     throw new Error("ReservationTransactionRequired");
   if (model.productionIamReviewed || model.livePermissionsVerified)
     throw new Error("LiveIamNotReviewed");
+  if (!model.roles.operator.data.includes("TransactWriteItems"))
+    throw new Error("OperatorAuthorityMutationRequiresTransaction");
+  if (model.roles.operator.data.includes("PutItem"))
+    throw new Error("OperatorPutItemIsNotAuthorityScoped");
 }
 
 export type MigrationBackend =
@@ -165,7 +169,7 @@ export async function enableInProcessWriterExclusion(
     mainnetEnabled: false,
     broadcastAuthorized: false,
   };
-  await store.put(row);
+  await store.atomicPut([{ row }]);
   return row;
 }
 
@@ -182,7 +186,7 @@ export async function rollbackCanonicalAcceptance(store: Store): Promise<Row> {
     mainnetEnabled: false,
     broadcastAuthorized: false,
   };
-  await store.put(next, existing.version);
+  await store.atomicPut([{ row: next, expected: existing.version }]);
   return next;
 }
 
@@ -533,7 +537,7 @@ export async function importSnapshot(
   const authority = rows.filter(isAuthorityRow);
   const rest = rows.filter((row) => !isAuthorityRow(row));
   for (const row of rest) await store.put(structuredClone(row));
-  for (const row of authority) await store.put(structuredClone(row));
+  for (const row of authority) await store.atomicPut([{ row: structuredClone(row) }]);
   const failures = preservationFailures(rows, memoryRows(store));
   if (failures.length) throw new Error(failures.join(","));
   return {
