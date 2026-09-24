@@ -22,6 +22,13 @@ jobs:
         run: |
           docker build -f scripts/yukon/Dockerfile.compile -t qsb-yukon-intake:compile /tmp/yukon-intake
           docker run --rm --network none --read-only qsb-yukon-intake:compile > /tmp/yukon-intake/compile-receipt.txt
+      - name: Validate isolated pinning repair
+        run: |
+          python3 scripts/yukon/adapt_pin.py --source /tmp/yukon-intake/source --out /tmp/yukon-pin-repair
+          python3 scripts/yukon/test_pin_repair.py /tmp/yukon-pin-repair/pinning/pinning.cu > /tmp/yukon-intake/pin-repair-host.json
+          cp /tmp/yukon-pin-repair/adaptation.json /tmp/yukon-intake/pin-repair-source.json
+          docker build -f scripts/yukon/Dockerfile.pin-repair -t qsb-yukon-pin-repair:compile /tmp/yukon-pin-repair
+          docker run --rm --network none --read-only qsb-yukon-pin-repair:compile > /tmp/yukon-intake/pin-repair-compile.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -29,4 +36,5 @@ jobs:
           path: |
             /tmp/yukon-intake/result.json
             /tmp/yukon-intake/compile-receipt.txt
+            /tmp/yukon-intake/pin-repair-*
           if-no-files-found: warn

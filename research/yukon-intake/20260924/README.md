@@ -50,3 +50,7 @@ The first working-demo path remains the coordinator release work in issue #15. T
 ## Native compilation result
 
 [CI run 36039392902](https://github.com/starknet-innovation/qsb-app/actions/runs/36039392902) passed on source commit `069506f` (native Linux x86_64). Both default upstream entrypoints compiled successfully with CUDA 12.8.93; all ten intake tests and the live immutable-tree/predicate checks passed. The [compiler receipt](compile-receipt.txt) records the two binary hashes and compiler/OpenSSL package versions. Subsequent report-only changes do not alter those tested compiler inputs. No GPU execution occurred; the adoption blockers above remain unresolved.
+
+## Follow-up isolated repair
+
+[Pinning repair](PINNING-REPAIR.md) adds a source-hash-checked successor experiment for the predicate, overflow and identified arithmetic flags. The original findings and artifacts above remain unchanged. It is still HOLD pending bounded scheduling, full error handling and native/end-to-end validation.

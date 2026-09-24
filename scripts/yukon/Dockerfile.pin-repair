@@ -1,0 +1,8 @@
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04@sha256:6617a625f4090c76c545a0e7d63f2e441718ef9af7f4efe7dd1242a29e289fd7
+RUN apt-get update && apt-get install -y --no-install-recommends libssl-dev && rm -rf /var/lib/apt/lists/*
+COPY pinning /candidate
+WORKDIR /candidate
+RUN nvcc -O3 -arch=sm_89 -std=c++17 pinning.cu -o /pinning-repaired -lcrypto -lm
+RUN if nvcc -E -DQSB_C31=1 pinning.cu >/tmp/override.out 2>/tmp/override.err; then exit 1; else grep -q 'Unsafe override: QSB_C31' /tmp/override.err; fi
+RUN (nvcc --version; sha256sum /pinning-repaired; dpkg-query -W gcc g++ libssl-dev) > /compile-receipt.txt
+ENTRYPOINT ["cat", "/compile-receipt.txt"]
