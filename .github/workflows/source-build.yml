@@ -1,6 +1,11 @@
 name: Rebuild optimized artifacts
 on:
   workflow_dispatch:
+    inputs:
+      export_images:
+        description: Export built images for isolated release validation
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -30,3 +35,23 @@ jobs:
             solver-build-receipt.json
           if-no-files-found: error
           retention-days: 14
+      - name: Export validation artifacts
+        if: inputs.export_images
+        run: |
+          mkdir -p validation-artifacts
+          container=$(docker create qsb-optimized:source-v1)
+          docker cp "$container:/opt/qsb-validation" validation-artifacts/runtime
+          docker rm "$container"
+          docker image inspect qsb-optimized:source-v1 qsb-optimized-queue:source-v1 > validation-artifacts/docker-images.json
+          tar -C validation-artifacts -czf validation-artifacts/runtime-files.tar.gz runtime
+          rm -rf validation-artifacts/runtime
+          docker save qsb-optimized:source-v1 qsb-optimized-queue:source-v1 | gzip -1 > validation-artifacts/images.tar.gz
+          (cd validation-artifacts && sha256sum runtime-files.tar.gz images.tar.gz docker-images.json > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: inputs.export_images
+        with:
+          name: isolated-validation-images
+          path: validation-artifacts/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
