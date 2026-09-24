@@ -197,6 +197,26 @@ describe("supervised runtime handoff", () => {
     expect(contract.broadcastAuthorized).toBe(false);
   });
 
+  it("re-hashes every file listed in both supervised source manifests", () => {
+    const manifests = [
+      "supervised/archive/source-manifest.json",
+      "supervised/runtime/source-manifest.json",
+    ];
+    for (const manifestPath of manifests) {
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+        files: { path: string; sha256: string }[];
+      };
+      const root = path.dirname(manifestPath);
+      expect(manifest.files.length).toBeGreaterThan(0);
+      for (const entry of manifest.files) {
+        const actual = createHash("sha256")
+          .update(readFileSync(path.join(root, entry.path)))
+          .digest("hex");
+        expect(actual, `${manifestPath}:${entry.path}`).toBe(entry.sha256);
+      }
+    }
+  });
+
   it("keeps in-process admission off the default app and behind the dispatcher", async () => {
     const store = new MemoryStore();
     await seedCapability(store);
