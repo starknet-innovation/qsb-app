@@ -1,0 +1,3 @@
+QSB_CUDA_DIAGNOSTIC ordinal=1 site=cudaSetDevice(gpu_index)
+QSB_CUDA_DIAGNOSTIC ordinal=2 site=cudaGetDeviceProperties(&prop, gpu_index)
+QSB_RANGE_INCOMPLETE: cudaGetDeviceProperties(&prop, gpu_index) failed

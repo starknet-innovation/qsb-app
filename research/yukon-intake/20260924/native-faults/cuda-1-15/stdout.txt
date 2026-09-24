@@ -1,0 +1,6 @@
+QSB Real Pinning Search (seq+lt) [GPU 0]
+  GPU: NVIDIA GeForce RTX 4090 (128 SMs)
+  Isomorphic recovery coordinates: xR'=+1
+  GTable built on GPU in 0.76s (153175181 points, 9349 MiB total, spot check passed)
+  Full suffix: 12 bytes, seq@0, lt@4
+  Mode: REAL

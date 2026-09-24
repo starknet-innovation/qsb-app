@@ -1,0 +1,3 @@
+QSB Real Pinning Search (seq+lt) [GPU 0]
+  GPU: NVIDIA GeForce RTX 4090 (128 SMs)
+  Isomorphic recovery coordinates: xR'=+1

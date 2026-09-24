@@ -1,0 +1,2 @@
+QSB_CUDA_DIAGNOSTIC ordinal=1 site=cudaSetDevice(gpu_index)
+QSB_RANGE_INCOMPLETE: cudaSetDevice(gpu_index) failed

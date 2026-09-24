@@ -1,0 +1,13 @@
+QSB_CUDA_DIAGNOSTIC ordinal=1 site=cudaSetDevice(gpu_index)
+QSB_CUDA_DIAGNOSTIC ordinal=2 site=cudaGetDeviceProperties(&prop, gpu_index)
+QSB_CUDA_DIAGNOSTIC ordinal=3 site=cudaMalloc(&dL,lb)
+QSB_CUDA_DIAGNOSTIC ordinal=4 site=cudaMalloc(&dH,hb)
+QSB_CUDA_DIAGNOSTIC ordinal=5 site=cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice)
+QSB_CUDA_DIAGNOSTIC ordinal=6 site=cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice)
+QSB_CUDA_DIAGNOSTIC ordinal=7 site=cudaFree(dL)
+QSB_CUDA_DIAGNOSTIC ordinal=8 site=cudaFree(dH)
+QSB_CUDA_DIAGNOSTIC ordinal=9 site=cudaMalloc(&d_mid, 32)
+QSB_CUDA_DIAGNOSTIC ordinal=10 site=cudaMemcpy(d_mid, pp.midstate, 32, cudaMemcpyHostToDevice)
+QSB_CUDA_DIAGNOSTIC ordinal=11 site=cudaMalloc(&d_suffix, 256)
+QSB_CUDA_DIAGNOSTIC ordinal=12 site=cudaMemcpy(d_suffix, suffix_template, 256, cudaMemcpyHostToDevice)
+QSB_RANGE_INCOMPLETE: cudaMemcpy(d_suffix, suffix_template, 256, cudaMemcpyHostToDevice) failed

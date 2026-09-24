@@ -1,0 +1,10 @@
+{
+  "scope": "diagnostic-only-forced-nominations-and-synthetic-CUDA-errors",
+  "normalSourceSha256": "a9f4a8d9a76a23a92b4c1feaa788562ef5f9e098590ce4964a403fca51d8da87",
+  "diagnostics": {
+    "overflow": "0f21b78e0b4df1d5546a28c76067ac8467ca9204c0d02ffd53b680ff70dcaff6",
+    "cuda": "fbc7b1a6cec4db15d39dc77f528ae4ef18e8c6843c09b7726800434b7565027a"
+  },
+  "paramsSha256": "115abe9de0deac8be16244b0f21bc7bdfd17456f5e615ddb6bfb6cfb9add0f7a",
+  "freshWithdrawal": false
+}

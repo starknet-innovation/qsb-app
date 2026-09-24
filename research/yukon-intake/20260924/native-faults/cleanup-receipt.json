@@ -1,0 +1,17 @@
+{
+  "pod": "4obuj58wmz8ha8",
+  "createdAt": "2026-09-24T18:59:18.657Z",
+  "deleteBy": "2026-09-24T19:29:18Z",
+  "watchdogCell": "182",
+  "pricePerHour": 0.74,
+  "commit": "8f9d323",
+  "initialCreateHTTP500": true,
+  "listBeforeRetry": [],
+  "deletedAt": "2026-09-24T19:01:50Z",
+  "podsAfter": [],
+  "watchdogTerminated": true,
+  "approximateElapsedComputeUsd": 0.0312,
+  "excludesStorageAndRounding": true,
+  "archiveSha256": "e270c4de4da5f36590a80cd57c36b2f1033f60a1189a77a409d0c40b58b8dc5e",
+  "all17NormalSourceFilesUnchanged": true
+}

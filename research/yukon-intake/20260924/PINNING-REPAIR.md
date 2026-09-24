@@ -269,3 +269,40 @@ SHA-preimage solutions. Broader arithmetic, real hit/overflow and native fault
 injection, matched throughput, release integration and fresh withdrawal gates
 remain. The normal two-batch smoke is not exhaustive large-range differential
 coverage, and the trace binary is not the production binary.
+
+## Native capacity and checked-CUDA faults — passed 24 September
+
+Commit `8f9d3237edec9884665c5d5ee9f0fdd70c408e57` adds separate diagnostic
+builds and leaves all 17 normal solver source/header files byte-identical.
+One secure RTX 4090 ran six forced-nomination cases: 1/63/64 drained, while
+65/1024/1025 exited 2 with the exact over-capacity count and no drain marker.
+The 1025 case passed compute-sanitizer with zero errors. Forced nominations
+are not real DER solutions; the unchanged exact CPU gate still controls output.
+This validates rejection and bounded writes, not support for publishing >64 hits.
+
+The separate CUDA diagnostic preserves real calls, then substitutes an error
+return at a selected ordinal. All **33 reached calls** independently exited 2
+at the selected ordinal without subsequent checked calls or range completion.
+These include allocation, upload, table setup, stream attributes and synchronization.
+This is synthetic error-return injection after real calls, not induced hardware
+failure, coverage of every static CUDA call, or injection into the separately
+checked asynchronous slot/readback helpers. Those distinctions remain material.
+
+The unchanged-source normal binary was rebuilt and completed a one-candidate
+zero-hit smoke. Its SHA256 is
+`1de2aea958cb32dd1db658abd659fb2ffaef82b8b031b28f2fbe829bbf88f204`;
+it is not byte-identical to the previous build and is not substituted into any
+release. Prior expanded differential evidence remains bound to its own binary.
+The two diagnostic hashes and exact transcripts are in `native-faults/`.
+No diagnostic environment controls were added to normal solver source.
+
+All 28 local harness tests passed before native execution. The pod was deleted
+at 19:01:50 UTC and zero pods confirmed; its deletion watchdog was terminated.
+Approximate elapsed compute was $0.0312 excluding storage/provider rounding.
+An initial creation returned HTTP 500; a fresh empty pod list was reconciled
+before the single successful creation retry. No paid solver submission retry,
+fixture spend, proof restart, production deployment or broadcast occurred.
+
+The candidate remains HOLD. Broader arithmetic and asynchronous failure coverage,
+representative matched performance, release/runtime integration, independent
+review and fresh full withdrawal remain outstanding.

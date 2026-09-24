@@ -1,0 +1,310 @@
+{
+  "scope": "diagnostic-only; synthetic CUDA failure after real call; forced nominations are not valid hits",
+  "runs": [
+    {
+      "case": "overflow-1-0",
+      "returncode": 0
+    },
+    {
+      "case": "overflow-63-0",
+      "returncode": 0
+    },
+    {
+      "case": "overflow-64-0",
+      "returncode": 0
+    },
+    {
+      "case": "overflow-65-0",
+      "returncode": 2
+    },
+    {
+      "case": "overflow-1024-0",
+      "returncode": 2
+    },
+    {
+      "case": "overflow-1025-0",
+      "returncode": 2
+    },
+    {
+      "case": "overflow-1025-0-memcheck",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-0",
+      "returncode": 0
+    },
+    {
+      "case": "cuda-1-1",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-2",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-3",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-4",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-5",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-6",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-7",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-8",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-9",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-10",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-11",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-12",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-13",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-14",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-15",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-16",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-17",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-18",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-19",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-20",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-21",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-22",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-23",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-24",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-25",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-26",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-27",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-28",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-29",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-30",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-31",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-32",
+      "returncode": 2
+    },
+    {
+      "case": "cuda-1-33",
+      "returncode": 2
+    }
+  ],
+  "cudaSites": [
+    {
+      "ordinal": 1,
+      "site": "cudaSetDevice(gpu_index)"
+    },
+    {
+      "ordinal": 2,
+      "site": "cudaGetDeviceProperties(&prop, gpu_index)"
+    },
+    {
+      "ordinal": 3,
+      "site": "cudaMalloc(&dL,lb)"
+    },
+    {
+      "ordinal": 4,
+      "site": "cudaMalloc(&dH,hb)"
+    },
+    {
+      "ordinal": 5,
+      "site": "cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice)"
+    },
+    {
+      "ordinal": 6,
+      "site": "cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice)"
+    },
+    {
+      "ordinal": 7,
+      "site": "cudaFree(dL)"
+    },
+    {
+      "ordinal": 8,
+      "site": "cudaFree(dH)"
+    },
+    {
+      "ordinal": 9,
+      "site": "cudaMalloc(&d_mid, 32)"
+    },
+    {
+      "ordinal": 10,
+      "site": "cudaMemcpy(d_mid, pp.midstate, 32, cudaMemcpyHostToDevice)"
+    },
+    {
+      "ordinal": 11,
+      "site": "cudaMalloc(&d_suffix, 256)"
+    },
+    {
+      "ordinal": 12,
+      "site": "cudaMemcpy(d_suffix, suffix_template, 256, cudaMemcpyHostToDevice)"
+    },
+    {
+      "ordinal": 13,
+      "site": "cudaMalloc(&d_nri,32)"
+    },
+    {
+      "ordinal": 14,
+      "site": "cudaMalloc(&d_u2rx,32)"
+    },
+    {
+      "ordinal": 15,
+      "site": "cudaMalloc(&d_u2ry,32)"
+    },
+    {
+      "ordinal": 16,
+      "site": "cudaMalloc(&d_neg2u2rx,32)"
+    },
+    {
+      "ordinal": 17,
+      "site": "cudaMalloc(&d_neg2u2ry,32)"
+    },
+    {
+      "ordinal": 18,
+      "site": "cudaMemcpy(d_nri, pp.neg_r_inv, 32, cudaMemcpyHostToDevice)"
+    },
+    {
+      "ordinal": 19,
+      "site": "cudaMemcpy(d_u2rx, pp.u2r_x, 32, cudaMemcpyHostToDevice)"
+    },
+    {
+      "ordinal": 20,
+      "site": "cudaMemcpy(d_u2ry, pp.u2r_y, 32, cudaMemcpyHostToDevice)"
+    },
+    {
+      "ordinal": 21,
+      "site": "cudaMemcpyToSymbol(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x))"
+    },
+    {
+      "ordinal": 22,
+      "site": "cudaMemcpyToSymbol(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y))"
+    },
+    {
+      "ordinal": 23,
+      "site": "cudaMemcpy(d_neg2u2rx,n2x,32,cudaMemcpyHostToDevice)"
+    },
+    {
+      "ordinal": 24,
+      "site": "cudaMemcpy(d_neg2u2ry,n2y,32,cudaMemcpyHostToDevice)"
+    },
+    {
+      "ordinal": 25,
+      "site": "cudaDeviceSetLimit(cudaLimitStackSize, 32768)"
+    },
+    {
+      "ordinal": 26,
+      "site": "cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index)"
+    },
+    {
+      "ordinal": 27,
+      "site": "cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index)"
+    },
+    {
+      "ordinal": 28,
+      "site": "cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want)"
+    },
+    {
+      "ordinal": 29,
+      "site": "cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index)"
+    },
+    {
+      "ordinal": 30,
+      "site": "cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index)"
+    },
+    {
+      "ordinal": 31,
+      "site": "cudaStreamSetAttribute(slot_stream[s], cudaStreamAttributeAccessPolicyWindow, &av)"
+    },
+    {
+      "ordinal": 32,
+      "site": "cudaStreamSetAttribute(slot_stream[s], cudaStreamAttributeAccessPolicyWindow, &av)"
+    },
+    {
+      "ordinal": 33,
+      "site": "cudaDeviceSynchronize()"
+    }
+  ],
+  "binaries": {
+    "normal": "1de2aea958cb32dd1db658abd659fb2ffaef82b8b031b28f2fbe829bbf88f204",
+    "overflow": "13802926ee76cb3468a622e6036548031e24a3cb9a2ab6b1b90d8b0fec64a4b2",
+    "cuda": "33dcbee45dfe7aacb3bf81fafa233b2a7969e4681c67f4501c6c53204007b74c"
+  },
+  "freshWithdrawal": false,
+  "rangeCreditEligible": false
+}
