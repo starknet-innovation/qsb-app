@@ -1,6 +1,6 @@
 # Terraform deployment (AWS application, Runpod GPUs)
 
-This folder deploys the **public checkout's historical/research application stack** into a new AWS environment. GPUs remain on an existing Runpod serverless endpoint. It does not create GPU resources or reuse any existing validation environment.
+This folder deploys the **public checkout's historical/research application stack** into a new AWS environment. GPUs remain on an existing Runpod serverless endpoint. It does not create GPU resources or reuse any existing validation environment. The optional [supervised runtime infrastructure](runtime/README.md) adds its CPU host, evidence storage/backups, dispatch transport, runtime permissions and independent cleanup watchdog; execution stays disabled.
 
 **Scope:** working frontend/API infrastructure and historical coordinator/reference wiring, with all transaction activation disabled. The newer optimized long-running supervised runtime is not yet a self-contained public deployment; it cannot be hosted unchanged by these short-lived Lambdas. See [mainnet readiness](../docs/MAINNET-READINESS.md). Applying Terraform is not mainnet activation, wallet compatibility certification, or permission to spend funds.
 
@@ -16,7 +16,7 @@ This folder deploys the **public checkout's historical/research application stac
 | Operations | Separate service roles, resource-scoped data/compute grants, 30-day log retention and failure alarms |
 | External | Existing Runpod endpoint and optional existing Secrets Manager ARN; no secret values in Terraform |
 
-No EC2 GPUs, VPC/NAT, custom DNS or certificates are needed for the default CloudFront hostname. AWS-managed public networking reaches Runpod. Custom domains, WAF/rate policy beyond API throttling, regional IAM/cutover review, durable long-running Linux host and production supervision remain separate work. This is a new-environment stack: do not point it at production records or import existing infrastructure casually.
+With the default `provision_runtime=false`, no VPC/NAT or CPU host is created. Opting into the supervised runtime adds its private CPU host and NAT network. No EC2 GPUs, custom DNS or certificates are needed for the default CloudFront hostname. AWS-managed public networking reaches Runpod. Custom domains, WAF/rate policy beyond API throttling and regional IAM/cutover review remain separate work. The runtime infrastructure is included; final dispatcher installation, runtime enrollment and activation remain unfinished software/release work. This is a new-environment stack: do not point it at production records or import existing infrastructure casually.
 
 ## Prerequisites
 

@@ -10,7 +10,7 @@ A research application for constructing and recovering quantum-safe Bitcoin vaul
 - `server/`: API, durable storage interfaces, search coordination, and transaction checks.
 - `worker/`: historical GPU worker build and public CPU verification code.
 - `tests/`: application unit tests, browser harnesses, and reference tests.
-- [terraform/](terraform/README.md): AWS research-app infrastructure, with GPUs remaining on Runpod and transaction activation disabled.
+- [terraform/](terraform/README.md): AWS app and optional supervised-runtime infrastructure (CPU host, evidence storage, queues and cleanup), with GPUs on Runpod and execution disabled.
 - `research/optimized-subset/`: isolated optimized CUDA source with exact exceptional-point recovery and checked host operations. See its README before use.
 - `docs/STATUS.md`: achieved evidence summary.
 - [Mainnet readiness checklist](docs/MAINNET-READINESS.md): remaining tasks, dependencies and acceptance evidence.

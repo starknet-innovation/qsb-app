@@ -45,6 +45,8 @@ The repository is a curated research snapshot. Some integration work and evidenc
 
 **Acceptance evidence:** joined success and failure/restart scenarios against the actual packaged components and durable backend. Label simulated chain/provider/solver facts explicitly. A process acknowledgement must never count as search success, and a verified hit must never count as whole-range coverage.
 
+Terraform now defines a dormant supervised host and supporting storage, queue, IAM, backup and cleanup resources; see [runtime infrastructure](../terraform/runtime/README.md). Definition of those resources does not close the installation, application-connection or actual-host validation gates below.
+
 ## 3. Select and validate the production execution host
 
 **Status: open for production.** Local container and process tests do not certify a selected deployment host.

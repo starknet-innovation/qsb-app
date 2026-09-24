@@ -1,4 +1,5 @@
 mock_provider "aws" {
+  mock_data "aws_ami" { defaults = { id = "ami-0123456789abcdef0" } }
   mock_data "aws_partition" { defaults = { partition = "aws" } }
   mock_data "aws_caller_identity" { defaults = { account_id = "123456789012" } }
 }
@@ -39,4 +40,54 @@ run "reject_wrong_commit" {
   command = plan
   variables { source_commit = "0000000000000000000000000000000000000000" }
   expect_failures = [terraform_data.release]
+}
+run "dormant_runtime" {
+  command = plan
+  variables {
+    provision_runtime         = true
+    runtime_ami_id            = "ami-0123456789abcdef0"
+    runtime_ami_owner         = "123456789012"
+    runtime_availability_zone = "eu-west-1a"
+  }
+  assert {
+    condition     = length(aws_instance.runtime) == 1 && !aws_instance.runtime[0].associate_public_ip_address && aws_instance.runtime[0].metadata_options[0].http_tokens == "required"
+    error_message = "Runtime host must be private and require IMDSv2."
+  }
+  assert {
+    condition     = length(aws_security_group.runtime[0].ingress) == 0 && aws_ebs_volume.evidence[0].encrypted
+    error_message = "Runtime has no inbound listener and requires encrypted evidence storage."
+  }
+  assert {
+    condition     = aws_cloudwatch_event_rule.watchdog[0].state == "DISABLED" && output.supervised_runtime.execution_enabled == false
+    error_message = "Provisioning without enrolled targets must not activate cleanup or execution."
+  }
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.SUPERVISED_EXECUTION_ENABLED == "false"
+    error_message = "Provisioned API transport must not activate the dispatcher."
+  }
+  assert {
+    condition     = jsondecode(aws_sqs_queue.dispatch[0].redrive_policy).maxReceiveCount == 1
+    error_message = "Uncertain dispatch must not be repeatedly redelivered as new paid work."
+  }
+}
+run "enrolled_cleanup" {
+  command = plan
+  variables {
+    provision_runtime         = true
+    runtime_ami_id            = "ami-0123456789abcdef0"
+    runtime_ami_owner         = "123456789012"
+    runtime_availability_zone = "eu-west-1a"
+    runpod_endpoint_id        = "exampleendpoint"
+    runpod_secret_arn         = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:test-Example"
+    cleanup_endpoints         = { disposabletest1 = { delete_after = "2026-09-24T20:00:00Z" } }
+  }
+  assert {
+    condition     = aws_cloudwatch_event_rule.watchdog[0].state == "ENABLED" && aws_lambda_function.watchdog[0].reserved_concurrent_executions == 1
+    error_message = "Only explicit endpoint enrollment activates the serialized cleanup watchdog."
+  }
+}
+run "reject_missing_runtime_configuration" {
+  command = plan
+  variables { provision_runtime = true }
+  expect_failures = [aws_instance.runtime]
 }
