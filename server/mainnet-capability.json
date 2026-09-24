@@ -1,7 +1,7 @@
 {
   "format": "qsb-mainnet-service-capability-v1",
   "network": "mainnet",
-  "coreSourceManifest": "fb886a88a3b319c39495a8886980ca823c51def8c5c435332fd2df0479355f51",
+  "coreSourceManifest": "3bf8fd3a38c23d4fe474376c0c2087576c08afdf60adf06a4f34ac9bc4d33355",
   "cpuCallback": "474abc9259b5506e32e95c8e568740c182b2210b33aa75da39e26b5cd6ef7bb1",
   "profileHash": "f6320ad322fd6978a985f8bede4ae934f439705999d74dfe7693d942d1a3f3e9",
   "providerGpuLimit": 1,

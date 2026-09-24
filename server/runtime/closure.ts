@@ -4,6 +4,7 @@ import { assertInsideRepo } from "./identity";
 
 /** Files the public checkout can package without reading a developer work directory. */
 export const requiredReleasePaths = [
+  "docs/source-build/20260924/solver-build-receipt.json",
   "server/app.ts",
   "server/chain.ts",
   "server/coordinator.ts",
@@ -19,6 +20,8 @@ export const requiredReleasePaths = [
   "server/validation-search.ts",
   "server/runtime/capability.ts",
   "server/runtime/closure.ts",
+  "server/runtime/coverage-ledger.ts",
+  "server/runtime/solver-review.ts",
   "server/runtime/cpu-verifier.ts",
   "server/runtime/dispatcher.ts",
   "server/runtime/evidence-reader.ts",
@@ -48,8 +51,10 @@ export const requiredReleasePaths = [
   "src/mainnet/submissionClient.ts",
   "worker/Dockerfile",
   "worker/handler.py",
+  "worker/optimized/source-lock.json",
   "worker/prepare_kernels.py",
   "worker/search_ranges.py",
+  "worker/validation/field_assumptions.py",
   "worker/cpu/LICENSE",
   "worker/cpu/bitcoin_tx.py",
   "worker/cpu/gpu_emulator.py",

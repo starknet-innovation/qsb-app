@@ -13,7 +13,7 @@ See the [complete known mainnet readiness checklist](MAINNET-READINESS.md) for t
 
 ## Remaining release work
 
-- Final integrated source/image identity, deployment isolation, and permission review. A source manifest, in-process handoff, local host rehearsal, and local storage-cutover rehearsal now exist in this checkout. No production host is selected. Native binary hashes, OCI identities, regional IAM, and a fresh CPU-verified search do not.
+- Final integrated source/image identity, deployment isolation, and permission review. A source manifest, in-process handoff, local host rehearsal, and local storage-cutover rehearsal now exist in this checkout. No production host is selected. Native binary hashes, OCI identities, regional IAM, and a fresh CPU-verified search do not. A source review of the ranked generic field path and a pin-scoped coverage ledger are now checked in this checkout. They are not a GPU rerun and do not enroll a native binary. In-memory coverage does not measure the HOLD solver binary recorded by `docs/source-build/20260924/solver-build-receipt.json`.
 - Fresh full search with the optimized final runtime, new local wallet authorization, and unchanged Core validation of that exact result.
 - Chain-correct external miner inclusion and independent confirmation. Offline regtest acceptance is not external mining certification.
 - Explicit authorization of the exact transaction, amount and fee before any mainnet broadcast.

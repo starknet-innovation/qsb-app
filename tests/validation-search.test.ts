@@ -3,6 +3,10 @@ import { validationTick } from "../server/validation-search";
 import { MemoryStore } from "../server/store";
 import { release, type Job } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
+import {
+  coverageLedgerSchema,
+  creditedAttempts,
+} from "../server/runtime/coverage-ledger";
 const event = { owner: "regtest:fixture", jobId: "proof", revision: 0 };
 let store: MemoryStore;
 let provider: any;
@@ -178,6 +182,17 @@ it("pauses when a purported completed range has the wrong boundaries", async () 
   await expect(tick()).rejects.toThrow("ValidationRangeMismatch");
   expect(provider.run).toHaveBeenCalledTimes(1);
 });
+it("rejects a completed range that omits work-range fields", async () => {
+  await tick();
+  const result = completed(0);
+  result.output.workRange = {} as typeof result.output.workRange;
+  provider.status.mockResolvedValue(result);
+  await expect(tick()).rejects.toThrow("ValidationRangeMismatch");
+  const partial = completed(0);
+  delete partial.output.workRange.sequence;
+  provider.status.mockResolvedValue(partial);
+  await expect(tick()).rejects.toThrow("ValidationRangeMismatch");
+});
 
 it("selects a fresh pin after an exhaustive digest round has no usable solution", async () => {
   const row = (await store.get(pk, sk))!;
@@ -199,6 +214,23 @@ it("selects a fresh pin after an exhaustive digest round has no usable solution"
         ...(row.validation as any),
         nextAttempt: 4829,
         nextPinAttempt: 42,
+        coverageLedger: {
+          accounts: [
+            {
+              sessionId: "regtest:fixture/proof",
+              solverPin: "qsb-config-a-ranked-v2-2791ed0",
+              pinning: [],
+              subsets: {
+                "2147483648:500000000": {
+                  round1: [],
+                  round2: [{ start: 0, end: 4829 }],
+                },
+              },
+              stopped: false,
+              stopReason: null,
+            },
+          ],
+        },
       },
     },
     0,
@@ -300,6 +332,359 @@ it("does not double count a completed range if Dynamo fails before its checkpoin
   await tick();
   expect((await store.get(pk, sk))?.validation).toMatchObject({ completed: 1 });
   expect((await store.get(pk, sk))?.job).toMatchObject({ computeSeconds: 1 });
+});
+
+it("does not credit a deterministic failure or a hit list past capacity", async () => {
+  await tick();
+  const blocked = completed(0);
+  blocked.output.checkpoint = "requires-verification-or-resume";
+  provider.status.mockResolvedValue(blocked);
+  await tick();
+  expect((await store.get(pk, sk))?.validation).toMatchObject({
+    completed: 0,
+    coverageLedger: {
+      accounts: [
+        expect.objectContaining({
+          stopped: true,
+          stopReason: "deterministic-failure",
+        }),
+      ],
+    },
+  });
+  provider.status.mockResolvedValue(completed(0));
+  await tick();
+  expect((await store.get(pk, sk))?.validation).toMatchObject({ completed: 0 });
+  expect(provider.run).toHaveBeenCalledTimes(1);
+});
+
+it("credits a completed pinning batch that contains a CPU-valid hit", async () => {
+  await tick();
+  cpu.mockImplementation(async (input: { action?: string }) =>
+    input.action === "export"
+      ? { parameterBase64: "public", parameterSha256: "b".repeat(64) }
+      : { valid: true, sequence: 2147483648, locktime: 500000000 },
+  );
+  provider.status.mockResolvedValue(
+    completed(0, ["sequence=2147483648\nlocktime=500000000\n"]),
+  );
+  await tick();
+  const row = (await store.get(pk, sk))!;
+  expect(row.job).toMatchObject({
+    status: "queued",
+    stage: "round1",
+    solution: { sequence: 2147483648, locktime: 500000000 },
+  });
+  expect(row.validation).toMatchObject({ completed: 1 });
+  const ledger = coverageLedgerSchema.parse(
+    (row.validation as { coverageLedger: unknown }).coverageLedger,
+  );
+  expect(
+    creditedAttempts(
+      ledger,
+      {
+        sessionId: "regtest:fixture/proof",
+        solverPin: "qsb-config-a-ranked-v2-2791ed0",
+        searchPin: null,
+      },
+      "pinning",
+    ),
+  ).toEqual([{ start: 0, end: 1 }]);
+});
+
+it("does not credit or advance a valid hit whose checkpoint is incomplete", async () => {
+  await tick();
+  cpu.mockImplementation(async (input: { action?: string }) =>
+    input.action === "export"
+      ? { parameterBase64: "public", parameterSha256: "b".repeat(64) }
+      : { valid: true, sequence: 2147483648, locktime: 500000000 },
+  );
+  const blocked = completed(0, ["sequence=2147483648\nlocktime=500000000\n"]);
+  blocked.output.checkpoint = "requires-verification-or-resume";
+  provider.status.mockResolvedValue(blocked);
+  await tick();
+  const row = (await store.get(pk, sk))!;
+  expect(row.job).toMatchObject({ status: "failed", stage: "pinning" });
+  expect((row.job as Job).solution).toBeUndefined();
+  expect(row.validation).toMatchObject({
+    completed: 0,
+    coverageLedger: {
+      measuresHoldSolverBinary: false,
+      accounts: [
+        expect.objectContaining({
+          stopped: true,
+          stopReason: "deterministic-failure",
+          pinning: [],
+        }),
+      ],
+    },
+  });
+  expect((row.job as Job).computeSeconds).toBe(1);
+  await tick();
+  await tick();
+  expect((await store.get(pk, sk))?.job).toMatchObject({
+    status: "failed",
+    computeSeconds: 1,
+  });
+});
+
+it("does not credit a 64-record completed batch from the truncating worker", async () => {
+  await tick();
+  provider.status.mockResolvedValue(
+    completed(0, ["indices=1\n".repeat(64)]),
+  );
+  await tick();
+  const row = (await store.get(pk, sk))!;
+  expect(row.job).toMatchObject({
+    status: "failed",
+    error: expect.stringContaining("supported capacity"),
+  });
+  expect(row.validation).toMatchObject({ completed: 0 });
+  expect(cpu).toHaveBeenCalledTimes(1);
+});
+
+it("fails closed when published hit records exceed supported capacity", async () => {
+  await tick();
+  provider.status.mockResolvedValue(
+    completed(0, ["indices=1\n".repeat(65)]),
+  );
+  await tick();
+  const row = (await store.get(pk, sk))!;
+  expect(row.job).toMatchObject({
+    status: "failed",
+    error: expect.stringContaining("supported capacity"),
+  });
+  expect(row.validation).toMatchObject({ completed: 0 });
+  expect(cpu).toHaveBeenCalledTimes(1);
+});
+
+it("fails closed when one pinning candidate holds more than 64 sequence records", async () => {
+  await tick();
+  provider.status.mockResolvedValue(
+    completed(0, ["sequence=2147483648\nlocktime=500000000\n".repeat(65)]),
+  );
+  await tick();
+  const row = (await store.get(pk, sk))!;
+  expect(row.job).toMatchObject({
+    status: "failed",
+    error: expect.stringContaining("supported capacity"),
+  });
+  expect(row.validation).toMatchObject({ completed: 0 });
+  expect(cpu).toHaveBeenCalledTimes(1);
+});
+
+it("does not fail the current session because another coverage account is stopped", async () => {
+  const row = (await store.get(pk, sk))!;
+  await store.put(
+    {
+      ...row,
+      version: row.version + 1,
+      validation: {
+        ...(row.validation as object),
+        coverageLedger: {
+          holdSolverBinarySha256: null,
+          measuresHoldSolverBinary: false,
+          accounts: [
+            {
+              sessionId: "other-session",
+              solverPin: "qsb-config-a-ranked-v2-2791ed0",
+              pinning: [],
+              subsets: {},
+              stopped: true,
+              stopReason: "deterministic-failure",
+            },
+          ],
+        },
+      },
+    },
+    row.version,
+  );
+  await tick();
+  expect((await store.get(pk, sk))?.job).toMatchObject({ status: "searching" });
+  expect(provider.run).toHaveBeenCalledTimes(1);
+});
+
+it("does not submit more work after a stopped account is forced back to queued", async () => {
+  await tick();
+  provider.status.mockResolvedValue(
+    completed(0, ["sequence=2147483648\nlocktime=500000000\n".repeat(65)]),
+  );
+  await tick();
+  const row = (await store.get(pk, sk))!;
+  expect((row.job as Job).status).toBe("failed");
+  await store.put(
+    {
+      ...row,
+      version: row.version + 1,
+      job: { ...(row.job as Job), status: "queued", revision: 1 },
+    },
+    row.version,
+  );
+  await validationTick(
+    { ...event, revision: 1 },
+    (await store.get(pk, sk))!,
+    store,
+    provider,
+    cpu,
+  );
+  expect(provider.run).toHaveBeenCalledTimes(1);
+  expect((await store.get(pk, sk))?.job).toMatchObject({ status: "failed" });
+  expect((await store.get(pk, sk))?.validation).toMatchObject({ completed: 0 });
+});
+
+it("resubmits a reconciled terminal attempt after resume and does not replay an uncertain one", async () => {
+  await tick();
+  provider.status.mockResolvedValue({ status: "TIMED_OUT" });
+  await tick();
+  await tick();
+  provider.status.mockResolvedValue({ status: "CANCELLED" });
+  await tick();
+  const paused = (await store.get(pk, sk))!;
+  expect(paused.validation).toMatchObject({
+    nextAttempt: 1,
+    interrupted: [{ attempt: 0, id: "gpu-0" }],
+    completed: 0,
+  });
+  await store.put(
+    {
+      ...paused,
+      version: paused.version + 1,
+      job: {
+        ...(paused.job as Job),
+        status: "queued",
+        revision: 1,
+        error: undefined,
+      },
+    },
+    paused.version,
+  );
+  provider.status.mockResolvedValue({ status: "IN_PROGRESS" });
+  await validationTick(
+    { ...event, revision: 1 },
+    (await store.get(pk, sk))!,
+    store,
+    provider,
+    cpu,
+  );
+  expect(provider.run).toHaveBeenLastCalledWith(
+    expect.objectContaining({ attempt: 0 }),
+  );
+  expect((await store.get(pk, sk))?.validation).toMatchObject({
+    completed: 0,
+    retry: [],
+    active: [{ attempt: 0, id: "gpu-1" }],
+  });
+
+  const unknown = (await store.get(pk, sk))!;
+  await store.put(
+    {
+      ...unknown,
+      version: unknown.version + 1,
+      job: { ...(unknown.job as Job), status: "queued" },
+      validation: {
+        ...(unknown.validation as object),
+        active: [],
+        interrupted: [{ attempt: 3 }],
+        nextAttempt: 4,
+      },
+    },
+    unknown.version,
+  );
+  await validationTick(
+    { ...event, revision: 1 },
+    (await store.get(pk, sk))!,
+    store,
+    provider,
+    cpu,
+  );
+  expect(provider.run).toHaveBeenCalledTimes(2);
+  expect((await store.get(pk, sk))?.job).toMatchObject({
+    status: "paused",
+    error: expect.stringContaining("outcome unknown"),
+  });
+});
+
+it("refuses exhaustion while a pinning range is absent from the ledger", async () => {
+  const row = (await store.get(pk, sk))!;
+  await store.put(
+    {
+      ...row,
+      version: 1,
+      validation: { ...(row.validation as object), nextAttempt: 134217728 },
+    },
+    0,
+  );
+  await tick();
+  expect((await store.get(pk, sk))?.job).toMatchObject({
+    status: "failed",
+    error: expect.stringContaining("uncredited"),
+  });
+  expect(provider.run).not.toHaveBeenCalled();
+});
+
+it("keeps subset credit on the pin that earned it after a pin change", async () => {
+  const searchPin = "2147483648:500000000";
+  const scope = {
+    sessionId: "regtest:fixture/proof",
+    solverPin: "qsb-config-a-ranked-v2-2791ed0",
+    searchPin,
+  };
+  const ledger = {
+    accounts: [
+      {
+        sessionId: scope.sessionId,
+        solverPin: scope.solverPin,
+        pinning: [],
+        subsets: {
+          [searchPin]: {
+            round1: [],
+            round2: [{ start: 0, end: 4829 }],
+          },
+        },
+        stopped: false,
+        stopReason: null,
+      },
+    ],
+  };
+  const row = (await store.get(pk, sk))!;
+  await store.put(
+    {
+      ...row,
+      version: 1,
+      job: {
+        ...(row.job as Job),
+        stage: "round2",
+        solution: {
+          sequence: 2147483648,
+          locktime: 500000000,
+          round1: [141, 142, 143, 144, 145, 146, 147, 148, 149],
+          round2: [],
+        },
+      },
+      validation: {
+        ...(row.validation as object),
+        nextAttempt: 4829,
+        nextPinAttempt: 42,
+        coverageLedger: ledger,
+      },
+    },
+    0,
+  );
+  await tick();
+  const next = (await store.get(pk, sk))!;
+  expect(next.job).toMatchObject({ stage: "pinning" });
+  const ledgerAfter = coverageLedgerSchema.parse(
+    (next.validation as { coverageLedger: unknown }).coverageLedger,
+  );
+  expect(creditedAttempts(ledgerAfter, scope, "round2")).toEqual([
+    { start: 0, end: 4829 },
+  ]);
+  expect(
+    creditedAttempts(
+      ledgerAfter,
+      { ...scope, searchPin: "2147483649:500000000" },
+      "round2",
+    ),
+  ).toEqual([]);
 });
 
 it("rejects an unsupported pinned release before any provider request", async () => {

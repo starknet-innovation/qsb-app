@@ -5,6 +5,18 @@ import type { Row, Store } from "./store";
 import type { Runpod } from "./providers";
 import { release, type Job, type PublicVault } from "../src/lib/model";
 import { searchVersion, workRange, subsetRank } from "./search-ranges";
+import {
+  type CoverageScope,
+  type SearchStage,
+  applyRange,
+  coverageAccountStopped,
+  coverageLedgerSchema,
+  coversPartition,
+  creditedAttempts,
+  emptyLedger,
+  publishedHitRecords,
+} from "./runtime/coverage-ledger";
+import { readHoldSolverBinding } from "./runtime/solver-review";
 const slot = z.object({
   attempt: z.number().int().nonnegative(),
   id: z.string().optional(),
@@ -16,8 +28,10 @@ const stateSchema = z.object({
   active: z.array(slot).max(32),
   cancel: z.array(z.string()).max(32),
   interrupted: z.array(slot).max(32).default([]),
+  retry: z.array(z.number().int().nonnegative()).max(32).default([]),
   completed: z.number().int().nonnegative(),
   candidatesChecked: z.number().int().nonnegative(),
+  coverageLedger: coverageLedgerSchema.optional(),
   nextPinAttempt: z.number().int().nonnegative().default(0),
   pinRestarts: z.number().int().nonnegative().default(0),
   parameters: z
@@ -56,6 +70,15 @@ export async function validationTick(
     waitSeconds,
     polls: (event.polls || 0) + 1,
   });
+  const holdSolver = readHoldSolverBinding();
+  const haltStopped = async (message: string, accountedUnitId?: string) => {
+    if (accountedUnitId !== undefined)
+      state.active = state.active.filter((unit) => unit.id !== accountedUnitId);
+    job.status = "failed";
+    job.error = message;
+    await save();
+    return finish(false, 0);
+  };
   // Drain only ids submitted by this run before starting a new phase or stopping.
   if (state.cancel.length) {
     const id = state.cancel[0];
@@ -132,21 +155,68 @@ export async function validationTick(
         workRange: z.record(z.string(), z.unknown()),
       })
       .parse(result.output);
-    const expected = workRange(job.stage, unit.attempt);
+    const stage = searchStage(job.stage);
+    const expected = workRange(stage, unit.attempt);
     if (
       output.stage !== job.stage ||
       output.manifestHash !== job.manifestHash ||
       output.attempt !== unit.attempt ||
-      JSON.stringify(output.workRange, Object.keys(output.workRange).sort()) !==
-        JSON.stringify(expected, Object.keys(expected).sort())
+      !sameWorkRange(output.workRange, expected)
     )
       throw Error("ValidationRangeMismatch");
+    const records = publishedHitRecords(output.candidates);
+    const scope = coverageScope(event, job, selected.id);
+    // The historical worker truncates at 64 and still reports range-complete.
+    // An exact 64-record file is not credited as a finished range.
+    if (records >= 64) {
+      const decision = applyRange(
+        state.coverageLedger ?? emptyLedger(),
+        scope,
+        stage,
+        unit.attempt,
+        { kind: "hit-capacity", hitCount: records },
+        holdSolver,
+      );
+      state.coverageLedger = decision.ledger;
+      return haltStopped("Validation hit output exceeds supported capacity.");
+    }
     const checked = output.candidates.length
       ? await cpu({ ...input, action: "verify", candidates: output.candidates })
       : { valid: false };
     state.candidatesChecked += output.candidates.length;
     job.computeSeconds += (result.executionTime || 0) / 1000;
     if (checked.valid === true) {
+      if (output.status !== "completed" || output.checkpoint !== "range-complete") {
+        const decision = applyRange(
+          state.coverageLedger ?? emptyLedger(),
+          scope,
+          stage,
+          unit.attempt,
+          { kind: "deterministic-failure" },
+          holdSolver,
+        );
+        state.coverageLedger = decision.ledger;
+        return haltStopped(
+          "Validation range or candidate needs independent review.",
+          unit.id,
+        );
+      }
+      const decision = applyRange(
+        state.coverageLedger ?? emptyLedger(),
+        scope,
+        stage,
+        unit.attempt,
+        { kind: "range-complete", hitCount: records },
+        holdSolver,
+      );
+      state.coverageLedger = decision.ledger;
+      if (decision.stop) {
+        return haltStopped(
+          `Validation range stopped without credit: ${decision.reason}`,
+          unit.id,
+        );
+      }
+      if (decision.credited) state.completed++;
       if (job.stage === "pinning") {
         const hit = z
           .object({
@@ -200,38 +270,111 @@ export async function validationTick(
       output.status !== "completed" ||
       output.checkpoint !== "range-complete"
     ) {
-      job.status = "paused";
-      job.error = "Validation range or candidate needs independent review.";
-      await save();
-      return finish(false, 0);
+      const decision = applyRange(
+        state.coverageLedger ?? emptyLedger(),
+        scope,
+        stage,
+        unit.attempt,
+        { kind: "deterministic-failure" },
+        holdSolver,
+      );
+      state.coverageLedger = decision.ledger;
+      return haltStopped(
+        "Validation range or candidate needs independent review.",
+        unit.id,
+      );
+    }
+    const decision = applyRange(
+      state.coverageLedger ?? emptyLedger(),
+      scope,
+      stage,
+      unit.attempt,
+      { kind: "range-complete", hitCount: records },
+      holdSolver,
+    );
+    state.coverageLedger = decision.ledger;
+    if (decision.stop) {
+      return haltStopped(
+        `Validation range stopped without credit: ${decision.reason}`,
+        unit.id,
+      );
     }
     state.active = state.active.filter((x) => x.id !== unit.id);
-    state.completed++;
+    if (decision.credited) state.completed++;
   }
+  if (
+    coverageAccountStopped(
+      state.coverageLedger,
+      coverageScope(event, job, selected.id),
+    )
+  ) {
+    return haltStopped(
+      "Validation coverage stopped; this account cannot resume.",
+    );
+  }
+  if (state.interrupted.some((unit) => !unit.id)) {
+    job.status = "paused";
+    job.error =
+      "Validation submission outcome unknown; reconcile before resuming.";
+    await save();
+    return finish(false, 0);
+  }
+  const busy = new Set([
+    ...state.active.map((unit) => unit.attempt),
+    ...state.retry,
+  ]);
+  for (const unit of state.interrupted) {
+    if (unit.id && !busy.has(unit.attempt)) {
+      state.retry.push(unit.attempt);
+      busy.add(unit.attempt);
+    }
+  }
+  state.interrupted = [];
   job.updatedAt = new Date().toISOString();
   job.attempt = state.nextAttempt;
   await save();
   if (state.active.length >= state.slots) return finish(false);
-  try {
-    workRange(job.stage, state.nextAttempt);
-  } catch {
-    if (state.active.length) return finish(false);
-    if (job.stage === "round1" || job.stage === "round2") {
-      // A particular pin need not have a usable digest solution. No HORS
-      // secrets have been disclosed, so select a fresh pin and try again.
-      job.stage = "pinning";
-      job.status = "queued";
-      delete job.solution;
-      delete state.parameters;
-      state.nextAttempt = state.nextPinAttempt;
-      state.pinRestarts++;
+  const retryAttempt = state.retry.shift();
+  let attempt: number;
+  if (retryAttempt !== undefined) {
+    attempt = retryAttempt;
+  } else {
+    try {
+      workRange(job.stage, state.nextAttempt);
+    } catch {
+      if (state.active.length) return finish(false);
+      const stage = searchStage(job.stage);
+      const covered = coversPartition(
+        creditedAttempts(
+          state.coverageLedger ?? emptyLedger(),
+          coverageScope(event, job, selected.id),
+          stage,
+        ),
+        stage,
+      );
+      if (!covered) {
+        return haltStopped(
+          "Validation stage cannot be exhausted while a range is uncredited.",
+        );
+      }
+      if (job.stage === "round1" || job.stage === "round2") {
+        // A particular pin need not have a usable digest solution. No HORS
+        // secrets have been disclosed, so select a fresh pin and try again.
+        job.stage = "pinning";
+        job.status = "queued";
+        delete job.solution;
+        delete state.parameters;
+        state.nextAttempt = state.nextPinAttempt;
+        state.pinRestarts++;
+        await save();
+        return finish(false, 0);
+      }
+      job.status = "paused";
+      job.error = "Validation stage exhausted its complete range.";
       await save();
-      return finish(false, 0);
+      return finish(true);
     }
-    job.status = "paused";
-    job.error = "Validation stage exhausted its complete range.";
-    await save();
-    return finish(true);
+    attempt = state.nextAttempt;
   }
   if (!state.parameters) {
     state.parameters = stateSchema.shape.parameters
@@ -239,9 +382,8 @@ export async function validationTick(
       .parse(await cpu({ ...input, action: "export" }));
     await save();
   }
-  const unit: { attempt: number; id?: string } = {
-    attempt: state.nextAttempt++,
-  };
+  if (retryAttempt === undefined) state.nextAttempt++;
+  const unit: { attempt: number; id?: string } = { attempt };
   state.active.push(unit);
   job.status = "searching";
   await save(); // A crash after this point pauses; it never duplicates paid work.
@@ -260,4 +402,45 @@ export async function validationTick(
   unit.id = response.id;
   await save();
   return finish(false, state.active.length < state.slots ? 0 : 5);
+}
+
+function sameWorkRange(
+  actual: Record<string, unknown>,
+  expected: {
+    version: string;
+    start: string;
+    count: number;
+    sequence?: number;
+    sequenceCount?: number;
+    locktime?: number;
+  },
+): boolean {
+  const expectedRecord = expected as Record<string, unknown>;
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expectedRecord).sort();
+  if (actualKeys.length !== expectedKeys.length) return false;
+  return expectedKeys.every(
+    (key, index) =>
+      key === actualKeys[index] && actual[key] === expectedRecord[key],
+  );
+}
+
+function searchStage(stage: string): SearchStage {
+  if (stage === "pinning" || stage === "round1" || stage === "round2") return stage;
+  throw new Error("InvalidValidationStage");
+}
+
+function coverageScope(
+  event: Event,
+  job: Job,
+  solverPin: string,
+): CoverageScope {
+  return {
+    sessionId: `${event.owner}/${event.jobId}`,
+    solverPin,
+    searchPin:
+      job.stage === "pinning" || !job.solution
+        ? null
+        : `${job.solution.sequence}:${job.solution.locktime}`,
+  };
 }

@@ -14,6 +14,7 @@ import { Esplora } from "../server/chain";
 import { Slipstream } from "../server/providers";
 import { createApp } from "../server/app";
 import { MemoryStore } from "../server/store";
+import type { Job } from "../src/lib/model";
 import { rehearsalAddressAllowed, testnet4Genesis } from "../server/network";
 const key = new Uint8Array(32).fill(7),
   pub = secp256k1.getPublicKey(key);
@@ -108,6 +109,79 @@ it("requires exact explicit allowlisting even when an injected operations gate i
   expect((await app.request(post("/vaults/any/fund", {}, token))).status).toBe(
     503,
   );
+});
+
+it("resumes a paused job when only another coverage account is stopped", async () => {
+  vi.stubEnv("QSB_REHEARSAL_ADDRESSES", address);
+  const store = new MemoryStore();
+  const app = createApp(store, { enabled: true });
+  const challenge = await (
+    await app.request(post("/auth/challenge", { address }))
+  ).json();
+  const signature = Signer.sign(
+    btc.WIF(btc.TEST_NETWORK).encode(key),
+    address,
+    challenge.message,
+  );
+  const { token } = await (
+    await app.request(post("/auth/verify", { id: challenge.id, signature }))
+  ).json();
+  const jobId = "paused-job";
+  const job = {
+    id: jobId,
+    owner: address,
+    vaultId: "v",
+    createdAt: "2026-09-24T00:00:00.000Z",
+    updatedAt: "2026-09-24T00:00:00.000Z",
+    status: "paused",
+    stage: "pinning",
+    manifest: {},
+    manifestHash: "a".repeat(64),
+    attempt: 0,
+    computeSeconds: 0,
+    revision: 0,
+  } as Job;
+  const account = {
+    solverPin: "qsb-config-a-ranked-v2-2791ed0",
+    pinning: [],
+    subsets: {},
+    stopped: true,
+    stopReason: "deterministic-failure",
+  };
+  await store.put({
+    pk: `OWNER#${address}`,
+    sk: `JOB#${jobId}`,
+    version: 0,
+    job,
+    validation: {
+      coverageLedger: {
+        holdSolverBinarySha256: null,
+        measuresHoldSolverBinary: false,
+        accounts: [{ ...account, sessionId: "other-session" }],
+      },
+    },
+  });
+  const resumed = await app.request(post(`/jobs/${jobId}/resume`, {}, token));
+  expect(resumed.status).toBe(202);
+  expect((await resumed.json()).job.status).toBe("queued");
+  await store.put({
+    pk: `OWNER#${address}`,
+    sk: `JOB#${jobId}`,
+    version: 1,
+    job: { ...job, status: "paused", revision: 1 },
+    validation: {
+      coverageLedger: {
+        holdSolverBinarySha256: null,
+        measuresHoldSolverBinary: false,
+        accounts: [{ ...account, sessionId: `${address}/${jobId}` }],
+      },
+    },
+  }, 1);
+  const blocked = await app.request(post(`/jobs/${jobId}/resume`, {}, token));
+  expect(blocked.status).toBe(409);
+  expect(await blocked.json()).toEqual({
+    error: "Stopped coverage cannot be resumed on this account.",
+  });
 });
 
 it("blocks Teststream preflight and submit when miner reports a different chain", async () => {
