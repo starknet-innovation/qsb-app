@@ -504,3 +504,24 @@ failed/interrupted handoff and successful empty-result binding. CPU export and
 binding are real; compute is mocked in these new handoff tests. Earlier native
 runtime evidence remains separately scoped; this is not a new GPU execution,
 positive-hit, durable-credit or fresh withdrawal proof.
+
+## Positive CPU binding replay
+
+`check_pin_reference_replay.py` replays only the historical public pin solution
+through the new reference binding. It does not invoke the GPU or search any
+range, and does not assemble, broadcast or spend the already-spent fixture.
+The runtime envelope is synthetic and its binary identity is an explicitly
+labelled sentinel, not an attestation to a tested solver. The historical public
+bundle remains outside this PR; only a public hash/verdict receipt is published
+in `runtime/reference-positive/receipt.json`.
+
+The full-transaction CPU reference reproduced the solution as `valid:true`,
+with exact sequence/locktime binding. Changing output value and fee while keeping
+amounts balanced, and updating both envelope manifest hashes, was rejected
+because re-exported parameters differed. This exercises the positive reference
+branch and transaction-context substitution defense. The CPU reference tries
+both recovery signs independently; the synthetic recid field is not GPU parity
+evidence. No complete range credit is issued.
+
+A positive result produced by the new normal GPU binary and passed through this
+handoff remains pending, as do durable integration and fresh end-to-end proof.
