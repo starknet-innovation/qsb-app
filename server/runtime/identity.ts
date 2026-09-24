@@ -33,10 +33,22 @@ export function assertInsideRepo(root: string, relativePath: string): string {
   if (path.isAbsolute(relativePath) || relativePath.split(/[/\\]/).includes(".."))
     throw new Error("Release path escapes the checkout");
   const rootReal = realpathSync(root);
-  const absolute = path.resolve(rootReal, relativePath);
-  if (absolute !== rootReal && !absolute.startsWith(rootReal + path.sep))
+  const parts = relativePath.split(/[/\\]/).filter((part) => part && part !== ".");
+  let current = rootReal;
+  for (const part of parts) {
+    current = path.join(current, part);
+    const stat = lstatSync(current, { throwIfNoEntry: false });
+    if (!stat) {
+      const lexical = path.resolve(rootReal, ...parts);
+      if (lexical !== rootReal && !lexical.startsWith(rootReal + path.sep))
+        throw new Error("Release path escapes the checkout");
+      return lexical;
+    }
+    if (stat.isSymbolicLink())
+      throw new Error("Release path escapes the checkout");
+  }
+  const real = realpathSync(current);
+  if (real !== current || (real !== rootReal && !real.startsWith(rootReal + path.sep)))
     throw new Error("Release path escapes the checkout");
-  if (lstatSync(absolute, { throwIfNoEntry: false })?.isSymbolicLink())
-    throw new Error("Release path escapes the checkout");
-  return absolute;
+  return current;
 }

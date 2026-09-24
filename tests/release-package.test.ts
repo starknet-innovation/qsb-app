@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -126,6 +134,12 @@ describe("source release package", () => {
     }
     expect(manifest.releases.pinning.sourcesEnrolled).toBe(true);
     expect(manifest.releases.historicalSubset.sourcesEnrolled).toBe(true);
+    expect(
+      Object.keys(manifest.identities.sourceFiles).some(
+        (relativePath) =>
+          relativePath.includes("__pycache__") || relativePath.endsWith(".pyc"),
+      ),
+    ).toBe(false);
   });
 
   it("requires both historical candidate roots", () => {
@@ -184,5 +198,18 @@ describe("source release package", () => {
     expect(() => assertInsideRepo(root, "/etc/passwd")).toThrow(
       /escapes the checkout/,
     );
+    const directory = mkdtempSync(path.join(tmpdir(), "qsb-link-"));
+    const outside = mkdtempSync(path.join(tmpdir(), "qsb-outside-"));
+    try {
+      writeFileSync(path.join(outside, "secret.txt"), "outside\n");
+      mkdirSync(path.join(directory, "nested"));
+      symlinkSync(outside, path.join(directory, "nested", "alias"));
+      expect(() => assertInsideRepo(directory, "nested/alias/secret.txt")).toThrow(
+        /escapes the checkout/,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });

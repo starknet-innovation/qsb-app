@@ -139,6 +139,7 @@ function walkFiles(root: string, relativeDir: string): string[] {
       const full = path.join(current, entry.name);
       if (entry.isSymbolicLink())
         throw new Error("Release path escapes the checkout");
+      if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) continue;
       if (entry.isDirectory()) stack.push(full);
       else if (entry.isFile()) {
         const relative = path.relative(root, full).split(path.sep).join("/");

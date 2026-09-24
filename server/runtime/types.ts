@@ -93,6 +93,7 @@ export const launchStateSchema = z.enum([
   "uncertain",
   "acknowledged",
   "running",
+  "replacing",
   "terminal",
 ]);
 export type LaunchState = z.infer<typeof launchStateSchema>;
@@ -123,6 +124,7 @@ export const runtimeViewSchema = z
       "acknowledged",
       "uncertain",
       "running",
+      "replacing",
       "terminal",
     ]),
     searchRunning: z.boolean(),
@@ -136,6 +138,7 @@ export function isSearchRunning(record: LaunchRecord): boolean {
     case "launching":
     case "uncertain":
     case "acknowledged":
+    case "replacing":
     case "terminal":
       return false;
     case "running":

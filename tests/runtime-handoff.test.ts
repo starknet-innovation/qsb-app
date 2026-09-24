@@ -823,4 +823,225 @@ describe("supervised runtime handoff", () => {
       admitSupervisedJob(store, address, "mainnet", body),
     ).rejects.toThrow(/Outpoint already reserved/);
   });
+
+  async function claimedFixture() {
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const fixture = simulatedMainnetRequest();
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    const admitted = await admitSupervisedJob(
+      store,
+      address,
+      "mainnet",
+      fixture.prepared.body,
+    );
+    await claimAdmittedLaunch(store, address, admitted.job.id);
+    return { store, fixture, admitted };
+  }
+
+  it("refuses replacement once process history is full", async () => {
+    const { store, admitted } = await claimedFixture();
+    const starter = localAckStarter(
+      process.execPath,
+      [
+        "-e",
+        `process.stdout.write(${JSON.stringify(acknowledgementLine(admitted.job.mainnetRequestHash))}, () => process.exit(0))`,
+      ],
+      2000,
+      admitted.job.mainnetRequestHash,
+    );
+    await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      starter.start,
+      new Date(),
+      2000,
+    );
+    const row = await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`);
+    const launch = row?.launch as { previousProcessIds: string[]; processId: string };
+    launch.previousProcessIds = Array.from({ length: 8 }, (_, index) => `old-${index}`);
+    await store.put({ ...row!, launch, version: row!.version + 1 }, row!.version);
+    let starts = 0;
+    await expect(
+      replaceOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => {
+          starts += 1;
+          return { processId: "should-not-start" };
+        },
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/ReplaceRefused/);
+    expect(starts).toBe(0);
+    await Promise.all(starter.exits);
+  });
+
+  it("rejects a paid submission while replacement is in progress", async () => {
+    const { store, admitted } = await claimedFixture();
+    const starter = localAckStarter(
+      process.execPath,
+      [
+        "-e",
+        `process.stdout.write(${JSON.stringify(acknowledgementLine(admitted.job.mainnetRequestHash))}, () => process.exit(0))`,
+      ],
+      2000,
+      admitted.job.mainnetRequestHash,
+    );
+    await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      starter.start,
+      new Date(),
+      2000,
+    );
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let submits = 0;
+    const replacing = replaceOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => {
+        await gate;
+        return { processId: "replacement-process" };
+      },
+      new Date(),
+      2000,
+    );
+    const started = Date.now();
+    let state = "";
+    while (state !== "replacing") {
+      state = (
+        (await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`))?.launch as {
+          state: string;
+        }
+      ).state;
+      if (Date.now() - started > 2000) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await expect(
+      submitProviderOnce(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => {
+          submits += 1;
+          return { providerId: "should-not-submit" };
+        },
+      ),
+    ).rejects.toThrow(/DuplicatePaidSubmission/);
+    expect(submits).toBe(0);
+    release();
+    await replacing;
+    await Promise.all(starter.exits);
+  });
+
+  it("drains a live sibling only after the process is stopped", async () => {
+    const { store, admitted } = await claimedFixture();
+    await openSiblingSlot(store, address, admitted.job.id, admitted.job.mainnetRequestHash);
+    const line = acknowledgementLine(admitted.job.mainnetRequestHash);
+    const starter = localAckStarter(
+      process.execPath,
+      [
+        "-e",
+        `process.stdout.write(${JSON.stringify(line)}, () => setTimeout(() => {}, 10000))`,
+      ],
+      2000,
+      admitted.job.mainnetRequestHash,
+    );
+    const acknowledged = await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      1,
+      admitted.job.mainnetRequestHash,
+      starter.start,
+      new Date(),
+      2000,
+    );
+    await expect(
+      drainSibling(store, address, admitted.job.id, admitted.job.mainnetRequestHash),
+    ).rejects.toThrow(/SiblingProcessStillLive/);
+    expect(
+      (
+        (await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#1`))?.launch as {
+          state: string;
+        }
+      ).state,
+    ).toBe("acknowledged");
+    let stopped = 0;
+    const drained = await drainSibling(
+      store,
+      address,
+      admitted.job.id,
+      admitted.job.mainnetRequestHash,
+      async (processId) => {
+        expect(processId).toBe(acknowledged.processId);
+        stopped += 1;
+        process.kill(Number(processId), "SIGKILL");
+      },
+    );
+    expect(stopped).toBe(1);
+    expect(drained.evidence?.outcome).toBe("drained");
+    await Promise.all(starter.exits);
+  });
+
+  it("invalidates an acknowledgement when stdout continues past the ack line", async () => {
+    const { store, admitted } = await claimedFixture();
+    const line = acknowledgementLine(admitted.job.mainnetRequestHash);
+    const starter = localAckStarter(
+      process.execPath,
+      [
+        "-e",
+        `process.stdout.write(${JSON.stringify(line)}, () => setTimeout(() => process.stdout.write("more\\n", () => process.exit(0)), 30))`,
+      ],
+      2000,
+      admitted.job.mainnetRequestHash,
+    );
+    const acknowledged = await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      starter.start,
+      new Date(),
+      2000,
+    );
+    expect(acknowledged.state).toBe("acknowledged");
+    const started = Date.now();
+    let state = acknowledged.state;
+    while (state === "acknowledged" && Date.now() - started < 2000) {
+      state = (
+        (await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`))?.launch as {
+          state: typeof state;
+        }
+      ).state;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(state).toBe("uncertain");
+    await Promise.all(starter.exits);
+  });
 });

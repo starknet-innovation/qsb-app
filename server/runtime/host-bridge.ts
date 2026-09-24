@@ -62,7 +62,39 @@ export type SupervisedJob = {
   };
 };
 
-export type OwnedProcessStart = () => Promise<{ processId: string }>;
+export type OwnedProcessStart = () => Promise<{
+  processId: string;
+  /** Rejects if stdout is not exactly the acknowledgement for the process lifetime. */
+  stdoutExclusive?: Promise<void>;
+}>;
+export type ProcessStop = (processId: string) => Promise<void>;
+
+const PROCESS_HISTORY_LIMIT = 8;
+
+function watchExclusiveStdout(
+  store: Store,
+  owner: string,
+  requestId: string,
+  slot: number,
+  inputHash: string,
+  started: { processId: string; stdoutExclusive?: Promise<void> },
+): void {
+  if (!started.stdoutExclusive) return;
+  void started.stdoutExclusive.catch(async () => {
+    try {
+      const current = await loadPair(store, owner, requestId, slot);
+      if (
+        current.launch.processId !== started.processId ||
+        current.launch.bindings.inputHash !== inputHash ||
+        current.launch.state === "terminal"
+      )
+        return;
+      await commit(store, current, { ...current.launch, state: "uncertain" });
+    } catch {
+      return;
+    }
+  });
+}
 export type ProviderSubmit = () => Promise<{ providerId: string }>;
 
 const pkOf = (owner: string) => `OWNER#${owner}`;
@@ -104,6 +136,7 @@ function jobForLaunch(job: SupervisedJob, launch: LaunchRecord): SupervisedJob {
     case "claimed":
     case "launching":
     case "acknowledged":
+    case "replacing":
       next.status = "queued";
       delete next.error;
       return next;
@@ -256,7 +289,7 @@ export async function launchOwnedProcess(
     if (!started.processId) throw new Error("ProcessIdentityMissing");
     const current = await loadPair(store, owner, requestId, slot);
     if (current.launch.state !== "launching") throw new Error("LaunchRefused");
-    return await commit(store, current, {
+    const acknowledged = await commit(store, current, {
       ...current.launch,
       state: "acknowledged",
       processId: started.processId,
@@ -269,6 +302,8 @@ export async function launchOwnedProcess(
         wholeRangeCovered: false,
       },
     });
+    watchExclusiveStdout(store, owner, requestId, slot, inputHash, started);
+    return acknowledged;
   } catch (error) {
     const current = await loadPair(store, owner, requestId, slot);
     if (current.launch.state === "launching") {
@@ -300,6 +335,7 @@ export async function submitProviderOnce(
     throw new Error("ImmutableInputMismatch");
   if (
     launch.state !== "acknowledged" ||
+    launch.replacement ||
     launch.providerSubmissions !== 0 ||
     launch.providerOutcome !== "not-submitted" ||
     launch.providerId
@@ -315,7 +351,12 @@ export async function submitProviderOnce(
     const submitted = await submit();
     if (!submitted.providerId) throw new Error("ProviderIdentityMissing");
     const current = await loadPair(store, owner, requestId, slot);
-    if (current.launch.providerId || current.launch.providerSubmissions !== 1)
+    if (
+      current.launch.providerId ||
+      current.launch.providerSubmissions !== 1 ||
+      current.launch.replacement ||
+      current.launch.state === "replacing"
+    )
       throw new Error("DuplicatePaidSubmission");
     return await commit(store, current, {
       ...current.launch,
@@ -346,6 +387,7 @@ export async function recordLateProviderId(
   if (!providerId) throw new Error("ProviderIdentityMissing");
   if (
     launch.state !== "uncertain" ||
+    launch.replacement ||
     launch.providerOutcome !== "uncertain" ||
     launch.providerSubmissions !== 1 ||
     launch.providerId
@@ -378,13 +420,16 @@ export async function replaceOwnedProcess(
       launch.state !== "running" &&
       launch.state !== "uncertain") ||
     !launch.processId ||
-    launch.replacement
+    launch.replacement ||
+    launch.previousProcessIds.length >= PROCESS_HISTORY_LIMIT
   )
     throw new Error("ReplaceRefused");
+  const priorState = launch.state;
   const providerSubmissions = launch.providerSubmissions;
   const providerId = launch.providerId;
   await commit(store, loaded, {
     ...launch,
+    state: "replacing",
     replacement: "starting",
     processStarts: launch.processStarts + 1,
   });
@@ -394,6 +439,7 @@ export async function replaceOwnedProcess(
       throw new Error("ProcessIdentityMissing");
     const current = await loadPair(store, owner, requestId, slot);
     if (
+      current.launch.state !== "replacing" ||
       current.launch.replacement !== "starting" ||
       current.launch.providerSubmissions !== providerSubmissions ||
       current.launch.providerId !== providerId
@@ -404,8 +450,9 @@ export async function replaceOwnedProcess(
       : current.launch.previousProcessIds;
     const rest = { ...current.launch };
     delete rest.replacement;
-    return await commit(store, current, {
+    const replaced = await commit(store, current, {
       ...rest,
+      state: priorState,
       processId: started.processId,
       previousProcessIds: previous,
       acknowledgement: {
@@ -417,6 +464,8 @@ export async function replaceOwnedProcess(
         wholeRangeCovered: false,
       },
     });
+    watchExclusiveStdout(store, owner, requestId, slot, inputHash, started);
+    return replaced;
   } catch (error) {
     const current = await loadPair(store, owner, requestId, slot);
     if (current.launch.replacement === "starting") {
@@ -445,6 +494,7 @@ export async function recordProcessExit(
     throw new Error("ImmutableInputMismatch");
   if (
     launch.state !== "acknowledged" ||
+    launch.replacement ||
     launch.processId !== processId ||
     launch.acknowledgement?.searchSuccess !== false
   )
@@ -487,6 +537,8 @@ export async function publishSimulatedVerifiedHit(
   if (launch.bindings.inputHash !== inputHash)
     throw new Error("ImmutableInputMismatch");
   if (launch.processId !== processId) throw new Error("StaleProcess");
+  if (launch.replacement || launch.state === "replacing")
+    throw new Error("ReplaceInProgress");
   if (launch.state !== "running" || !isSearchRunning(launch))
     throw new Error("AcknowledgementIsNotSuccess");
   if (launch.acknowledgement?.searchSuccess !== false)
@@ -546,6 +598,7 @@ export async function drainSibling(
   owner: string,
   requestId: string,
   inputHash: string,
+  stop?: ProcessStop,
 ): Promise<LaunchRecord> {
   const loaded = await loadPair(store, owner, requestId, 1);
   const { launch } = loaded;
@@ -553,7 +606,44 @@ export async function drainSibling(
     throw new Error("ImmutableInputMismatch");
   if (launch.providerSubmissions !== 0 || launch.providerId)
     throw new Error("SiblingProviderMustBeReconciled");
+  if (launch.replacement || launch.state === "replacing")
+    throw new Error("ReplaceInProgress");
   if (launch.state === "terminal") return launch;
+  const live =
+    launch.processId !== undefined &&
+    (launch.state === "acknowledged" ||
+      launch.state === "running" ||
+      launch.state === "launching" ||
+      launch.state === "uncertain");
+  if (live) {
+    if (!stop || !launch.processId) throw new Error("SiblingProcessStillLive");
+    await stop(launch.processId);
+    const current = await loadPair(store, owner, requestId, 1);
+    if (
+      current.launch.processId !== launch.processId ||
+      current.launch.providerSubmissions !== 0 ||
+      current.launch.providerId ||
+      current.launch.state === "terminal"
+    )
+      throw new Error("SiblingProcessStillLive");
+    return commit(store, current, {
+      ...current.launch,
+      state: "terminal",
+      evidence: {
+        format: "qsb-terminal-evidence-v1",
+        inputHash,
+        processId: launch.processId,
+        outcome: "drained",
+        hitVerified: false,
+        wholeRangeCovered: false,
+        solverFacts: "not-run",
+        chainFacts: "not-run",
+        cpuVerification: "not-run",
+        binariesProduced: false,
+        freshSearch: false,
+      },
+    });
+  }
   return commit(store, loaded, {
     ...launch,
     state: "terminal",
@@ -599,7 +689,15 @@ export function localAckStarter(
       );
       let text = "";
       let settled = false;
+      let acked = false;
       const expected = acknowledgementLine(inputHash);
+      let rejectExclusive: (error: Error) => void = () => undefined;
+      let resolveExclusive: () => void = () => undefined;
+      const stdoutExclusive = new Promise<void>((resolve, reject) => {
+        resolveExclusive = resolve;
+        rejectExclusive = reject;
+      });
+      stdoutExclusive.catch(() => undefined);
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
@@ -611,11 +709,23 @@ export function localAckStarter(
         settled = true;
         clearTimeout(timer);
         if (error) reject(error);
-        else resolve({ processId });
+        else {
+          acked = true;
+          resolve({ processId, stdoutExclusive });
+        }
+      };
+      const violate = () => {
+        rejectExclusive(new Error("AcknowledgementRejected"));
+        child.kill("SIGKILL");
+        if (!acked) finish(new Error("AcknowledgementRejected"));
       };
       const consider = () => {
         if (text.endsWith("\r")) return;
         const normalized = text.replace(/\r\n/g, "\n");
+        if (acked) {
+          if (normalized !== expected) violate();
+          return;
+        }
         if (normalized === expected) finish();
         else if (!expected.startsWith(normalized))
           finish(new Error("AcknowledgementRejected"));
@@ -624,11 +734,15 @@ export function localAckStarter(
         text += chunk.toString("utf8");
         consider();
       });
-      child.on("error", (error) => finish(error));
-      child.on("exit", (code) => {
+      child.on("error", (error) => {
+        if (acked) rejectExclusive(error);
+        else finish(error);
+      });
+      child.on("exit", () => {
         const normalized = text.replace(/\r\n/g, "\n");
-        if (normalized !== expected)
-          finish(new Error(`ProcessExitedBeforeAck:${code ?? "null"}`));
+        if (normalized === expected) resolveExclusive();
+        else if (acked) violate();
+        else finish(new Error("ProcessExitedBeforeAck"));
       });
     });
   return { start, exits };
