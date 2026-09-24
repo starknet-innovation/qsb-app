@@ -118,8 +118,12 @@ export function emptyLedger(): CoverageLedger {
 
 export function coverageAccountStopped(
   ledger: CoverageLedger | undefined,
+  scope: Pick<CoverageScope, "sessionId" | "solverPin">,
 ): boolean {
-  return ledger?.accounts.some((account) => account.stopped) ?? false;
+  if (!ledger) return false;
+  return (
+    findAccount(ledger, scope.sessionId, scope.solverPin)?.stopped === true
+  );
 }
 
 export function stageAttemptCount(stage: SearchStage): number {

@@ -106,9 +106,9 @@ export const algorithmAssumptions: readonly AlgorithmAssumption[] = [
   {
     id: "predicates-and-publication",
     admitted:
-      "The ranked gate calls gpu_is_valid_der. Strict qsb_exact_der matches that predicate on 32-byte inputs in the CPU check. Easy and calibrate modes are not the generic path. CUDA and OpenSSL helpers, hit reads, and hit writes return QSB_RANGE_INCOMPLETE before a completed-batch publication.",
+      "The ranked gate calls gpu_is_valid_der. Strict qsb_exact_der matches that predicate on 32-byte inputs in the CPU check. Easy and calibrate modes are not the generic path. QSB_CUDA_REQUIRE, the OpenSSL helper, capacity overflow, exceptional recovery, and hit writes return QSB_RANGE_INCOMPLETE before a completed-batch publication.",
     remains:
-      "No native binary was built, so these checks are source-locked rather than tied to new machine code. docs/gpu-validation is not in this checkout.",
+      "On the selected generic path, the post-kernel cudaGetLastError check and the hit-count cudaMemcpy still print a generic CUDA or hit-read error and return 1. That return blocks a completed checkpoint and is not QSB_RANGE_INCOMPLETE. No native binary was built, so these checks are source-locked rather than tied to new machine code. docs/gpu-validation is not in this checkout.",
   },
   {
     id: "capacity-and-omissions",

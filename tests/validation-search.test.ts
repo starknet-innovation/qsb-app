@@ -457,6 +457,37 @@ it("fails closed when one pinning candidate holds more than 64 sequence records"
   expect(cpu).toHaveBeenCalledTimes(1);
 });
 
+it("does not fail the current session because another coverage account is stopped", async () => {
+  const row = (await store.get(pk, sk))!;
+  await store.put(
+    {
+      ...row,
+      version: row.version + 1,
+      validation: {
+        ...(row.validation as object),
+        coverageLedger: {
+          holdSolverBinarySha256: null,
+          measuresHoldSolverBinary: false,
+          accounts: [
+            {
+              sessionId: "other-session",
+              solverPin: "qsb-config-a-ranked-v2-2791ed0",
+              pinning: [],
+              subsets: {},
+              stopped: true,
+              stopReason: "deterministic-failure",
+            },
+          ],
+        },
+      },
+    },
+    row.version,
+  );
+  await tick();
+  expect((await store.get(pk, sk))?.job).toMatchObject({ status: "searching" });
+  expect(provider.run).toHaveBeenCalledTimes(1);
+});
+
 it("does not submit more work after a stopped account is forced back to queued", async () => {
   await tick();
   provider.status.mockResolvedValue(

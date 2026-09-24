@@ -6,6 +6,7 @@ import {
   SUBSET_ATTEMPTS,
   SUBSET_TOTAL,
   applyRange,
+  coverageAccountStopped,
   creditedAttempts,
   emptyLedger,
   insertAttempt,
@@ -193,6 +194,26 @@ describe("coverage accounting", () => {
         "pinning",
       ),
     ).toEqual([]);
+  });
+
+  it("stops only the matching session and solver account", () => {
+    const stopped = credit(emptyLedger(), scope, "pinning", 0, {
+      kind: "deterministic-failure",
+    }).ledger;
+    const otherSession = { sessionId: "session-b", solverPin: scope.solverPin };
+    const otherSolver = { sessionId: scope.sessionId, solverPin: "other-solver" };
+    expect(coverageAccountStopped(stopped, scope)).toBe(true);
+    expect(coverageAccountStopped(stopped, otherSession)).toBe(false);
+    expect(coverageAccountStopped(stopped, otherSolver)).toBe(false);
+    expect(coverageAccountStopped(undefined, scope)).toBe(false);
+    const replaced = replaceSession(stopped, otherSession);
+    expect(replaced.ok).toBe(true);
+    expect(replaced.created).toBe(true);
+    expect(
+      replaced.ledger.accounts.find((account) => account.sessionId === "session-b"),
+    ).toMatchObject({ stopped: false, pinning: [], stopReason: null });
+    expect(coverageAccountStopped(replaced.ledger, otherSession)).toBe(false);
+    expect(coverageAccountStopped(replaced.ledger, scope)).toBe(true);
   });
 
   it("does not transfer coverage across a session or solver pin replacement", () => {

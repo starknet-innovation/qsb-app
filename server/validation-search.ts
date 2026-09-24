@@ -300,7 +300,12 @@ export async function validationTick(
     state.active = state.active.filter((x) => x.id !== unit.id);
     if (decision.credited) state.completed++;
   }
-  if (coverageAccountStopped(state.coverageLedger)) {
+  if (
+    coverageAccountStopped(
+      state.coverageLedger,
+      coverageScope(event, job, selected.id),
+    )
+  ) {
     return haltStopped(
       "Validation coverage stopped; this account cannot resume.",
     );

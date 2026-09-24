@@ -2,6 +2,7 @@ import { mainnetUiConfig, type MainnetUiOptions } from "./mainnetConfig";
 import {
   assertVaultConfiguration,
   pinSolver,
+  solverRelease,
   vaultConfiguration,
 } from "../src/lib/provenance";
 import { Hono } from "hono";
@@ -629,9 +630,15 @@ export function createApp(
     const storedLedger = z
       .object({ coverageLedger: coverageLedgerSchema.optional() })
       .safeParse(row.validation);
+    const solverPin = job.solver
+      ? job.solver.descriptor.id
+      : solverRelease("qsb-config-a-ranked-v2-2791ed0").id;
     if (
       storedLedger.success &&
-      coverageAccountStopped(storedLedger.data.coverageLedger)
+      coverageAccountStopped(storedLedger.data.coverageLedger, {
+        sessionId: `${c.get("owner")}/${job.id}`,
+        solverPin,
+      })
     )
       return c.json(
         { error: "Stopped coverage cannot be resumed on this account." },
