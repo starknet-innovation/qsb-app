@@ -115,18 +115,6 @@ async function setup(reject = false) {
       amount: "50000",
       fee: "10000",
       costAccepted: true as const,
-      exactSpend: {
-        format: "qsb-exact-spend-authorization-v1" as const,
-        chain: "mainnet" as const,
-        txid: tx.id,
-        rawTxSha256: rawTransactionSha256(rawTxHex),
-        amountSats: "50000",
-        feeSats: "10000",
-        inputs: [{ txid: previous.id, vout: 0, valueSats: "100000" }],
-        directMainnetDecision: "explicit" as const,
-        mainnetEnabled: false as const,
-        broadcastAuthorized: false as const,
-      },
       spentFixtureRefs: [
         {
           label: HISTORICAL_XVERSE_REGTEST_WITHDRAWAL.label,
@@ -139,13 +127,33 @@ async function setup(reject = false) {
     },
   };
 }
-it("refuses mainnet funding transport while release broadcast stays disabled", async () => {
+it("rejects a requester-supplied exact spend and does not fund", async () => {
   const f = await setup();
   const path = "/vaults/" + f.vault.id + "/fund";
-  const response = await f.app.request(req(path, f.body, f.token));
-  expect(response.status).toBe(409);
+  const response = await f.app.request(
+    req(
+      path,
+      {
+        ...f.body,
+        exactSpend: {
+          format: "qsb-exact-spend-authorization-v1",
+          chain: "mainnet",
+          txid: f.tx.id,
+          rawTxSha256: rawTransactionSha256(f.body.rawTxHex),
+          amountSats: "50000",
+          feeSats: "10000",
+          inputs: [{ txid: "ab".repeat(32), vout: 0, valueSats: "100000" }],
+          directMainnetDecision: "explicit",
+          mainnetEnabled: false,
+          broadcastAuthorized: false,
+        },
+      },
+      f.token,
+    ),
+  );
+  expect(response.status).toBe(400);
   expect(await response.json()).toMatchObject({
-    error: "MainnetTransportRefused",
+    error: "Invalid request",
   });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();
@@ -157,9 +165,21 @@ it("refuses mainnet funding transport while release broadcast stays disabled", a
   )?.vault as { status: string; funding?: unknown };
   expect(stored.status).toBe("unfunded");
   expect(stored.funding).toBeUndefined();
-  const again = await f.app.request(req(path, f.body, f.token));
-  expect(again.status).toBe(409);
-  expect(await again.json()).toMatchObject({ error: "MainnetTransportRefused" });
+  const again = await f.app.request(
+    req(
+      path,
+      {
+        ...f.body,
+        exactSpend: {
+          directMainnetDecision: "explicit",
+          inputs: [{ txid: "ab".repeat(32), vout: 0, valueSats: "100000" }],
+        },
+      },
+      f.token,
+    ),
+  );
+  expect(again.status).toBe(400);
+  expect(await again.json()).toMatchObject({ error: "Invalid request" });
   expect(release.mainnetEnabled).toBe(false);
   expect("broadcastAuthorized" in release).toBe(false);
 });
@@ -181,20 +201,20 @@ it("does not preflight or broadcast without an exact spend record", async () => 
     (await f.store.get("OWNER#" + address, "VAULT#" + f.vault.id))?.vault,
   ).toMatchObject({ status: "unfunded" });
 });
-it("does not broadcast when the authorized fee differs from the transaction", async () => {
+it("does not treat a rewritten caller fee as an exact spend", async () => {
   const f = await setup();
   const response = await f.app.request(
     req(
       "/vaults/" + f.vault.id + "/fund",
       {
         ...f.body,
-        exactSpend: { ...f.body.exactSpend, feeSats: "10001" },
+        exactSpend: { feeSats: "10001", directMainnetDecision: "explicit" },
       },
       f.token,
     ),
   );
-  expect(response.status).toBe(409);
-  expect(await response.json()).toMatchObject({ error: "ExactSpendMismatch" });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: "Invalid request" });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();
   expect(f.raw).not.toHaveBeenCalled();
@@ -246,15 +266,18 @@ it("does not save a withdrawal intent before the transport refusal", async () =>
       "/jobs/" + jobId + "/submit",
       {
         rawTxHex: f.body.rawTxHex,
-        exactSpend: f.body.exactSpend,
+        exactSpend: {
+          directMainnetDecision: "explicit",
+          inputs: [{ txid: "ab".repeat(32), vout: 0, valueSats: "100000" }],
+        },
         spentFixtureRefs: f.body.spentFixtureRefs,
       },
       f.token,
     ),
   );
-  expect(response.status).toBe(409);
+  expect(response.status).toBe(400);
   expect(await response.json()).toMatchObject({
-    error: "MainnetTransportRefused",
+    error: "Invalid request",
   });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();
@@ -272,7 +295,7 @@ it("does not consult a rejecting mainnet miner while transport stays closed", as
   );
   expect(response.status).toBe(409);
   expect(await response.json()).toMatchObject({
-    error: "MainnetTransportRefused",
+    error: "SpendAuthorizationRequired",
   });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();

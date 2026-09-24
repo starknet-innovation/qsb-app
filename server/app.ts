@@ -312,7 +312,6 @@ export function createApp(
         amount: sats,
         fee: sats,
         costAccepted: z.literal(true),
-        exactSpend: z.unknown().optional(),
         spentFixtureRefs: z.array(z.unknown()).max(32).optional(),
       })
       .strict()
@@ -336,6 +335,7 @@ export function createApp(
         409,
       );
     assertVaultConfiguration(vault);
+    // The requester cannot supply exactSpend, so this route cannot satisfy 7.3.
     const permit = authorizeConfiguredSpend({
       chain: NETWORK_ID,
       chainBaseUrl: chainBase,
@@ -344,7 +344,7 @@ export function createApp(
       txid: transactionId(body.rawTxHex),
       amountSats: body.amount,
       feeSats: body.fee,
-      exactSpend: body.exactSpend,
+      exactSpend: undefined,
       spentFixtureRefs: body.spentFixtureRefs ?? [],
       release,
       walletApp: "xverse",
@@ -560,7 +560,6 @@ export function createApp(
     const body = z
       .object({
         rawTxHex: z.string().max(150000),
-        exactSpend: z.unknown().optional(),
         spentFixtureRefs: z.array(z.unknown()).max(32).optional(),
       })
       .strict()
@@ -584,6 +583,7 @@ export function createApp(
     const feeSats = job.manifest?.fee;
     if (typeof amountSats !== "string" || typeof feeSats !== "string")
       throw new MinerInclusionError("ExactSpendMismatch");
+    // The requester cannot supply exactSpend, so this route cannot satisfy 7.3.
     const permit = authorizeConfiguredSpend({
       chain: NETWORK_ID,
       chainBaseUrl: chainBase,
@@ -592,7 +592,7 @@ export function createApp(
       txid: transactionId(rawTxHex),
       amountSats,
       feeSats,
-      exactSpend: body.exactSpend,
+      exactSpend: undefined,
       spentFixtureRefs: body.spentFixtureRefs ?? [],
       release,
       walletApp: "xverse",

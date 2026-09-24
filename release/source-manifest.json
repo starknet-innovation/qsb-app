@@ -81,7 +81,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "ab7cacd2996d0c53d3a6b745084ed98b1f1a792668681ad6e0ff3101cd5c0354",
+      "api": "c9711b749cea0a690075213f1788307b5aaed258340d27e58f03fb09fc04440a",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "c4db7617ecb6f36c503dc704b68d5aaec96053d9eaa48193fbf458d17cc17c78",
@@ -167,7 +167,7 @@
       "research/optimized-subset/subset/tests/gpu_epochs/zinv32.cuh": "12303e74b178d2cfc45951ddc0c6c31b634646bacc55ea5a43097997bdd51689",
       "scripts/package-release.ts": "5b1d0d9e5169c8e83a1b9259033c710011a3d8cf46b02824a1c73708de4d2031",
       "scripts/storage-inventory.ts": "c8ecc1d3ed239f444efd50ab8bb704be13408f609aba1e80d16a5325d5e4603e",
-      "server/app.ts": "4cecdfa1d8dfe6187b961801f1e3ba4a43fc3f1e80d5474797b4381c64b0979f",
+      "server/app.ts": "39bcb0f9e6d28b4f92e4d2da14f6656831e7734dac6adc6dff40f4349628b3a5",
       "server/chain.ts": "71ec84e791cdfe5bd8217949ac72c16773a5246654c92e349a45c429a6322321",
       "server/coordinator.ts": "2271cf97b06a1a94d1901bf3bb39253e4732f56a9eae7c388f413b69cdd895df",
       "server/lambda.ts": "2ec8b51b90988b49e09c9300a198c119edb4711f1441208dbfec92df64747e09",
