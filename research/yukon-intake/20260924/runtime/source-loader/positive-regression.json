@@ -1,0 +1,26 @@
+{
+  "scope": "CPU-only historical public solution replay; synthetic runtime envelope",
+  "contextHash": "8181d95d4a75b1a927c922b41e2729cd3c2bd0d845c561ee3654db4a834ab36a",
+  "parameterSha256": "bb17900b09f7b1134fbf9f773e6b94a7538cdfd13b9b87cbf52e8d067270fd55",
+  "verdict": {
+    "referenceChecked": true,
+    "contextHash": "8181d95d4a75b1a927c922b41e2729cd3c2bd0d845c561ee3654db4a834ab36a",
+    "verdicts": [
+      {
+        "valid": true,
+        "sequence": 2147507142,
+        "locktime": 687354201
+      }
+    ],
+    "decision": "candidate-verified",
+    "rangeCreditEligible": false,
+    "releaseStatus": "HOLD",
+    "freshWithdrawal": false
+  },
+  "crossContextRejected": true,
+  "gpuExecuted": false,
+  "rangeSearched": false,
+  "fixtureSpentThisRun": false,
+  "freshWithdrawal": false,
+  "releaseStatus": "HOLD"
+}

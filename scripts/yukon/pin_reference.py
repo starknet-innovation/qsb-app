@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import types
 ROOT=Path(__file__).resolve().parents[2]
 LOCK=Path(__file__).with_name('pin_reference_lock.json')
 
@@ -77,11 +78,22 @@ def verify(request,output,context,expected_binary):
 
 if __name__=='__main__':
     if sys.argv[1:]!=['child']:raise SystemExit('child only')
-    for name,want in json.loads(LOCK.read_text()).items():
+    order=('secp256k1.py','bitcoin_tx.py','gpu_emulator.py','qsb_pipeline.py','verify_hit.py','handler.py')
+    locked=json.loads(LOCK.read_text())
+    if set(locked)!=set(order):raise ValueError('Unexpected CPU source set')
+    verified={}
+    for name in order:
         p=ROOT/'worker/cpu'/name
-        if p.is_symlink() or hashlib.sha256(p.read_bytes()).hexdigest()!=want:raise ValueError('Pinned CPU source mismatch')
-    sys.path.insert(0,str(ROOT/'worker/cpu'))
-    import handler
+        source=p.read_bytes()
+        if p.is_symlink() or hashlib.sha256(source).hexdigest()!=locked[name]:raise ValueError('Pinned CPU source mismatch')
+        if name[:-3] in sys.modules:raise ValueError('Fresh CPU interpreter required')
+        verified[name]=source
+    # Compile exactly the bytes just hashed, never import-loader bytecode caches.
+    for name in order:
+        module=types.ModuleType(name[:-3]);module.__file__=str(ROOT/'worker/cpu'/name)
+        sys.modules[name[:-3]]=module
+        exec(compile(verified[name],module.__file__,'exec'),module.__dict__)
+    handler=sys.modules['handler']
     raw=sys.stdin.read(2000001)
     if len(raw)>2000000:raise ValueError('Context too large')
     print(json.dumps(handler.handler(json.loads(raw))))

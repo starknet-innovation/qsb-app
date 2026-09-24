@@ -525,3 +525,26 @@ evidence. No complete range credit is issued.
 
 A positive result produced by the new normal GPU binary and passed through this
 handoff remains pending, as do durable integration and fresh end-to-end proof.
+
+## Exact-source CPU loader regression
+
+Runtime integration review identified a source-attestation gap in the new research
+reference adapter: it hashed six `.py` files but then used ordinary imports, which
+could execute matching-timestamp cached bytecode instead of those checked bytes.
+The adapter now reads and verifies the exact six-file source set, rejects
+preloaded reference modules, and compiles those saved bytes in dependency order
+inside its fresh child. Production reference sources and their lock are unchanged.
+
+The disposable-directory regression constructs an alternative `handler` bytecode
+cache with a valid source timestamp/size header. An ordinary isolated Python
+import demonstrably uses that cache. The repaired child ignores it and exports
+real parameters from the pinned source. Changed source and symlinked source both
+reject. All **45 local tests pass**. The positive historical CPU replay was rerun
+as a loader regression and is saved under `runtime/source-loader/`; it remains
+CPU-only, with no solver invocation or fixture spend.
+
+This closes the demonstrated bytecode-cache substitution path, not filesystem
+immutability or full runtime enrollment. The trusted launcher, adapter/lock
+identity, immutable installation, queue/durable fencing and independent review
+remain release requirements. No claim is made that source hashes alone establish
+an attested host or provider image.
