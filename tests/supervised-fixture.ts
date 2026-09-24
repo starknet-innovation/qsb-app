@@ -7,6 +7,7 @@ import { outputScript } from "../src/lib/transactions";
 import { prepareMainnetSearchRequest } from "../src/mainnet/submission";
 import { RELEASE } from "../src/mainnet/solvedContract";
 import { MAINNET_SEARCH_PROFILE } from "../src/mainnet/submission";
+import { HISTORICAL_CUDA_PROGRAM_ID } from "../src/lib/cuda-program";
 import type { PublicVault } from "../src/lib/model";
 
 export const privateKey = new Uint8Array(32).fill(1);
@@ -82,6 +83,12 @@ export function simulatedMainnetRequest(idempotencyKey = crypto.randomUUID()) {
     wallet: { address, publicKey, type: "p2wpkh" },
     releaseId: MAINNET_SEARCH_PROFILE,
   });
+  const cloned = structuredClone(prepared.body);
+  const depositBoundBody = {
+    manifest: cloned.manifest,
+    request: cloned.request,
+    execution: { releaseId: HISTORICAL_CUDA_PROGRAM_ID },
+  };
   const bundle = {
     format: "qsb-mainnet-solved-state-v1" as const,
     network: "mainnet" as const,
@@ -94,5 +101,5 @@ export function simulatedMainnetRequest(idempotencyKey = crypto.randomUUID()) {
     },
     release: RELEASE,
   };
-  return { vault: prepared.request.vault, prepared, bundle };
+  return { vault: prepared.request.vault, prepared, depositBoundBody, bundle };
 }

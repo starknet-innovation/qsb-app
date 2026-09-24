@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  HISTORICAL_CUDA_PROGRAM,
   HISTORICAL_CUDA_PROGRAM_ID,
   WATCHED_YUKON_SUBSET,
   assertDepositCudaProgram,
+  assertSearchUsesDepositProgram,
   cudaProgramForDeposit,
   historicalCudaProgram,
   openDeposit,
@@ -11,8 +14,10 @@ import {
   requireEnrolledCudaProgram,
   watchedYukonSubsetProgram,
 } from "../src/lib/cuda-program";
-import { pinSolver } from "../src/lib/provenance";
+import { pinSolver, solverRelease } from "../src/lib/provenance";
+import * as provenance from "../src/lib/provenance";
 import { pinNewSupervisedJob } from "../supervised/archive/work/yukon-app-routing-20260923/routing";
+import { pinNewSupervisedJob as pinRuntimeSupervisedJob } from "../supervised/runtime/source/work/yukon-app-routing-20260923/routing";
 
 const scriptHex = "51";
 const vaultId = "10000000-0000-4000-8000-000000000001";
@@ -53,6 +58,10 @@ function manifestFor(vault: ReturnType<typeof depositVault>) {
 }
 
 describe("deposit CUDA program binding", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("opens a new deposit on the enrolled historical program", () => {
     const opened = openDeposit({ id: "new" });
     expect(opened.cudaProgram).toEqual(programForNewDeposit());
@@ -106,7 +115,15 @@ describe("deposit CUDA program binding", () => {
         historical,
         manifestFor(historical),
       ),
-    ).toThrow("DepositCudaProgramMismatch");
+    ).toThrow("CudaProgramNotEnrolled");
+    expect(() =>
+      pinRuntimeSupervisedJob(
+        { releaseId: WATCHED_YUKON_SUBSET.supervisedProfileId },
+        "owner",
+        historical,
+        manifestFor(historical),
+      ),
+    ).toThrow("CudaProgramNotEnrolled");
     expect(() =>
       pinNewSupervisedJob(
         { releaseId: WATCHED_YUKON_SUBSET.supervisedProfileId },
@@ -115,18 +132,65 @@ describe("deposit CUDA program binding", () => {
         manifestFor(depositVault()),
       ),
     ).toThrow("DepositCudaProgramMissing");
+    expect(() =>
+      pinRuntimeSupervisedJob(
+        { releaseId: WATCHED_YUKON_SUBSET.supervisedProfileId },
+        "owner",
+        depositVault(),
+        manifestFor(depositVault()),
+      ),
+    ).toThrow("DepositCudaProgramMissing");
   });
 
-  it("allows the supervised subset only for a deposit opened under that program", () => {
+  it("does not let a deposit select the unenrolled Yukon subset", () => {
     const program = watchedYukonSubsetProgram();
-    const opened = depositVault(program);
-    const execution = pinNewSupervisedJob(
-      { releaseId: WATCHED_YUKON_SUBSET.supervisedProfileId },
-      "owner",
-      opened,
-      manifestFor(opened),
+    expect(() => openDeposit(depositVault(program))).toThrow(
+      "DepositCudaProgramMismatch",
     );
-    expect(execution.profile.subset.solverId).toBe(program.id);
-    expect(execution.profile.subset.solverReleaseHash).toBe(program.releaseHash);
+    const opened = depositVault(program);
+    for (const pin of [pinNewSupervisedJob, pinRuntimeSupervisedJob]) {
+      expect(() =>
+        pin(
+          { releaseId: WATCHED_YUKON_SUBSET.supervisedProfileId },
+          "owner",
+          opened,
+          manifestFor(opened),
+        ),
+      ).toThrow("DepositCudaProgramMismatch");
+    }
+    expect(
+      readFileSync("src/lib/cuda-program.ts", "utf8"),
+    ).toBe(
+      readFileSync(
+        "supervised/runtime/source/outputs/qsb-vault/src/lib/cuda-program.ts",
+        "utf8",
+      ),
+    );
+  });
+
+  it("keeps a missing record on the frozen historical release", () => {
+    const frozen = historicalCudaProgram();
+    expect(frozen).toEqual(HISTORICAL_CUDA_PROGRAM);
+    expect(cudaProgramForDeposit(undefined)).toEqual(frozen);
+    const current = solverRelease(HISTORICAL_CUDA_PROGRAM_ID);
+    expect(assertSearchUsesDepositProgram(current, undefined)).toEqual(frozen);
+    const cheaperBuild = { ...current, compiler: "cheaper-build" };
+    expect(() =>
+      assertSearchUsesDepositProgram(cheaperBuild, undefined),
+    ).toThrow("DepositCudaProgramMismatch");
+    vi.spyOn(provenance, "solverRelease").mockReturnValue({
+      ...current,
+      kernelCommit: "a".repeat(40),
+      image: "replaced-under-the-same-id",
+    });
+    expect(cudaProgramForDeposit(undefined)).toEqual(frozen);
+    expect(historicalCudaProgram()).toEqual(frozen);
+    expect(programForNewDeposit()).toEqual(frozen);
+    expect(() =>
+      assertSearchUsesDepositProgram(
+        provenance.solverRelease(HISTORICAL_CUDA_PROGRAM_ID),
+        undefined,
+      ),
+    ).toThrow("DepositCudaProgramMismatch");
   });
 });

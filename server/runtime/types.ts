@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HISTORICAL_CUDA_PROGRAM_ID } from "../../src/lib/cuda-program";
 
 export const RELEASE_MANIFEST_FORMAT = "qsb-source-release-manifest-v1" as const;
 export const SUPERVISED_PROFILE_ID = "qsb-supervised-pin-v4-subset-v5" as const;
@@ -8,7 +9,10 @@ export type Phase = z.infer<typeof phaseSchema>;
 
 export const releaseBindingSchema = z
   .object({
-    profileId: z.literal(SUPERVISED_PROFILE_ID),
+    profileId: z.union([
+      z.literal(SUPERVISED_PROFILE_ID),
+      z.literal(HISTORICAL_CUDA_PROGRAM_ID),
+    ]),
     sourceManifestFormat: z.literal(RELEASE_MANIFEST_FORMAT),
     coreSourceManifest: z.string().regex(/^[a-f0-9]{64}$/),
     nativeBinariesEnrolled: z.literal(false),

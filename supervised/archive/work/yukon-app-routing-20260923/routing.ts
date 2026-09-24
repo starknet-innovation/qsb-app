@@ -2,7 +2,7 @@
 import {z} from 'zod';
 import {withdrawalSchema} from '../../../../src/lib/model';
 import {assertSolverPin,assertVaultConfiguration,fingerprint,solverRelease} from '../../../../src/lib/provenance';
-import {assertDepositCudaProgram,assertSearchUsesDepositProgram,WATCHED_YUKON_SUBSET} from '../../../../src/lib/cuda-program';
+import {assertDepositCudaProgram,assertSearchUsesDepositProgram,requireEnrolledCudaProgram,WATCHED_YUKON_SUBSET} from '../../../../src/lib/cuda-program';
 import {MANIFEST as PIN_IMAGE} from '../yukon-pin-preflight-20260923/execution-gate';
 import {MANIFEST as SUBSET_IMAGE} from '../yukon-indexed-controller-20260923/execution-gate';
 import {PIN_RUNTIME,RUNTIME} from '../yukon-owned-pin-handoff-20260923/runtime-api';
@@ -16,11 +16,11 @@ export type SupervisedExecution={kind:'qsb-supervised-service-v1';profile:Return
 export function pinNewSupervisedJob(choice:unknown,owner:string,vault:Vault,manifestInput:unknown):SupervisedExecution{
  requestSchema.parse(choice);const v=structuredClone(vault),manifest=withdrawalSchema.parse(manifestInput),configuration=assertVaultConfiguration(v);
  if(!owner||manifest.vaultId!==v.id||!['regtest','testnet4','mainnet'].includes(configuration.network)||!v.funding||fingerprint(v.funding)!==fingerprint(manifest.funding))throw Error('New job/vault binding differs');
- const p=supervisedProfile();
- if(p.subset.solverId!==WATCHED_YUKON_SUBSET.solverId||p.subset.solverReleaseHash!==WATCHED_YUKON_SUBSET.solverReleaseHash)throw Error('CudaProgramNotEnrolled');
  if(!v.cudaProgram)throw Error('DepositCudaProgramMissing');
  const bound=assertDepositCudaProgram(v.cudaProgram);
- if(bound.id!==p.subset.solverId||bound.releaseHash!==p.subset.solverReleaseHash||bound.kernelCommit!==WATCHED_YUKON_SUBSET.kernelCommit)throw Error('DepositCudaProgramMismatch');
+ requireEnrolledCudaProgram(bound.id);
+ const p=supervisedProfile();
+ if(p.id===WATCHED_YUKON_SUBSET.supervisedProfileId||p.subset.solverId===WATCHED_YUKON_SUBSET.solverId||bound.id!==p.subset.solverId||bound.releaseHash!==p.subset.solverReleaseHash||bound.kernelCommit!==WATCHED_YUKON_SUBSET.kernelCommit)throw Error('CudaProgramNotEnrolled');
  return {kind:'qsb-supervised-service-v1',profile:p,profileHash:fingerprint(p),vaultConfigurationHash:fingerprint(configuration),publicContextHash:fingerprint({publicStateJson:v.publicStateJson,manifest,network:configuration.network}),manifestHash:fingerprint(manifest),jobId:manifest.idempotencyKey,owner,vaultId:v.id,network:configuration.network,revision:0};
 }
 /** Stable stored routing only; queued retries cannot change profile or migrate a historical job. */

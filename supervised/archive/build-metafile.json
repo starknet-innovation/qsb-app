@@ -85,7 +85,7 @@
       "format": "esm"
     },
     "../../src/lib/cuda-program.ts": {
-      "bytes": 4354,
+      "bytes": 4785,
       "imports": [
         {
           "path": "../../src/lib/provenance.ts",
@@ -411,7 +411,7 @@
       "imports": [],
       "exports": [],
       "inputs": {},
-      "bytes": 152162
+      "bytes": 152751
     },
     "dist/service.cjs": {
       "imports": [
@@ -513,7 +513,7 @@
           "bytesInOutput": 1312
         },
         "work/yukon-app-routing-20260923/routing.ts": {
-          "bytesInOutput": 3015
+          "bytesInOutput": 2988
         },
         "../../src/lib/network.ts": {
           "bytesInOutput": 384
@@ -522,7 +522,7 @@
           "bytesInOutput": 2361
         },
         "../../src/lib/cuda-program.ts": {
-          "bytesInOutput": 2193
+          "bytesInOutput": 2523
         },
         "work/yukon-pin-preflight-20260923/execution-gate.ts": {
           "bytesInOutput": 90
@@ -558,7 +558,7 @@
           "bytesInOutput": 3616
         }
       },
-      "bytes": 56300
+      "bytes": 56603
     }
   }
 }

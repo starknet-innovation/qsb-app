@@ -12,14 +12,13 @@ import { Conflict, MemoryStore, type Store } from "../server/store";
 import contract from "../server/mainnet-capability.json";
 import { release } from "../src/lib/model";
 import { fingerprint } from "../src/lib/provenance";
+import { historicalCudaProgram } from "../src/lib/cuda-program";
 import { currentAdmissionClient } from "../src/mainnet/admissionClient";
 import { bindSolvedConsumer } from "../src/mainnet/consumer";
 import {
   MAINNET_SEARCH_PROFILE,
   prepareMainnetSearchRequest,
-  retainedMainnetSubmission,
 } from "../src/mainnet/submission";
-import { retainedRequests } from "../src/mainnet/retainedRequest";
 import { validateRequest } from "../src/mainnet/solvedContract";
 import { assertServiceChain } from "../server/runtime/capability";
 import { CONTRACT as archiveContract } from "../supervised/archive/work/yukon-mainnet-service-enrollment-20260923/capability";
@@ -103,31 +102,6 @@ async function seedCapability(store: MemoryStore) {
     contract,
   });
   await enableInProcessWriterExclusion(store, "store-transaction-condition");
-}
-
-function memoryRetention() {
-  const rows = new Map<string, string>();
-  return retainedRequests(
-    {
-      getItem: (key) => rows.get(key) ?? null,
-      setItem: (key, value) => {
-        rows.set(key, value);
-      },
-    },
-    {
-      request: async (
-        _name: string,
-        optionsOrCallback: unknown,
-        maybeCallback?: () => unknown,
-      ) => {
-        const callback =
-          typeof optionsOrCallback === "function"
-            ? optionsOrCallback
-            : maybeCallback;
-        return callback?.();
-      },
-    } as Pick<LockManager, "request">,
-  );
 }
 
 describe("supervised runtime handoff", () => {
@@ -230,13 +204,13 @@ describe("supervised runtime handoff", () => {
     const plain = createApp(store);
     const token = await login(plain);
     expect(
-      (await plain.request(request("/jobs/supervised", closed.prepared.body, token)))
+      (await plain.request(request("/jobs/supervised", closed.depositBoundBody, token)))
         .status,
     ).toBe(404);
     const dispatched = createSupervisedCreationApp(store);
     const dispatchedToken = await login(dispatched);
     const refused = await dispatched.request(
-      request("/jobs/supervised", closed.prepared.body, dispatchedToken),
+      request("/jobs/supervised", closed.depositBoundBody, dispatchedToken),
     );
     expect(refused.status).toBe(503);
     expect(await refused.json()).toEqual({
@@ -273,7 +247,7 @@ describe("supervised runtime handoff", () => {
       racing,
       address,
       "mainnet",
-      closed.prepared.body,
+      closed.depositBoundBody,
       confirmingLedger,
     );
     expect(admitted.created).toBe(false);
@@ -316,7 +290,7 @@ describe("supervised runtime handoff", () => {
       },
     };
     await expect(
-      admitSupervisedJob(store, address, "mainnet", fixture.prepared.body, confirmingLedger),
+      admitSupervisedJob(store, address, "mainnet", fixture.depositBoundBody, confirmingLedger),
     ).rejects.toThrow(/Supervised search capability is not active/);
     expect(
       [...inner.rows.values()].filter(
@@ -350,7 +324,7 @@ describe("supervised runtime handoff", () => {
       vault: closed.vault,
     });
     const token = await login(app);
-    const wrongChain = structuredClone(closed.prepared.body) as {
+    const wrongChain = structuredClone(closed.depositBoundBody) as {
       request: { network: string };
     };
     wrongChain.request.network = "testnet4";
@@ -366,12 +340,12 @@ describe("supervised runtime handoff", () => {
     expect(
       (
         await app.request(
-          request("/jobs/supervised", closed.prepared.body, otherToken),
+          request("/jobs/supervised", closed.depositBoundBody, otherToken),
         )
       ).status,
     ).toBe(409);
     const created = await app.request(
-      request("/jobs/supervised", closed.prepared.body, token),
+      request("/jobs/supervised", closed.depositBoundBody, token),
     );
     expect(created.status).toBe(201);
     const createdBody = await created.json();
@@ -381,14 +355,14 @@ describe("supervised runtime handoff", () => {
       searchRunning: false,
     });
     const replay = await app.request(
-      request("/jobs/supervised", closed.prepared.body, token),
+      request("/jobs/supervised", closed.depositBoundBody, token),
     );
     expect(replay.status).toBe(200);
     expect((await replay.json()).job.id).toBe(createdBody.job.id);
     expect(
       [...store.rows.values()].filter((row) => String(row.sk).startsWith("JOB#")),
     ).toHaveLength(1);
-    const altered = structuredClone(closed.prepared.body);
+    const altered = structuredClone(closed.depositBoundBody);
     altered.manifest.helper.value = "20000";
     altered.manifest.outputValue = "100000";
     altered.request.manifest.helper.value = "20000";
@@ -420,7 +394,7 @@ describe("supervised runtime handoff", () => {
       1,
     );
     expect(
-      (await app.request(request("/jobs/supervised", closed.prepared.body, token)))
+      (await app.request(request("/jobs/supervised", closed.depositBoundBody, token)))
         .status,
     ).toBe(503);
   });
@@ -438,7 +412,7 @@ describe("supervised runtime handoff", () => {
     });
     const token = await login(app);
     const admitted = await (
-      await app.request(request("/jobs/supervised", fixture.prepared.body, token))
+      await app.request(request("/jobs/supervised", fixture.depositBoundBody, token))
     ).json();
     expect(admitted.runtime.searchRunning).toBe(false);
     const claimed = await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
@@ -449,7 +423,7 @@ describe("supervised runtime handoff", () => {
       phase: "pinning",
       capability: "search-only",
       release: {
-        profileId: "qsb-supervised-pin-v4-subset-v5",
+        profileId: "qsb-config-a-ranked-v2-2791ed0",
         coreSourceManifest: contract.coreSourceManifest,
         nativeBinariesEnrolled: false,
         broadcastAuthorized: false,
@@ -835,7 +809,7 @@ describe("supervised runtime handoff", () => {
     });
     const token = await login(app);
     const admitted = await (
-      await app.request(request("/jobs/supervised", fixture.prepared.body, token))
+      await app.request(request("/jobs/supervised", fixture.depositBoundBody, token))
     ).json();
     await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
     const starter = localAckStarter(
@@ -953,23 +927,24 @@ describe("supervised runtime handoff", () => {
     const token = await login(app);
     const fetcher: typeof fetch = (input, init) =>
       Promise.resolve(app.request(String(input), init));
-    const submitted = await retainedMainnetSubmission(
-      fixture.prepared,
-      memoryRetention(),
-      () => true,
-      async (body) => {
-        const response = await app.request(
-          request("/jobs/supervised", body, token),
-        );
-        expect(response.status).toBe(201);
-        return response.json();
-      },
-    ).submit();
-    const job = (
-      submitted as {
-        job: { id: string; status: string; mainnetRequestHash: string };
-      }
-    ).job;
+    const refused = await app.request(
+      request("/jobs/supervised", fixture.prepared.body, token),
+    );
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      error: "Deposit is bound to a different CUDA program.",
+    });
+    expect(
+      [...store.rows.values()].filter((row) => String(row.sk).startsWith("JOB#")),
+    ).toHaveLength(0);
+    const admitted = await (
+      await app.request(request("/jobs/supervised", fixture.depositBoundBody, token))
+    ).json();
+    const job = admitted.job as {
+      id: string;
+      status: string;
+      mainnetRequestHash: string;
+    };
     expect(job.status).toBe("queued");
     await claimAdmittedLaunch(store, address, job.id, confirmingLedger);
     const first = localAckStarter(
@@ -1113,9 +1088,9 @@ describe("supervised runtime handoff", () => {
       () => token,
       fetcher,
     );
-    const admitted = await reader(fixture.vault.id);
-    expect(admitted.mainnetAuthorized).toBe(false);
-    expect(admitted.record.bundleSha256).toBe(fingerprint(fixture.bundle));
+    const solved = await reader(fixture.vault.id);
+    expect(solved.mainnetAuthorized).toBe(false);
+    expect(solved.record.bundleSha256).toBe(fingerprint(fixture.bundle));
     const bound = await bindSolvedConsumer(
       fixture.prepared.request,
       fixture.bundle,
@@ -1227,7 +1202,7 @@ describe("supervised runtime handoff", () => {
       store,
       address,
       "mainnet",
-      fixture.prepared.body,
+      fixture.depositBoundBody,
       confirmingLedger,
     );
     await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
@@ -1280,7 +1255,7 @@ describe("supervised runtime handoff", () => {
       store,
       address,
       "mainnet",
-      fixture.prepared.body,
+      fixture.depositBoundBody,
       confirmingLedger,
     );
     await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
@@ -1328,7 +1303,7 @@ describe("supervised runtime handoff", () => {
     const helper = { txid: "33".repeat(32), vout: 1, value: "10000" };
     const funding = { ...first.vault.funding!, txid: upper };
     const secondVault = { ...second.vault, funding };
-    const request = second.prepared.body.request as {
+    const request = second.depositBoundBody.request as {
       vault: typeof secondVault;
       manifest: { funding: typeof funding; helper: typeof helper };
     };
@@ -1338,10 +1313,10 @@ describe("supervised runtime handoff", () => {
       manifest: { ...request.manifest, funding, helper },
     };
     const body = {
-      ...second.prepared.body,
+      ...second.depositBoundBody,
       request: nextRequest,
       manifest: {
-        ...second.prepared.body.manifest,
+        ...second.depositBoundBody.manifest,
         funding,
         helper,
       },
@@ -1358,7 +1333,7 @@ describe("supervised runtime handoff", () => {
       version: 0,
       vault: secondVault,
     });
-    await admitSupervisedJob(store, address, "mainnet", first.prepared.body, confirmingLedger);
+    await admitSupervisedJob(store, address, "mainnet", first.depositBoundBody, confirmingLedger);
     await expect(
       admitSupervisedJob(store, address, "mainnet", body, confirmingLedger),
     ).rejects.toThrow(/Outpoint already reserved/);
@@ -1377,18 +1352,18 @@ describe("supervised runtime handoff", () => {
     const txid = "ab".repeat(32);
     const funding = { ...fixture.vault.funding!, txid };
     const vault = { ...fixture.vault, funding };
-    const request = fixture.prepared.body.request as {
+    const request = fixture.depositBoundBody.request as {
       vault: typeof vault;
       manifest: { funding: typeof funding };
     };
     const body = {
-      ...fixture.prepared.body,
+      ...fixture.depositBoundBody,
       request: {
         ...request,
         vault,
         manifest: { ...request.manifest, funding },
       },
-      manifest: { ...fixture.prepared.body.manifest, funding },
+      manifest: { ...fixture.depositBoundBody.manifest, funding },
     };
     await store.put({
       pk: `OWNER#${address}`,
@@ -1470,11 +1445,11 @@ describe("supervised runtime handoff", () => {
       store,
       address,
       "mainnet",
-      fixture.prepared.body,
+      fixture.depositBoundBody,
       confirmingLedger,
     );
     expect(admitted.job.reservationAuthorityGeneration).toBe(authority.generation);
-    const points = [fixture.prepared.body.manifest.funding, fixture.prepared.body.manifest.helper];
+    const points = [fixture.depositBoundBody.manifest.funding, fixture.depositBoundBody.manifest.helper];
     for (const point of points) {
       const key = `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`;
       expect(point.txid.toLowerCase()).toBe(key.slice("OUTPOINT#".length).split(":")[0]);
@@ -1502,13 +1477,13 @@ describe("supervised runtime handoff", () => {
       store,
       address,
       "mainnet",
-      fixture.prepared.body,
+      fixture.depositBoundBody,
       confirmingLedger,
     );
     const spent = {
       assertNetwork: async () => undefined,
       unspent: async (point: { txid: string }) => {
-        if (point.txid === fixture.prepared.body.manifest.helper.txid)
+        if (point.txid === fixture.depositBoundBody.manifest.helper.txid)
           throw new Error("spent");
         return { previousTxHex: "00", confirmations: 1 };
       },
@@ -1617,6 +1592,42 @@ describe("supervised runtime handoff", () => {
     expect(after.state).not.toBe("running");
   });
 
+  it("does not label a historical or unrecorded deposit with the Yukon subset profile", async () => {
+    async function refuseSubsetProfile(
+      vault: ReturnType<typeof simulatedMainnetRequest>["vault"],
+      body: ReturnType<typeof simulatedMainnetRequest>["prepared"]["body"],
+    ) {
+      const store = new MemoryStore();
+      await seedCapability(store);
+      await store.put({
+        pk: `OWNER#${address}`,
+        sk: `VAULT#${vault.id}`,
+        version: 0,
+        vault,
+      });
+      await expect(
+        admitSupervisedJob(store, address, "mainnet", body, confirmingLedger),
+      ).rejects.toThrow("Deposit is bound to a different CUDA program.");
+      expect(
+        [...store.rows.values()].some((row) =>
+          JSON.stringify(row).includes("qsb-supervised-pin-v4-subset-v5"),
+        ),
+      ).toBe(false);
+      expect(
+        [...store.rows.values()].filter((row) =>
+          String(row.sk).startsWith("JOB#"),
+        ),
+      ).toHaveLength(0);
+    }
+    const missing = simulatedMainnetRequest();
+    await refuseSubsetProfile(missing.vault, missing.prepared.body);
+    const stamped = simulatedMainnetRequest();
+    const vault = { ...stamped.vault, cudaProgram: historicalCudaProgram() };
+    const body = structuredClone(stamped.prepared.body);
+    body.request.vault = vault;
+    await refuseSubsetProfile(vault, body);
+  });
+
   async function claimedFixture() {
     const store = new MemoryStore();
     await seedCapability(store);
@@ -1631,7 +1642,7 @@ describe("supervised runtime handoff", () => {
       store,
       address,
       "mainnet",
-      fixture.prepared.body,
+      fixture.depositBoundBody,
       confirmingLedger,
     );
     await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
@@ -2117,7 +2128,7 @@ describe("supervised runtime handoff", () => {
     });
     const token = await login(app);
     const admitted = await (
-      await app.request(request("/jobs/supervised", fixture.prepared.body, token))
+      await app.request(request("/jobs/supervised", fixture.depositBoundBody, token))
     ).json();
     const paused = await app.request(
       request(`/jobs/${admitted.job.id}/pause`, {}, token),
@@ -2308,7 +2319,7 @@ describe("supervised runtime handoff", () => {
       store,
       address,
       "mainnet",
-      fixture.prepared.body,
+      fixture.depositBoundBody,
       confirmingLedger,
     );
     await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
@@ -2727,7 +2738,7 @@ describe("supervised runtime handoff", () => {
       inner,
       address,
       "mainnet",
-      fixture.prepared.body,
+      fixture.depositBoundBody,
       confirmingLedger,
     );
     let revoked = false;
@@ -2777,7 +2788,7 @@ describe("supervised runtime handoff", () => {
       inner,
       address,
       "mainnet",
-      fixture.prepared.body,
+      fixture.depositBoundBody,
       confirmingLedger,
     );
     let bumped = false;
@@ -2832,7 +2843,7 @@ describe("supervised runtime handoff", () => {
       store,
       address,
       "mainnet",
-      fixture.prepared.body,
+      fixture.depositBoundBody,
       confirmingLedger,
     );
     const key = `${AUTHORITY_PK}|${AUTHORITY_SK}`;
@@ -2921,7 +2932,7 @@ describe("supervised runtime handoff", () => {
     const store = new MemoryStore();
     await seedCapability(store);
     const fixture = simulatedMainnetRequest();
-    const body = structuredClone(fixture.prepared.body);
+    const body = structuredClone(fixture.depositBoundBody);
     body.request.vault.status = "unfunded";
     delete body.request.vault.funding;
     const parsed = validateRequest(body.request);
@@ -2953,7 +2964,7 @@ describe("supervised runtime handoff", () => {
       vault: fixture.vault,
     });
     await expect(
-      admitSupervisedJob(store, address, "mainnet", fixture.prepared.body, {
+      admitSupervisedJob(store, address, "mainnet", fixture.depositBoundBody, {
         assertNetwork: async () => undefined,
         unspent: async () => {
           throw new Error("spent");
@@ -2979,7 +2990,7 @@ describe("supervised runtime handoff", () => {
       store,
       address,
       "mainnet",
-      fixture.prepared.body,
+      fixture.depositBoundBody,
       confirmingLedger,
     );
     const row = await store.get(`OWNER#${address}`, `VAULT#${fixture.vault.id}`);
@@ -3013,7 +3024,7 @@ describe("supervised runtime handoff", () => {
       inner,
       address,
       "mainnet",
-      fixture.prepared.body,
+      fixture.depositBoundBody,
       confirmingLedger,
     );
     let bumped = false;

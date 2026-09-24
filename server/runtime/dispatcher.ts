@@ -1,7 +1,11 @@
 import { hex } from "@scure/base";
 import { z } from "zod";
 import { fingerprint, pinSolver, vaultConfiguration } from "../../src/lib/provenance";
-import { cudaProgramForDeposit } from "../../src/lib/cuda-program";
+import {
+  cudaProgramForDeposit,
+  HISTORICAL_CUDA_PROGRAM_ID,
+  type CudaProgramRecord,
+} from "../../src/lib/cuda-program";
 import {
   release,
   type PublicVault,
@@ -36,7 +40,12 @@ const bodySchema = z
   .object({
     manifest: withdrawalSchema,
     execution: z
-      .object({ releaseId: z.literal(MAINNET_SEARCH_PROFILE) })
+      .object({
+        releaseId: z.union([
+          z.literal(MAINNET_SEARCH_PROFILE),
+          z.literal(HISTORICAL_CUDA_PROGRAM_ID),
+        ]),
+      })
       .strict(),
     request: z.unknown(),
   })
@@ -163,10 +172,24 @@ async function assertSpendableFunding(
   }
 }
 
+function boundDepositProgram(vault: PublicVault): CudaProgramRecord {
+  try {
+    return cudaProgramForDeposit(vault.cudaProgram);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "DepositCudaProgramMismatch"
+    )
+      throw new GateError(409, "Deposit is bound to a different CUDA program.");
+    throw error;
+  }
+}
+
 function depositSolverPin(vault: PublicVault) {
   try {
-    return pinSolver(vault, cudaProgramForDeposit(vault.cudaProgram).id);
+    return pinSolver(vault, boundDepositProgram(vault).id);
   } catch (error) {
+    if (error instanceof GateError) throw error;
     if (
       error instanceof Error &&
       (error.message === "UnsupportedSolverRelease" ||
@@ -191,6 +214,8 @@ function assertVaultStillAdmitted(job: SupervisedJob, vault: PublicVault): void 
   }
   if (!job.solver || fingerprint(solver) !== fingerprint(job.solver))
     throw new GateError(409, "Vault solver pin no longer matches the admitted job.");
+  if (job.execution.profile.id !== boundDepositProgram(vault).id)
+    throw new GateError(409, "Deposit is bound to a different CUDA program.");
 }
 
 export async function admitSupervisedJob(
@@ -219,8 +244,6 @@ export async function admitSupervisedJob(
     throw new GateError(409, "Wallet does not match this session.");
   if (fingerprint(parsed.manifest) !== fingerprint(request.manifest))
     throw new GateError(409, "Manifest does not match the original request.");
-  if (parsed.execution.releaseId !== MAINNET_SEARCH_PROFILE)
-    throw new GateError(409, "Unsupported supervised release.");
   const pk = `OWNER#${owner}`;
   const vaultRow = await store.get(pk, `VAULT#${request.id}`);
   if (!vaultRow) throw new GateError(404, "Vault not found");
@@ -250,6 +273,9 @@ export async function admitSupervisedJob(
   }
   await assertSpendableFunding(ledger, owner, vault, request.manifest);
   await assertCanonicalFree(store, [request.manifest.funding, request.manifest.helper]);
+  const bound = boundDepositProgram(vault);
+  if (parsed.execution.releaseId !== bound.id)
+    throw new GateError(409, "Deposit is bound to a different CUDA program.");
   const now = new Date().toISOString();
   const job: SupervisedJob = {
     id,
@@ -267,7 +293,7 @@ export async function admitSupervisedJob(
     execution: {
       kind: "qsb-supervised-service-v1",
       network: "mainnet",
-      profile: { id: MAINNET_SEARCH_PROFILE },
+      profile: { id: HISTORICAL_CUDA_PROGRAM_ID },
       sourceManifestFormat: RELEASE_MANIFEST_FORMAT,
       coreSourceManifest: coreDigest,
       nativeBinariesEnrolled: false,
