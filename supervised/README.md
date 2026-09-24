@@ -20,7 +20,7 @@ Local tests compose the actual public create, dispatch, admission and host-claim
 
 This finishes the source connection, not a deployable mainnet activation:
 
-- The [repository-built runtime distribution](runtime/README.md) replaces the external archive dependency for builds; it is not installed or activated automatically. The historical configuration It still pins `eu-west-1` and `QsbYukonIsolated*`, whereas Terraform's generic app table has a different name. A reviewed successor must align these identities; silently renaming a live table would be unsafe.
+- The [repository-built runtime distribution](runtime/README.md) replaces the external archive dependency for builds; it is not installed or activated automatically. The historical configuration still pins `eu-west-1` and `QsbYukonIsolated*`, whereas Terraform's generic app table has a different name. A reviewed successor must align these identities; silently renaming a live table would be unsafe.
 - The sanitized service archive deliberately uses an unenrolled image registry. Actual immutable image/CPU/runtime identities, private FIFO provisioning and watchdog socket enrollment remain required. The periodic cleanup Lambda does not replace the runtime's watchdog protocol.
 - Successful launch and crash/restart behavior of this final composed package on the intended Linux host must be demonstrated before activation. Child exit is not provider drain or search completion.
 - Verified result publication/evidence export, full fresh optimized proof and external miner gates remain on the mainnet readiness checklist.

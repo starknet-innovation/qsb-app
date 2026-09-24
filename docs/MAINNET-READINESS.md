@@ -20,7 +20,7 @@ The repository is a curated research snapshot. Some integration work and evidenc
 
 ## 1. Complete and freeze the distributable release
 
-**Status: partial.** Application and selected native source are public; complete experimental service/host packaging is not included here yet.
+**Status: source build paths added; release enrollment remains open.** The [optimized worker](../worker/optimized/README.md) and [Linux supervisor distribution](../supervised/runtime/README.md) now build from repository source. This removes the private archive/precompiled solver input requirement. It does not certify the new artifacts or automatically reconcile historical image/CPU/runtime identities.
 
 - [ ] Package the complete reviewed API, dispatcher, runtime, CPU verifier and evidence-reader dependency closure without reads from a developer work directory.
 - [ ] Define compatible pinning and subset releases explicitly. A subset-only optimization must not be treated as a replacement for the entire solver pipeline.
