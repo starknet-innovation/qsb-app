@@ -1077,3 +1077,21 @@ fixture was searched or spent, and no mainnet or external miner transaction was
 sent. Attempts 38–99 were not attempted; a future continuation must preserve these
 receipts and begin with unattempted work after fresh resource/price/watchdog checks.
 No continuation or replacement was submitted during this run.
+
+## Reconciled continuation preparation
+
+`continue_pin_campaign.py` reruns CPU verification of downloaded evidence and
+requires a clean bounded stop, no unresolved attempts and no verified candidate.
+It validates the original plan including the completed/unattempted boundary,
+rejects overlap or context changes, and writes only the unattempted tail to a new
+exclusive directory. It does not allocate resources, authorize dispatch or retry
+uncertain work. Four tests cover the tail, exclusive output, uncertain/hit/exhausted
+campaigns, overlaps and contradictory stop markers.
+
+The actual 38 completed outputs were reverified and a 62-request continuation was
+prepared. `runtime/fresh-campaign/continuation-prepared.json` binds both plans,
+the parent CPU receipt, context and first unattempted request. No continuation
+was launched. A cumulative spending limit has been requested before turning this
+bounded experiment into repeated probabilistic searches; independent-review
+assignment is also awaiting the user's choice. Other technical release gates
+remain HOLD.

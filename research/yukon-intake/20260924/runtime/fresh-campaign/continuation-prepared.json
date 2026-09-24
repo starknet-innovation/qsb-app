@@ -1,0 +1,13 @@
+{
+  "format": "qsb-pin-campaign-continuation-v1",
+  "parentPlanHash": "3007e98b969c6722ba859f66876a960af3f44ee43902c407af02944e98d53325",
+  "parentReceiptHash": "92e18fc834a6247f2d381e221bb2a248e3b4f00eca6d011a29a9c9eb08fc4d72",
+  "nextPlanHash": "577ad019363a00ab21fdf4dc16e663cbd0f1cbc8ab13e899bb7baa1aff4437d5",
+  "completedParentOutputs": 38,
+  "remainingRequests": 62,
+  "firstUnattemptedRequestHash": "778923377e1bf950724135cd730ae59ec33771230d5cdd3e4b108073ab522340",
+  "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+  "gpuExecuted": false,
+  "dispatchAuthorized": false,
+  "releaseStatus": "HOLD"
+}
