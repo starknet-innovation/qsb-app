@@ -1,4 +1,7 @@
-locals { runtime_count = var.provision_runtime ? 1 : 0 }
+locals {
+  # Mainnet jobs use the Step Functions coordinator. This runtime is not that path.
+  runtime_count = var.provision_runtime && var.network != "mainnet" ? 1 : 0
+}
 data "aws_ami" "runtime" {
   count  = local.runtime_count
   owners = [var.runtime_ami_owner]

@@ -1,3 +1,4 @@
+// Off the mainnet path. The deployed mainnet Lambda does not mount these routes.
 import { it, expect } from "vitest";
 import { MemoryStore } from "../server/store";
 import { createApp } from "../server/app";

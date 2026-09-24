@@ -81,7 +81,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "c9399cdf5a2971ecaf7464bef707194d6095a3e3cc9fe560d50919f50b508f4f",
+      "api": "7eeb537873b149d65222ee610509d9648e0badbac72bbcdb86a245c7f828116a",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "726cd12bbbe992887d77a88a31a383d14826b6a4dbdd9cedd22547722d23914a",
@@ -171,7 +171,7 @@
       "server/app.ts": "39bcb0f9e6d28b4f92e4d2da14f6656831e7734dac6adc6dff40f4349628b3a5",
       "server/chain.ts": "71ec84e791cdfe5bd8217949ac72c16773a5246654c92e349a45c429a6322321",
       "server/coordinator.ts": "2271cf97b06a1a94d1901bf3bb39253e4732f56a9eae7c388f413b69cdd895df",
-      "server/lambda.ts": "2ec8b51b90988b49e09c9300a198c119edb4711f1441208dbfec92df64747e09",
+      "server/lambda.ts": "abe72c18c555f2d699ec5cdb3c0a8edb0d6b4df77500f76b14ade0d388096c0c",
       "server/local.ts": "7a3c1f8a57928f77e51418b92c025622bbe71a3b291cc2094e24e37eadc378bd",
       "server/mainnet-capability.json": "0670c2d878ed980b47ae64ba8a384a3da6b9d593b2140693719bbac761885583",
       "server/mainnetConfig.ts": "e995c6a9385012217326c2490f188e8382eda40fb37858e9d4f0939d86181102",

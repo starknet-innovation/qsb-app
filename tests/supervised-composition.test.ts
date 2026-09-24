@@ -1,3 +1,4 @@
+// Off the mainnet path. The deployed mainnet Lambda does not mount this dispatcher.
 import { it, expect, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { Signer } from "bip322-js";
