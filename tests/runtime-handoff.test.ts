@@ -4,7 +4,7 @@ import * as btc from "@scure/btc-signer";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../server/app";
-import { MemoryStore } from "../server/store";
+import { Conflict, MemoryStore } from "../server/store";
 import contract from "../server/mainnet-capability.json";
 import { release } from "../src/lib/model";
 import { fingerprint } from "../src/lib/provenance";
@@ -18,9 +18,10 @@ import {
 import { retainedRequests } from "../src/mainnet/retainedRequest";
 import { assertServiceChain } from "../server/runtime/capability";
 import { runEnrolledCpuVerifier } from "../server/runtime/cpu-verifier";
-import { claimAdmittedLaunch } from "../server/runtime/dispatcher";
+import { admitSupervisedJob, claimAdmittedLaunch } from "../server/runtime/dispatcher";
 import {
   acknowledgementExpired,
+  acknowledgementLine,
   drainSibling,
   launchOwnedProcess,
   localAckStarter,
@@ -254,6 +255,7 @@ describe("supervised runtime handoff", () => {
       process.execPath,
       ["-e", "setTimeout(() => {}, 10000)"],
       200,
+      admitted.job.mainnetRequestHash,
     );
     const start: OwnedProcessStart = async () => {
       starts += 1;
@@ -315,8 +317,12 @@ describe("supervised runtime handoff", () => {
     await claimAdmittedLaunch(store, address, admitted.job.id);
     const starter = localAckStarter(
       process.execPath,
-      ["-e", "process.stdout.write('ack', () => process.exit(0))"],
+      [
+        "-e",
+        `process.stdout.write(${JSON.stringify(acknowledgementLine(admitted.job.mainnetRequestHash))}, () => process.exit(0))`,
+      ],
       2000,
+      admitted.job.mainnetRequestHash,
     );
     const acknowledged = await launchOwnedProcess(
       store,
@@ -445,8 +451,12 @@ describe("supervised runtime handoff", () => {
     await claimAdmittedLaunch(store, address, job.id);
     const first = localAckStarter(
       process.execPath,
-      ["-e", "process.stdout.write('ack', () => process.exit(0))"],
+      [
+        "-e",
+        `process.stdout.write(${JSON.stringify(acknowledgementLine(job.mainnetRequestHash))}, () => process.exit(0))`,
+      ],
       2000,
+      job.mainnetRequestHash,
     );
     const acknowledged = await launchOwnedProcess(
       store,
@@ -522,8 +532,12 @@ describe("supervised runtime handoff", () => {
     expect(providerCalls).toBe(1);
     const replacement = localAckStarter(
       process.execPath,
-      ["-e", "process.stdout.write('ack', () => process.exit(0))"],
+      [
+        "-e",
+        `process.stdout.write(${JSON.stringify(acknowledgementLine(job.mainnetRequestHash))}, () => process.exit(0))`,
+      ],
       2000,
+      job.mainnetRequestHash,
     );
     const replaced = await replaceOwnedProcess(
       store,
@@ -673,5 +687,140 @@ describe("supervised runtime handoff", () => {
       ).status,
     ).toBe(503);
     await Promise.all([...first.exits, ...replacement.exits]);
+  });
+
+  it("lets only one concurrent launch pass the claimed version", async () => {
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const fixture = simulatedMainnetRequest();
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    const admitted = await admitSupervisedJob(
+      store,
+      address,
+      "mainnet",
+      fixture.prepared.body,
+    );
+    await claimAdmittedLaunch(store, address, admitted.job.id);
+    let starts = 0;
+    const start: OwnedProcessStart = async () => {
+      starts += 1;
+      return { processId: `concurrent-${starts}` };
+    };
+    const results = await Promise.allSettled([
+      launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        start,
+        new Date(),
+        1000,
+      ),
+      launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        start,
+        new Date(),
+        1000,
+      ),
+    ]);
+    expect(starts).toBe(1);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(rejected?.status).toBe("rejected");
+    if (rejected?.status === "rejected")
+      expect(rejected.reason).toBeInstanceOf(Conflict);
+  });
+
+  it("rejects stdout that merely contains ack", async () => {
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const fixture = simulatedMainnetRequest();
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    const admitted = await admitSupervisedJob(
+      store,
+      address,
+      "mainnet",
+      fixture.prepared.body,
+    );
+    await claimAdmittedLaunch(store, address, admitted.job.id);
+    const noisy = localAckStarter(
+      process.execPath,
+      ["-e", "process.stdout.write('package loaded', () => process.exit(0))"],
+      2000,
+      admitted.job.mainnetRequestHash,
+    );
+    await expect(
+      launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        noisy.start,
+        new Date(),
+        2000,
+      ),
+    ).rejects.toThrow(/AcknowledgementRejected/);
+    await Promise.all(noisy.exits);
+  });
+
+  it("reserves one outpoint regardless of txid case", async () => {
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const first = simulatedMainnetRequest();
+    const second = simulatedMainnetRequest();
+    const upper = first.vault.funding!.txid.toUpperCase();
+    const helper = { txid: "33".repeat(32), vout: 1, value: "10000" };
+    const funding = { ...first.vault.funding!, txid: upper };
+    const secondVault = { ...second.vault, funding };
+    const request = second.prepared.body.request as {
+      vault: typeof secondVault;
+      manifest: { funding: typeof funding; helper: typeof helper };
+    };
+    const nextRequest = {
+      ...request,
+      vault: secondVault,
+      manifest: { ...request.manifest, funding, helper },
+    };
+    const body = {
+      ...second.prepared.body,
+      request: nextRequest,
+      manifest: {
+        ...second.prepared.body.manifest,
+        funding,
+        helper,
+      },
+    };
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${first.vault.id}`,
+      version: 0,
+      vault: first.vault,
+    });
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${secondVault.id}`,
+      version: 0,
+      vault: secondVault,
+    });
+    await admitSupervisedJob(store, address, "mainnet", first.prepared.body);
+    await expect(
+      admitSupervisedJob(store, address, "mainnet", body),
+    ).rejects.toThrow(/Outpoint already reserved/);
   });
 });

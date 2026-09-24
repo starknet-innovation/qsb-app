@@ -4,15 +4,16 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import archived from "../../src/lib/releases/qsb-config-a-ranked-v2.json";
 import {
   componentForPath,
+  enrolledSourcePaths,
   historicalCandidateRoots,
   optimizedSubsetRoot,
-  requiredReleasePaths,
 } from "./closure";
 import { assertInsideRepo, sha256Hex } from "./identity";
 import { RELEASE_MANIFEST_FORMAT } from "./types";
@@ -154,6 +155,17 @@ function hashFile(root: string, relativePath: string): string {
   return sha256Hex(readFileSync(absolute));
 }
 
+export function enrollHistoricalPair(
+  pinningFiles: readonly string[],
+  subsetFiles: readonly string[],
+): { pinning: boolean; historicalSubset: boolean } {
+  const pinning = pinningFiles.length > 0;
+  const historicalSubset = subsetFiles.length > 0;
+  if (pinning !== historicalSubset)
+    throw new Error("HistoricalCandidatePairIncomplete");
+  return { pinning, historicalSubset };
+}
+
 export function assertCompatibleStages(manifest: SourceReleaseManifest): void {
   const { pinning, historicalSubset, optimizedSubset } = manifest.releases;
   if (
@@ -182,14 +194,15 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
-  const required = [...requiredReleasePaths];
+  const required = enrolledSourcePaths(root);
   for (const relativePath of required) {
     if (!existsSync(assertInsideRepo(root, relativePath)))
       throw new Error(`Missing release input ${relativePath}`);
   }
-  const historical = historicalCandidateRoots.flatMap((dir) =>
-    walkFiles(root, dir),
-  );
+  const pinningFiles = walkFiles(root, historicalCandidateRoots[0]);
+  const subsetFiles = walkFiles(root, historicalCandidateRoots[1]);
+  const enrolled = enrollHistoricalPair(pinningFiles, subsetFiles);
+  const historical = [...pinningFiles, ...subsetFiles];
   const optimized = walkFiles(root, optimizedSubsetRoot);
   if (!optimized.length)
     throw new Error("Optimized subset source is not in this checkout");
@@ -209,7 +222,6 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
     a[0].localeCompare(b[0]),
   ))
     components[component] = sha256Hex(parts.sort().join("\n"));
-  const historicalEnrolled = historical.length > 0;
   const manifest: SourceReleaseManifest = {
     format: RELEASE_MANIFEST_FORMAT,
     mainnetEnabled: false,
@@ -247,14 +259,14 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
         replacesSolverPipeline: false,
         selectedByWorkerDockerfile: true,
         compatiblePipelinePartner: "historicalSubset",
-        sourcesEnrolled: historicalEnrolled,
+        sourcesEnrolled: enrolled.pinning,
       },
       historicalSubset: {
         role: "historical-pipeline-stage",
         replacesSolverPipeline: false,
         selectedByWorkerDockerfile: true,
         compatiblePipelinePartner: "pinning",
-        sourcesEnrolled: historicalEnrolled,
+        sourcesEnrolled: enrolled.historicalSubset,
       },
       optimizedSubset: {
         role: "isolated-research",
@@ -326,6 +338,7 @@ export function writePackageTree(
   outDir: string,
   manifest: SourceReleaseManifest = createSourceManifest(root),
 ): void {
+  rmSync(path.join(outDir, "tree"), { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
   for (const relativePath of Object.keys(manifest.identities.sourceFiles)) {
     const source = assertInsideRepo(root, relativePath);
@@ -346,23 +359,32 @@ export function verifyPackageTree(outDir: string): SourceReleaseManifest {
     readFileSync(path.join(outDir, "release-manifest.json"), "utf8"),
   ) as SourceReleaseManifest;
   assertCompatibleStages(manifest);
+  const absent = [
+    manifest.identities.nativeBinaries.pinning,
+    manifest.identities.nativeBinaries.historicalSubset,
+    manifest.identities.nativeBinaries.optimizedSubset,
+    manifest.identities.imageConfig,
+    manifest.identities.ociIndex,
+    manifest.identities.registryManifest,
+  ];
   if (
     manifest.mainnetEnabled !== false ||
     manifest.broadcastAuthorized !== false ||
     manifest.identities.registryManifest.placeholderIsDeployable !== false ||
-    manifest.identities.nativeBinaries.pinning.value !== null ||
-    manifest.identities.imageConfig.value !== null ||
-    manifest.identities.ociIndex.value !== null ||
-    manifest.identities.registryManifest.value !== null
+    absent.some((identity) => identity.value !== null || identity.status !== "not-produced")
   )
     throw new Error("Release manifest claims an identity this checkout did not produce");
+  const treeRoot = path.resolve(outDir, "tree");
+  const walked = walkFiles(treeRoot, ".");
+  const enrolledPaths = Object.keys(manifest.identities.sourceFiles).sort();
+  if (walked.join("\n") !== enrolledPaths.join("\n"))
+    throw new Error("Packaged tree does not match the manifest path set");
   for (const [relativePath, digest] of Object.entries(
     manifest.identities.sourceFiles,
   )) {
     if (relativePath.split("/").includes("..") || path.isAbsolute(relativePath))
       throw new Error("Release path escapes the checkout");
-    const absolute = path.resolve(outDir, "tree", relativePath);
-    const treeRoot = path.resolve(outDir, "tree");
+    const absolute = path.resolve(treeRoot, relativePath);
     if (!absolute.startsWith(treeRoot + path.sep))
       throw new Error("Release path escapes the checkout");
     if (sha256Hex(readFileSync(absolute)) !== digest)

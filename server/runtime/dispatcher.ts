@@ -114,7 +114,7 @@ export async function admitSupervisedJob(
       { row: { pk, sk: `JOB#${id}`, version: 0, job: stored } },
       ...[request.manifest.funding, request.manifest.helper].map((point) => ({
         row: {
-          pk: `OUTPOINT#${point.txid}:${point.vout}`,
+          pk: `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`,
           sk: "RESERVATION",
           version: 0,
           owner,

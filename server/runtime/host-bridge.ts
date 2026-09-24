@@ -138,34 +138,28 @@ function jobForLaunch(job: SupervisedJob, launch: LaunchRecord): SupervisedJob {
   }
 }
 
-async function commit(
-  store: Store,
-  owner: string,
-  requestId: string,
-  slot: number,
-  next: LaunchRecord,
-) {
+type LoadedPair = Awaited<ReturnType<typeof loadPair>>;
+
+async function commit(store: Store, loaded: LoadedPair, next: LaunchRecord) {
   const parsed = launchRecordSchema.parse(next);
-  const { pk, launchRow, jobRow, job } = await loadPair(
-    store,
-    owner,
-    requestId,
-    slot,
-  );
-  if (parsed.bindings.inputHash !== job.mainnetRequestHash)
+  if (parsed.bindings.inputHash !== loaded.job.mainnetRequestHash)
     throw new Error("ImmutableInputMismatch");
   await store.atomicPut([
     {
-      row: { ...launchRow, launch: parsed, version: launchRow.version + 1 },
-      expected: launchRow.version,
+      row: {
+        ...loaded.launchRow,
+        launch: parsed,
+        version: loaded.launchRow.version + 1,
+      },
+      expected: loaded.launchRow.version,
     },
     {
       row: {
-        ...jobRow,
-        job: jobForLaunch(job, parsed),
-        version: jobRow.version + 1,
+        ...loaded.jobRow,
+        job: jobForLaunch(loaded.job, parsed),
+        version: loaded.jobRow.version + 1,
       },
-      expected: jobRow.version,
+      expected: loaded.jobRow.version,
     },
   ]);
   return parsed;
@@ -246,12 +240,13 @@ export async function launchOwnedProcess(
   now: Date,
   boundMs: number,
 ): Promise<LaunchRecord> {
-  const { launch, job } = await loadPair(store, owner, requestId, slot);
+  const loaded = await loadPair(store, owner, requestId, slot);
+  const { launch, job } = loaded;
   if (launch.bindings.inputHash !== inputHash || job.mainnetRequestHash !== inputHash)
     throw new Error("ImmutableInputMismatch");
   if (launch.state !== "claimed" || launch.processStarts !== 0 || launch.replacement)
     throw new Error("LaunchRefused");
-  await commit(store, owner, requestId, slot, {
+  await commit(store, loaded, {
     ...launch,
     state: "launching",
     processStarts: launch.processStarts + 1,
@@ -261,7 +256,7 @@ export async function launchOwnedProcess(
     if (!started.processId) throw new Error("ProcessIdentityMissing");
     const current = await loadPair(store, owner, requestId, slot);
     if (current.launch.state !== "launching") throw new Error("LaunchRefused");
-    return await commit(store, owner, requestId, slot, {
+    return await commit(store, current, {
       ...current.launch,
       state: "acknowledged",
       processId: started.processId,
@@ -277,7 +272,7 @@ export async function launchOwnedProcess(
   } catch (error) {
     const current = await loadPair(store, owner, requestId, slot);
     if (current.launch.state === "launching") {
-      await commit(store, owner, requestId, slot, {
+      await commit(store, current, {
         ...current.launch,
         state: "uncertain",
       });
@@ -299,7 +294,8 @@ export async function submitProviderOnce(
   inputHash: string,
   submit: ProviderSubmit,
 ): Promise<LaunchRecord> {
-  const { launch } = await loadPair(store, owner, requestId, slot);
+  const loaded = await loadPair(store, owner, requestId, slot);
+  const { launch } = loaded;
   if (launch.bindings.inputHash !== inputHash)
     throw new Error("ImmutableInputMismatch");
   if (
@@ -309,7 +305,7 @@ export async function submitProviderOnce(
     launch.providerId
   )
     throw new Error("DuplicatePaidSubmission");
-  await commit(store, owner, requestId, slot, {
+  await commit(store, loaded, {
     ...launch,
     state: "uncertain",
     providerOutcome: "uncertain",
@@ -321,7 +317,7 @@ export async function submitProviderOnce(
     const current = await loadPair(store, owner, requestId, slot);
     if (current.launch.providerId || current.launch.providerSubmissions !== 1)
       throw new Error("DuplicatePaidSubmission");
-    return await commit(store, owner, requestId, slot, {
+    return await commit(store, current, {
       ...current.launch,
       state: "running",
       providerId: submitted.providerId,
@@ -343,7 +339,8 @@ export async function recordLateProviderId(
   inputHash: string,
   providerId: string,
 ): Promise<LaunchRecord> {
-  const { launch } = await loadPair(store, owner, requestId, slot);
+  const loaded = await loadPair(store, owner, requestId, slot);
+  const { launch } = loaded;
   if (launch.bindings.inputHash !== inputHash)
     throw new Error("ImmutableInputMismatch");
   if (!providerId) throw new Error("ProviderIdentityMissing");
@@ -354,7 +351,7 @@ export async function recordLateProviderId(
     launch.providerId
   )
     throw new Error("DuplicatePaidSubmission");
-  return commit(store, owner, requestId, slot, {
+  return commit(store, loaded, {
     ...launch,
     state: "running",
     providerId,
@@ -372,7 +369,8 @@ export async function replaceOwnedProcess(
   now: Date,
   boundMs: number,
 ): Promise<LaunchRecord> {
-  const { launch } = await loadPair(store, owner, requestId, slot);
+  const loaded = await loadPair(store, owner, requestId, slot);
+  const { launch } = loaded;
   if (launch.bindings.inputHash !== inputHash)
     throw new Error("ImmutableInputMismatch");
   if (
@@ -385,7 +383,7 @@ export async function replaceOwnedProcess(
     throw new Error("ReplaceRefused");
   const providerSubmissions = launch.providerSubmissions;
   const providerId = launch.providerId;
-  await commit(store, owner, requestId, slot, {
+  await commit(store, loaded, {
     ...launch,
     replacement: "starting",
     processStarts: launch.processStarts + 1,
@@ -406,7 +404,7 @@ export async function replaceOwnedProcess(
       : current.launch.previousProcessIds;
     const rest = { ...current.launch };
     delete rest.replacement;
-    return await commit(store, owner, requestId, slot, {
+    return await commit(store, current, {
       ...rest,
       processId: started.processId,
       previousProcessIds: previous,
@@ -422,7 +420,7 @@ export async function replaceOwnedProcess(
   } catch (error) {
     const current = await loadPair(store, owner, requestId, slot);
     if (current.launch.replacement === "starting") {
-      await commit(store, owner, requestId, slot, {
+      await commit(store, current, {
         ...current.launch,
         state: "uncertain",
         replacement: "uncertain",
@@ -441,7 +439,8 @@ export async function recordProcessExit(
   processId: string,
   exitCode: number,
 ): Promise<LaunchRecord> {
-  const { launch } = await loadPair(store, owner, requestId, slot);
+  const loaded = await loadPair(store, owner, requestId, slot);
+  const { launch } = loaded;
   if (launch.bindings.inputHash !== inputHash)
     throw new Error("ImmutableInputMismatch");
   if (
@@ -450,7 +449,7 @@ export async function recordProcessExit(
     launch.acknowledgement?.searchSuccess !== false
   )
     throw new Error("AcknowledgementIsNotSuccess");
-  return commit(store, owner, requestId, slot, {
+  return commit(store, loaded, {
     ...launch,
     state: "terminal",
     evidence: {
@@ -483,7 +482,8 @@ export async function publishSimulatedVerifiedHit(
   const solved = validateSolvedState(bundle);
   if (fingerprint(solved.request) !== inputHash)
     throw new Error("ImmutableInputMismatch");
-  const { launch } = await loadPair(store, owner, requestId, slot);
+  const loaded = await loadPair(store, owner, requestId, slot);
+  const { launch } = loaded;
   if (launch.bindings.inputHash !== inputHash)
     throw new Error("ImmutableInputMismatch");
   if (launch.processId !== processId) throw new Error("StaleProcess");
@@ -493,7 +493,7 @@ export async function publishSimulatedVerifiedHit(
     throw new Error("AcknowledgementIsNotSuccess");
   if (facts.wholeRangeCovered !== false || facts.freshSearch !== false)
     throw new Error("CoverageRejected");
-  return commit(store, owner, requestId, slot, {
+  return commit(store, loaded, {
     ...launch,
     state: "terminal",
     evidence: {
@@ -547,13 +547,14 @@ export async function drainSibling(
   requestId: string,
   inputHash: string,
 ): Promise<LaunchRecord> {
-  const { launch } = await loadPair(store, owner, requestId, 1);
+  const loaded = await loadPair(store, owner, requestId, 1);
+  const { launch } = loaded;
   if (launch.bindings.inputHash !== inputHash)
     throw new Error("ImmutableInputMismatch");
   if (launch.providerSubmissions !== 0 || launch.providerId)
     throw new Error("SiblingProviderMustBeReconciled");
   if (launch.state === "terminal") return launch;
-  return commit(store, owner, requestId, 1, {
+  return commit(store, loaded, {
     ...launch,
     state: "terminal",
     evidence: {
@@ -572,10 +573,15 @@ export async function drainSibling(
   });
 }
 
+export function acknowledgementLine(inputHash: string): string {
+  return `QSB_ACK ${inputHash}\n`;
+}
+
 export function localAckStarter(
   command: string,
   args: string[],
   boundMs: number,
+  inputHash: string,
 ): { start: OwnedProcessStart; exits: Promise<number>[] } {
   const exits: Promise<number>[] = [];
   const start: OwnedProcessStart = () =>
@@ -593,6 +599,7 @@ export function localAckStarter(
       );
       let text = "";
       let settled = false;
+      const expected = acknowledgementLine(inputHash);
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
@@ -606,13 +613,21 @@ export function localAckStarter(
         if (error) reject(error);
         else resolve({ processId });
       };
+      const consider = () => {
+        if (text.endsWith("\r")) return;
+        const normalized = text.replace(/\r\n/g, "\n");
+        if (normalized === expected) finish();
+        else if (!expected.startsWith(normalized))
+          finish(new Error("AcknowledgementRejected"));
+      };
       child.stdout.on("data", (chunk: Buffer) => {
         text += chunk.toString("utf8");
-        if (text.includes("ack")) finish();
+        consider();
       });
       child.on("error", (error) => finish(error));
       child.on("exit", (code) => {
-        if (!text.includes("ack"))
+        const normalized = text.replace(/\r\n/g, "\n");
+        if (normalized !== expected)
           finish(new Error(`ProcessExitedBeforeAck:${code ?? "null"}`));
       });
     });

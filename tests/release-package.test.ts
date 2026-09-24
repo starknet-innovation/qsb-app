@@ -1,11 +1,13 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { enrolledSourcePaths } from "../server/runtime/closure";
 import { assertInsideRepo, certifyWrapper, sha256Hex } from "../server/runtime/identity";
 import {
   assertCompatibleStages,
   createSourceManifest,
+  enrollHistoricalPair,
   serializeManifest,
   verifyPackageTree,
   writePackageTree,
@@ -101,6 +103,78 @@ describe("source release package", () => {
         nativeSha256: enrolled.nativeSha256,
       }),
     ).toEqual({ ok: false, reason: "wrapper-changed" });
+  });
+
+  it("enrolls the local import closure and build metadata", () => {
+    const manifest = createSourceManifest(root);
+    const paths = enrolledSourcePaths(root);
+    for (const relativePath of [
+      "src/mainnet/assembly.ts",
+      "src/mainnet/chain.ts",
+      "src/mainnet/finalizer.ts",
+      "src/lib/api.ts",
+      "src/lib/session.ts",
+      "src/lib/backup.ts",
+      "src/lib/qsb.ts",
+      "src/lib/qsb-worker.ts",
+      "package.json",
+      "package-lock.json",
+      "tsconfig.json",
+    ]) {
+      expect(paths).toContain(relativePath);
+      expect(manifest.identities.sourceFiles[relativePath]).toMatch(/^[a-f0-9]{64}$/);
+    }
+    expect(manifest.releases.pinning.sourcesEnrolled).toBe(true);
+    expect(manifest.releases.historicalSubset.sourcesEnrolled).toBe(true);
+  });
+
+  it("requires both historical candidate roots", () => {
+    expect(enrollHistoricalPair(["a"], ["b"])).toEqual({
+      pinning: true,
+      historicalSubset: true,
+    });
+    expect(enrollHistoricalPair([], [])).toEqual({
+      pinning: false,
+      historicalSubset: false,
+    });
+    expect(() => enrollHistoricalPair(["a"], [])).toThrow(
+      /HistoricalCandidatePairIncomplete/,
+    );
+    expect(() => enrollHistoricalPair([], ["b"])).toThrow(
+      /HistoricalCandidatePairIncomplete/,
+    );
+  });
+
+  it("rejects extra tree files and unproduced native identities", () => {
+    const manifest = createSourceManifest(root);
+    const directory = mkdtempSync(path.join(tmpdir(), "qsb-release-"));
+    writePackageTree(root, directory, manifest);
+    const extra = path.join(directory, "tree/stale-injected.txt");
+    writeFileSync(extra, "not enrolled\n");
+    expect(() => verifyPackageTree(directory)).toThrow(/path set/);
+    writePackageTree(root, directory, manifest);
+    expect(existsSync(extra)).toBe(false);
+    expect(verifyPackageTree(directory).format).toBe(
+      "qsb-source-release-manifest-v1",
+    );
+    const manifestPath = path.join(directory, "release-manifest.json");
+    const forged = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+      identities: {
+        nativeBinaries: {
+          historicalSubset: { value: string | null; status: string };
+          optimizedSubset: { value: string | null; status: string };
+        };
+      };
+    };
+    forged.identities.nativeBinaries.historicalSubset.value = "ab".repeat(32);
+    forged.identities.nativeBinaries.historicalSubset.status = "produced";
+    writeFileSync(manifestPath, JSON.stringify(forged));
+    expect(() => verifyPackageTree(directory)).toThrow(/did not produce/);
+    forged.identities.nativeBinaries.historicalSubset.value = null;
+    forged.identities.nativeBinaries.historicalSubset.status = "not-produced";
+    forged.identities.nativeBinaries.optimizedSubset.value = "cd".repeat(32);
+    writeFileSync(manifestPath, JSON.stringify(forged));
+    expect(() => verifyPackageTree(directory)).toThrow(/did not produce/);
   });
 
   it("refuses release paths outside this checkout", () => {

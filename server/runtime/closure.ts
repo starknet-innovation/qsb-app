@@ -1,3 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { assertInsideRepo } from "./identity";
+
 /** Files the public checkout can package without reading a developer work directory. */
 export const requiredReleasePaths = [
   "server/app.ts",
@@ -52,7 +56,54 @@ export const requiredReleasePaths = [
   "scripts/package-release.ts",
 ] as const;
 
+/** Compiler and lock metadata required to type-check the packaged tree. */
+export const buildMetadataPaths = [
+  "package.json",
+  "package-lock.json",
+  "tsconfig.json",
+] as const;
+
+const localSpecifier =
+  /(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)["'](\.[^"']+)["']|new URL\(\s*["'](\.[^"']+)["']/g;
+
+function resolveLocalSpecifier(fromFile: string, specifier: string): string {
+  const base = path.posix.normalize(
+    path.posix.join(path.posix.dirname(fromFile), specifier),
+  );
+  if (/\.(?:ts|tsx|json|py|mjs|cjs)$/.test(base)) return base;
+  return `${base}.ts`;
+}
+
+/** Transitive relative imports of the enrolled sources, plus build metadata. */
+export function enrolledSourcePaths(root: string): string[] {
+  const seen = new Set<string>([...requiredReleasePaths]);
+  const pending: string[] = [...requiredReleasePaths];
+  while (pending.length) {
+    const relativePath = pending.pop();
+    if (!relativePath || !/\.(?:ts|tsx)$/.test(relativePath)) continue;
+    const absolute = assertInsideRepo(root, relativePath);
+    if (!existsSync(absolute)) continue;
+    const text = readFileSync(absolute, "utf8");
+    for (const match of text.matchAll(localSpecifier)) {
+      const specifier = match[1] ?? match[2];
+      if (!specifier) continue;
+      const resolved = resolveLocalSpecifier(relativePath, specifier);
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
+      pending.push(resolved);
+    }
+  }
+  for (const relativePath of buildMetadataPaths) seen.add(relativePath);
+  return [...seen].sort();
+}
+
 export const componentForPath = (relativePath: string): string => {
+  if (
+    relativePath === "package.json" ||
+    relativePath === "package-lock.json" ||
+    relativePath === "tsconfig.json"
+  )
+    return "build-metadata";
   if (relativePath.startsWith("server/runtime/host-bridge.ts") || relativePath.startsWith("worker/"))
     return relativePath.startsWith("worker/cpu/") ? "cpu-verifier" : "runtime";
   if (relativePath === "server/runtime/cpu-verifier.ts") return "cpu-verifier";
