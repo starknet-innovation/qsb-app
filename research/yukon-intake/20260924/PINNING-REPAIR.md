@@ -333,3 +333,26 @@ provider rounding. No funded fixture, wallet, spent proof, production deployment
 or broadcast was involved. Remaining principal gates are broader arithmetic,
 matched throughput, explicit release/runtime integration, independent review and
 a fresh complete withdrawal; the PR remains HOLD.
+
+## Explicit runtime adapter prepared
+
+`scripts/yukon/pin_runtime.py` adds an isolated pinning-only protocol rather than
+changing the historical worker's CLI or release identity. Its caller supplies an
+enrolled expected binary hash; request and installed bytes must both match it.
+The request includes parameter integrity, public manifest/request identity and
+explicit checked range bounds. Execution uses a fresh directory, process-group
+timeout and a restricted environment. A successful exit alone is insufficient:
+the exact single drained-count marker is required, and returned candidate records
+must parse exactly and fall within the requested range without duplicates.
+Malformed or excessive output rejects. Failed/interrupted work returns no hits.
+
+All results remain `HOLD`, `verified=false`, `rangeCreditEligible=false`. This
+adapter does not CPU-verify puzzle hits, publish durable credit, enroll a release,
+attest remote hardware, or make the candidate selectable by the app. These are
+remaining integration requirements, not claims satisfied by a response hash.
+
+Thirty-four local tests pass, including actual stub subprocess success/failure,
+missing marker, binary mismatch and process-group timeout. The stub is not GPU
+solver evidence. CI now additionally prepares a valid synthetic public parameter
+record and runs the actual compiled solver through this adapter without a GPU;
+that new CI result is pending. Successful GPU runtime integration still remains.

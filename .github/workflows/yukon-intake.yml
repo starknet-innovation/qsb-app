@@ -31,6 +31,7 @@ jobs:
           docker build -f scripts/yukon/Dockerfile.pin-repair -t qsb-yukon-pin-repair:compile /tmp/yukon-pin-repair
           docker run --rm --network none --read-only qsb-yukon-pin-repair:compile > /tmp/yukon-intake/pin-repair-compile.txt
           docker run --rm --network none --read-only --tmpfs /tmp --mount type=bind,src="$PWD/scripts/yukon",dst=/checks,readonly --entrypoint python3 qsb-yukon-pin-repair:compile /checks/check_native_cli.py /pinning-repaired > /tmp/yukon-intake/pin-repair-native-cli.json
+          docker run --rm --network none --read-only --tmpfs /tmp --mount type=bind,src="$PWD/scripts/yukon",dst=/checks,readonly --entrypoint python3 qsb-yukon-pin-repair:compile /checks/check_pin_runtime_native.py /pinning-repaired > /tmp/yukon-intake/pin-repair-runtime-no-gpu.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
