@@ -81,7 +81,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "7be7de5385a876fdc73c7ed080f42c9abbf690267d63a553734966163eead391",
+      "api": "c9399cdf5a2971ecaf7464bef707194d6095a3e3cc9fe560d50919f50b508f4f",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "726cd12bbbe992887d77a88a31a383d14826b6a4dbdd9cedd22547722d23914a",
@@ -127,7 +127,7 @@
       "value": null
     },
     "sourceFiles": {
-      "AGENTS.md": "7eb8caf58178df323b24968d4f81769b1f6e13db9ac3bad77d669c26d7e76089",
+      "AGENTS.md": "302ac626fa8e321d7cea178f95548890d64aac6b1c4b32f95a67fc4468ba5ee1",
       "README.md": "d476b0cfec3847dd8bcc165beeec2e45d2f3031084de6073d0426ea60c9abfb7",
       "docs/source-build/20260924/solver-build-receipt.json": "1e243370561b16c7d2c1d9be68e756fe39fbea44167f0e70d8507d1a14dfc160",
       "package-lock.json": "633d302ec95b0e175ba1bf9d24ee827b93b27c33910b76ca434b99c783754e4b",
