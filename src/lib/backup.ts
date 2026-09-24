@@ -120,9 +120,15 @@ export async function decryptRecovery(
     );
   }
 }
+const recoveryBackupId =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:-withdrawal|-signing)?$/i;
+
 export function recoveryBackupFilename(id: string): string {
   if (
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    !recoveryBackupId.test(id) ||
+    id.includes("/") ||
+    id.includes("\\") ||
+    id.includes("..")
   )
     throw new Error("Invalid vault id.");
   return `qsb-recovery-${id}.json`;

@@ -81,10 +81,10 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "1e9e0ce3b4ab62898fa6bba22b63d789130a5e983cfdc60b7dd7722bcf0f2a4b",
+      "api": "37fc3529a18b22be1e1126932bc6c91b92bbd615bc56a95be9680e962c122961",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
-      "dispatcher": "c4db7617ecb6f36c503dc704b68d5aaec96053d9eaa48193fbf458d17cc17c78",
+      "dispatcher": "b25848b63c17a231f37187582d63a448326448227998a6ce111ef2322067ee58",
       "evidence-reader": "768e7c8098ff9d9b473f5c7a0a77ff272d679b1e9cab801dfd0145832ce88c58",
       "fresh-proof": "7c322f9603a117ad2ad0dd88dc102ec63e57d04082643f24530e9bd9aef115af",
       "historical-pinning": "9e1aba0e8882ba85f46609774844a7a75283cf5358cccd9dcc49abedf80fad48",
@@ -176,8 +176,9 @@
       "server/mainnetConfig.ts": "e995c6a9385012217326c2490f188e8382eda40fb37858e9d4f0939d86181102",
       "server/network.ts": "bf7163415b49087ba4341b59b6f9d1b736d6c37ebeb151883ab0146c61d0d66b",
       "server/providers.ts": "05a1769390b06449b83240fab4cbd0ecc78b0cd49f5d36ab1daef9c1cd453fc1",
+      "server/runtime/activation.ts": "da42133a64a484eb5b7c75fab8e66e57bc422c25c549dad9901c72c90ce5cd0e",
       "server/runtime/capability.ts": "5695dc01ce72e1243022204014b7de5a8c662ac337aa73c52124628c8de2a797",
-      "server/runtime/closure.ts": "19f30ff81ee37539608f4f17de053d6d8e9466c0daf027044403b79138923402",
+      "server/runtime/closure.ts": "4ad71b951f439ce53ced55fb8fba0eb766266d66a0f8485902ee718a834eb2c2",
       "server/runtime/core-binary.json": "e801c46615cd3b9ad84af8736cfddd7707787a1e8f29ed8afb2f07fddb4b6b96",
       "server/runtime/coverage-ledger.ts": "7c02a3c5f1dbd8681f4f1a5c552661b63c7da57d892ce3ab5356d52829774c83",
       "server/runtime/cpu-verifier.ts": "a7c3e834696bc2ec2cab21c738ed740edd2dfe5c78666e044337b27fcd9405ee",
@@ -189,7 +190,7 @@
       "server/runtime/host-requirements.ts": "dbfdc41524f043d7a8933039f4d1bdb52c034a5f9754f1d3843ec137d55a7eef",
       "server/runtime/identity.ts": "b42a637beb039e8d8e05b3d7ec45a339c7a9aaf6f4314af961984b09348bc4e8",
       "server/runtime/miner-inclusion.ts": "ba2e4a88f7b26986c9ba4c5d784bfb4be30f1fc1a7a4e52ab36a575e2e02e99e",
-      "server/runtime/package-release.ts": "8c6636bcdab04cb84e846f7244463180872d44adf9bfa7ab6e50ecf89727da6e",
+      "server/runtime/package-release.ts": "47273cfafa8e426aec0f74d78435c392ba4c59a5d6fd837ae6c2d669d5b191ba",
       "server/runtime/reservation-guard.ts": "dcb80cd1cdbbfdc5f8807c06eb1ac5216fee28313c5f480f83bf7a92b5bdbad3",
       "server/runtime/solver-review.ts": "79e83740350af6b8115f790786d5f4a775e269f5f60175b8d3d36e0451572d2f",
       "server/runtime/storage-authority.ts": "b7a4bd14832f1ea57277783e4aa30ec357ed8fd836be5c47901100f583c61746",
@@ -200,7 +201,7 @@
       "server/transaction-checks.ts": "025902928390beb57f97c341c0473857844e60725931052897f009829b72bc30",
       "server/validation-search.ts": "2944683a6a9f7965caafdd02c06779a67e17bed576680d4770fb4a65f1e54e53",
       "src/lib/api.ts": "b7d24b75c3305f5254ad7a9e9989bd390efd74a17b13862c39764d434854c22e",
-      "src/lib/backup.ts": "329acf76fbeb806f8a07e4a5fbf4277beb1d5270d00dd37f67ca1ce3c5d03d1f",
+      "src/lib/backup.ts": "bc8be06c10e970dad3ef335f9f2788bb58628c350490052155cf37a54840c572",
       "src/lib/model.ts": "e4a05fc3dd1bd274fc643a5aa78805963afbe8bd1c1a6ad611b6405faa50bc4d",
       "src/lib/network.ts": "74b9b709923ee52d314080254e9213a35d39cf348e5b72fe1443c9f41af8fbab",
       "src/lib/provenance.ts": "a0f8a8f81c3671933d1839439eecdc26959e855d9399ca34ae518ff4a7d03035",
@@ -216,7 +217,7 @@
       "src/mainnet/consumer.ts": "75638bbbe7d7eb75f393db71308dfea8f266555637c86fe187f3401bef2e0240",
       "src/mainnet/finalizer.ts": "cf6566d098f4e8616441d7089b7270e33347ac4750776ad5075924c03ec8312f",
       "src/mainnet/flow.ts": "e3fcfb1ce652f6f9bb383701c04a08077fa711362ebb449c6fad7096189fa9c1",
-      "src/mainnet/intent.ts": "2e2b1608e5915163a1d72e594d4e0ba553c4c548be0ba39b3a989fafbbd9b234",
+      "src/mainnet/intent.ts": "f84cfbd0cc7c69270beb2f5fb1284238c1f87546b9e07944248821e079a5faec",
       "src/mainnet/publicResult.ts": "0f40d89e5d22da447ea43e95cd7f7735def23b73081913faf4f2ed789d3bf4fa",
       "src/mainnet/retainedRequest.ts": "a41d6b26a0d1015508f04e5e341352e180e7f76e2592aafb8597e36907f7a120",
       "src/mainnet/solvedContract.ts": "037dd2d0154b4940374b57490dde93efa19bc5a8b15b75450c3c5d91b7831fce",
@@ -282,7 +283,8 @@
     "Production AWS permissions, Runpod credentials, wallet backups, and operator runtime files are not included.",
     "Native binary hashes and OCI config, index, and registry manifest digests remain unproduced.",
     "Section 6 fresh optimized withdrawal was not run from this checkout. Proof-runner, freshness, bundle, drain, and Core-report gates do not close it.",
-    "Section 7 external miner inclusion was not run from this checkout. Chain-agreement, spent-fixture, exact-spend, and preflight gates do not close it."
+    "Section 7 external miner inclusion was not run from this checkout. Chain-agreement, spent-fixture, exact-spend, and preflight gates do not close it.",
+    "Section 8 production activation is not approved. Decision, deployment, and runbook gates do not enable mainnet or authorize a spend."
   ],
   "releases": {
     "historicalSubset": {

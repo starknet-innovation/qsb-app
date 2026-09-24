@@ -447,36 +447,80 @@ export function assessDeploymentRecord(input: unknown): DeploymentAssessment {
   };
 }
 
+const quotedCredential =
+  /(?:^|[^A-Za-z0-9_])(?:passphrase|password|api[_-]?key|secretString|private[_-]?key|mnemonic|seed|token|walletBackup|authorization)\s*[:=]\s*(?:"[^"\n]+"|'[^'\n]+'|`[^`\n]+`)/i;
+const envCredential =
+  /(?:^|[\n;])\s*(?:export\s+)?[A-Z0-9_]*(?:PASSPHRASE|PASSWORD|API_KEY|SECRET|TOKEN|MNEMONIC|PRIVATE_KEY)[A-Z0-9_]*\s*=\s*(?:"[^"\n]+"|'[^'\n]+'|\S+)/;
+const yamlCredential =
+  /(?:^|\n)\s*(?:passphrase|password|api_key|api-key|private_key|mnemonic|token)\s*:\s*(?:"[^"\n]+"|'[^'\n]+'|[^\s#]+)/i;
+
+export type ProposedCommitSecretVerdict = {
+  format: "qsb-proposed-commit-secret-verdict-v1";
+  verdict: "clean" | "indeterminate";
+  secretsCommitted: false | "unscanned";
+  certified: boolean;
+  unscannedPaths: string[];
+};
+
+function refuseCredentialText(file: { path: string; text: string }): void {
+  if (
+    /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(file.text) ||
+    /AKIA[0-9A-Z]{16}/.test(file.text) ||
+    quotedCredential.test(file.text) ||
+    envCredential.test(file.text)
+  )
+    fail("SecretCommitRefused:material");
+  if (/\.(?:ya?ml|txt)$/i.test(file.path) && yamlCredential.test(file.text))
+    fail("SecretCommitRefused:material");
+}
+
+/** JSON objects are scanned structurally. Other text is not certified clean. */
+function jsonStructurallyScanned(file: { path: string; text: string }): boolean {
+  const trimmed = file.text.trim();
+  if (trimmed === "") return true;
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (containsEncryptedBackup(parsed)) fail("SecretCommitRefused:backup");
+    assertNoCredentialMaterial(parsed, file.path);
+    return true;
+  } catch (error) {
+    if (error instanceof ActivationError) throw error;
+    if (error instanceof SyntaxError) return false;
+    if (
+      error instanceof Error &&
+      error.message.startsWith("CredentialMaterialRejected")
+    )
+      fail(`SecretCommitRefused:${error.message}`);
+    throw error;
+  }
+}
+
 export function assertProposedCommitHasNoSecrets(
   files: { path: string; text: string }[],
-): { secretsCommitted: false } {
+): ProposedCommitSecretVerdict {
   if (files.length === 0) fail("SecretCommitRefused:empty");
+  const unscannedPaths: string[] = [];
   for (const file of files) {
     if (forbiddenCommitPath.test(file.path)) fail(`SecretCommitRefused:${file.path}`);
-    if (
-      /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(file.text) ||
-      /AKIA[0-9A-Z]{16}/.test(file.text)
-    )
-      fail("SecretCommitRefused:material");
-    const trimmed = file.text.trim();
-    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-      try {
-        const parsed = JSON.parse(trimmed) as unknown;
-        if (containsEncryptedBackup(parsed)) fail("SecretCommitRefused:backup");
-        assertNoCredentialMaterial(parsed, file.path);
-      } catch (error) {
-        if (error instanceof ActivationError) throw error;
-        if (error instanceof SyntaxError) continue;
-        if (
-          error instanceof Error &&
-          error.message.startsWith("CredentialMaterialRejected")
-        )
-          fail(`SecretCommitRefused:${error.message}`);
-        throw error;
-      }
-    }
+    refuseCredentialText(file);
+    if (!jsonStructurallyScanned(file)) unscannedPaths.push(file.path);
   }
-  return { secretsCommitted: false };
+  if (unscannedPaths.length > 0)
+    return {
+      format: "qsb-proposed-commit-secret-verdict-v1",
+      verdict: "indeterminate",
+      secretsCommitted: "unscanned",
+      certified: false,
+      unscannedPaths,
+    };
+  return {
+    format: "qsb-proposed-commit-secret-verdict-v1",
+    verdict: "clean",
+    secretsCommitted: false,
+    certified: true,
+    unscannedPaths: [],
+  };
 }
 
 export function agentsDeploymentRule(agentsMarkdown: string): void {

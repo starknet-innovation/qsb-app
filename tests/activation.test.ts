@@ -282,6 +282,16 @@ describe("deployment verification", () => {
   it("rejects secret material in a proposed commit", () => {
     expect(
       assertProposedCommitHasNoSecrets([
+        { path: "config.json", text: JSON.stringify({ enabled: false }) },
+      ]),
+    ).toMatchObject({
+      verdict: "clean",
+      secretsCommitted: false,
+      certified: true,
+      unscannedPaths: [],
+    });
+    expect(
+      assertProposedCommitHasNoSecrets([
         { path: "docs/OPERATIONAL-RUNBOOK.md", text: "no secrets here" },
         {
           path: "server/runtime/host-requirements.ts",
@@ -295,7 +305,29 @@ describe("deployment verification", () => {
           text: readFileSync(path.join(root, "src/lib/backup.ts"), "utf8"),
         },
       ]),
-    ).toEqual({ secretsCommitted: false });
+    ).toMatchObject({
+      verdict: "indeterminate",
+      secretsCommitted: "unscanned",
+      certified: false,
+    });
+    expect(() =>
+      assertProposedCommitHasNoSecrets([
+        {
+          path: "config.ts",
+          text: 'const config = { passphrase: "not-a-real-secret" }',
+        },
+      ]),
+    ).toThrow("SecretCommitRefused:material");
+    expect(() =>
+      assertProposedCommitHasNoSecrets([
+        { path: "notes.txt", text: "token: not-a-real-secret" },
+      ]),
+    ).toThrow("SecretCommitRefused:material");
+    expect(() =>
+      assertProposedCommitHasNoSecrets([
+        { path: "run.sh", text: "export TOKEN=not-a-real-secret" },
+      ]),
+    ).toThrow("SecretCommitRefused:material");
     expect(() =>
       assertProposedCommitHasNoSecrets([{ path: ".env", text: "X=1" }]),
     ).toThrow("SecretCommitRefused");

@@ -122,6 +122,18 @@ describe("section 8 in-repo regressions", () => {
     expect(recoveryBackupFilename(original.vault.id)).toBe(
       `qsb-recovery-${original.vault.id}.json`,
     );
+    expect(recoveryBackupFilename(`${original.vault.id}-withdrawal`)).toBe(
+      `qsb-recovery-${original.vault.id}-withdrawal.json`,
+    );
+    expect(recoveryBackupFilename(`${original.vault.id}-signing`)).toBe(
+      `qsb-recovery-${original.vault.id}-signing.json`,
+    );
+    expect(() => recoveryBackupFilename(`${original.vault.id}-other`)).toThrow(
+      "Invalid vault id.",
+    );
+    expect(() => recoveryBackupFilename(`../${original.vault.id}`)).toThrow(
+      "Invalid vault id.",
+    );
     expect(downloaded).not.toContain(passphrase);
     expect(downloaded).not.toContain("private-only");
     const reimported = await decryptRecovery(downloaded, passphrase);
