@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, cpSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, rmSync, cpSync, readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -18,7 +18,9 @@ if (!/mainnetEnabled:\s*false/.test(model)) throw Error('This deployment package
 execFileSync('npm',['run','vendor'],{stdio:'inherit'});
 execFileSync('npm',['run','build'],{stdio:'inherit',env:{...process.env,VITE_QSB_NETWORK:network}});
 const out = path.join(root,'terraform/.build');
+const preservedIdentities = existsSync(path.join(out,'deploy-identities.json')) ? readFileSync(path.join(out,'deploy-identities.json')) : null;
 rmSync(out,{recursive:true,force:true});mkdirSync(out,{recursive:true});
+if (preservedIdentities) writeFileSync(path.join(out,'deploy-identities.json'), preservedIdentities);
 cpSync('dist',path.join(out,'frontend'),{recursive:true});
 execFileSync('node',['supervised/build.mjs'],{stdio:'inherit'});
 cpSync('supervised/dist',path.join(out,'runtime'),{recursive:true});
