@@ -53,6 +53,8 @@ export type SupervisedJob = {
   attempt: number;
   computeSeconds: number;
   revision: number;
+  /** Slot that owns the single billable provider submission for this request. */
+  paidProviderSlot?: number;
   error?: string;
   solution?: {
     sequence: number;
@@ -132,10 +134,23 @@ async function loadPair(store: Store, owner: string, requestId: string, slot: nu
 }
 
 function jobForLaunch(job: SupervisedJob, launch: LaunchRecord): SupervisedJob {
+  if (
+    launch.providerSubmissions > 0 &&
+    job.paidProviderSlot !== undefined &&
+    job.paidProviderSlot !== launch.bindings.slot
+  )
+    throw new Error("DuplicatePaidSubmission");
+  const paidProviderSlot =
+    launch.providerSubmissions > 0 ? launch.bindings.slot : job.paidProviderSlot;
   if (launch.bindings.slot !== 0)
-    return { ...job, updatedAt: new Date().toISOString() };
+    return {
+      ...job,
+      ...(paidProviderSlot !== undefined ? { paidProviderSlot } : {}),
+      updatedAt: new Date().toISOString(),
+    };
   const next: SupervisedJob = {
     ...job,
+    ...(paidProviderSlot !== undefined ? { paidProviderSlot } : {}),
     updatedAt: new Date().toISOString(),
     runtime: runtimeView(launch),
   };
@@ -184,7 +199,10 @@ async function commit(store: Store, loaded: LoadedPair, next: LaunchRecord) {
   const parsed = launchRecordSchema.parse(next);
   if (parsed.bindings.inputHash !== loaded.job.mainnetRequestHash)
     throw new Error("ImmutableInputMismatch");
-  await store.atomicPut([
+  const nextJob = jobForLaunch(loaded.job, parsed);
+  const reservesProvider =
+    parsed.providerSubmissions > 0 && loaded.job.paidProviderSlot !== parsed.bindings.slot;
+  const writes: Parameters<Store["atomicPut"]>[0] = [
     {
       row: {
         ...loaded.launchRow,
@@ -193,15 +211,18 @@ async function commit(store: Store, loaded: LoadedPair, next: LaunchRecord) {
       },
       expected: loaded.launchRow.version,
     },
-    {
+  ];
+  if (parsed.bindings.slot === 0 || reservesProvider) {
+    writes.push({
       row: {
         ...loaded.jobRow,
-        job: jobForLaunch(loaded.job, parsed),
+        job: nextJob,
         version: loaded.jobRow.version + 1,
       },
       expected: loaded.jobRow.version,
-    },
-  ]);
+    });
+  }
+  await store.atomicPut(writes);
   return parsed;
 }
 
@@ -291,35 +312,78 @@ export async function launchOwnedProcess(
     state: "launching",
     processStarts: launch.processStarts + 1,
   });
+  let started: { processId: string; stdoutExclusive?: Promise<void> } | undefined;
   try {
-    const started = await start();
-    if (!started.processId) throw new Error("ProcessIdentityMissing");
-    const current = await loadPair(store, owner, requestId, slot);
-    if (current.launch.state !== "launching") throw new Error("LaunchRefused");
-    const acknowledged = await commit(store, current, {
-      ...current.launch,
-      state: "acknowledged",
-      processId: started.processId,
-      acknowledgement: {
-        kind: "process-started",
-        processId: started.processId,
-        deadline: new Date(now.getTime() + boundMs).toISOString(),
-        inputHash,
-        searchSuccess: false,
-        wholeRangeCovered: false,
-      },
-    });
+    const startedProcess = await start();
+    if (!startedProcess.processId) throw new Error("ProcessIdentityMissing");
+    started = startedProcess;
+    const acknowledged = await acknowledgeSpawned(
+      store,
+      owner,
+      requestId,
+      slot,
+      inputHash,
+      started.processId,
+      now,
+      boundMs,
+    );
     watchExclusiveStdout(store, owner, requestId, slot, inputHash, started);
     return acknowledged;
   } catch (error) {
-    const current = await loadPair(store, owner, requestId, slot);
-    if (current.launch.state === "launching") {
-      await commit(store, current, {
-        ...current.launch,
-        state: "uncertain",
-      });
+    const processId = started?.processId;
+    for (;;) {
+      const current = await loadPair(store, owner, requestId, slot);
+      if (processId && current.launch.processId === processId) break;
+      if (current.launch.state !== "launching") break;
+      try {
+        await commit(store, current, {
+          ...current.launch,
+          state: "uncertain",
+          ...(processId ? { processId } : {}),
+        });
+        break;
+      } catch (persistError) {
+        if (persistError instanceof Conflict) continue;
+        throw persistError;
+      }
     }
     throw error;
+  }
+}
+
+async function acknowledgeSpawned(
+  store: Store,
+  owner: string,
+  requestId: string,
+  slot: number,
+  inputHash: string,
+  processId: string,
+  now: Date,
+  boundMs: number,
+): Promise<LaunchRecord> {
+  for (;;) {
+    const current = await loadPair(store, owner, requestId, slot);
+    if (current.launch.processId === processId && current.launch.state === "acknowledged")
+      return current.launch;
+    if (current.launch.state !== "launching") throw new Error("LaunchRefused");
+    try {
+      return await commit(store, current, {
+        ...current.launch,
+        state: "acknowledged",
+        processId,
+        acknowledgement: {
+          kind: "process-started",
+          processId,
+          deadline: new Date(now.getTime() + boundMs).toISOString(),
+          inputHash,
+          searchSuccess: false,
+          wholeRangeCovered: false,
+        },
+      });
+    } catch (error) {
+      if (error instanceof Conflict) continue;
+      throw error;
+    }
   }
 }
 
@@ -336,24 +400,34 @@ export async function submitProviderOnce(
   inputHash: string,
   submit: ProviderSubmit,
 ): Promise<LaunchRecord> {
-  const loaded = await loadPair(store, owner, requestId, slot);
-  const { launch } = loaded;
-  if (launch.bindings.inputHash !== inputHash)
-    throw new Error("ImmutableInputMismatch");
-  if (
-    launch.state !== "acknowledged" ||
-    launch.replacement ||
-    launch.providerSubmissions !== 0 ||
-    launch.providerOutcome !== "not-submitted" ||
-    launch.providerId
-  )
-    throw new Error("DuplicatePaidSubmission");
-  await commit(store, loaded, {
-    ...launch,
-    state: "uncertain",
-    providerOutcome: "uncertain",
-    providerSubmissions: 1,
-  });
+  for (;;) {
+    const loaded = await loadPair(store, owner, requestId, slot);
+    const { launch, job } = loaded;
+    if (launch.bindings.inputHash !== inputHash)
+      throw new Error("ImmutableInputMismatch");
+    if (job.paidProviderSlot !== undefined && job.paidProviderSlot !== slot)
+      throw new Error("DuplicatePaidSubmission");
+    if (
+      launch.state !== "acknowledged" ||
+      launch.replacement ||
+      launch.providerSubmissions !== 0 ||
+      launch.providerOutcome !== "not-submitted" ||
+      launch.providerId
+    )
+      throw new Error("DuplicatePaidSubmission");
+    try {
+      await commit(store, loaded, {
+        ...launch,
+        state: "uncertain",
+        providerOutcome: "uncertain",
+        providerSubmissions: 1,
+      });
+      break;
+    } catch (error) {
+      if (error instanceof Conflict) continue;
+      throw error;
+    }
+  }
   try {
     const submitted = await submit();
     if (!submitted.providerId) throw new Error("ProviderIdentityMissing");

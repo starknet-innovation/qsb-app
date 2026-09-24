@@ -1,5 +1,11 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { componentForPath } from "./closure";
+import { assertInsideRepo, sha256Hex } from "./identity";
+import { componentIdentities } from "./package-release";
+import { RELEASE_MANIFEST_FORMAT } from "./types";
 
 export type CpuVerifierResult =
   | { ok: true; result: unknown; source: "worker/cpu/handler.py" }
@@ -16,12 +22,49 @@ except Exception as error:
     json.dump({"ok": False, "error": type(error).__name__ + ": " + str(error)}, sys.stdout)
 `;
 
+const trustedManifestPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../release/source-manifest.json",
+);
+
+/** Refuse to label a run as enrolled unless the CPU sources match the trusted manifest. */
+export function assertEnrolledCpuSources(root: string): void {
+  const manifest = JSON.parse(readFileSync(trustedManifestPath, "utf8")) as {
+    format: string;
+    identities: {
+      sourceFiles: Record<string, string>;
+      components: Record<string, string>;
+    };
+  };
+  if (manifest.format !== RELEASE_MANIFEST_FORMAT)
+    throw new Error("CpuVerifierNotEnrolled");
+  const enrolled: Record<string, string> = {};
+  for (const [relativePath, digest] of Object.entries(manifest.identities.sourceFiles)) {
+    if (componentForPath(relativePath) !== "cpu-verifier") continue;
+    let actual: string;
+    try {
+      actual = sha256Hex(readFileSync(assertInsideRepo(root, relativePath)));
+    } catch {
+      throw new Error("CpuVerifierNotEnrolled");
+    }
+    if (actual !== digest) throw new Error("CpuVerifierNotEnrolled");
+    enrolled[relativePath] = digest;
+  }
+  if (
+    Object.keys(enrolled).length === 0 ||
+    componentIdentities(enrolled)["cpu-verifier"] !==
+      manifest.identities.components["cpu-verifier"]
+  )
+    throw new Error("CpuVerifierNotEnrolled");
+}
+
 /** Runs the enrolled public CPU verifier. A rejection is not search success. */
-export function runEnrolledCpuVerifier(
+export async function runEnrolledCpuVerifier(
   root: string,
   event: unknown,
   timeoutMs = 20000,
 ): Promise<CpuVerifierResult> {
+  assertEnrolledCpuSources(root);
   return new Promise((resolve, reject) => {
     const child = spawn(
       "python3",

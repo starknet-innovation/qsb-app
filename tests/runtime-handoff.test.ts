@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { Signer } from "bip322-js";
 import * as btc from "@scure/btc-signer";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -1348,6 +1350,106 @@ describe("supervised runtime handoff", () => {
     }
     expect(conflicts).toBe(0);
     expect(state).toBe("uncertain");
+  });
+
+  it("refuses a CPU verifier whose sources are not the enrolled bytes", async () => {
+    const directory = mkdtempSync(`${tmpdir()}/qsb-cpu-`);
+    await expect(
+      runEnrolledCpuVerifier(directory, { action: "verify", stage: "pinning" }),
+    ).rejects.toThrow(/CpuVerifierNotEnrolled/);
+  });
+
+  it("retains both process ids when primary and sibling acknowledge together", async () => {
+    const { store, admitted } = await claimedFixture();
+    await openSiblingSlot(store, address, admitted.job.id, admitted.job.mainnetRequestHash);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const primary = launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => {
+        await gate;
+        return { processId: "primary-pid" };
+      },
+      new Date(),
+      1000,
+    );
+    const sibling = launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      1,
+      admitted.job.mainnetRequestHash,
+      async () => {
+        await gate;
+        return { processId: "sibling-pid" };
+      },
+      new Date(),
+      1000,
+    );
+    const started = Date.now();
+    while (Date.now() - started < 2000) {
+      const primaryLaunch = (
+        await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+      )?.launch as { state: string };
+      const siblingLaunch = (
+        await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#1`)
+      )?.launch as { state: string };
+      if (primaryLaunch.state === "launching" && siblingLaunch.state === "launching") break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    release();
+    const [primaryResult, siblingResult] = await Promise.all([primary, sibling]);
+    expect(primaryResult).toMatchObject({ state: "acknowledged", processId: "primary-pid" });
+    expect(siblingResult).toMatchObject({ state: "acknowledged", processId: "sibling-pid" });
+  });
+
+  it("allows only one paid provider submission across sibling slots", async () => {
+    const { store, admitted } = await claimedFixture();
+    await openSiblingSlot(store, address, admitted.job.id, admitted.job.mainnetRequestHash);
+    for (const slot of [0, 1]) {
+      await launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        slot,
+        admitted.job.mainnetRequestHash,
+        async () => ({ processId: `slot-${slot}` }),
+        new Date(),
+        1000,
+      );
+    }
+    let calls = 0;
+    const submit = async () => {
+      calls += 1;
+      return { providerId: `provider-${calls}` };
+    };
+    const results = await Promise.allSettled([
+      submitProviderOnce(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        submit,
+      ),
+      submitProviderOnce(
+        store,
+        address,
+        admitted.job.id,
+        1,
+        admitted.job.mainnetRequestHash,
+        submit,
+      ),
+    ]);
+    expect(calls).toBe(1);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
   });
 
   it("does not drain a sibling that is still launching without a pid", async () => {

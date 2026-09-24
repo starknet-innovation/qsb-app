@@ -82,13 +82,13 @@
     "components": {
       "api": "84b742b60dd15926cc317a053538fcda0ff4c9f7c26bd99fb7612621acc7acc3",
       "build-metadata": "3a2ef4f2470110d8310426dc37725bddf090aa6a4d7b87a416fd50419265a25e",
-      "cpu-verifier": "23c3531f90934a8ca39608da0111a9c0731ec0debab33837ca2c69a61911f00e",
+      "cpu-verifier": "8d08185ae81d3238cc445466e0b7458dfb870dd31ee3d4b526cf41f9e784adb2",
       "dispatcher": "678954556205b8ee08810fe4c2a74ecc56bea8ec402dbf9a5205f9fb3e532e29",
       "evidence-reader": "70b4e6371a0de567e4368c65d5ab2904f801e094c059b9f99b73d30670ebe674",
       "historical-pinning": "9e1aba0e8882ba85f46609774844a7a75283cf5358cccd9dcc49abedf80fad48",
       "historical-subset": "322de9dfdec86850b23fbc70e41c6eb29b6e2439235138d2fd61897e9438ed17",
       "optimized-subset": "093a86768158ab60c0a5c2365524aaf873985806efe0ed53459f1f4e59231240",
-      "runtime": "e1eaa4a2172f59af095fba1cb605b1e4f8bb256f6e7fa82502c1446ff1934d21"
+      "runtime": "c1f019d9b20c843b2735bf3f078f283d56548a52942c26226f7ce857dfa21967"
     },
     "imageConfig": {
       "reason": "No OCI image config digest was produced from this checkout.",
@@ -173,10 +173,10 @@
       "server/providers.ts": "b891305e079ee8b48cf7f4b2fb209f9cd1d92f7fbebf7513bf929a7c4bbaab64",
       "server/runtime/capability.ts": "af7fbba36d5c9c6c4208c7b9da9e1fadee58fd627e57a1bad24a18a1d84ff6a8",
       "server/runtime/closure.ts": "e901cbcb92793d371e420ad36248657cf5537e8b24a83e41cae4d8886b558f27",
-      "server/runtime/cpu-verifier.ts": "39591de1a40496b690d9bc5f63cba183f2d20fd8d9a7e40b3ffdb99db047e94a",
+      "server/runtime/cpu-verifier.ts": "9d9b7f33716a36b8dd50ccad03293062ab2774fc55ae0a989b9e791421dd5d3c",
       "server/runtime/dispatcher.ts": "1e7e3f4166ac7141fb04f567dad14a8aff600738dc4a716aecac0d5f019f1a0b",
       "server/runtime/evidence-reader.ts": "809853b230f8272a11651b9ebb9d72e5dbdd731fea0d8833a57b997b323d7289",
-      "server/runtime/host-bridge.ts": "1b85073ae03cf6d005fb19cac1a4d30dadc1a1c536b4b4deb7469e79ad7ef700",
+      "server/runtime/host-bridge.ts": "d8ae1594e61b7f701ec3dff8a217c196a39730ede6509e7da795219595798ea1",
       "server/runtime/identity.ts": "b42a637beb039e8d8e05b3d7ec45a339c7a9aaf6f4314af961984b09348bc4e8",
       "server/runtime/package-release.ts": "3916204e74b14ee5d04e450cd8bec5b25124d03da35aaa2a0f8d53d7b077016e",
       "server/runtime/supervised-routes.ts": "dd61fcbc145139c76699b3b5f8ab8927ed6ac280be29944facb697b63109acac",
