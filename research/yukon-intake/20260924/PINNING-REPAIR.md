@@ -166,3 +166,14 @@ operation or completion after failure and pointer identity on success. These are
 not 162-site native fault-injection results. GPU table correctness, exceptional
 coverage and final-build validation remain pending. The public-input version
 b69629d passed native CI run 36042539454; this later change needs a new build.
+
+## Native differential runner prepared
+
+`scripts/yukon/native_pin.py` prepares eight unfunded public synthetic ranges for
+one-/two-block SHA geometry, partial batches, sequence transitions and uint32
+endpoints. It compiles both normal and separately traced binaries, checks the
+normal drain count, and compares every trace hash with independent Python
+secp256k1 plus hashlib. Missing, duplicate, extra and incorrect traces reject.
+Predicates are unchanged in the trace binary; this is not a fresh withdrawal or
+performance benchmark. Preparation succeeded locally; 24 local tests pass.
+Native execution and final binary receipts are pending. No GPU allocated yet.
