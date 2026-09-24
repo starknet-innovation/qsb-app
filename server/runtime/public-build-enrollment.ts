@@ -301,6 +301,7 @@ function solverDivergence(
 type StageCopy = {
   from: string | null;
   sources: string[];
+  destination: string;
 };
 
 type OptimizedStage = {
@@ -417,8 +418,13 @@ function parseOptimizedStages(text: string): OptimizedStage[] {
       }
       sources.push(token);
     }
-    if (sources.length < 2) fail("PublicBuildDockerfileUnparsed");
-    current.copies.push({ from: fromStage, sources: sources.slice(0, -1) });
+    const destination = sources[sources.length - 1];
+    if (sources.length < 2 || !destination) fail("PublicBuildDockerfileUnparsed");
+    current.copies.push({
+      from: fromStage,
+      sources: sources.slice(0, -1),
+      destination,
+    });
   }
   if (!stages.length) fail("PublicBuildDockerfileUnparsed");
   return stages;
@@ -460,6 +466,35 @@ function copiesValidationArtifact(source: string): boolean {
   );
 }
 
+/** Stages that inherit runtime and can replace its artifact before the queue image. */
+function stagesAfterRuntime(stages: readonly OptimizedStage[]): OptimizedStage[] {
+  const after: OptimizedStage[] = [];
+  const seen = new Set<string>();
+  let current = "queue";
+  while (current !== "runtime") {
+    if (seen.has(current)) fail("PublicBuildBaseImageMismatch");
+    seen.add(current);
+    const stage = stageByName(stages, current);
+    if (!stage || !stageByName(stages, stage.image))
+      fail("PublicBuildBaseImageMismatch");
+    after.push(stage);
+    current = stage.image;
+  }
+  return after;
+}
+
+function replacesRuntimeArtifact(copy: StageCopy): boolean {
+  if (!copy.from) return false;
+  return (
+    copy.sources.some(copiesValidationArtifact) ||
+    copiesValidationArtifact(copy.destination)
+  );
+}
+
+function solverCopyCounts(copy: StageCopy): boolean {
+  return copy.from === null && copy.sources.some(copiesSolverSource);
+}
+
 function assertOptimizedDockerfile(root: string): void {
   const stages = parseOptimizedStages(
     readRepoFile(root, OPTIMIZED_DOCKERFILE).toString("utf8"),
@@ -482,10 +517,18 @@ function assertOptimizedDockerfile(root: string): void {
   if (
     producers.some((copy) => {
       const producer = stageByName(stages, copy.from ?? "");
-      return !producer?.copies.some((item) => item.sources.some(copiesSolverSource));
+      const solverCopies =
+        producer?.copies.filter((item) => item.sources.some(copiesSolverSource)) ??
+        [];
+      return (
+        !solverCopies.some(solverCopyCounts) ||
+        solverCopies.some((item) => item.from !== null)
+      );
     })
   )
     fail("PublicBuildDockerfileMissingSolver");
+  if (stagesAfterRuntime(stages).some((stage) => stage.copies.some(replacesRuntimeArtifact)))
+    fail("PublicBuildArtifactReplaced");
   parseWorkerDockerfile(readRepoFile(root, HISTORICAL_DOCKERFILE).toString("utf8"));
 }
 

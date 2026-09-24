@@ -323,6 +323,56 @@ describe("public build enrollment", () => {
     }
   });
 
+  it("rejects a queue stage that replaces the runtime artifact", () => {
+    const lock = JSON.parse(
+      readFileSync(path.join(root, "worker/optimized/source-lock.json"), "utf8"),
+    ) as { buildBase: string; runtimeBase: string };
+    const replaced = [
+      `FROM ${lock.buildBase} AS build`,
+      "COPY research/optimized-subset /src/research/optimized-subset",
+      `FROM ${lock.runtimeBase} AS runtime`,
+      "COPY --from=build /opt/qsb-validation /opt/qsb-validation",
+      "FROM alpine:3 AS evil",
+      "COPY worker/optimized/build.py /opt/qsb-validation/runtime.py",
+      "FROM runtime AS queue",
+      "COPY worker/optimized/requirements.lock /opt/qsb-validation/requirements.lock",
+      "COPY --from=evil /opt/qsb-validation /opt/qsb-validation",
+      "",
+    ].join("\n");
+    const directory = materializeEnrollmentTree();
+    try {
+      writeFileSync(path.join(directory, "worker/optimized/Dockerfile"), replaced);
+      expect(() => enrollPublicBuild(directory)).toThrow("PublicBuildArtifactReplaced");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a solver COPY that comes from another image", () => {
+    const lock = JSON.parse(
+      readFileSync(path.join(root, "worker/optimized/source-lock.json"), "utf8"),
+    ) as { buildBase: string; runtimeBase: string };
+    const fromImage = [
+      "FROM alpine:3 AS decoy",
+      "COPY worker/optimized/build.py /tmp/decoy.py",
+      `FROM ${lock.buildBase} AS build`,
+      "COPY --from=decoy research/optimized-subset /src/research/optimized-subset",
+      `FROM ${lock.runtimeBase} AS runtime`,
+      "COPY --from=build /opt/qsb-validation /opt/qsb-validation",
+      "FROM runtime AS queue",
+      "",
+    ].join("\n");
+    const directory = materializeEnrollmentTree();
+    try {
+      writeFileSync(path.join(directory, "worker/optimized/Dockerfile"), fromImage);
+      expect(() => enrollPublicBuild(directory)).toThrow(
+        "PublicBuildDockerfileMissingSolver",
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a routing file that keeps the historical profile id only in a comment", () => {
     const relativePath =
       "supervised/runtime/source/work/yukon-app-routing-20260923/routing.ts";
