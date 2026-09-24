@@ -1,11 +1,10 @@
 import{readResourceGrant}from'./resource-grant';
 import {readContextGrant} from './context';
 import {readGrant} from './sessions';
-import {signingReservations} from '../yukon-service-solved-completion-20260923/reservations';
+import {generationAuthority,signingReservations} from '../yukon-service-solved-completion-20260923/reservations';
 import {enrolledMainnet} from '../yukon-mainnet-service-enrollment-20260923/capability';
 import {fingerprint} from '../../outputs/qsb-vault/src/lib/provenance';
 import {routeStoredJob} from '../yukon-app-routing-20260923/routing';
-import {reservationAuthority} from '../yukon-canonical-reservations-20260923/reservations';
 import {type LaunchRequest} from '../yukon-mainnet-service-enrollment-20260923/dispatch';
 import type {CensusStore} from '../yukon-mainnet-cycling-runner-20260923/census-store';
 import {validateConfig,type Config} from '../yukon-mainnet-cycling-runner-20260923/transport';
@@ -22,9 +21,9 @@ export async function executionBoundary(base:CensusStore,owner:string,request:La
  if(owner!==r.owner||cfg.blueprint.runId!==ids.runId||cfg.blueprint.pin.parent!==ids.parent||cfg.blueprint.subset.parent!==ids.parent||cfg.blueprint.subset.scope!==ids.scope||cfg.blueprint.pin.owner!==owner||cfg.blueprint.subset.owner!==owner||cfg.blueprint.pin.revision!==1||cfg.blueprint.subset.revision!==1)throw Error('Controller identity differs');
  const runPk='SUPERVISION#'+ids.runId,scopePk='VALIDATION#'+ids.parent,bindingKey='V5_CONTROLLER#'+r.jobId,configHash=fingerprint(cfg);
  async function reads(initial:boolean){
-  const job=await base.get(pk,'JOB#'+r.jobId),admission=await base.get(pk,'V5_ADMISSION#'+r.jobId),invocation=await base.get(pk,'V5_INVOCATION#'+r.jobId),authority=await reservationAuthority(base);
+  const job=await base.get(pk,'JOB#'+r.jobId),admission=await base.get(pk,'V5_ADMISSION#'+r.jobId),invocation=await base.get(pk,'V5_INVOCATION#'+r.jobId),authority=await generationAuthority(base);
   if(!job||!admission||!invocation)throw Error('Service admission required');const j=job.job as any;
-  if(admission.status!=='admitted'||admission.requestHash!==fingerprint(r)||admission.executionHash!==r.executionHash||admission.jobVersion!==r.jobRowVersion+1||j.owner!==owner||j.id!==r.jobId||j.revision!==0||j.status!==(initial?'starting':'bootstrapping')||j.reservationAuthorityHash!==fingerprint(authority))throw Error('Paused or changed admission');
+  if(admission.status!=='admitted'||admission.requestHash!==fingerprint(r)||admission.executionHash!==r.executionHash||admission.jobVersion!==r.jobRowVersion+1||j.owner!==owner||j.id!==r.jobId||j.revision!==0||j.status!==(initial?'starting':'bootstrapping')||j.reservationAuthorityGeneration!==authority.generation)throw Error('Paused or changed admission');
   if(!initial&&j.controllerRun!==(enrolled?runPk:(previousRun??runPk)))throw Error('Controller ownership changed');
   if(initial&&job.version!==admission.jobVersion)throw Error('Admission job version changed');
   if(typeof invocation.request!=='string'||fingerprint(JSON.parse(invocation.request))!==fingerprint(r)||invocation.executionHash!==r.executionHash||invocation.invocationId!==r.invocationId||invocation.owner!==owner||invocation.jobId!==r.jobId||!['accepted','unknown','dispatching'].includes(String(invocation.status)))throw Error('Invocation changed');
@@ -46,11 +45,11 @@ export async function executionBoundary(base:CensusStore,owner:string,request:La
   if(!start&&!cpuStart&&!completion&&!operationStart&&!transportStart&&!retiring)return base.atomicPut(writes);
   const x=await reads(start&&session===0);if(fingerprint(x.context)!==fingerprint(context))throw Error('Public context changed');
   const prior=await base.get(pk,bindingKey);
-  if(retiring){const receipt=writes.find(w=>w.row.pk===previousRun&&w.row.sk==='CONTEXT_RETIREMENT')?.row;if(writes.length!==5||!receipt||!x.grant||!prior||prior.session!==session-1||prior.runPk!==previousRun||prior.configHash!==fingerprint(priorConfig)||prior.requestHash!==fingerprint(r))throw Error('Unbound context retirement');const {pk:_,sk:__,version:___,proofHash,...body}=receipt;if(fingerprint(body)!==x.grant.eligibilityHash||fingerprint(x.grant.stableReceipt)!==x.grant.eligibilityHash)throw Error('Retirement differs from complete domain grant');await base.atomicPut([...writes,...[prior,x.job,x.admission,x.invocation,x.authority,x.vault,x.capability,...x.reservations,x.grant].map(row=>({row,expected:row.version}))]);return;}
+  if(retiring){const receipt=writes.find(w=>w.row.pk===previousRun&&w.row.sk==='CONTEXT_RETIREMENT')?.row;if(writes.length!==5||!receipt||!x.grant||!prior||prior.session!==session-1||prior.runPk!==previousRun||prior.configHash!==fingerprint(priorConfig)||prior.requestHash!==fingerprint(r))throw Error('Unbound context retirement');const {pk:_,sk:__,version:___,proofHash,...body}=receipt;if(fingerprint(body)!==x.grant.eligibilityHash||fingerprint(x.grant.stableReceipt)!==x.grant.eligibilityHash)throw Error('Retirement differs from complete domain grant');await base.atomicPut([...writes,...[prior,x.job,x.admission,x.invocation,x.authority,x.vault,x.capability,...x.reservations,x.grant].map(row=>({row,expected:row.version,...(row===x.authority||x.reservations.includes(row)?{conditionOnly:true}:{})}))]);return;}
   if(start){if(enrolled)throw Error('Controller already bound');if(session===0){if(prior)throw Error('Controller already bound');if(!writes.some(w=>w.row.pk===scopePk&&w.row.phase==='bootstrap'&&w.expected===undefined))throw Error('Missing bootstrap scope');}else{if(!prior||prior.session!==session-1||prior.runPk!==previousRun||prior.configHash!==fingerprint(priorConfig)||prior.requestHash!==fingerprint(r)||prior.contextHash!==fingerprint(context))throw Error('Predecessor service binding changed');if(!writes.some(w=>w.row.pk===previousRun&&w.row.sk==='OWNER'&&w.row.status==='superseded'&&w.row.successor===runPk)||!writes.some(w=>w.row.pk===scopePk&&w.row.supervisedRun===runPk&&w.expected!==undefined))throw Error('Missing settled owner handoff');}}
   else if(!prior||prior.runPk!==runPk||prior.configHash!==configHash||prior.requestHash!==fingerprint(r))throw Error('Controller binding changed');
   const binding=start?{kind:mode,pk,sk:bindingKey,version:prior?prior.version+1:0,session,runPk,scopePk,configHash,requestHash:fingerprint(r),executionHash:r.executionHash,contextHash:fingerprint(context),...(previousRun?{predecessorRun:previousRun}:{})}:prior!;
-  await base.atomicPut([...writes,...(start&&session>0?[{row:{...prior!,sk:'V5_CONTROLLER_SESSION#'+r.jobId+'#'+(session-1),version:0}}]:[]),{row:binding,...(prior?{expected:prior.version}:{})},{row:{...x.job,version:x.job.version+1,job:{...x.j,status:'bootstrapping',controllerRun:runPk}},expected:x.job.version},...([x.admission,x.invocation,x.authority,x.vault,x.capability,...x.reservations,...(x.grant?[x.grant]:[])].map(row=>({row,expected:row.version})))]);enrolled=true;
+  await base.atomicPut([...writes,...(start&&session>0?[{row:{...prior!,sk:'V5_CONTROLLER_SESSION#'+r.jobId+'#'+(session-1),version:0}}]:[]),{row:binding,...(prior?{expected:prior.version}:{})},{row:{...x.job,version:x.job.version+1,job:{...x.j,status:'bootstrapping',controllerRun:runPk}},expected:x.job.version},...([x.admission,x.invocation,x.authority,x.vault,x.capability,...x.reservations,...(x.grant?[x.grant]:[])].map(row=>({row,expected:row.version,...(row===x.authority||x.reservations.includes(row)?{conditionOnly:true}:{})}))]);enrolled=true;
  }};
  return {store,originalRequest:structuredClone(initial.j.mainnetRequest),context:structuredClone(context),config:structuredClone(cfg),binding:{runPk,scopePk,configHash}};
 }
