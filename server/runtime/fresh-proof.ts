@@ -270,7 +270,14 @@ function outpointKey(point: Outpoint): string {
   return `${normalized.txid}:${normalized.vout}`;
 }
 
+function assertUniqueOutpoints(points: Outpoint[]): void {
+  const keys = points.map(outpointKey);
+  if (new Set(keys).size !== keys.length) throw new Error("DuplicateOutpoint");
+}
+
 function assertSameOutpointMultiset(left: Outpoint[], right: Outpoint[]): void {
+  assertUniqueOutpoints(left);
+  assertUniqueOutpoints(right);
   const keys = (points: Outpoint[]) => points.map(outpointKey).sort();
   const a = keys(left);
   const b = keys(right);
@@ -929,10 +936,31 @@ export function judgeCoreReport(value: unknown): CoreJudgment {
   };
 }
 
+/** No reviewed Bitcoin Core binary is enrolled in this checkout. */
+export const enrolledCoreBinaries = {
+  format: "qsb-core-binary-enrollment-v1",
+  bitcoindSha256: null,
+  bitcoinCliSha256: null,
+  enrolled: false,
+} as const;
+
 export function admitCoreHarnessResult(value: unknown): CoreJudgment {
   const judgment = judgeCoreReport(value);
   if (judgment.overclaim) throw new Error("CoreReportOverclaimsSection6");
-  if (judgment.harnessRan && judgment.chain !== "regtest")
+  if (!judgment.harnessRan) return judgment;
+  if (judgment.chain !== "regtest")
     throw new Error("ControlledProofChainMustBeRegtest");
+  if (
+    !enrolledCoreBinaries.enrolled ||
+    enrolledCoreBinaries.bitcoindSha256 === null ||
+    enrolledCoreBinaries.bitcoinCliSha256 === null
+  )
+    throw new Error("CoreBinaryNotEnrolled");
+  const binaries = record(record(value)?.coreBinaries);
+  if (
+    binaries?.bitcoindSha256 !== enrolledCoreBinaries.bitcoindSha256 ||
+    binaries?.bitcoinCliSha256 !== enrolledCoreBinaries.bitcoinCliSha256
+  )
+    throw new Error("CoreBinaryMismatch");
   return judgment;
 }

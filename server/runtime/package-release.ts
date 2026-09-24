@@ -362,6 +362,7 @@ export function packagedPackageJson(checkoutText: string): string {
   if (parsed.scripts) {
     const scripts = { ...parsed.scripts };
     for (const name of unpackagedReleaseScripts) delete scripts[name];
+    delete scripts["harness:core"];
     parsed.scripts = scripts;
   }
   return `${JSON.stringify(parsed, null, 2)}\n`;

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -384,7 +384,15 @@ describe("signing bundle binding", () => {
         outputs,
         searchEvidence: "not-run",
       }),
-    ).toThrow(/BindingMismatch/);
+    ).toThrow(/DuplicateOutpoint/);
+    expect(() =>
+      exportDisposableSigningBundle({
+        request: duplicated,
+        inputs: [inputs[0]!, inputs[0]!],
+        outputs,
+        searchEvidence: "not-run",
+      }),
+    ).toThrow(/DuplicateOutpoint/);
   });
 
   it("labels replay, synthetic no-hit, and mocked success as not a fresh search", () => {
@@ -570,7 +578,7 @@ describe("core harness judgment", () => {
     expect(relaxed.freshOptimizedWithdrawal).toBe(false);
     expect(relaxed.puzzleRelaxedSpend).toBe(true);
     expect(relaxed.chain).toBe("regtest");
-    expect(
+    expect(() =>
       admitCoreHarnessResult({
         harnessRan: true,
         network: "regtest",
@@ -578,8 +586,12 @@ describe("core harness judgment", () => {
         freshOptimizedWithdrawal: false,
         section6Closed: false,
         tests: [],
-      }).section6Closed,
-    ).toBe(false);
+        coreBinaries: {
+          bitcoindSha256: "ab".repeat(32),
+          bitcoinCliSha256: "cd".repeat(32),
+        },
+      }),
+    ).toThrow(/CoreBinaryNotEnrolled/);
     expect(() =>
       admitCoreHarnessResult({
         harnessRan: true,
@@ -632,6 +644,29 @@ describe("core harness judgment", () => {
     expect(judgment.freshOptimizedWithdrawal).toBe(false);
     expect(judgment.fullProductionWithdrawalVerified).toBe(false);
     expect(judgment.reason).toContain("does not close section 6");
+    const bin = mkdtempSync(path.join(tmpdir(), "qsb-fake-core-"));
+    writeFileSync(path.join(bin, "bitcoind"), "#!/bin/sh\nexit 0\n");
+    writeFileSync(path.join(bin, "bitcoin-cli"), "#!/bin/sh\nexit 0\n");
+    chmodSync(path.join(bin, "bitcoind"), 0o755);
+    chmodSync(path.join(bin, "bitcoin-cli"), 0o755);
+    const namedReport = path.join(dir, "named-binaries.json");
+    let namedStatus = 0;
+    try {
+      execFileSync("bash", ["scripts/test-core.sh"], {
+        cwd: root,
+        env: { ...process.env, BITCOIN_BIN: bin, QSB_CORE_REPORT: namedReport },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      namedStatus = (error as { status?: number }).status ?? 1;
+    }
+    expect(namedStatus).toBe(2);
+    const named = judgeCoreReport(
+      JSON.parse(readFileSync(namedReport, "utf8")),
+    );
+    expect(named.harnessRan).toBe(false);
+    expect(named.reason).toContain("not harness evidence");
 
     const stdout = execFileSync("python3", ["tests/core_regtest.py"], {
       cwd: root,
