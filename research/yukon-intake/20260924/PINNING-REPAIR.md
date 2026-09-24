@@ -183,3 +183,33 @@ compiled binary, inside a network-disabled read-only container with temporary
 scratch space. Malformed CLI/ranges, truncated/oversized/trailing parameter data
 and zero curve constants must fail before CUDA access or a drain receipt. This
 check is prepared for CI, not yet recorded as passing; it is not GPU execution.
+
+## First native generic differential — passed 24 September
+
+Source commit `39a5dc9e1aff46be74d0d8282ce8987200a470cb` was tested on one
+secure RTX 4090 with CUDA 12.8.93. Both normal and separately traced binaries
+compiled and ran all eight synthetic ranges: 12-/75-byte suffixes, 1/129/257
+locktime counts, two consecutive sequences and the final uint32 boundaries.
+All **3,600 public-key hashes** matched independent Python curve arithmetic and
+hashlib, without missing/duplicate/extra trace records. All eight normal runs
+reported the expected drained candidate count. A two-sequence 257-locktime
+normal run passed compute-sanitizer memcheck with **zero errors**.
+
+Normal binary: `fcd5fd1af515c583b0d7cc32384f2acc3dd1bfaf062774a9bc3e6f869afb751a`.
+Trace binary: `6dcec0e481ff4c49f0f1d1d98932473020922a50b18b3540a36535e5572e15b0`.
+All 17 staged source/header hashes were checked against the adaptation manifest
+after retrieval. Public receipts and exact trace logs are in `native-generic/`.
+CI run 36043210294 also passed compilation and all eleven real-binary rejection
+paths without a GPU. Twenty-four local tests passed.
+
+The temporary pod was deleted at 18:46:57 UTC, before its 19:13:30 deletion
+watchdog; a fresh provider listing showed zero pods. Approximate elapsed compute
+was $0.03, excluding storage and provider rounding. No funded outpoint, wallet,
+private recovery material, proof endpoint or transaction was used.
+
+**Limits:** these are synthetic generic-path cases with scalar multiplier 1 and
+recovery point G. They do not cover the specialized FAST_TAIL layout, multiple
+GPU batches, all exceptional points, full device overflow/fault injection or
+representative throughput. Trace and normal binaries are distinct. This is not
+a fresh withdrawal, release approval or external-miner evidence. Those remaining
+gates must use the final source/binary and genuine transaction bindings.

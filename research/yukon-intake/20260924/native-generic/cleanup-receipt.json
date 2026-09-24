@@ -1,0 +1,14 @@
+{
+  "podId": "gt9vck64jvdto1",
+  "deletedAt": "2026-09-24T18:46:57Z",
+  "remainingPods": 0,
+  "watchdogCell": 121,
+  "deadline": "2026-09-24T19:13:30Z",
+  "estimatedComputeUSD": 0.03,
+  "excludes": "storage, provider billing rounding",
+  "sourceCommit": "39a5dc9e1aff46be74d0d8282ce8987200a470cb",
+  "sourceSha256": "9ff11d77598f1fcf43aac128eeccbcff7c20c4d09781e50998e90a38d774d951",
+  "traceSourceSha256": "9466d3cc33eba4da68255bf63cfa76b48d7d22d396f541a473558c44202c2a2c",
+  "evidenceArchiveSha256": "35c9b4b87ad74d242539fdbe4fa4e4086d00e8a98cdb42ba2e5e14887b3cfff3",
+  "matchedHashes": 3600
+}

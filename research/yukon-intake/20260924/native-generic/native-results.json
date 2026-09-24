@@ -1,0 +1,106 @@
+{
+  "scope": "synthetic-public-generic-pinning-only",
+  "runs": [
+    {
+      "case": "sl12-seq2147483648",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.153175801038742
+    },
+    {
+      "case": "sl12-seq2147483648",
+      "binary": "pinning-trace",
+      "matchedHashes": 2,
+      "seconds": 1.2039171271026134
+    },
+    {
+      "case": "sl12-seq2147483649",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.2740722205489874
+    },
+    {
+      "case": "sl12-seq2147483649",
+      "binary": "pinning-trace",
+      "matchedHashes": 258,
+      "seconds": 1.1893918085843325
+    },
+    {
+      "case": "sl12-seq2147483650",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.180576615035534
+    },
+    {
+      "case": "sl12-seq2147483650",
+      "binary": "pinning-trace",
+      "matchedHashes": 1028,
+      "seconds": 1.2005202304571867
+    },
+    {
+      "case": "sl12-seq4294967295",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1830556094646454
+    },
+    {
+      "case": "sl12-seq4294967295",
+      "binary": "pinning-trace",
+      "matchedHashes": 512,
+      "seconds": 1.238007828593254
+    },
+    {
+      "case": "sl75-seq2147483648",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1750471368432045
+    },
+    {
+      "case": "sl75-seq2147483648",
+      "binary": "pinning-trace",
+      "matchedHashes": 2,
+      "seconds": 1.192880779504776
+    },
+    {
+      "case": "sl75-seq2147483649",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1738532911986113
+    },
+    {
+      "case": "sl75-seq2147483649",
+      "binary": "pinning-trace",
+      "matchedHashes": 258,
+      "seconds": 1.2075197044759989
+    },
+    {
+      "case": "sl75-seq2147483650",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1749919727444649
+    },
+    {
+      "case": "sl75-seq2147483650",
+      "binary": "pinning-trace",
+      "matchedHashes": 1028,
+      "seconds": 1.2066650912165642
+    },
+    {
+      "case": "sl75-seq4294967295",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.169843889772892
+    },
+    {
+      "case": "sl75-seq4294967295",
+      "binary": "pinning-trace",
+      "matchedHashes": 512,
+      "seconds": 1.2054352350533009
+    }
+  ],
+  "freshWithdrawal": false,
+  "binaries": {
+    "pinning": "fcd5fd1af515c583b0d7cc32384f2acc3dd1bfaf062774a9bc3e6f869afb751a",
+    "pinning-trace": "6dcec0e481ff4c49f0f1d1d98932473020922a50b18b3540a36535e5572e15b0"
+  }
+}
