@@ -10,6 +10,11 @@ import { Esplora } from "../server/chain";
 import { Slipstream } from "../server/providers";
 import { fundingPsbt } from "../src/lib/transactions";
 import { release, type PublicVault } from "../src/lib/model";
+import { NETWORK_ID } from "../src/lib/network";
+import {
+  historicalCudaProgram,
+  watchedYukonSubsetProgram,
+} from "../src/lib/cuda-program";
 import { rawTransactionSha256 } from "../server/runtime/miner-inclusion";
 import { HISTORICAL_XVERSE_REGTEST_WITHDRAWAL } from "../server/runtime/fresh-proof";
 const key = new Uint8Array(32).fill(7),
@@ -197,9 +202,11 @@ it("does not preflight or broadcast without an exact spend record", async () => 
   expect(f.test).not.toHaveBeenCalled();
   expect(f.raw).not.toHaveBeenCalled();
   expect(f.unspent).not.toHaveBeenCalled();
-  expect(
-    (await f.store.get("OWNER#" + address, "VAULT#" + f.vault.id))?.vault,
-  ).toMatchObject({ status: "unfunded" });
+  const stored = (
+    await f.store.get("OWNER#" + address, "VAULT#" + f.vault.id)
+  )?.vault as { status: string; cudaProgram?: unknown };
+  expect(stored.status).toBe("unfunded");
+  expect(stored.cudaProgram).toBeUndefined();
 });
 it("does not treat a rewritten caller fee as an exact spend", async () => {
   const f = await setup();
@@ -307,4 +314,52 @@ it("does not consult a rejecting mainnet miner while transport stays closed", as
   expect(
     (await f.store.get("OWNER#" + address, "VAULT#" + f.vault.id))?.vault,
   ).toMatchObject({ status: "unfunded" });
+});
+it("stamps the enrolled CUDA program when a vault is created", async () => {
+  const f = await setup();
+  const scriptHex = "51".repeat(100);
+  const scriptHash = createHash("sha256")
+    .update(Buffer.from(scriptHex, "hex"))
+    .digest("hex");
+  const id = crypto.randomUUID();
+  const body = {
+    id,
+    name: "deposit",
+    createdAt: "2026-09-24T00:00:00.000Z",
+    network: NETWORK_ID,
+    config: "A" as const,
+    scriptHex,
+    scriptHash,
+    paymentAddress: address,
+    publicStateJson: JSON.stringify({
+      config: "A",
+      hash_mode: "sha256",
+      n: 150,
+      full_script_hex: scriptHex,
+      round_sigs: [],
+    }),
+    status: "unfunded" as const,
+  };
+  const response = await f.app.request(req("/vaults", body, f.token));
+  expect(response.status).toBe(201);
+  const created = (await response.json()) as { vault: PublicVault };
+  expect(created.vault.cudaProgram).toEqual(historicalCudaProgram());
+  expect(created.vault.funding).toBeUndefined();
+  const stored = (
+    await f.store.get("OWNER#" + address, "VAULT#" + id)
+  )?.vault as PublicVault;
+  expect(stored.cudaProgram).toEqual(historicalCudaProgram());
+  expect(stored.status).toBe("unfunded");
+  const rejectedId = crypto.randomUUID();
+  const rejected = await f.app.request(
+    req(
+      "/vaults",
+      { ...body, id: rejectedId, cudaProgram: watchedYukonSubsetProgram() },
+      f.token,
+    ),
+  );
+  expect(rejected.status).toBe(400);
+  expect(
+    await f.store.get("OWNER#" + address, "VAULT#" + rejectedId),
+  ).toBeUndefined();
 });

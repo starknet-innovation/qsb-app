@@ -39,6 +39,7 @@ vi.mock("@aws-sdk/client-lambda", () => ({
 import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job } from "../src/lib/model";
+import { watchedYukonSubsetProgram } from "../src/lib/cuda-program";
 import { workRange } from "../server/search-ranges";
 const event = { owner: "test", jobId: "test-job", revision: 0 };
 const pk = "OWNER#test",
@@ -81,6 +82,22 @@ beforeEach(() => {
     ),
   }));
   mocks.run.mockResolvedValue({ id: "compute-1" });
+});
+it("does not run the historical kernel for a deposit bound to another program", async () => {
+  await seed();
+  const row = (await store.get(pk, "VAULT#v"))!;
+  const vault = row.vault;
+  if (!vault || typeof vault !== "object" || Array.isArray(vault))
+    throw new Error("missing vault");
+  await store.put(
+    {
+      ...row,
+      vault: { ...vault, cudaProgram: watchedYukonSubsetProgram() },
+    },
+    0,
+  );
+  await expect(handler(event)).rejects.toThrow("DepositCudaProgramMismatch");
+  expect(mocks.run).not.toHaveBeenCalled();
 });
 it("stops a stale workflow revision before any paid request", async () => {
   await seed({ revision: 1 });

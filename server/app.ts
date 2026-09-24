@@ -5,6 +5,7 @@ import {
   solverRelease,
   vaultConfiguration,
 } from "../src/lib/provenance";
+import { cudaProgramForDeposit, openDeposit } from "../src/lib/cuda-program";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
@@ -269,6 +270,7 @@ export function createApp(
       vault.network !== NETWORK_ID ||
       vault.paymentAddress !== c.get("owner") ||
       vault.funding ||
+      vault.cudaProgram ||
       vault.status !== "unfunded"
     )
       return c.json(
@@ -289,13 +291,14 @@ export function createApp(
         { error: "Vault script does not match its commitment." },
         400,
       );
+    const recorded = openDeposit(vault);
     await store.put({
       pk: `OWNER#${c.get("owner")}`,
-      sk: `VAULT#${vault.id}`,
+      sk: `VAULT#${recorded.id}`,
       version: 0,
-      vault,
+      vault: recorded,
     });
-    return c.json({ vault }, 201);
+    return c.json({ vault: recorded }, 201);
   });
   app.post("/api/vaults/:id/fund", async (c) => {
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
@@ -523,6 +526,27 @@ export function createApp(
       return c.json({ error: "Transaction amounts do not balance." }, 400);
     await ledger.unspent(manifest.funding, v.scriptHex);
     await ledger.unspent(manifest.helper, hex.encode(outputScript(owner)));
+    const bound = cudaProgramForDeposit(v.cudaProgram);
+    let solver;
+    try {
+      solver = pinSolver(v, bound.id);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message === "UnsupportedSolverRelease" ||
+          error.message === "DepositCudaProgramMismatch")
+      )
+        return c.json(
+          { error: "Deposit is bound to a different CUDA program." },
+          409,
+        );
+      throw error;
+    }
+    if (
+      solver.descriptor.kernelCommit !== bound.kernelCommit ||
+      solver.releaseHash !== bound.releaseHash
+    )
+      return c.json({ error: "Deposit CUDA program mismatch." }, 409);
     const now = new Date().toISOString();
     const job: Job = {
       id,
@@ -530,7 +554,7 @@ export function createApp(
       vaultId: manifest.vaultId,
       manifest,
       manifestHash: hash(JSON.stringify(manifest)),
-      solver: pinSolver(v),
+      solver,
       createdAt: now,
       updatedAt: now,
       status: "queued",

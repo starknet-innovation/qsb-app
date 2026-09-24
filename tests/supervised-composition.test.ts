@@ -13,6 +13,7 @@ import { createSupervisedCreationApp } from "../supervised/dispatch/routes";
 import { receiveOne } from "../supervised/dispatch/queue";
 import { address, privateKey, publicKey } from "./supervised-fixture";
 import { fingerprint, vaultConfiguration } from "../src/lib/provenance";
+import { watchedYukonSubsetProgram } from "../src/lib/cuda-program";
 import {
   createExplicitJob,
   CAPABILITY,
@@ -74,6 +75,7 @@ async function prepared(authority: "generation" | "schema", store: Store = new M
     publicStateJson: JSON.stringify(state),
     funding: point("1"),
     status: "confirmed",
+    cudaProgram: watchedYukonSubsetProgram(),
   };
   vault.configuration = vaultConfiguration(vault);
   const manifest = {

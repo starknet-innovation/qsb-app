@@ -56,10 +56,13 @@ export function assertVaultConfiguration(
     throw new Error("VaultConfigurationMismatch");
   return expected;
 }
-export function pinSolver(v: VaultInput & { configuration?: unknown }) {
+export function pinSolver(
+  v: VaultInput & { configuration?: unknown },
+  programId: string = currentSolverId,
+) {
   const configuration = assertVaultConfiguration(v);
   if (v.config !== "A") throw new Error("UnsupportedVaultProtocol");
-  const descriptor = solverRelease(currentSolverId);
+  const descriptor = solverRelease(programId);
   return {
     descriptor,
     releaseHash: fingerprint(descriptor),

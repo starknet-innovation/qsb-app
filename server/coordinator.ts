@@ -1,4 +1,5 @@
 import { assertSolverPin, solverRelease } from "../src/lib/provenance";
+import { assertSearchUsesDepositProgram } from "../src/lib/cuda-program";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
 import { chain } from "./chain";
@@ -140,6 +141,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
   const selected = job.solver
     ? assertSolverPin(job.solver, vault)
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
+  assertSearchUsesDepositProgram(selected, vault.cudaProgram);
   if (
     selected.searchVersion !== searchVersion ||
     selected.kernelCommit !== release.kernelCommit ||

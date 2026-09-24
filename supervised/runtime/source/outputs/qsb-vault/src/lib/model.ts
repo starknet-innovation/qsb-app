@@ -37,6 +37,14 @@ export const publicVaultSchema = z
       .strict()
       .optional(),
     funding: outpoint.optional(),
+    cudaProgram: z
+      .object({
+        id: z.string().min(1).max(120),
+        kernelCommit: z.string().regex(/^[a-f0-9]{40}$/),
+        releaseHash: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict()
+      .optional(),
     status: z.enum(["unfunded", "submitted", "confirmed", "spent"]),
   })
   .strict();

@@ -1,6 +1,7 @@
 import { hex } from "@scure/base";
 import { z } from "zod";
 import { fingerprint, pinSolver, vaultConfiguration } from "../../src/lib/provenance";
+import { cudaProgramForDeposit } from "../../src/lib/cuda-program";
 import {
   release,
   type PublicVault,
@@ -162,6 +163,20 @@ async function assertSpendableFunding(
   }
 }
 
+function depositSolverPin(vault: PublicVault) {
+  try {
+    return pinSolver(vault, cudaProgramForDeposit(vault.cudaProgram).id);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message === "UnsupportedSolverRelease" ||
+        error.message === "DepositCudaProgramMismatch")
+    )
+      throw new GateError(409, "Deposit is bound to a different CUDA program.");
+    throw error;
+  }
+}
+
 function assertVaultStillAdmitted(job: SupervisedJob, vault: PublicVault): void {
   if (vault.status !== "confirmed" || !vault.funding)
     throw new GateError(409, "Confirmed vault funding is no longer current.");
@@ -169,8 +184,9 @@ function assertVaultStillAdmitted(job: SupervisedJob, vault: PublicVault): void 
     throw new GateError(409, "Confirmed vault funding is no longer current.");
   let solver: ReturnType<typeof pinSolver>;
   try {
-    solver = pinSolver(vault);
-  } catch {
+    solver = depositSolverPin(vault);
+  } catch (error) {
+    if (error instanceof GateError) throw error;
     throw new GateError(409, "Vault solver pin no longer matches the admitted job.");
   }
   if (!job.solver || fingerprint(solver) !== fingerprint(job.solver))
@@ -247,7 +263,7 @@ export async function admitSupervisedJob(
     manifestHash: fingerprint(request.manifest),
     mainnetRequestHash: requestHash,
     reservationAuthorityGeneration: authorityGeneration,
-    solver: pinSolver(vault),
+    solver: depositSolverPin(vault),
     execution: {
       kind: "qsb-supervised-service-v1",
       network: "mainnet",

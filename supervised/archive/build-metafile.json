@@ -5,7 +5,7 @@
       "imports": []
     },
     "../../src/lib/provenance.ts": {
-      "bytes": 2989,
+      "bytes": 3027,
       "imports": [
         {
           "path": "@noble/hashes/sha2.js",
@@ -36,18 +36,23 @@
       ],
       "format": "esm"
     },
+    "../../server/runtime/reservation-guard.ts": {
+      "bytes": 7945,
+      "imports": [],
+      "format": "esm"
+    },
     "work/yukon-service-solved-completion-20260923/reservations.ts": {
-      "bytes": 1032,
+      "bytes": 1577,
       "imports": [
-        {
-          "path": "../../src/lib/provenance.ts",
-          "kind": "import-statement",
-          "original": "../../../../src/lib/provenance"
-        },
         {
           "path": "work/yukon-canonical-reservations-20260923/reservations.ts",
           "kind": "import-statement",
           "original": "../yukon-canonical-reservations-20260923/reservations"
+        },
+        {
+          "path": "../../server/runtime/reservation-guard.ts",
+          "kind": "import-statement",
+          "original": "../../../../server/runtime/reservation-guard"
         }
       ],
       "format": "esm"
@@ -64,7 +69,7 @@
       "format": "esm"
     },
     "../../src/lib/model.ts": {
-      "bytes": 5103,
+      "bytes": 5337,
       "imports": [
         {
           "path": "../../src/lib/network.ts",
@@ -75,6 +80,17 @@
           "path": "zod",
           "kind": "import-statement",
           "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "../../src/lib/cuda-program.ts": {
+      "bytes": 4354,
+      "imports": [
+        {
+          "path": "../../src/lib/provenance.ts",
+          "kind": "import-statement",
+          "original": "./provenance"
         }
       ],
       "format": "esm"
@@ -95,7 +111,7 @@
       "format": "esm"
     },
     "work/yukon-app-routing-20260923/routing.ts": {
-      "bytes": 3933,
+      "bytes": 4635,
       "imports": [
         {
           "path": "zod",
@@ -111,6 +127,11 @@
           "path": "../../src/lib/provenance.ts",
           "kind": "import-statement",
           "original": "../../../../src/lib/provenance"
+        },
+        {
+          "path": "../../src/lib/cuda-program.ts",
+          "kind": "import-statement",
+          "original": "../../../../src/lib/cuda-program"
         },
         {
           "path": "work/yukon-pin-preflight-20260923/execution-gate.ts",
@@ -209,7 +230,7 @@
       "format": "esm"
     },
     "../../server/store.ts": {
-      "bytes": 5540,
+      "bytes": 13544,
       "imports": [
         {
           "path": "@aws-sdk/client-dynamodb",
@@ -220,12 +241,54 @@
           "path": "@aws-sdk/lib-dynamodb",
           "kind": "import-statement",
           "external": true
+        },
+        {
+          "path": "../../server/runtime/reservation-guard.ts",
+          "kind": "import-statement",
+          "original": "./runtime/reservation-guard"
+        }
+      ],
+      "format": "esm"
+    },
+    "../../server/runtime/host-requirements.ts": {
+      "bytes": 10823,
+      "imports": [
+        {
+          "path": "zod",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "../../server/runtime/storage-authority.ts": {
+      "bytes": 33583,
+      "imports": [
+        {
+          "path": "zod",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "../../server/store.ts",
+          "kind": "import-statement",
+          "original": "../store"
+        },
+        {
+          "path": "../../server/runtime/host-requirements.ts",
+          "kind": "import-statement",
+          "original": "./host-requirements"
+        },
+        {
+          "path": "../../server/runtime/reservation-guard.ts",
+          "kind": "import-statement",
+          "original": "./reservation-guard"
         }
       ],
       "format": "esm"
     },
     "work/yukon-mainnet-service-enrollment-20260923/dispatch.ts": {
-      "bytes": 7545,
+      "bytes": 7628,
       "imports": [
         {
           "path": "work/yukon-service-solved-completion-20260923/reservations.ts",
@@ -238,9 +301,9 @@
           "original": "./capability"
         },
         {
-          "path": "work/yukon-canonical-reservations-20260923/reservations.ts",
+          "path": "../../server/runtime/storage-authority.ts",
           "kind": "import-statement",
-          "original": "../yukon-canonical-reservations-20260923/reservations"
+          "original": "../../../../server/runtime/storage-authority"
         },
         {
           "path": "node:crypto",
@@ -271,7 +334,7 @@
       "format": "esm"
     },
     "work/yukon-mainnet-service-enrollment-20260923/admission.ts": {
-      "bytes": 3773,
+      "bytes": 3770,
       "imports": [
         {
           "path": "work/yukon-service-solved-completion-20260923/reservations.ts",
@@ -302,11 +365,6 @@
           "path": "work/yukon-app-routing-20260923/routing.ts",
           "kind": "import-statement",
           "original": "../yukon-app-routing-20260923/routing"
-        },
-        {
-          "path": "work/yukon-canonical-reservations-20260923/reservations.ts",
-          "kind": "import-statement",
-          "original": "../yukon-canonical-reservations-20260923/reservations"
         }
       ],
       "format": "esm"
@@ -353,7 +411,7 @@
       "imports": [],
       "exports": [],
       "inputs": {},
-      "bytes": 72675
+      "bytes": 152162
     },
     "dist/service.cjs": {
       "imports": [
@@ -403,7 +461,7 @@
           "external": true
         },
         {
-          "path": "node:crypto",
+          "path": "zod",
           "kind": "require-call",
           "external": true
         },
@@ -414,6 +472,16 @@
         },
         {
           "path": "@aws-sdk/lib-dynamodb",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "zod",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
           "kind": "require-call",
           "external": true
         },
@@ -436,19 +504,25 @@
           "bytesInOutput": 3458
         },
         "work/yukon-canonical-reservations-20260923/reservations.ts": {
-          "bytesInOutput": 918
+          "bytesInOutput": 230
+        },
+        "../../server/runtime/reservation-guard.ts": {
+          "bytesInOutput": 5564
         },
         "work/yukon-service-solved-completion-20260923/reservations.ts": {
-          "bytesInOutput": 862
+          "bytesInOutput": 1312
         },
         "work/yukon-app-routing-20260923/routing.ts": {
-          "bytesInOutput": 2472
+          "bytesInOutput": 3015
         },
         "../../src/lib/network.ts": {
           "bytesInOutput": 384
         },
         "../../src/lib/model.ts": {
-          "bytesInOutput": 2123
+          "bytesInOutput": 2361
+        },
+        "../../src/lib/cuda-program.ts": {
+          "bytesInOutput": 2193
         },
         "work/yukon-pin-preflight-20260923/execution-gate.ts": {
           "bytesInOutput": 90
@@ -468,17 +542,23 @@
         "work/yukon-mainnet-service-enrollment-20260923/capability.ts": {
           "bytesInOutput": 2446
         },
-        "work/yukon-mainnet-service-enrollment-20260923/dispatch.ts": {
-          "bytesInOutput": 6675
+        "../../server/runtime/storage-authority.ts": {
+          "bytesInOutput": 1844
         },
         "../../server/store.ts": {
-          "bytesInOutput": 4586
+          "bytesInOutput": 11239
+        },
+        "../../server/runtime/host-requirements.ts": {
+          "bytesInOutput": 405
+        },
+        "work/yukon-mainnet-service-enrollment-20260923/dispatch.ts": {
+          "bytesInOutput": 6747
         },
         "work/yukon-mainnet-service-enrollment-20260923/admission.ts": {
-          "bytesInOutput": 3542
+          "bytesInOutput": 3616
         }
       },
-      "bytes": 38797
+      "bytes": 56300
     }
   }
 }
