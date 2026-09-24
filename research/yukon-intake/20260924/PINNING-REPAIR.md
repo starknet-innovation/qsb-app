@@ -90,3 +90,19 @@ changed source remains required; GPU curve coverage remains pending.
 Bounded-only implementation `23b704c947abcac80963c3cd10c616d1fe59832c`
 passed native CUDA compilation in Actions run 36041532564. It does not certify
 these subsequent publication/recovery changes.
+
+## Standalone CUDA error checks
+
+The adapter now wraps the locked inventory of 41 previously unchecked standalone
+CUDA calls, covering device selection/properties, allocations, table/parameter
+uploads, initialization synchronization, tuning attributes, counter reset and
+fallback readback. Each return is evaluated once and any non-success exits 2.
+Existing assigned/conditional checks are preserved. A small scanner hides
+comments/literals, rejects inventory drift, and does not wrap checked expressions;
+the one unbraced tuning loop is explicitly braced before transformation.
+
+Eighteen local tests pass. Host CUDA mocks verify evaluation once and no later
+calls/output after each injected failure in a three-operation sequence. This is
+not 41-site native fault injection: active-path GPU failure validation and the
+helper-header CUDA calls remain to be audited. Table-construction OpenSSL checks,
+GPU exceptional coverage, runtime integration and fresh proof are still pending.

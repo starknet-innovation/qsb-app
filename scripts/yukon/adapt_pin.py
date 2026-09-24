@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import shutil
 from validate import LOCK, check_source_lock, function
+from check_cuda import checked_cuda
 
 FLAGS = {name: 0 for name in (
     'QSB_C31', 'QSB_SHORT_CARRY', 'QSB_CARRY62', 'QSB_FIELD_SC',
@@ -107,8 +108,14 @@ def adapt(text):
         '    if (total_searched != range.sequence_count * range.locktime_count) return 2;\n'
         '    printf("QSB_RANGE_DRAINED candidates=%llu\\n", (unsigned long long)total_searched);\n'
         '    printf("\\n  Done: %luM')
+    text = replace(text,
+        'for (int s = 0; s < QSB_SLOTS; s++)\n                cudaStreamSetAttribute(slot_stream[s], cudaStreamAttributeAccessPolicyWindow, &av);',
+        'for (int s = 0; s < QSB_SLOTS; s++) {\n                cudaStreamSetAttribute(slot_stream[s], cudaStreamAttributeAccessPolicyWindow, &av);\n            }')
+    text, cuda_sites = checked_cuda(text)
+    if len(cuda_sites) != 41:
+        raise ValueError(f'CUDA standalone call inventory changed: {len(cuda_sites)}')
     # Compile-time lock: command-line flags cannot silently re-enable shortcuts.
-    prefix = '#include "qsb_pin_contract.h"\n#include "qsb_pin_recovery.h"\n'
+    prefix = '#define QSB_CUDA(call) qsb_require_host((call) == cudaSuccess, #call)\n#include "qsb_pin_contract.h"\n#include "qsb_pin_recovery.h"\n'
     for name, value in FLAGS.items():
         prefix += f'#if defined({name}) && {name} != {value}\n#error "Unsafe override: {name}"\n#endif\n#ifndef {name}\n#define {name} {value}\n#endif\n'
     return prefix + text
