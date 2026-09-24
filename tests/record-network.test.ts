@@ -17,20 +17,20 @@ it("rejects a challenge, session, and vault that omit network", async () => {
     address: "addr",
     message: "QSB",
   });
-  expect(
-    (
-      await app.request(
-        new Request("http://localhost/api/auth/verify", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            id: "00000000-0000-4000-8000-000000000001",
-            signature: "aa",
-          }),
-        }),
-      )
-    ).status,
-  ).toBe(401);
+  const verify = await app.request(
+    new Request("http://localhost/api/auth/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "00000000-0000-4000-8000-000000000001",
+        signature: "aa",
+      }),
+    }),
+  );
+  expect(verify.status).toBe(401);
+  expect(await verify.json()).toEqual({
+    error: "Sign-in request expired or already used.",
+  });
   await store.put({
     pk: sessionPk,
     sk: "AUTH",
