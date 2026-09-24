@@ -1,0 +1,11 @@
+{
+  "localTag": "qsb-pr30-pin-runtime:20260924",
+  "localOciIndexDigest": "sha256:94c2e8e8ccd34c9677cc5dc5f1ef8856c9aaba3ac1395d22f8873228e3678748",
+  "amd64ManifestDigest": "sha256:aee7882679a2c432caf6a2a33f3217a421a7beef5b7fef649d9164b0d7fad7f8",
+  "configDigest": "sha256:d1b2ff1025ab51302765e61f670285f5ee5b10ed20d02d1bfcc321fde0d4c323",
+  "runtimeManifestSha256": "4e380441231fce434745d6116187aef06ad4086c8df9496948b65b880a7d9039",
+  "registryPushed": false,
+  "enrolled": false,
+  "gpuImageSuccessTested": false,
+  "releaseStatus": "HOLD"
+}

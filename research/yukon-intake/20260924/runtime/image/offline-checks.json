@@ -1,0 +1,63 @@
+{
+  "scope": "Offline read-only image entrypoint; no GPU available",
+  "binarySha256": "88cf46c45a63972e31af5f1c835a3b4088d6ea76af4b69e7bb0d7227d1562263",
+  "cases": [
+    {
+      "case": "real frozen compute without GPU",
+      "exitCode": 0,
+      "accepted": true
+    },
+    {
+      "case": "real CPU parameter binding",
+      "exitCode": 0,
+      "accepted": true
+    },
+    {
+      "case": "unknown action",
+      "exitCode": 2,
+      "accepted": false
+    },
+    {
+      "case": "extra private field",
+      "exitCode": 2,
+      "accepted": false
+    },
+    {
+      "case": "wrong binary",
+      "exitCode": 2,
+      "accepted": false
+    },
+    {
+      "case": "failed output",
+      "exitCode": 2,
+      "accepted": false
+    },
+    {
+      "case": "invalid pin",
+      "exitCode": 2,
+      "accepted": false
+    },
+    {
+      "case": "false candidate",
+      "exitCode": 2,
+      "accepted": false
+    },
+    {
+      "case": "historical CPU handoff, no search",
+      "exitCode": 0,
+      "accepted": true
+    }
+  ],
+  "positive": {
+    "contextHash": "8181d95d4a75b1a927c922b41e2729cd3c2bd0d845c561ee3654db4a834ab36a",
+    "parameterHashes": {
+      "round1": "eb0c9275bed41802078f5f2f4c12b0b2116e5668ff24e498e15a98a9093019f5",
+      "round2": "ceb4e80ef6b6a9c10560db9bc11e767b4f2e513c1fecc4ba839d7e42180d2eea"
+    },
+    "cpuOnlyHistoricalReplay": true
+  },
+  "gpuSuccessEstablished": false,
+  "providerQueueTested": false,
+  "fixtureSpentThisRun": false,
+  "releaseStatus": "HOLD"
+}

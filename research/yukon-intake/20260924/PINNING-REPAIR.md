@@ -708,3 +708,32 @@ closure lock was refreshed for the new operation; the frozen GPU binary and CPU
 reference sources remain unchanged. Live provider drain, complete composed
 positive-GPU handoff, immutable release enrollment/routing and fresh end-to-end
 proof are still pending. The tests do not certify those broader gates.
+
+## Frozen pin runtime image package and offline entrypoints
+
+`package_pin_runtime.py` produces a new directory from an explicit eleven-file
+public closure and only the previously tested frozen `88cf46c4…` binary. It rejects
+another binary, symlinks and overwriting an existing package. It copies one checked
+binary snapshot and verifies the six CPU source hashes before packaging. The binary
+is supplied explicitly from native test evidence, not committed to Git; source
+compilation and its distinct output identity remain the earlier build workflow.
+
+The pinned CUDA runtime base, manifest and one-request `pin_worker.py` entrypoint
+support compute, public CPU verification and pin handoff. Each process checks its
+closure; these checks are consistency controls, not remote image attestation.
+The manifest remains HOLD/dispatch-disabled with no invented registry digest.
+No provider queue handler or application default is changed.
+
+The local amd64 image built successfully; exact OCI index, amd64 manifest and
+config digests are recorded separately in `runtime/image/build.json`. It was
+**not pushed or enrolled**. Nine actual image cases ran with `--network none`,
+read-only root and tmpfs: frozen binary no-GPU failure, real public parameter
+binding, six malformed/negative cases, and historical positive CPU handoff.
+No-GPU compute reports failed with no candidates/credit. The positive case only
+regenerated public subset parameters; it did not search or spend the historical
+fixture. All test containers exited and were removed. The local image is retained.
+
+All **48 Python tests pass**, including packaging whitelist/hash/overwrite tests.
+This closes local assembly and offline entrypoint checks, not GPU success inside
+this image, provider queue transport, remote enrollment or fresh proof. Earlier
+native GPU tests are not silently promoted into certification of this new image.

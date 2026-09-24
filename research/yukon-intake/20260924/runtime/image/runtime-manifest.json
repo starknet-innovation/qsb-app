@@ -1,0 +1,20 @@
+{
+  "format": "qsb-yukon-pin-runtime-v1",
+  "protocol": "qsb-yukon-pinning-research-v1",
+  "releaseStatus": "HOLD",
+  "dispatchAuthorized": false,
+  "imageManifestDigest": null,
+  "files": {
+    "bin/pinning": "88cf46c45a63972e31af5f1c835a3b4088d6ea76af4b69e7bb0d7227d1562263",
+    "scripts/yukon/pin_reference.py": "e5d853e9e9a5f3feac1df41bfa7babfcb24224ee2d51bee2f0e8e44941ae71df",
+    "scripts/yukon/pin_reference_lock.json": "1cd666c1e9ef0fe32dacf1a784b6ddbaeee7b765af4466c82c06d2b01320735a",
+    "scripts/yukon/pin_runtime.py": "4c36b3a09c192c831bf85ce0f58295a5ba085ca0f8803bc9eadae512f2a8adde",
+    "scripts/yukon/pin_worker.py": "f8cd9a5ad4ccad319b55bcd954127d694a533ae5b0bd6c194556ba78e08666b0",
+    "worker/cpu/bitcoin_tx.py": "c7e52af90bd0d9fce9834fce26dcd67aee0d7751ee228d9730873c4d12659a5c",
+    "worker/cpu/gpu_emulator.py": "449312593576ec4e59d8abe1b2f601d9c2d74d58c99dfe88924442a6cab4e896",
+    "worker/cpu/handler.py": "d08b7e530d2c140021bfeb645d229f8bb37e2c0f88100cdbe79b03432026a5c1",
+    "worker/cpu/qsb_pipeline.py": "05334c08fa012a77ccba2887e05d78f90a8b81c0e34b786931b423f7f11255d8",
+    "worker/cpu/secp256k1.py": "d2cebd1410b75cad606806cf02d7bee3e24724d5fcb7a53a07f598fcbc8afece",
+    "worker/cpu/verify_hit.py": "9f9e60952db15c054871403b60266d04c50d012e882bcd52a30f4bd3ba831fba"
+  }
+}
