@@ -16,6 +16,7 @@ import {
   emptyLedger,
   publishedHitRecords,
 } from "./runtime/coverage-ledger";
+import { checkoutRoot, readHoldSolverBinding } from "./runtime/solver-review";
 const slot = z.object({
   attempt: z.number().int().nonnegative(),
   id: z.string().optional(),
@@ -69,7 +70,10 @@ export async function validationTick(
     waitSeconds,
     polls: (event.polls || 0) + 1,
   });
-  const haltStopped = async (message: string) => {
+  const holdSolver = readHoldSolverBinding(checkoutRoot);
+  const haltStopped = async (message: string, accountedUnitId?: string) => {
+    if (accountedUnitId !== undefined)
+      state.active = state.active.filter((unit) => unit.id !== accountedUnitId);
     job.status = "failed";
     job.error = message;
     await save();
@@ -157,8 +161,7 @@ export async function validationTick(
       output.stage !== job.stage ||
       output.manifestHash !== job.manifestHash ||
       output.attempt !== unit.attempt ||
-      JSON.stringify(output.workRange, Object.keys(output.workRange).sort()) !==
-        JSON.stringify(expected, Object.keys(expected).sort())
+      !sameWorkRange(output.workRange, expected)
     )
       throw Error("ValidationRangeMismatch");
     const records = publishedHitRecords(output.candidates);
@@ -170,6 +173,7 @@ export async function validationTick(
         stage,
         unit.attempt,
         { kind: "hit-capacity", hitCount: records },
+        holdSolver,
       );
       state.coverageLedger = decision.ledger;
       return haltStopped("Validation hit output exceeds supported capacity.");
@@ -187,10 +191,12 @@ export async function validationTick(
           stage,
           unit.attempt,
           { kind: "deterministic-failure" },
+          holdSolver,
         );
         state.coverageLedger = decision.ledger;
         return haltStopped(
           "Validation range or candidate needs independent review.",
+          unit.id,
         );
       }
       const decision = applyRange(
@@ -199,11 +205,13 @@ export async function validationTick(
         stage,
         unit.attempt,
         { kind: "range-complete", hitCount: records },
+        holdSolver,
       );
       state.coverageLedger = decision.ledger;
       if (decision.stop) {
         return haltStopped(
           `Validation range stopped without credit: ${decision.reason}`,
+          unit.id,
         );
       }
       if (decision.credited) state.completed++;
@@ -266,10 +274,12 @@ export async function validationTick(
         stage,
         unit.attempt,
         { kind: "deterministic-failure" },
+        holdSolver,
       );
       state.coverageLedger = decision.ledger;
       return haltStopped(
         "Validation range or candidate needs independent review.",
+        unit.id,
       );
     }
     const decision = applyRange(
@@ -278,11 +288,13 @@ export async function validationTick(
       stage,
       unit.attempt,
       { kind: "range-complete", hitCount: records },
+      holdSolver,
     );
     state.coverageLedger = decision.ledger;
     if (decision.stop) {
       return haltStopped(
         `Validation range stopped without credit: ${decision.reason}`,
+        unit.id,
       );
     }
     state.active = state.active.filter((x) => x.id !== unit.id);
@@ -383,6 +395,27 @@ export async function validationTick(
   unit.id = response.id;
   await save();
   return finish(false, state.active.length < state.slots ? 0 : 5);
+}
+
+function sameWorkRange(
+  actual: Record<string, unknown>,
+  expected: {
+    version: string;
+    start: string;
+    count: number;
+    sequence?: number;
+    sequenceCount?: number;
+    locktime?: number;
+  },
+): boolean {
+  const expectedRecord = expected as Record<string, unknown>;
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expectedRecord).sort();
+  if (actualKeys.length !== expectedKeys.length) return false;
+  return expectedKeys.every(
+    (key, index) =>
+      key === actualKeys[index] && actual[key] === expectedRecord[key],
+  );
 }
 
 function searchStage(stage: string): SearchStage {

@@ -182,6 +182,17 @@ it("pauses when a purported completed range has the wrong boundaries", async () 
   await expect(tick()).rejects.toThrow("ValidationRangeMismatch");
   expect(provider.run).toHaveBeenCalledTimes(1);
 });
+it("rejects a completed range that omits work-range fields", async () => {
+  await tick();
+  const result = completed(0);
+  result.output.workRange = {} as typeof result.output.workRange;
+  provider.status.mockResolvedValue(result);
+  await expect(tick()).rejects.toThrow("ValidationRangeMismatch");
+  const partial = completed(0);
+  delete partial.output.workRange.sequence;
+  provider.status.mockResolvedValue(partial);
+  await expect(tick()).rejects.toThrow("ValidationRangeMismatch");
+});
 
 it("selects a fresh pin after an exhaustive digest round has no usable solution", async () => {
   const row = (await store.get(pk, sk))!;
@@ -397,6 +408,7 @@ it("does not credit or advance a valid hit whose checkpoint is incomplete", asyn
   expect(row.validation).toMatchObject({
     completed: 0,
     coverageLedger: {
+      measuresHoldSolverBinary: false,
       accounts: [
         expect.objectContaining({
           stopped: true,
@@ -405,6 +417,13 @@ it("does not credit or advance a valid hit whose checkpoint is incomplete", asyn
         }),
       ],
     },
+  });
+  expect((row.job as Job).computeSeconds).toBe(1);
+  await tick();
+  await tick();
+  expect((await store.get(pk, sk))?.job).toMatchObject({
+    status: "failed",
+    computeSeconds: 1,
   });
 });
 

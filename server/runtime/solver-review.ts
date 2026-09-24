@@ -1,6 +1,19 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { z } from "zod";
+import type { HoldSolverBinding } from "./coverage-ledger";
 import { sha256Hex } from "./identity";
+
+/** Checkout root for this module, including inside a packaged tree. */
+export const checkoutRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
+
+const HOLD_SOLVER_RECEIPT = "docs/source-build/20260924/solver-build-receipt.json";
+const HOLD_SOLVER_LOCK = "worker/optimized/source-lock.json";
+const OPTIMIZED_SOURCE = "research/optimized-subset";
 
 /** Ranked batches are this compile, not the default short-epoch pair build. */
 export const SELECTED_GENERIC_FLAGS = {
@@ -106,6 +119,20 @@ export const algorithmAssumptions: readonly AlgorithmAssumption[] = [
   },
 ];
 
+export type HoldSolverSourceGap = {
+  binding: HoldSolverBinding;
+  sourceLockSha256: string;
+  sourceMatchesHoldBuild: boolean;
+  divergedFromHoldBuild: readonly string[];
+  inMemoryLedgerMeasuresBinary: false;
+  gpuExecuted: false;
+  nativeBinarySha256: null;
+  wholeRangeCovered: false;
+  mainnetEnabled: false;
+  broadcastAuthorized: false;
+  reason: "source-diverges-from-hold-build" | "hold-binary-unenrolled";
+};
+
 export type SolverReview = {
   kind: "source-review";
   selectedFlags: typeof SELECTED_GENERIC_FLAGS;
@@ -118,6 +145,7 @@ export type SolverReview = {
   sourceSha256: string;
   files: Record<string, string>;
   assumptions: readonly AlgorithmAssumption[];
+  holdSolver: HoldSolverSourceGap;
 };
 
 export type EvidenceClaim = {
@@ -132,7 +160,8 @@ export type EvidenceJudgment = {
     | "predecessor-evidence"
     | "source-mismatch"
     | "native-not-run"
-    | "binary-mismatch";
+    | "binary-mismatch"
+    | "hold-binary-unenrolled";
 };
 
 const LOCAL_INCLUDE = /^\s*#\s*include\s+"([^"]+)"/gm;
@@ -204,6 +233,7 @@ export function reviewGenericPath(root: string): SolverReview {
     sourceSha256: sourceIdentity(files),
     files,
     assumptions: algorithmAssumptions,
+    holdSolver: holdSolverSourceGap(root),
   };
 }
 
@@ -216,9 +246,105 @@ export function judgeEvidence(
     return { accepted: false, reason: "predecessor-evidence" };
   if (claim.sourceSha256 !== review.sourceSha256)
     return { accepted: false, reason: "source-mismatch" };
+  if (
+    claim.nativeBinarySha256 !== null &&
+    claim.nativeBinarySha256 === review.holdSolver.binding.binarySha256
+  )
+    return { accepted: false, reason: "hold-binary-unenrolled" };
   if (review.nativeBinarySha256 === null || claim.nativeBinarySha256 === null)
     return { accepted: false, reason: "native-not-run" };
   if (claim.nativeBinarySha256 !== review.nativeBinarySha256)
     return { accepted: false, reason: "binary-mismatch" };
   return { accepted: false, reason: "native-not-run" };
+}
+
+const holdReceiptSchema = z
+  .object({
+    binarySha256: z.string().regex(/^[a-f0-9]{64}$/),
+    sourceLockSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    status: z.literal("HOLD"),
+    historicalBinaryAttestation: z.literal(false),
+    flags: z.array(z.string()).min(1),
+  })
+  .passthrough();
+
+const holdLockSchema = z
+  .object({
+    files: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/)),
+    status: z.literal("HOLD"),
+    flags: z.array(z.string()).min(1),
+  })
+  .passthrough();
+
+function readRepoFile(root: string, relativePath: string): Buffer {
+  if (path.isAbsolute(relativePath) || relativePath.split("/").includes(".."))
+    throw new Error(`Solver path escapes the checkout: ${relativePath}`);
+  const absolute = path.join(root, relativePath);
+  if (!existsSync(absolute))
+    throw new Error(`Missing solver record ${relativePath}`);
+  return readFileSync(absolute);
+}
+
+/** The public HOLD solver receipt. This checkout does not enroll or execute it. */
+export function readHoldSolverBinding(root: string): HoldSolverBinding {
+  const receipt = holdReceiptSchema.parse(
+    JSON.parse(readRepoFile(root, HOLD_SOLVER_RECEIPT).toString("utf8")),
+  );
+  if (
+    !receipt.flags.includes("-DZLAB_TRIM=0") ||
+    !receipt.flags.includes("-DQSB_PAIR_SHARED=0")
+  )
+    throw new Error("HOLD solver receipt is not the ranked generic build");
+  return {
+    binarySha256: receipt.binarySha256,
+    status: "HOLD",
+    enrolled: false,
+    historicalBinaryAttestation: false,
+  };
+}
+
+/**
+ * In-memory coverage is not a measurement of the HOLD solver binary.
+ * Source that differs from the lock that built that binary cannot inherit it.
+ */
+export function holdSolverSourceGap(root: string): HoldSolverSourceGap {
+  const receipt = holdReceiptSchema.parse(
+    JSON.parse(readRepoFile(root, HOLD_SOLVER_RECEIPT).toString("utf8")),
+  );
+  const lockBytes = readRepoFile(root, HOLD_SOLVER_LOCK);
+  if (sha256Hex(lockBytes) !== receipt.sourceLockSha256)
+    throw new Error("HOLD solver source lock does not match the receipt");
+  const lock = holdLockSchema.parse(JSON.parse(lockBytes.toString("utf8")));
+  const diverged: string[] = [];
+  for (const [relativeFile, expected] of Object.entries(lock.files).sort(
+    ([left], [right]) => left.localeCompare(right),
+  )) {
+    const relativePath = path.posix.normalize(
+      path.posix.join(OPTIMIZED_SOURCE, relativeFile),
+    );
+    if (
+      !relativePath.startsWith(`${OPTIMIZED_SOURCE}/`) ||
+      relativePath.split("/").includes("..")
+    )
+      throw new Error(`HOLD solver lock escapes the optimized tree: ${relativeFile}`);
+    const actual = sha256Hex(readRepoFile(root, relativePath));
+    if (actual !== expected) diverged.push(relativePath);
+  }
+  const binding = readHoldSolverBinding(root);
+  const sourceMatchesHoldBuild = diverged.length === 0;
+  return {
+    binding,
+    sourceLockSha256: receipt.sourceLockSha256,
+    sourceMatchesHoldBuild,
+    divergedFromHoldBuild: diverged,
+    inMemoryLedgerMeasuresBinary: false,
+    gpuExecuted: false,
+    nativeBinarySha256: null,
+    wholeRangeCovered: false,
+    mainnetEnabled: false,
+    broadcastAuthorized: false,
+    reason: sourceMatchesHoldBuild
+      ? "hold-binary-unenrolled"
+      : "source-diverges-from-hold-build",
+  };
 }

@@ -59,11 +59,27 @@ const accountSchema = z
 export const coverageLedgerSchema = z
   .object({
     accounts: z.array(accountSchema).max(MAX_ACCOUNTS),
+    /** Identity of the HOLD solver binary this ledger is not a measurement of. */
+    holdSolverBinarySha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable()
+      .default(null),
+    /** In-memory intervals never measure that binary. A true value does not parse. */
+    measuresHoldSolverBinary: z.literal(false).default(false),
   })
   .strict();
 
 export type CoverageLedger = z.infer<typeof coverageLedgerSchema>;
 type Account = CoverageLedger["accounts"][number];
+
+/** The recorded HOLD solver. Credits may name it, and still do not measure it. */
+export type HoldSolverBinding = {
+  binarySha256: string;
+  status: "HOLD";
+  enrolled: false;
+  historicalBinaryAttestation: false;
+};
 
 export type CreditDecision = {
   ledger: CoverageLedger;
@@ -72,10 +88,32 @@ export type CreditDecision = {
   reason: string;
   /** A credited batch, a hit, or a finished stage is not whole-range coverage. */
   wholeRangeCovered: false;
+  /** In-memory accounting is not an execution of the HOLD solver binary. */
+  measuresHoldSolverBinary: false;
+  holdSolverBinarySha256: string | null;
 };
 
+export type SessionReplacement =
+  | { ok: true; created: true; ledger: CoverageLedger }
+  | {
+      ok: true;
+      created: false;
+      ledger: CoverageLedger;
+      reason: "existing-session";
+    }
+  | {
+      ok: false;
+      created: false;
+      ledger: CoverageLedger;
+      reason: "coverage-account-full";
+    };
+
 export function emptyLedger(): CoverageLedger {
-  return { accounts: [] };
+  return {
+    accounts: [],
+    holdSolverBinarySha256: null,
+    measuresHoldSolverBinary: false,
+  };
 }
 
 export function coverageAccountStopped(
@@ -158,27 +196,68 @@ export function creditedAttempts(
 
 /**
  * A replacement session starts empty. Credits already stored for another
- * session id stay there and are not copied.
+ * session id stay there and are not copied. A full ledger is an error, not
+ * another empty session.
  */
 export function replaceSession(
   ledger: CoverageLedger,
   next: { sessionId: string; solverPin: string },
-): CoverageLedger {
-  if (findAccount(ledger, next.sessionId, next.solverPin)) return ledger;
-  if (ledger.accounts.length >= MAX_ACCOUNTS) return ledger;
+): SessionReplacement {
+  if (findAccount(ledger, next.sessionId, next.solverPin))
+    return { ok: true, created: false, ledger, reason: "existing-session" };
+  if (ledger.accounts.length >= MAX_ACCOUNTS)
+    return {
+      ok: false,
+      created: false,
+      ledger,
+      reason: "coverage-account-full",
+    };
   return {
-    accounts: [
-      ...ledger.accounts,
-      {
-        sessionId: next.sessionId,
-        solverPin: next.solverPin,
-        pinning: [],
-        subsets: {},
-        stopped: false,
-        stopReason: null,
-      },
-    ],
+    ok: true,
+    created: true,
+    ledger: {
+      ...ledger,
+      measuresHoldSolverBinary: false,
+      accounts: [
+        ...ledger.accounts,
+        {
+          sessionId: next.sessionId,
+          solverPin: next.solverPin,
+          pinning: [],
+          subsets: {},
+          stopped: false,
+          stopReason: null,
+        },
+      ],
+    },
   };
+}
+
+function creditDecision(
+  ledger: CoverageLedger,
+  binding: HoldSolverBinding | null,
+  credited: boolean,
+  stop: boolean,
+  reason: string,
+): CreditDecision {
+  return {
+    ledger,
+    credited,
+    stop,
+    reason,
+    wholeRangeCovered: false,
+    measuresHoldSolverBinary: false,
+    holdSolverBinarySha256: binding?.binarySha256 ?? null,
+  };
+}
+
+function holdBindingAccepted(binding: HoldSolverBinding): boolean {
+  return (
+    binding.status === "HOLD" &&
+    binding.enrolled === false &&
+    binding.historicalBinaryAttestation === false &&
+    /^[a-f0-9]{64}$/.test(binding.binarySha256)
+  );
 }
 
 export function applyRange(
@@ -187,30 +266,33 @@ export function applyRange(
   stage: SearchStage,
   attempt: number,
   outcome: RangeOutcome,
+  binding: HoldSolverBinding,
 ): CreditDecision {
+  if (!holdBindingAccepted(binding))
+    return creditDecision(ledger, null, false, true, "hold-solver-unbound");
+  if (
+    ledger.holdSolverBinarySha256 !== null &&
+    ledger.holdSolverBinarySha256 !== binding.binarySha256
+  )
+    return creditDecision(ledger, binding, false, true, "hold-solver-mismatch");
   const next = structuredClone(ledger);
+  next.holdSolverBinarySha256 = binding.binarySha256;
+  next.measuresHoldSolverBinary = false;
   const account = ensureAccount(next, scope);
-  if (!account) {
-    return {
-      ledger: next,
-      credited: false,
-      stop: true,
-      reason: "coverage-account-full",
-      wholeRangeCovered: false,
-    };
-  }
+  if (!account)
+    return creditDecision(next, binding, false, true, "coverage-account-full");
   const refuse = (reason: string, stop: boolean): CreditDecision => {
     if (stop && !account.stopped) {
       account.stopped = true;
       account.stopReason = reason;
     }
-    return {
-      ledger: next,
-      credited: false,
-      stop: account.stopped,
-      reason: account.stopReason ?? reason,
-      wholeRangeCovered: false,
-    };
+    return creditDecision(
+      next,
+      binding,
+      false,
+      account.stopped,
+      account.stopReason ?? reason,
+    );
   };
   if (account.stopped) return refuse(account.stopReason ?? "stopped", true);
   if (!Number.isSafeInteger(attempt) || attempt < 0 || attempt >= stageAttemptCount(stage))
@@ -219,13 +301,7 @@ export function applyRange(
     return refuse("unsupported-geometry", true);
   switch (outcome.kind) {
     case "retry":
-      return {
-        ledger: next,
-        credited: false,
-        stop: false,
-        reason: "retry-without-credit",
-        wholeRangeCovered: false,
-      };
+      return creditDecision(next, binding, false, false, "retry-without-credit");
     case "deterministic-failure":
     case "unsupported-geometry":
     case "host-error":
@@ -243,13 +319,13 @@ export function applyRange(
         return refuse("hit-capacity", true);
       const placed = placeAttempt(account, scope, stage, attempt);
       if (placed === "overflow") return refuse("coverage-account-full", true);
-      return {
-        ledger: next,
-        credited: placed === "added",
-        stop: false,
-        reason: placed === "added" ? "credited" : "already-credited",
-        wholeRangeCovered: false,
-      };
+      return creditDecision(
+        next,
+        binding,
+        placed === "added",
+        false,
+        placed === "added" ? "credited" : "already-credited",
+      );
     }
     default: {
       const neverOutcome: never = outcome;

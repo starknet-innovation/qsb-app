@@ -14,15 +14,31 @@ import {
   replaceSession,
   subsetAccounted,
   type CoverageScope,
+  type RangeOutcome,
+  type SearchStage,
 } from "../server/runtime/coverage-ledger";
 import {
+  checkoutRoot,
+  holdSolverSourceGap,
   judgeEvidence,
+  readHoldSolverBinding,
   reviewGenericPath,
   sourceIdentity,
 } from "../server/runtime/solver-review";
 
 const root = process.cwd();
+const holdSolver = readHoldSolverBinding(checkoutRoot);
 const pinA = "2147483648:500000000";
+
+function credit(
+  ledger: ReturnType<typeof emptyLedger>,
+  scope: CoverageScope,
+  stage: SearchStage,
+  attempt: number,
+  outcome: RangeOutcome,
+) {
+  return applyRange(ledger, scope, stage, attempt, outcome, holdSolver);
+}
 const scope: CoverageScope = {
   sessionId: "session-a",
   solverPin: "qsb-config-a-ranked-v2-2791ed0",
@@ -69,14 +85,14 @@ describe("ranked range partition", () => {
 
 describe("coverage accounting", () => {
   it("credits a retry once and keeps a prior pin's rounds off the next pin", () => {
-    const retry = applyRange(emptyLedger(), scope, "round1", 3, { kind: "retry" });
+    const retry = credit(emptyLedger(), scope, "round1", 3, { kind: "retry" });
     expect(retry.credited).toBe(false);
     expect(retry.wholeRangeCovered).toBe(false);
-    const first = applyRange(retry.ledger, scope, "round1", 3, {
+    const first = credit(retry.ledger, scope, "round1", 3, {
       kind: "range-complete",
       hitCount: 0,
     });
-    const again = applyRange(first.ledger, scope, "round1", 3, {
+    const again = credit(first.ledger, scope, "round1", 3, {
       kind: "range-complete",
       hitCount: 0,
     });
@@ -94,12 +110,12 @@ describe("coverage accounting", () => {
   });
 
   it("stops deterministic failures, unsupported geometry, and overflow without credit", () => {
-    const failed = applyRange(emptyLedger(), scope, "round2", 1, {
+    const failed = credit(emptyLedger(), scope, "round2", 1, {
       kind: "deterministic-failure",
     });
     expect(failed.credited).toBe(false);
     expect(failed.stop).toBe(true);
-    const later = applyRange(failed.ledger, scope, "round2", 1, {
+    const later = credit(failed.ledger, scope, "round2", 1, {
       kind: "range-complete",
       hitCount: 0,
     });
@@ -112,22 +128,22 @@ describe("coverage accounting", () => {
       { kind: "exceptional-unresolved" as const },
       { kind: "hit-capacity" as const, hitCount: 65 },
     ]) {
-      const decision = applyRange(emptyLedger(), scope, "round1", 0, outcome);
+      const decision = credit(emptyLedger(), scope, "round1", 0, outcome);
       expect(decision.credited).toBe(false);
       expect(decision.stop).toBe(true);
       expect(decision.wholeRangeCovered).toBe(false);
     }
-    const overflow = applyRange(emptyLedger(), scope, "round1", 0, {
+    const overflow = credit(emptyLedger(), scope, "round1", 0, {
       kind: "range-complete",
       hitCount: 65,
     });
     expect(overflow.reason).toBe("hit-capacity");
-    expect(applyRange(emptyLedger(), scope, "round1", SUBSET_ATTEMPTS, {
+    expect(credit(emptyLedger(), scope, "round1", SUBSET_ATTEMPTS, {
       kind: "range-complete",
       hitCount: 0,
     }).reason).toBe("unsupported-geometry");
     expect(
-      applyRange(emptyLedger(), { ...scope, searchPin: null }, "round1", 0, {
+      credit(emptyLedger(), { ...scope, searchPin: null }, "round1", 0, {
         kind: "range-complete",
         hitCount: 0,
       }).reason,
@@ -137,13 +153,29 @@ describe("coverage accounting", () => {
   it("refuses a ninth coverage account without crediting it", () => {
     let ledger = emptyLedger();
     for (let index = 0; index < 8; index += 1) {
-      ledger = replaceSession(ledger, {
+      const created = replaceSession(ledger, {
         sessionId: `session-${index}`,
         solverPin: scope.solverPin,
       });
+      expect(created.ok).toBe(true);
+      expect(created.created).toBe(true);
+      ledger = created.ledger;
     }
     expect(ledger.accounts).toHaveLength(8);
-    const ninth = applyRange(
+    const ninthSession = replaceSession(ledger, {
+      sessionId: "session-9",
+      solverPin: scope.solverPin,
+    });
+    expect(ninthSession).toEqual({
+      ok: false,
+      created: false,
+      ledger,
+      reason: "coverage-account-full",
+    });
+    expect(ninthSession.ledger.accounts.some((account) => account.sessionId === "session-9")).toBe(
+      false,
+    );
+    const ninth = credit(
       ledger,
       { ...scope, sessionId: "session-9", searchPin: null },
       "pinning",
@@ -164,7 +196,7 @@ describe("coverage accounting", () => {
   });
 
   it("does not transfer coverage across a session or solver pin replacement", () => {
-    const credited = applyRange(emptyLedger(), scope, "pinning", 4, {
+    const credited = credit(emptyLedger(), scope, "pinning", 4, {
       kind: "range-complete",
       hitCount: 1,
     }).ledger;
@@ -172,14 +204,16 @@ describe("coverage accounting", () => {
       sessionId: "session-b",
       solverPin: scope.solverPin,
     });
+    expect(replaced.ok).toBe(true);
+    expect(replaced.created).toBe(true);
     expect(
       creditedAttempts(
-        replaced,
+        replaced.ledger,
         { ...scope, sessionId: "session-b", searchPin: null },
         "pinning",
       ),
     ).toEqual([]);
-    expect(creditedAttempts(replaced, scope, "pinning")).toEqual([{ start: 4, end: 5 }]);
+    expect(creditedAttempts(replaced.ledger, scope, "pinning")).toEqual([{ start: 4, end: 5 }]);
     expect(
       creditedAttempts(
         credited,
@@ -193,11 +227,13 @@ describe("coverage accounting", () => {
     let ledger = emptyLedger();
     for (const stage of ["round1", "round2"] as const) {
       for (let attempt = 0; attempt < SUBSET_ATTEMPTS; attempt += 1) {
-        const decision = applyRange(ledger, scope, stage, attempt, {
+        const decision = credit(ledger, scope, stage, attempt, {
           kind: "range-complete",
           hitCount: 0,
         });
         expect(decision.wholeRangeCovered).toBe(false);
+        expect(decision.measuresHoldSolverBinary).toBe(false);
+        expect(decision.holdSolverBinarySha256).toBe(holdSolver.binarySha256);
         ledger = decision.ledger;
       }
     }
@@ -206,6 +242,7 @@ describe("coverage accounting", () => {
       round2: true,
       both: true,
     });
+    expect(ledger.measuresHoldSolverBinary).toBe(false);
     expect(subsetAccounted(ledger, { ...scope, searchPin: "1:1" }).both).toBe(false);
     expect(publishedHitRecords(["indices=1\n".repeat(65)])).toBe(65);
     expect(publishedHitRecords(["sequence=2147483648\nlocktime=500000000\n".repeat(65)])).toBe(65);
@@ -322,5 +359,68 @@ describe("source-bound solver review", () => {
     expect(subset).toContain("if(!usable)return;");
     expect(optimized).not.toContain("? 64 :");
     expect(optimized).toContain("hand exceptional active points");
+  });
+
+  it("does not measure the HOLD solver binary from the in-memory ledger", () => {
+    const gap = holdSolverSourceGap(root);
+    expect(gap).toMatchObject({
+      inMemoryLedgerMeasuresBinary: false,
+      gpuExecuted: false,
+      nativeBinarySha256: null,
+      wholeRangeCovered: false,
+      mainnetEnabled: false,
+      broadcastAuthorized: false,
+      sourceMatchesHoldBuild: false,
+      reason: "source-diverges-from-hold-build",
+      binding: {
+        status: "HOLD",
+        enrolled: false,
+        historicalBinaryAttestation: false,
+        binarySha256:
+          "6d46cec4ddfebeb94993a9aad26a8506668b7b23b6d2d3f0214a6a77272586d6",
+      },
+    });
+    expect([...gap.divergedFromHoldBuild]).toEqual([
+      "research/optimized-subset/subset/tests/gpu_epochs/pair_shared.cuh",
+      "research/optimized-subset/subset/tests/gpu_epochs/tree.cu",
+    ]);
+    const review = reviewGenericPath(root);
+    expect(review.nativeBinarySha256).toBeNull();
+    expect(review.gpuExecuted).toBe(false);
+    expect(review.holdSolver.reason).toBe(gap.reason);
+    expect(
+      judgeEvidence(review, {
+        kind: "native-binary",
+        sourceSha256: review.sourceSha256,
+        nativeBinarySha256: gap.binding.binarySha256,
+      }),
+    ).toEqual({ accepted: false, reason: "hold-binary-unenrolled" });
+    const credited = credit(emptyLedger(), scope, "pinning", 0, {
+      kind: "range-complete",
+      hitCount: 0,
+    });
+    const mismatched = applyRange(
+      credited.ledger,
+      scope,
+      "pinning",
+      1,
+      { kind: "range-complete", hitCount: 0 },
+      { ...holdSolver, binarySha256: "ab".repeat(32) },
+    );
+    expect(mismatched.credited).toBe(false);
+    expect(mismatched.reason).toBe("hold-solver-mismatch");
+    expect(mismatched.measuresHoldSolverBinary).toBe(false);
+    expect(mismatched.ledger.accounts).toHaveLength(1);
+    const unbound = applyRange(
+      emptyLedger(),
+      scope,
+      "pinning",
+      0,
+      { kind: "range-complete", hitCount: 0 },
+      { ...holdSolver, enrolled: true } as typeof holdSolver,
+    );
+    expect(unbound.credited).toBe(false);
+    expect(unbound.reason).toBe("hold-solver-unbound");
+    expect(unbound.ledger.accounts).toEqual([]);
   });
 });
