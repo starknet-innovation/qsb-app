@@ -1,8 +1,10 @@
+import * as pinVerifier from "../scripts/yukon/pin_verifier";
 import { reconcileResearchPin } from "../scripts/yukon/pin_reconcile";
 import { submitResearchPin } from "../scripts/yukon/pin_submit";
 import { readFileSync } from "node:fs";
 import {
   receiveResearchPin,
+  handoffResearchPin,
   PIN_RESEARCH_RELEASE,
   PIN_RESEARCH_RELEASE_ID,
   PIN_RESEARCH_RELEASE_PK,
@@ -15,7 +17,7 @@ import {
   CreateTableCommand,
   DeleteTableCommand,
 } from "@aws-sdk/client-dynamodb";
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll, vi } from "vitest";
 import { MemoryStore, DynamoStore } from "../server/store";
 import { fingerprint } from "../src/lib/provenance";
 import { PinInventoryV3 } from "../supervised/runtime/source/work/yukon-indexed-pin-20260923/pin-inventory-v3";
@@ -858,5 +860,92 @@ describe("known-ID reconciliation after uncertain research submission", () => {
       }),
     ).rejects.toThrow("context changed");
     expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
+  });
+});
+
+describe("release-fenced subset handoff", () => {
+  async function enrolledWinner() {
+    const f = await drainingFixture();
+    for (const sk of ["SCOPE", "PIN#0"]) {
+      const row = (await f.store.get(f.pk, sk))!;
+      const frozen =
+        sk === "PIN#0"
+          ? JSON.stringify({
+              ...JSON.parse(row.frozen as string),
+              binarySha256: PIN_RESEARCH_RELEASE.binarySha256,
+            })
+          : undefined;
+      await f.store.put(
+        {
+          ...row,
+          version: row.version + 1,
+          researchReleaseId: PIN_RESEARCH_RELEASE_ID,
+          ...(frozen ? { frozen } : {}),
+        },
+        row.version,
+      );
+    }
+    const release = {
+      pk: PIN_RESEARCH_RELEASE_PK,
+      sk: PIN_RESEARCH_RELEASE_ID,
+      version: 0,
+      enabled: true,
+      descriptor: PIN_RESEARCH_RELEASE,
+      endpoint: "synthetic-endpoint",
+      scopes: [f.binding.scope],
+    };
+    await f.store.put(release);
+    return { ...f, release };
+  }
+  it("fences handoff against release revocation during the final drain observation", async () => {
+    const f = await enrolledWinner();
+    // Synthetic CPU export isolates the release transaction race, not cryptography.
+    const mock = vi
+      .spyOn(pinVerifier, "createPinHandoff")
+      .mockReturnValue(async () => f.handoff);
+    try {
+      await expect(
+        handoffResearchPin(f.store, f.binding, async () => {
+          await f.store.put({ ...f.release, version: 1, enabled: false }, 0);
+          return f.observe();
+        }),
+      ).rejects.toThrow();
+      expect((await f.store.get(f.pk, "SCOPE"))?.phase).toBe(
+        "pinning_draining",
+      );
+      expect((await f.store.get(f.pk, "PIN#0"))?.state).toBe(
+        "research_result_verified",
+      );
+    } finally {
+      mock.mockRestore();
+    }
+  });
+  it("prepares once under the same enrollment without authorizing dispatch", async () => {
+    const f = await enrolledWinner();
+    const mock = vi
+      .spyOn(pinVerifier, "createPinHandoff")
+      .mockReturnValue(async () => f.handoff);
+    try {
+      const got = await handoffResearchPin(f.store, f.binding, f.observe);
+      expect(got.dispatchAuthorized).toBe(false);
+      await expect(
+        handoffResearchPin(f.store, f.binding, f.observe),
+      ).rejects.toThrow();
+    } finally {
+      mock.mockRestore();
+    }
+  });
+  it("rejects an already revoked enrollment before invoking CPU export", async () => {
+    const f = await enrolledWinner();
+    await f.store.put({ ...f.release, version: 1, enabled: false }, 0);
+    const mock = vi.spyOn(pinVerifier, "createPinHandoff");
+    try {
+      await expect(
+        handoffResearchPin(f.store, f.binding, f.observe),
+      ).rejects.toThrow("Research release");
+      expect(mock).not.toHaveBeenCalled();
+    } finally {
+      mock.mockRestore();
+    }
   });
 });

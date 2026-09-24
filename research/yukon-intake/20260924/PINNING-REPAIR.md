@@ -938,3 +938,19 @@ No additional paid work or provider mutation was performed.
 All GitHub checks for `ee9da5f95c1386d1d520f0ce73dfea03e448d4d2` passed, including
 CUDA validation, application tests/typecheck and CodeQL. This does not close
 independent review, positive GPU hit publication or fresh end-to-end proof.
+
+## Release-fenced subset handoff
+
+`handoffResearchPin` now selects the exact enrolled release and uses the fixed
+CPU exporter before preparing subset parameters. It shares release/scope/intent
+version fencing with result publication. Revocation during CPU work or the final
+drain observation prevents the atomic handoff; preparation still grants no paid
+dispatch. Existing sibling-terminal, identity, context and queue-drain checks
+remain required. No live enrollment or production route was enabled.
+
+All 34 focused tests and typecheck pass; all 31 Store tests pass on actual
+loopback DynamoDB Local. The three new cases mock CPU export to isolate the
+release transaction race, one-time transition and pre-export revocation checks.
+They do not establish a positive GPU hit or a fresh withdrawal. Evidence and
+source hashes: `runtime/release-handoff/local-tests.json`. Test tables and the
+disposable container were removed.

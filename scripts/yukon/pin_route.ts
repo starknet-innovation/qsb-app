@@ -1,8 +1,12 @@
 /** Explicit research-only receive route. Does not submit jobs or select a default solver. */
 import type { Store } from "../../server/store";
 import { fingerprint } from "../../src/lib/provenance";
-import { decodeResearchQueueCompletion, publishResearchPin } from "./pin_store";
-import { createPinVerifier } from "./pin_verifier";
+import {
+  decodeResearchQueueCompletion,
+  publishResearchPin,
+  prepareResearchSubset,
+} from "./pin_store";
+import { createPinVerifier, createPinHandoff } from "./pin_verifier";
 
 export const PIN_RESEARCH_RELEASE = Object.freeze({
   protocol: "qsb-yukon-pin-queue-v1",
@@ -30,6 +34,43 @@ export async function receiveResearchPin(
 ) {
   const b = structuredClone(binding),
     provider = structuredClone(rawProviderResult);
+  const { guarded, intent } = await selectResearchRoute(store, b);
+  const decoded = decodeResearchQueueCompletion(
+    provider,
+    JSON.parse(intent.frozen as string),
+    PIN_RESEARCH_RELEASE.runtimeManifestSha256,
+  );
+  return publishResearchPin(
+    guarded,
+    {
+      ...b,
+      binarySha256: PIN_RESEARCH_RELEASE.binarySha256,
+    },
+    decoded,
+    createPinVerifier(),
+  );
+}
+
+/** Fixed CPU exporter; observe is a trusted operator read adapter, never user input.
+ * Preparing parameters grants neither paid dispatch nor production release approval.
+ */
+export async function handoffResearchPin(
+  store: Store,
+  binding: Binding,
+  observe: Parameters<typeof prepareResearchSubset>[3],
+) {
+  const b = structuredClone(binding);
+  const { guarded } = await selectResearchRoute(store, b);
+  return prepareResearchSubset(
+    guarded,
+    { ...b, binarySha256: PIN_RESEARCH_RELEASE.binarySha256 },
+    createPinHandoff(),
+    observe,
+  );
+}
+
+async function selectResearchRoute(store: Store, binding: Binding) {
+  const b = structuredClone(binding);
   if (!/^isolated-yukon-[a-z0-9-]+$/.test(b.scope))
     throw Error("Research scope required");
   const pk = "VALIDATION#" + b.scope;
@@ -58,12 +99,6 @@ export async function receiveResearchPin(
     ["xbgi2q58lbyyls", "72cqi112b9t8qv"].includes(release.endpoint)
   )
     throw Error("Research release is absent, revoked or mismatched");
-  const request = JSON.parse(intent.frozen);
-  const decoded = decodeResearchQueueCompletion(
-    provider,
-    request,
-    PIN_RESEARCH_RELEASE.runtimeManifestSha256,
-  );
   const guarded: Store = {
     get: store.get.bind(store),
     list: store.list.bind(store),
@@ -95,10 +130,5 @@ export async function receiveResearchPin(
       ]);
     },
   };
-  return publishResearchPin(
-    guarded,
-    { ...b, binarySha256: PIN_RESEARCH_RELEASE.binarySha256 },
-    decoded,
-    createPinVerifier(),
-  );
+  return { guarded, intent };
 }

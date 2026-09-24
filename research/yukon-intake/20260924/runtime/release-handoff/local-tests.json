@@ -1,0 +1,18 @@
+{
+  "scope": "Release-fenced subset preparation; mocked CPU handoff for new transaction race tests; no GPU/provider calls",
+  "focusedTests": 34,
+  "dynamoLocalStoreTests": 31,
+  "typecheck": "passed",
+  "newCases": [
+    "revocation during final drain observation blocks atomic handoff",
+    "enrolled handoff once, no dispatch authorization",
+    "revoked enrollment rejected before CPU export"
+  ],
+  "dynamoLocalImage": "sha256:ff89bd48ff32cd8d9be5fee8873b65b8854dc408f1afe881be6eb00247bc0dab",
+  "sourceSha256": {
+    "scripts/yukon/pin_route.ts": "ef2eff5ef8c49e173c8c5be70fd65fe2232d05cb7430605ad2e7ba115f4aac68",
+    "tests/yukon-pin-store.test.ts": "293e3040587e26650e035e8699dd5478d8d1b727a8a00ba98f3805d3b9365730"
+  },
+  "releaseStatus": "HOLD",
+  "positiveGpuHitEstablished": false
+}
