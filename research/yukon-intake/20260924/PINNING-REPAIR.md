@@ -177,3 +177,9 @@ secp256k1 plus hashlib. Missing, duplicate, extra and incorrect traces reject.
 Predicates are unchanged in the trace binary; this is not a fresh withdrawal or
 performance benchmark. Preparation succeeded locally; 24 local tests pass.
 Native execution and final binary receipts are pending. No GPU allocated yet.
+
+The native build workflow also executes eleven rejection paths in the actual
+compiled binary, inside a network-disabled read-only container with temporary
+scratch space. Malformed CLI/ranges, truncated/oversized/trailing parameter data
+and zero curve constants must fail before CUDA access or a drain receipt. This
+check is prepared for CI, not yet recorded as passing; it is not GPU execution.

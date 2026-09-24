@@ -1,5 +1,5 @@
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04@sha256:6617a625f4090c76c545a0e7d63f2e441718ef9af7f4efe7dd1242a29e289fd7
-RUN apt-get update && apt-get install -y --no-install-recommends libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libssl-dev python3 && rm -rf /var/lib/apt/lists/*
 COPY pinning /candidate
 WORKDIR /candidate
 RUN nvcc -O3 -arch=sm_89 -std=c++17 pinning.cu -o /pinning-repaired -lcrypto -lm
