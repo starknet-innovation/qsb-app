@@ -23,7 +23,7 @@
       "path": "work/yukon-mainnet-service-enrollment-20260923/capability.ts",
       "source": "work/yukon-mainnet-service-enrollment-20260923/capability.ts",
       "originalSha256": "14902f68d89c38fdf79bca4af86ffee771ddfce767647e4058d8ef19dfe400fa",
-      "sha256": "cd8897c7b287d7183c9d906836d2430b87fecd56616075d798b925a5c1010caa",
+      "sha256": "ad4f55803a01ddd633ace9811947f6077bfed31a8747e06e3a101f03b64c1095",
       "transformations": [
         "Relative app imports target public app; package imports resolve installed dependencies.",
         "coreSourceManifest rebound to the enrolled core digest on the public copy."

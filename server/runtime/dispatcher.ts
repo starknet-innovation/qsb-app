@@ -19,6 +19,10 @@ import {
 } from "./host-bridge";
 import { coreSourceDigest } from "./package-release";
 import { RELEASE_MANIFEST_FORMAT, type LaunchBindings } from "./types";
+import {
+  canonicalOutpointKey,
+  reservationAuthority,
+} from "../../supervised/archive/work/yukon-canonical-reservations-20260923/reservations";
 
 export type FundingLedger = {
   assertNetwork: () => Promise<void>;
@@ -45,25 +49,26 @@ function reservations(job: SupervisedJob): LaunchBindings["reservations"] {
   }));
 }
 
-function outpointAliasKeys(txid: string, vout: number): string[] {
-  return [
-    ...new Set([
-      `OUTPOINT#${txid}:${vout}`,
-      `OUTPOINT#${txid.toLowerCase()}:${vout}`,
-      `OUTPOINT#${txid.toUpperCase()}:${vout}`,
-    ]),
-  ];
+async function enrolledReservationAuthority(store: Store): Promise<Row> {
+  try {
+    return await reservationAuthority(store);
+  } catch (error) {
+    throw new GateError(
+      503,
+      error instanceof Error
+        ? error.message
+        : "Canonical reservation authority not enrolled; legacy migration/writer exclusion required",
+    );
+  }
 }
 
-async function assertAliasesFree(
+async function assertCanonicalFree(
   store: Store,
   points: { txid: string; vout: number }[],
 ): Promise<void> {
   for (const point of points) {
-    for (const pk of outpointAliasKeys(point.txid, point.vout)) {
-      if (await store.get(pk, "RESERVATION"))
-        throw new GateError(409, "Outpoint already reserved.");
-    }
+    if (await store.get(canonicalOutpointKey(point.txid, point.vout), "RESERVATION"))
+      throw new GateError(409, "Outpoint already reserved.");
   }
 }
 
@@ -73,18 +78,8 @@ async function currentReservation(
   jobId: string,
   point: { txid: string; vout: number },
 ): Promise<Row> {
-  const found: Row[] = [];
-  for (const pk of outpointAliasKeys(point.txid, point.vout)) {
-    const row = await store.get(pk, "RESERVATION");
-    if (row) found.push(row);
-  }
-  const row = found[0];
-  if (
-    found.length !== 1 ||
-    !row ||
-    row.owner !== owner ||
-    row.jobId !== jobId
-  )
+  const row = await store.get(canonicalOutpointKey(point.txid, point.vout), "RESERVATION");
+  if (!row || row.owner !== owner || row.jobId !== jobId)
     throw new GateError(409, "Outpoint reservation is no longer current.");
   return row;
 }
@@ -171,6 +166,8 @@ export async function admitSupervisedJob(
 ): Promise<{ job: SupervisedJob; created: boolean }> {
   assertServiceChain(serviceNetwork);
   const capability = await assertSearchCapability(store);
+  const authority = await enrolledReservationAuthority(store);
+  const authorityHash = fingerprint(authority);
   const parsed = bodySchema.parse(body);
   let request: ReturnType<typeof validateRequest>;
   try {
@@ -201,6 +198,8 @@ export async function admitSupervisedJob(
   const existing = await store.get(pk, `JOB#${id}`);
   if (existing) {
     const job = existing.job as SupervisedJob;
+    if (job.reservationAuthorityHash !== authorityHash)
+      throw new GateError(409, "Job belongs to a different reservation authority.");
     if (job.mainnetRequestHash !== requestHash)
       throw new GateError(
         409,
@@ -214,7 +213,7 @@ export async function admitSupervisedJob(
       throw new GateError(409, "A job already exists for this vault.");
   }
   await assertSpendableFunding(ledger, owner, vault, request.manifest);
-  await assertAliasesFree(store, [request.manifest.funding, request.manifest.helper]);
+  await assertCanonicalFree(store, [request.manifest.funding, request.manifest.helper]);
   const now = new Date().toISOString();
   const job: SupervisedJob = {
     id,
@@ -227,6 +226,7 @@ export async function admitSupervisedJob(
     manifest: request.manifest,
     manifestHash: fingerprint(request.manifest),
     mainnetRequestHash: requestHash,
+    reservationAuthorityHash: authorityHash,
     solver: pinSolver(vault),
     execution: {
       kind: "qsb-supervised-service-v1",
@@ -251,7 +251,7 @@ export async function admitSupervisedJob(
       { row: { pk, sk: `JOB#${id}`, version: 0, job: stored } },
       ...[request.manifest.funding, request.manifest.helper].map((point) => ({
         row: {
-          pk: `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`,
+          pk: canonicalOutpointKey(point.txid, point.vout),
           sk: "RESERVATION",
           version: 0,
           owner,
@@ -259,15 +259,26 @@ export async function admitSupervisedJob(
         },
       })),
       { row: capability, expected: capability.version },
+      { row: authority, expected: authority.version },
     ]);
   } catch (error) {
     if (error instanceof Conflict) {
       const raced = await store.get(pk, `JOB#${id}`);
       if (raced) {
         const racedJob = raced.job as SupervisedJob;
-        if (racedJob.mainnetRequestHash === requestHash)
+        if (
+          racedJob.reservationAuthorityHash === authorityHash &&
+          racedJob.mainnetRequestHash === requestHash
+        )
           return { job: racedJob, created: false };
       }
+      const currentAuthority = await store.get(authority.pk, authority.sk);
+      if (
+        !currentAuthority ||
+        currentAuthority.version !== authority.version ||
+        fingerprint(currentAuthority) !== authorityHash
+      )
+        throw new GateError(409, "Reservation authority changed.");
       const current = await store.get(capability.pk, capability.sk);
       if (
         !current ||
@@ -292,6 +303,8 @@ export async function claimAdmittedLaunch(
   if (release.mainnetEnabled || contract.broadcastAuthorized)
     throw new GateError(503, "Supervised search capability is not active.");
   const capability = await assertSearchCapability(store);
+  const authority = await enrolledReservationAuthority(store);
+  const authorityHash = fingerprint(authority);
   const coreDigest = authorizedCoreDigest();
   const pk = `OWNER#${owner}`;
   const jobRow = await store.get(pk, `JOB#${jobId}`);
@@ -299,6 +312,8 @@ export async function claimAdmittedLaunch(
   const job = jobRow.job as SupervisedJob;
   if (job.execution.coreSourceManifest !== coreDigest)
     throw new GateError(503, "Supervised search capability is not active.");
+  if (job.reservationAuthorityHash !== authorityHash)
+    throw new GateError(409, "Reservation authority changed.");
   for (;;) {
     const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
     if (!vaultRow) throw new GateError(404, "Vault not found");
@@ -345,6 +360,7 @@ export async function claimAdmittedLaunch(
         store.atomicPut([
           ...writes,
           { row: capability, expected: capability.version },
+          { row: authority, expected: authority.version },
           { row: vaultRow, expected: vaultRow.version },
           { row: fundingReservation, expected: fundingReservation.version },
           { row: helperReservation, expected: helperReservation.version },
@@ -378,6 +394,13 @@ export async function claimAdmittedLaunch(
         !sameReservation(helperReservation, currentHelper)
       )
         throw new GateError(409, "Outpoint reservation is no longer current.");
+      const currentAuthority = await store.get(authority.pk, authority.sk);
+      if (
+        !currentAuthority ||
+        currentAuthority.version !== authority.version ||
+        fingerprint(currentAuthority) !== authorityHash
+      )
+        throw new GateError(409, "Reservation authority changed.");
       const current = await store.get(capability.pk, capability.sk);
       if (
         !current ||

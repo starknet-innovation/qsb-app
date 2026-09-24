@@ -98,6 +98,19 @@ async function seedCapability(store: MemoryStore) {
     enabled: true,
     contract,
   });
+  await store.put({
+    pk: "SYSTEM#QSB_RESERVATIONS",
+    sk: "SCHEMA",
+    version: 1,
+    format: "qsb-canonical-reservations-v1",
+    state: "active",
+    writerPolicy: "canonical-only",
+    legacyWritersStopped: true,
+    migrationComplete: true,
+    generation: 1,
+    legacyInventoryHash: "ab".repeat(32),
+    canonicalInventoryHash: "cd".repeat(32),
+  });
 }
 
 function memoryRetention() {
@@ -1203,9 +1216,15 @@ describe("supervised runtime handoff", () => {
     ).rejects.toThrow(/Outpoint already reserved/);
   });
 
-  it("refuses a supervised reservation when a legacy uppercase outpoint exists", async () => {
+  it("refuses a reservation until the canonical reservation authority is enrolled", async () => {
     const store = new MemoryStore();
-    await seedCapability(store);
+    await store.put({
+      pk: "SYSTEM#QSB_MAINNET_SERVICE",
+      sk: "CAPABILITY",
+      version: 1,
+      enabled: true,
+      contract,
+    });
     const fixture = simulatedMainnetRequest();
     const txid = "ab".repeat(32);
     const funding = { ...fixture.vault.funding!, txid };
@@ -1230,7 +1249,7 @@ describe("supervised runtime handoff", () => {
       vault,
     });
     await store.put({
-      pk: `OUTPOINT#${txid.toUpperCase()}:${funding.vout}`,
+      pk: `OUTPOINT#Ab${txid.slice(2)}:${funding.vout}`,
       sk: "RESERVATION",
       version: 0,
       owner: "legacy-owner",
@@ -1238,8 +1257,29 @@ describe("supervised runtime handoff", () => {
     });
     await expect(
       admitSupervisedJob(store, address, "mainnet", body, confirmingLedger),
-    ).rejects.toThrow(/Outpoint already reserved/);
-    expect(await store.get(`OUTPOINT#${txid}:${funding.vout}`, "RESERVATION")).toBeUndefined();
+    ).rejects.toThrow(/Canonical reservation authority not enrolled/);
+    expect(
+      await store.get(`OUTPOINT#${txid}:${funding.vout}`, "RESERVATION"),
+    ).toBeUndefined();
+    await store.put({
+      pk: "SYSTEM#QSB_RESERVATIONS",
+      sk: "SCHEMA",
+      version: 1,
+      format: "qsb-canonical-reservations-v1",
+      state: "active",
+      writerPolicy: "canonical-only",
+      legacyWritersStopped: true,
+      migrationComplete: false,
+      generation: 1,
+      legacyInventoryHash: "ab".repeat(32),
+      canonicalInventoryHash: "cd".repeat(32),
+    });
+    await expect(
+      admitSupervisedJob(store, address, "mainnet", body, confirmingLedger),
+    ).rejects.toThrow(/Canonical reservation authority not enrolled/);
+    expect(
+      await store.get(`OUTPOINT#${txid}:${funding.vout}`, "RESERVATION"),
+    ).toBeUndefined();
   });
 
   it("refuses a launch claim when a reserved outpoint is gone or spent", async () => {
@@ -2510,6 +2550,57 @@ describe("supervised runtime handoff", () => {
     await expect(
       claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger),
     ).rejects.toThrow(/Supervised search capability is not active/);
+    expect(
+      await inner.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),
+    ).toBeUndefined();
+  });
+
+  it("does not claim a launch after the reservation authority changes", async () => {
+    const inner = new MemoryStore();
+    await seedCapability(inner);
+    const fixture = simulatedMainnetRequest();
+    await inner.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    const admitted = await admitSupervisedJob(
+      inner,
+      address,
+      "mainnet",
+      fixture.prepared.body,
+      confirmingLedger,
+    );
+    let bumped = false;
+    const store: Store = {
+      get: (pk, sk) => inner.get(pk, sk),
+      put: (row, expected) => inner.put(row, expected),
+      delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
+      list: (pk, prefix) => inner.list(pk, prefix),
+      atomicPut: async (writes) => {
+        const claiming = writes.some((write) =>
+          String(write.row.sk).startsWith("LAUNCH#"),
+        );
+        const fencesAuthority = writes.some(
+          (write) =>
+            write.row.pk === "SYSTEM#QSB_RESERVATIONS" && write.expected !== undefined,
+        );
+        if (claiming && fencesAuthority && !bumped) {
+          bumped = true;
+          const authority = await inner.get("SYSTEM#QSB_RESERVATIONS", "SCHEMA");
+          await inner.put(
+            { ...authority!, version: authority!.version + 1 },
+            authority!.version,
+          );
+        }
+        await inner.atomicPut(writes);
+      },
+    };
+    await expect(
+      claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger),
+    ).rejects.toThrow(/Reservation authority changed/);
+    expect(bumped).toBe(true);
     expect(
       await inner.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),
     ).toBeUndefined();
