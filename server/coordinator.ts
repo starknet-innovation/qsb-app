@@ -9,6 +9,11 @@ import { release, type Job, type PublicVault } from "../src/lib/model";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { z } from "zod";
 import { searchVersion, workRange, subsetRank } from "./search-ranges";
+import { gpuSpendLimits } from "./gpu-spend";
+import {
+  HOST_HIT_CAPACITY,
+  publishedHitRecords,
+} from "./runtime/coverage-ledger";
 import {
   SecretsManagerClient,
   GetSecretValueCommand,
@@ -163,6 +168,16 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       await save();
       return { ...event, done: true };
     }
+    if (
+      job.attempt >= gpuSpendLimits.maxJobAttempts ||
+      (job.gpuSubmissions ?? 0) >= gpuSpendLimits.maxJobAttempts
+    ) {
+      job.status = "paused";
+      job.error =
+        "Attempt cap reached. Further GPU work on this job needs a reviewed limit change.";
+      await save();
+      return { ...event, done: true };
+    }
     const parameters = z
       .object({
         parameterBase64: z.string().max(140000),
@@ -179,6 +194,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       ...job.parameterHashes,
       [key]: parameters.parameterSha256,
     };
+    job.gpuSubmissions = (job.gpuSubmissions ?? 0) + 1;
     job.status = "searching";
     delete job.retryRequested;
     await save();
@@ -235,81 +251,97 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       if (output.workRange[field] !== expectedRange[field])
         throw new Error("CandidateRangeMismatch");
     job.computeSeconds += (result.executionTime || 0) / 1000;
-    const checked = await cpu({
-      ...referenceInput,
-      action: "verify",
-      candidates: output.candidates,
-    });
-    if (checked.valid === true) {
+    // The historical worker truncates at 64 and still reports range-complete.
+    // An exact 64-record file is not credited as a finished range.
+    const records = publishedHitRecords(output.candidates);
+    if (records >= HOST_HIT_CAPACITY) {
       delete job.retryRequested;
-      if (job.stage === "pinning") {
-        const hit = z
-          .object({
-            sequence: z
-              .number()
-              .int()
-              .min(expectedRange.sequence!)
-              .max(expectedRange.sequence! + expectedRange.sequenceCount! - 1),
-            locktime: z
-              .number()
-              .int()
-              .min(expectedRange.locktime!)
-              .max(1744600000 - 1),
-          })
-          .parse(checked);
-        job.solution = { ...hit, round1: [], round2: [] };
-        job.stage = "round1";
-      } else {
-        const indices = z
-          .array(z.number().int().min(0).max(149))
-          .length(9)
-          .parse(checked.indices);
-        const rank = subsetRank(indices);
-        if (
-          rank < BigInt(expectedRange.start) ||
-          rank >= BigInt(expectedRange.start) + BigInt(expectedRange.count)
-        )
-          throw new Error("CandidateOutsideAssignedRange");
-        if (!job.solution || new Set(indices).size !== 9)
-          throw new Error("InvalidReferenceResult");
-        if (job.stage === "round1") {
-          job.solution.round1 = indices;
-          job.stage = "round2";
-        } else if (job.stage === "round2") {
-          job.solution.round2 = indices;
-          job.stage = "verification";
-        } else throw new Error("UnexpectedStage");
-      }
-      job.attempt = 0;
-      delete job.runpodId;
-      job.status =
-        job.stage === "verification" ? "awaiting_authorization" : "queued";
-    } else if (output.candidates.length && checked.derOnly !== true) {
-      job.status = "paused";
-      job.error = "GPU candidates failed independent CPU verification.";
-    } else if (
-      output.status === "completed" &&
-      output.checkpoint === "range-complete"
-    ) {
-      delete job.retryRequested;
-      job.attempt++;
-      delete job.runpodId;
-      job.status = "queued";
-      try {
-        workRange(job.stage, job.attempt);
-      } catch {
-        job.status = "paused";
-        job.error = "Search range exhausted; a reviewed new range is required.";
-      }
+      job.status = "failed";
+      job.error = "GPU hit output exceeds supported capacity.";
     } else {
-      if (job.retryRequested) {
-        delete job.runpodId;
+      const checked = await cpu({
+        ...referenceInput,
+        action: "verify",
+        candidates: output.candidates,
+      });
+      if (checked.valid === true) {
         delete job.retryRequested;
-        job.status = "queued";
-      } else {
+        if (job.stage === "pinning") {
+          const hit = z
+            .object({
+              sequence: z
+                .number()
+                .int()
+                .min(expectedRange.sequence!)
+                .max(expectedRange.sequence! + expectedRange.sequenceCount! - 1),
+              locktime: z
+                .number()
+                .int()
+                .min(expectedRange.locktime!)
+                .max(1744600000 - 1),
+            })
+            .parse(checked);
+          job.solution = { ...hit, round1: [], round2: [] };
+          job.stage = "round1";
+        } else {
+          const indices = z
+            .array(z.number().int().min(0).max(149))
+            .length(9)
+            .parse(checked.indices);
+          const rank = subsetRank(indices);
+          if (
+            rank < BigInt(expectedRange.start) ||
+            rank >= BigInt(expectedRange.start) + BigInt(expectedRange.count)
+          )
+            throw new Error("CandidateOutsideAssignedRange");
+          if (!job.solution || new Set(indices).size !== 9)
+            throw new Error("InvalidReferenceResult");
+          if (job.stage === "round1") {
+            job.solution.round1 = indices;
+            job.stage = "round2";
+          } else if (job.stage === "round2") {
+            job.solution.round2 = indices;
+            job.stage = "verification";
+          } else throw new Error("UnexpectedStage");
+        }
+        job.attempt = 0;
+        delete job.runpodId;
+        job.status =
+          job.stage === "verification" ? "awaiting_authorization" : "queued";
+      } else if (output.candidates.length && checked.derOnly !== true) {
         job.status = "paused";
-        job.error =
-          "Incomplete work unit. Resume repeats this bounded range; it has not been skipped.";
+        job.error = "GPU candidates failed independent CPU verification.";
+      } else if (
+        output.status === "completed" &&
+        output.checkpoint === "range-complete"
+      ) {
+        delete job.retryRequested;
+        job.attempt++;
+        delete job.runpodId;
+        if (job.attempt >= gpuSpendLimits.maxJobAttempts) {
+          job.status = "paused";
+          job.error =
+            "Attempt cap reached. Further GPU work on this job needs a reviewed limit change.";
+        } else {
+          job.status = "queued";
+          try {
+            workRange(job.stage, job.attempt);
+          } catch {
+            job.status = "paused";
+            job.error =
+              "Search range exhausted; a reviewed new range is required.";
+          }
+        }
+      } else {
+        if (job.retryRequested) {
+          delete job.runpodId;
+          delete job.retryRequested;
+          job.status = "queued";
+        } else {
+          job.status = "paused";
+          job.error =
+            "Incomplete work unit. Resume repeats this bounded range; it has not been skipped.";
+        }
       }
     }
   }
@@ -317,7 +349,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
   await save();
   return {
     ...event,
-    done: ["paused", "awaiting_authorization"].includes(job.status),
+    done: ["paused", "failed", "awaiting_authorization"].includes(job.status),
     polls: (event.polls || 0) + 1,
     waitSeconds: job.status === "queued" ? 0 : 5,
   };

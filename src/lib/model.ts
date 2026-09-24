@@ -97,6 +97,8 @@ export type Job = {
   solver?: SolverPin;
   parameterHashes?: Record<string, string>;
   attempt: number;
+  /** Paid submissions already counted against maxJobAttempts. Retries count. */
+  gpuSubmissions?: number;
   runpodId?: string;
   txid?: string;
   retryRequested?: boolean;

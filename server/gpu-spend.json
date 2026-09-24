@@ -1,0 +1,6 @@
+{
+  "workersMax": 1,
+  "workersMin": 0,
+  "executionTimeoutMs": 900000,
+  "maxJobAttempts": 40
+}

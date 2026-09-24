@@ -40,6 +40,7 @@ import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
+import { gpuSpendLimits } from "../server/gpu-spend";
 const event = { owner: "test", jobId: "test-job", revision: 0 };
 const pk = "OWNER#test",
   sk = "JOB#test-job";
@@ -153,6 +154,82 @@ it("checks provider credentials without starting work or requiring a funded vaul
   await expect(
     handler({ action: "providerHealth", owner: "test" } as any),
   ).rejects.toThrow();
+});
+
+function completedOutput(attempt: number, candidates: string[]) {
+  return {
+    status: "COMPLETED",
+    executionTime: 1000,
+    output: {
+      status: "completed",
+      stage: "pinning",
+      manifestHash: "a".repeat(64),
+      attempt,
+      candidates,
+      kernelCommit: release.kernelCommit,
+      checkpoint: "range-complete",
+      workRange: workRange("pinning", attempt),
+    },
+  };
+}
+
+it("does not start another GPU attempt once the job reaches the attempt cap", async () => {
+  await seed({ status: "queued", attempt: gpuSpendLimits.maxJobAttempts });
+  expect(await handler(event)).toMatchObject({ done: true });
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.cpu).not.toHaveBeenCalled();
+  expect((await store.get(pk, sk))?.job).toMatchObject({
+    attempt: gpuSpendLimits.maxJobAttempts,
+    status: "paused",
+    error: expect.stringContaining("Attempt cap reached"),
+  });
+});
+
+it("does not retry a job once its counted GPU submissions reach the cap", async () => {
+  await seed({
+    status: "queued",
+    attempt: 0,
+    gpuSubmissions: gpuSpendLimits.maxJobAttempts,
+    retryRequested: true,
+  });
+  expect(await handler(event)).toMatchObject({ done: true });
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect((await store.get(pk, sk))?.job).toMatchObject({
+    attempt: 0,
+    gpuSubmissions: gpuSpendLimits.maxJobAttempts,
+    status: "paused",
+    error: expect.stringContaining("Attempt cap reached"),
+  });
+});
+
+it("pauses after the last in-cap range instead of queueing another paid attempt", async () => {
+  const attempt = gpuSpendLimits.maxJobAttempts - 1;
+  await seed({ status: "searching", runpodId: "compute-1", attempt });
+  mocks.status.mockResolvedValue(completedOutput(attempt, []));
+  expect(await handler(event)).toMatchObject({ done: true });
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect((await store.get(pk, sk))?.job).toMatchObject({
+    attempt: gpuSpendLimits.maxJobAttempts,
+    status: "paused",
+    error: expect.stringContaining("Attempt cap reached"),
+  });
+});
+
+it("does not credit a 64-hit output as a finished range", async () => {
+  await seed({ status: "searching", runpodId: "compute-1", attempt: 3 });
+  mocks.status.mockResolvedValue(
+    completedOutput(3, ["sequence=2147483648\nlocktime=500000000\n".repeat(64)]),
+  );
+  expect(await handler(event)).toMatchObject({ done: true });
+  expect(mocks.cpu).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect((await store.get(pk, sk))?.job).toMatchObject({
+    attempt: 3,
+    stage: "pinning",
+    status: "failed",
+    computeSeconds: 1,
+    error: expect.stringContaining("supported capacity"),
+  });
 });
 
 it("keeps polling a paused provider request until cancellation is confirmed", async () => {
