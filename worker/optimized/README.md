@@ -23,3 +23,5 @@ The image remains HOLD and subset-only. The offline image checks verify descript
 The reference code retains its MIT license in `reference/LICENSE`; the optimized source retains Apache-2.0 in `research/optimized-subset/LICENSE`.
 
 A manually triggered [source-build workflow](../../.github/workflows/source-build.yml) performs the same clean-checkout builds on Linux and uploads the supervisor archive and public solver receipt. It has read-only repository permissions, no registry/provider credentials, and does not publish an image or deploy anything. It must be run explicitly; adding it does not imply that CI has passed.
+
+Verified run: [24 September source-build report](../../docs/source-build/20260924/REPORT.md), including the tested commit and generated identities.

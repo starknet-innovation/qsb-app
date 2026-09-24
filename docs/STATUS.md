@@ -19,3 +19,5 @@ See the [complete known mainnet readiness checklist](MAINNET-READINESS.md) for t
 - Explicit authorization of the exact transaction, amount and fee before any mainnet broadcast.
 
 The repository now includes source build paths for the optimized worker and complete imported Linux supervisor closure. Raw historical evidence is not fully exported, and historical GPU/withdrawal evidence is not reproduced by a source build. New build identities require enrollment and validation; see [source build instructions](../worker/optimized/README.md).
+
+The [24 September clean-checkout source-build report](source-build/20260924/REPORT.md) records successful native CUDA, queue-image and reproducible supervisor builds, with exact output identities. This closes the external-build-input gap; release enrollment and fresh execution gates remain open.
