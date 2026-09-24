@@ -183,11 +183,27 @@ export async function rollbackCanonicalAcceptance(store: Store): Promise<Row> {
     canonicalAccepting: false,
     legacyExcluded: true,
     productionEnforcement: false,
+    awsLegacyWriterDenied: false,
+    rollbackScope: "local-dry-run",
     mainnetEnabled: false,
     broadcastAuthorized: false,
   };
   await store.atomicPut([{ row: next, expected: existing.version }]);
   return next;
+}
+
+/** In-process rollback never applies an AWS IAM deny to a deployed legacy writer. */
+export function localRollbackCoverage(): {
+  scope: "local-dry-run";
+  deniesLegacyWriterInAws: false;
+  reason: string;
+} {
+  return {
+    scope: "local-dry-run",
+    deniesLegacyWriterInAws: false,
+    reason:
+      "This rehearsal stops canonical acceptance in this process. It does not deny dynamodb:PutItem or dynamodb:TransactWriteItems for a deployed legacy writer.",
+  };
 }
 
 export async function canonicalReservationWrites(
@@ -289,17 +305,38 @@ function releaseIdentities(row: Row): string[] {
   return ids;
 }
 
+function hasProviderId(job: Record<string, unknown> | undefined): boolean {
+  return typeof job?.runpodId === "string" && job.runpodId.length > 0;
+}
+
+/** Coordinator saves `searching` with no provider id before the paid submit returns. */
+function searchingWithoutProvider(job: Record<string, unknown> | undefined): boolean {
+  return job?.status === "searching" && !hasProviderId(job);
+}
+
+function pausedUnknownSubmission(job: Record<string, unknown> | undefined): boolean {
+  return (
+    !hasProviderId(job) &&
+    job?.status === "paused" &&
+    typeof job.error === "string" &&
+    job.error.includes("Submission outcome unknown")
+  );
+}
+
 function providerNotes(row: Row): string[] {
   const notes: string[] = [];
   const launch = record(row.launch);
   const job = record(row.job);
-  if (typeof launch?.providerId === "string" || typeof job?.runpodId === "string")
+  if (typeof launch?.providerId === "string" || hasProviderId(job))
     notes.push("provider-identity");
   if (
     launch?.providerOutcome === "uncertain" ||
-    (typeof job?.error === "string" && job.error.includes("Submission outcome unknown"))
+    (typeof job?.error === "string" &&
+      job.error.includes("Submission outcome unknown")) ||
+    searchingWithoutProvider(job)
   )
     notes.push("unknown-submission");
+  if (record(job?.validation)) notes.push("cleanup-history");
   if (releaseIdentities(row).length) notes.push("release");
   if (typeof job?.mainnetRequestHash === "string" || typeof job?.manifestHash === "string")
     notes.push("original-request");
@@ -341,6 +378,8 @@ export function inventoryRows(
       counts["original-request"] += 1;
     if (notes.includes("completed-coverage") && kind !== "completed-coverage")
       counts["completed-coverage"] += 1;
+    if (notes.includes("cleanup-history") && kind !== "cleanup-history")
+      counts["cleanup-history"] += 1;
     return { pk: row.pk, sk: row.sk, kind, notes };
   });
   return {
@@ -472,18 +511,33 @@ export function preservationFailures(before: Row[], after: Row[]): string[] {
         failures.push("CompletedCoverageDropped");
       if (typeof job.runpodId === "string" && nextJob.runpodId !== job.runpodId)
         failures.push("RollbackWouldDuplicatePaidWork");
-      const unknownSubmission =
-        typeof job.runpodId !== "string" &&
-        job.status === "paused" &&
-        typeof job.error === "string" &&
-        job.error.includes("Submission outcome unknown");
       if (
-        unknownSubmission &&
-        (nextJob.status !== "paused" ||
-          typeof nextJob.error !== "string" ||
-          !nextJob.error.includes("Submission outcome unknown"))
+        pausedUnknownSubmission(job) &&
+        !pausedUnknownSubmission(nextJob)
       )
         failures.push("RollbackWouldDuplicatePaidWork");
+      if (
+        searchingWithoutProvider(job) &&
+        !searchingWithoutProvider(nextJob) &&
+        !pausedUnknownSubmission(nextJob)
+      )
+        failures.push("RollbackWouldDuplicatePaidWork");
+      const beforeCleanup = record(job.validation);
+      const nextCleanup = record(nextJob.validation);
+      if (beforeCleanup) {
+        if (!nextCleanup) failures.push("CleanupHistoryShrunk");
+        else {
+          for (const field of ["active", "cancel", "interrupted"] as const) {
+            const previous = Array.isArray(beforeCleanup[field])
+              ? beforeCleanup[field]
+              : [];
+            const following = Array.isArray(nextCleanup[field])
+              ? nextCleanup[field]
+              : [];
+            if (!isPrefix(previous, following)) failures.push("CleanupHistoryShrunk");
+          }
+        }
+      }
     }
     const evidence = record(launch?.evidence);
     const nextEvidence = record(nextLaunch?.evidence);

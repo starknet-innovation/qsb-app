@@ -23,6 +23,7 @@ import {
   inferDrainFromAggregate,
   inventoryRows,
   legacyReservationWrite,
+  localRollbackCoverage,
   memoryRows,
   permissionModel,
   preservationFailures,
@@ -248,6 +249,13 @@ describe("durable storage authority rehearsal", () => {
     expect(stopped.legacyExcluded).toBe(true);
     expect(stopped.canonicalAccepting).toBe(false);
     expect(stopped.productionEnforcement).toBe(false);
+    expect(stopped.awsLegacyWriterDenied).toBe(false);
+    expect(stopped.rollbackScope).toBe("local-dry-run");
+    expect(localRollbackCoverage()).toEqual({
+      scope: "local-dry-run",
+      deniesLegacyWriterInAws: false,
+      reason: expect.stringContaining("does not deny dynamodb:PutItem"),
+    });
     await expect(
       legacyReservationWrite(store, {
         owner: "owner",
@@ -526,6 +534,42 @@ describe("durable storage authority rehearsal", () => {
     expect(deleteCondition.ConditionExpression).toContain("#excluded");
     expect(deleteCondition.ExpressionAttributeValues[":v"]).toBe(0);
     expect(deleteCondition.ExpressionAttributeValues[":false"]).toBe(false);
+    const searching = {
+      pk: "OWNER#owner",
+      sk: "JOB#searching-without-provider",
+      version: 1,
+      job: { status: "searching" },
+    };
+    expect(inventoryRows([searching]).counts["unknown-submission"]).toBe(1);
+    const replayed = structuredClone(searching);
+    (replayed.job as { status: string }).status = "queued";
+    expect(preservationFailures([searching], [replayed])).toContain(
+      "RollbackWouldDuplicatePaidWork",
+    );
+    const reconciled = structuredClone(searching);
+    (reconciled.job as { status: string; error?: string }).status = "paused";
+    (reconciled.job as { error?: string }).error =
+      "Submission outcome unknown. Reconcile Runpod before resuming.";
+    expect(preservationFailures([searching], [reconciled])).toEqual([]);
+    const withCleanup = {
+      pk: "OWNER#owner",
+      sk: "JOB#embedded-cleanup",
+      version: 1,
+      job: {
+        validation: {
+          active: [{ attempt: 1, id: "provider-1" }],
+          cancel: ["provider-1"],
+          interrupted: [{ attempt: 0 }],
+        },
+      },
+    };
+    expect(inventoryRows([withCleanup]).counts["cleanup-history"]).toBe(1);
+    const droppedCleanup = structuredClone(withCleanup);
+    (droppedCleanup.job as { validation: { active: unknown[] } }).validation.active =
+      [];
+    expect(preservationFailures([withCleanup], [droppedCleanup])).toContain(
+      "CleanupHistoryShrunk",
+    );
   });
 
   it("runs the inventory command on a snapshot file", () => {

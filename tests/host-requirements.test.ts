@@ -107,6 +107,15 @@ describe("local execution host rehearsal", () => {
       expect(
         report.checks.find((check) => check.id === "private-credential-channel")?.ok,
       ).toBe(false);
+      expect(report.isolatedHostRecorded).toBe(true);
+      expect(report.isolatedHostRecord).toBe(
+        "docs/runtime-installation/20260924-linux-validation.md",
+      );
+      expect(report.experimentalRuntimePointsAtHistoricalWorkerDockerfile).toBe(
+        false,
+      );
+      expect(report.operatorSteps.join(" ")).toContain("worker/optimized/Dockerfile");
+      expect(report.operatorSteps.join(" ")).toContain("supervised/runtime");
       expect(report.operatorSteps.join(" ")).toContain("000000000000");
       expect(report.operatorSteps.join(" ")).toContain("historical Lambda");
       expect(directoryExposesWrite(0o700)).toBe(false);
