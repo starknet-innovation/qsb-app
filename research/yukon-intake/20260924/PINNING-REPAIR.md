@@ -1012,3 +1012,29 @@ MemoryStore, provider responses and the crash snapshot are local test inputs.
 This does not demonstrate a second live submission or a fresh GPU hit. The
 complete replay and typecheck passed; no paid resource or network broadcast was
 used. The remaining live, independent-review and end-to-end gates stay open.
+
+## Fresh unfunded positive-hit campaign preparation
+
+`prepare_pin_campaign.py` creates a new public synthetic context with fresh,
+domain-separated random funding/helper outpoints. It reads no wallet or prior
+fixture and exports parameters through the actual CPU reference. The fixed config,
+strict predicate and frozen binary remain unchanged. Both endpoint ranges pass
+CPU preflight. The plan contains 100 disjoint consecutive sequence blocks; its
+hash and context hash are preserved in `runtime/fresh-campaign/preparation.json`.
+No GPU execution has occurred for this plan.
+
+`pin_campaign.py` provides compute-only bounded execution (at most 20 minutes,
+90-second per-range timeout, one child at a time). It writes an exclusive intent
+before execution and an exclusive result afterward, stops at any candidate or
+failure, and forbids reuse of the output directory. It does not automatically
+retry, grant coverage or claim CPU verification. Downloaded results require the
+separate trusted CPU verifier. An external 30-minute resource deletion watchdog,
+price announcement and one-GPU allocation remain mandatory before launch.
+
+Six new campaign tests plus eight imported reference tests pass. They cover
+single-use output, failure/uncertainty preservation, stop-on-hit, range overlap and
+verifier-domain rejection, interrupted output, and budget exhaustion before a
+new range. Compute is mocked in those tests. This prepares the fresh GPU-hit gate;
+it does not close that gate or authorize production activation. A managed test
+pod can bound physical GPU allocation separately from the unresolved serverless
+startup behavior; pod execution would not certify that serverless behavior.

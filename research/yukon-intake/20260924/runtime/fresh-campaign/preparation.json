@@ -1,0 +1,9 @@
+{
+  "format": "qsb-unfunded-campaign-preparation-v1",
+  "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+  "planHash": "3007e98b969c6722ba859f66876a960af3f44ee43902c407af02944e98d53325",
+  "requests": 100,
+  "maxRuntimeSeconds": 1200,
+  "gpuExecuted": false,
+  "releaseStatus": "HOLD"
+}
