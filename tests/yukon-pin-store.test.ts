@@ -1044,8 +1044,8 @@ describe("attached research sibling terminal reconciliation", () => {
       ).toBe(before);
     }
   });
-  it("rejects scope or global identity changes while reading the provider", async () => {
-    for (const change of ["scope", "claim"]) {
+  it("rejects scope, intent, identity index or global claim changes during provider reads", async () => {
+    for (const change of ["scope", "intent", "index", "claim"]) {
       const f = await drainingAttached();
       const before = await f.store.get(f.pk, "PIN#0");
       await expect(
@@ -1055,6 +1055,18 @@ describe("attached research sibling terminal reconciliation", () => {
             await f.store.put(
               { ...s, version: s.version + 1, endpoint: "changed" },
               s.version,
+            );
+          } else if (change === "intent" || change === "index") {
+            const sk = change === "intent" ? "PIN#0" : "IDENTITY#PIN#0";
+            const row = (await f.store.get(f.pk, sk))!;
+            await f.store.put(
+              {
+                ...row,
+                version: row.version + 1,
+                identityConflict: true,
+                ...(change === "index" ? { ambiguous: true } : {}),
+              },
+              row.version,
             );
           } else {
             const claim = (await f.store.get(
@@ -1069,7 +1081,16 @@ describe("attached research sibling terminal reconciliation", () => {
           return { id: f.raw.id, status: "CANCELLED" };
         }),
       ).rejects.toThrow();
-      expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
+      if (change === "intent") {
+        expect(await f.store.get(f.pk, "PIN#0")).toEqual({
+          ...before,
+          version: before!.version + 1,
+          identityConflict: true,
+        });
+      } else {
+        expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
+      }
+      expect((await f.store.get(f.pk, "PIN#0"))?.terminal).toBeUndefined();
     }
   });
   it("never consumes searching results as cleanup or resolves uncertain IDs", async () => {

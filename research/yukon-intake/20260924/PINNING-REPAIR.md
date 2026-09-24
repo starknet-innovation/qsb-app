@@ -1097,3 +1097,14 @@ was launched. A cumulative spending limit has been requested before turning this
 bounded experiment into repeated probabilistic searches; independent-review
 assignment is also awaiting the user's choice. Other technical release gates
 remain HOLD.
+
+## Terminal reconciliation race coverage follow-up
+
+The Store suite now also changes the intent or its identity index while the
+provider status GET is in flight, complementing existing scope/global-claim
+races. Each stale terminal result is rejected atomically; the competing update
+is preserved and no terminal receipt is published. All 36 MemoryStore tests
+pass, including these two additional subcases, and TypeScript checking passes.
+These are injected local races with mocked provider observations, not new live
+DynamoDB, provider-drain or independent review evidence. No runtime source or
+frozen solver binary changed.
