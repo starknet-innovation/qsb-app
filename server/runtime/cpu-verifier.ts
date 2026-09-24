@@ -87,7 +87,6 @@ function assertNoUnenrolledPython(
       throw new Error("CpuVerifierNotEnrolled");
     }
     for (const entry of entries) {
-      if (entry.name === "__pycache__" && entry.isDirectory()) continue;
       const relativePath = `${relativeDir}/${entry.name}`;
       const absolute = assertInsideRepo(root, relativePath);
       if (entry.isSymbolicLink()) throw new Error("CpuVerifierNotEnrolled");

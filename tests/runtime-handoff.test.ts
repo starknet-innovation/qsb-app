@@ -172,6 +172,48 @@ describe("supervised runtime handoff", () => {
     ).toHaveLength(1);
   });
 
+  it("does not queue a job after the capability row is revoked", async () => {
+    const inner = new MemoryStore();
+    await seedCapability(inner);
+    const fixture = simulatedMainnetRequest();
+    await inner.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    let revoked = false;
+    const store: Store = {
+      get: (pk, sk) => inner.get(pk, sk),
+      put: (row, expected) => inner.put(row, expected),
+      delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
+      list: (pk, prefix) => inner.list(pk, prefix),
+      atomicPut: async (writes) => {
+        const creating = writes.some((write) =>
+          String(write.row.sk).startsWith("JOB#"),
+        );
+        if (creating && !revoked) {
+          revoked = true;
+          const row = await inner.get("SYSTEM#QSB_MAINNET_SERVICE", "CAPABILITY");
+          await inner.put(
+            { ...row!, version: row!.version + 1, enabled: false },
+            row!.version,
+          );
+        }
+        await inner.atomicPut(writes);
+      },
+    };
+    await expect(
+      admitSupervisedJob(store, address, "mainnet", fixture.prepared.body),
+    ).rejects.toThrow(/Supervised search capability is not active/);
+    expect(
+      [...inner.rows.values()].filter(
+        (row) =>
+          String(row.sk).startsWith("JOB#") || String(row.pk).startsWith("OUTPOINT#"),
+      ),
+    ).toHaveLength(0);
+  });
+
   it("keeps the default service closed and rejects the final composition guards", async () => {
     expect(release.mainnetEnabled).toBe(false);
     expect(contract.broadcastAuthorized).toBe(false);
@@ -1469,6 +1511,18 @@ describe("supervised runtime handoff", () => {
       path.join(tree, "worker/cpu/qsb_pipeline.cpython-312-x86_64-linux-gnu.so"),
       "",
     );
+    await expect(
+      runEnrolledCpuVerifier(tree, { action: "verify", stage: "pinning" }),
+    ).rejects.toThrow(/CpuVerifierNotEnrolled/);
+  });
+
+  it("refuses cached bytecode beside the enrolled CPU sources", async () => {
+    const directory = mkdtempSync(`${tmpdir()}/qsb-pkg-`);
+    writePackageTree(process.cwd(), directory);
+    const tree = path.join(directory, "tree");
+    const cache = path.join(tree, "worker/cpu/__pycache__");
+    mkdirSync(cache);
+    writeFileSync(path.join(cache, "handler.cpython-312.pyc"), "not-enrolled");
     await expect(
       runEnrolledCpuVerifier(tree, { action: "verify", stage: "pinning" }),
     ).rejects.toThrow(/CpuVerifierNotEnrolled/);

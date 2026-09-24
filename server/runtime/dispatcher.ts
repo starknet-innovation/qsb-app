@@ -38,7 +38,7 @@ export async function admitSupervisedJob(
   body: unknown,
 ): Promise<{ job: SupervisedJob; created: boolean }> {
   assertServiceChain(serviceNetwork);
-  await assertSearchCapability(store);
+  const capability = await assertSearchCapability(store);
   const parsed = bodySchema.parse(body);
   let request: ReturnType<typeof validateRequest>;
   try {
@@ -121,6 +121,7 @@ export async function admitSupervisedJob(
           jobId: id,
         },
       })),
+      { row: capability, expected: capability.version },
     ]);
   } catch (error) {
     if (error instanceof Conflict) {
@@ -130,6 +131,14 @@ export async function admitSupervisedJob(
         if (racedJob.mainnetRequestHash === requestHash)
           return { job: racedJob, created: false };
       }
+      const current = await store.get(capability.pk, capability.sk);
+      if (
+        !current ||
+        current.version !== capability.version ||
+        current.enabled !== true ||
+        fingerprint(current.contract) !== fingerprint(capability.contract)
+      )
+        throw new GateError(503, "Supervised search capability is not active.");
       throw new GateError(409, "Outpoint already reserved.");
     }
     throw error;
