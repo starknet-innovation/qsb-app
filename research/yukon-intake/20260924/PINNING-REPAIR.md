@@ -306,3 +306,30 @@ fixture spend, proof restart, production deployment or broadcast occurred.
 The candidate remains HOLD. Broader arithmetic and asynchronous failure coverage,
 representative matched performance, release/runtime integration, independent
 review and fresh full withdrawal remain outstanding.
+
+## Native asynchronous error propagation — passed 24 September
+
+Commit `92bb6f0` adds a separate diagnostic build wrapping asynchronous CUDA
+expressions in the main source and the unchanged slot-readback / priority-lane
+helpers. Its baseline drains two sequences with one candidate each. All **31
+reached call ordinals** independently fail closed when a synthetic error is
+substituted after the real CUDA call: each stops before later instrumented calls
+and emits no range-drained marker. Cases include pinned allocation, stream/event
+creation, both root dependency directions, counter reset, compact result transfer,
+completion event recording and final event synchronization. Both sequences are
+covered. Exact site inventory, exit codes and transcripts are in `native-async/`.
+
+The diagnostic binary SHA256 is
+`65ccbed5aaba11196deee70bab43a8244b91eeb51d5947e499a4a30db4fe3cd6`.
+Normal solver source is unchanged. These are injected return errors after real
+calls, not real hardware failures or all compile-time modes. This small case does
+not prove every multi-batch reuse path, valid-hit publication, or cleanup-failure
+behavior. It complements rather than replaces the earlier checked-CUDA and
+capacity diagnostics. Thirty local tests passed before execution.
+
+The secure RTX 4090 pod was deleted at 19:06:05 UTC, zero pods confirmed, and its
+watchdog terminated. Approximate elapsed compute $0.0255 excludes storage and
+provider rounding. No funded fixture, wallet, spent proof, production deployment
+or broadcast was involved. Remaining principal gates are broader arithmetic,
+matched throughput, explicit release/runtime integration, independent review and
+a fresh complete withdrawal; the PR remains HOLD.

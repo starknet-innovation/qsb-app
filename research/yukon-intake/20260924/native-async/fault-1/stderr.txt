@@ -1,0 +1,2 @@
+QSB_ASYNC_DIAGNOSTIC ordinal=1 site=pinning.cu:3349:cudaHostAlloc
+Slot pipeline setup failed: unknown error

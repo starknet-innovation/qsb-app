@@ -1,0 +1,12 @@
+QSB_ASYNC_DIAGNOSTIC ordinal=1 site=pinning.cu:3349:cudaHostAlloc
+QSB_ASYNC_DIAGNOSTIC ordinal=2 site=pinning.cu:3351:cudaStreamCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=3 site=PriorityPipeline.h:30:cudaDeviceGetStreamPriorityRange
+QSB_ASYNC_DIAGNOSTIC ordinal=4 site=PriorityPipeline.h:33:cudaStreamCreateWithPriority
+QSB_ASYNC_DIAGNOSTIC ordinal=5 site=PriorityPipeline.h:35:cudaEventCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=6 site=PriorityPipeline.h:37:cudaEventCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=7 site=pinning.cu:3353:cudaEventCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=8 site=SlotReadback.h:26:cudaHostAlloc
+QSB_ASYNC_DIAGNOSTIC ordinal=9 site=pinning.cu:3351:cudaStreamCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=10 site=PriorityPipeline.h:30:cudaDeviceGetStreamPriorityRange
+QSB_ASYNC_DIAGNOSTIC ordinal=11 site=PriorityPipeline.h:33:cudaStreamCreateWithPriority
+Slot pipeline setup failed: unknown error

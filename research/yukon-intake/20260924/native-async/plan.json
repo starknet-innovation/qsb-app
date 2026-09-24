@@ -1,0 +1,36 @@
+{
+  "scope": "synthetic asynchronous CUDA error after real call, diagnostic only",
+  "sites": {
+    "pinning.cu": [
+      "pinning.cu:3346:cudaHostAlloc",
+      "pinning.cu:3347:cudaHostAlloc",
+      "pinning.cu:3349:cudaHostAlloc",
+      "pinning.cu:3351:cudaStreamCreateWithFlags",
+      "pinning.cu:3353:cudaEventCreateWithFlags",
+      "pinning.cu:3566:cudaEventSynchronize",
+      "pinning.cu:3632:cudaEventSynchronize",
+      "pinning.cu:3702:cudaMemcpyAsync",
+      "pinning.cu:3708:cudaMemsetAsync",
+      "pinning.cu:3743:cudaMemcpyAsync",
+      "pinning.cu:3746:cudaMemcpyAsync",
+      "pinning.cu:3748:cudaEventRecord"
+    ],
+    "SlotReadback.h": [
+      "SlotReadback.h:26:cudaHostAlloc",
+      "SlotReadback.h:41:cudaMemcpyAsync",
+      "SlotReadback.h:43:cudaEventRecord"
+    ],
+    "PriorityPipeline.h": [
+      "PriorityPipeline.h:30:cudaDeviceGetStreamPriorityRange",
+      "PriorityPipeline.h:33:cudaStreamCreateWithPriority",
+      "PriorityPipeline.h:35:cudaEventCreateWithFlags",
+      "PriorityPipeline.h:37:cudaEventCreateWithFlags",
+      "PriorityPipeline.h:43:cudaEventRecord",
+      "PriorityPipeline.h:44:cudaStreamWaitEvent",
+      "PriorityPipeline.h:51:cudaEventRecord",
+      "PriorityPipeline.h:52:cudaStreamWaitEvent"
+    ]
+  },
+  "sourceSha256": "a9f4a8d9a76a23a92b4c1feaa788562ef5f9e098590ce4964a403fca51d8da87",
+  "freshWithdrawal": false
+}

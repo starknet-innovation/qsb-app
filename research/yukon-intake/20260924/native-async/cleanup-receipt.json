@@ -1,0 +1,15 @@
+{
+  "pod": "3ltzmdsp091h4m",
+  "createdAt": "2026-09-24T19:04:01.21Z",
+  "deleteBy": "2026-09-24T19:34:01Z",
+  "watchdogCell": "207",
+  "pricePerHour": 0.74,
+  "commit": "92bb6f0",
+  "deletedAt": "2026-09-24T19:06:05Z",
+  "podsAfter": [],
+  "watchdogTerminated": true,
+  "approximateElapsedComputeUsd": 0.0255,
+  "excludesStorageAndRounding": true,
+  "archiveSha256": "44d51b5d2b235676f20d3c4305a1b175e2bd1d60021d70003325be0ab1fbe2e7",
+  "diagnosticSourceMatchesPreparedFiles": true
+}

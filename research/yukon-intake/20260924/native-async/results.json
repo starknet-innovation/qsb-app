@@ -1,0 +1,262 @@
+{
+  "scope": "two sequences, one candidate each; diagnostic error returns after real calls",
+  "runs": [
+    {
+      "ordinal": 0,
+      "returncode": 0
+    },
+    {
+      "ordinal": 1,
+      "returncode": 1
+    },
+    {
+      "ordinal": 2,
+      "returncode": 1
+    },
+    {
+      "ordinal": 3,
+      "returncode": 1
+    },
+    {
+      "ordinal": 4,
+      "returncode": 1
+    },
+    {
+      "ordinal": 5,
+      "returncode": 1
+    },
+    {
+      "ordinal": 6,
+      "returncode": 1
+    },
+    {
+      "ordinal": 7,
+      "returncode": 1
+    },
+    {
+      "ordinal": 8,
+      "returncode": 1
+    },
+    {
+      "ordinal": 9,
+      "returncode": 1
+    },
+    {
+      "ordinal": 10,
+      "returncode": 1
+    },
+    {
+      "ordinal": 11,
+      "returncode": 1
+    },
+    {
+      "ordinal": 12,
+      "returncode": 1
+    },
+    {
+      "ordinal": 13,
+      "returncode": 1
+    },
+    {
+      "ordinal": 14,
+      "returncode": 1
+    },
+    {
+      "ordinal": 15,
+      "returncode": 1
+    },
+    {
+      "ordinal": 16,
+      "returncode": 1
+    },
+    {
+      "ordinal": 17,
+      "returncode": 2
+    },
+    {
+      "ordinal": 18,
+      "returncode": 2
+    },
+    {
+      "ordinal": 19,
+      "returncode": 2
+    },
+    {
+      "ordinal": 20,
+      "returncode": 2
+    },
+    {
+      "ordinal": 21,
+      "returncode": 1
+    },
+    {
+      "ordinal": 22,
+      "returncode": 1
+    },
+    {
+      "ordinal": 23,
+      "returncode": 1
+    },
+    {
+      "ordinal": 24,
+      "returncode": 2
+    },
+    {
+      "ordinal": 25,
+      "returncode": 2
+    },
+    {
+      "ordinal": 26,
+      "returncode": 2
+    },
+    {
+      "ordinal": 27,
+      "returncode": 2
+    },
+    {
+      "ordinal": 28,
+      "returncode": 1
+    },
+    {
+      "ordinal": 29,
+      "returncode": 1
+    },
+    {
+      "ordinal": 30,
+      "returncode": 2
+    },
+    {
+      "ordinal": 31,
+      "returncode": 2
+    }
+  ],
+  "reachedSites": [
+    {
+      "ordinal": 1,
+      "site": "pinning.cu:3349:cudaHostAlloc"
+    },
+    {
+      "ordinal": 2,
+      "site": "pinning.cu:3351:cudaStreamCreateWithFlags"
+    },
+    {
+      "ordinal": 3,
+      "site": "PriorityPipeline.h:30:cudaDeviceGetStreamPriorityRange"
+    },
+    {
+      "ordinal": 4,
+      "site": "PriorityPipeline.h:33:cudaStreamCreateWithPriority"
+    },
+    {
+      "ordinal": 5,
+      "site": "PriorityPipeline.h:35:cudaEventCreateWithFlags"
+    },
+    {
+      "ordinal": 6,
+      "site": "PriorityPipeline.h:37:cudaEventCreateWithFlags"
+    },
+    {
+      "ordinal": 7,
+      "site": "pinning.cu:3353:cudaEventCreateWithFlags"
+    },
+    {
+      "ordinal": 8,
+      "site": "SlotReadback.h:26:cudaHostAlloc"
+    },
+    {
+      "ordinal": 9,
+      "site": "pinning.cu:3351:cudaStreamCreateWithFlags"
+    },
+    {
+      "ordinal": 10,
+      "site": "PriorityPipeline.h:30:cudaDeviceGetStreamPriorityRange"
+    },
+    {
+      "ordinal": 11,
+      "site": "PriorityPipeline.h:33:cudaStreamCreateWithPriority"
+    },
+    {
+      "ordinal": 12,
+      "site": "PriorityPipeline.h:35:cudaEventCreateWithFlags"
+    },
+    {
+      "ordinal": 13,
+      "site": "PriorityPipeline.h:37:cudaEventCreateWithFlags"
+    },
+    {
+      "ordinal": 14,
+      "site": "pinning.cu:3353:cudaEventCreateWithFlags"
+    },
+    {
+      "ordinal": 15,
+      "site": "SlotReadback.h:26:cudaHostAlloc"
+    },
+    {
+      "ordinal": 16,
+      "site": "pinning.cu:3708:cudaMemsetAsync"
+    },
+    {
+      "ordinal": 17,
+      "site": "PriorityPipeline.h:43:cudaEventRecord"
+    },
+    {
+      "ordinal": 18,
+      "site": "PriorityPipeline.h:44:cudaStreamWaitEvent"
+    },
+    {
+      "ordinal": 19,
+      "site": "PriorityPipeline.h:51:cudaEventRecord"
+    },
+    {
+      "ordinal": 20,
+      "site": "PriorityPipeline.h:52:cudaStreamWaitEvent"
+    },
+    {
+      "ordinal": 21,
+      "site": "SlotReadback.h:41:cudaMemcpyAsync"
+    },
+    {
+      "ordinal": 22,
+      "site": "SlotReadback.h:43:cudaEventRecord"
+    },
+    {
+      "ordinal": 23,
+      "site": "pinning.cu:3708:cudaMemsetAsync"
+    },
+    {
+      "ordinal": 24,
+      "site": "PriorityPipeline.h:43:cudaEventRecord"
+    },
+    {
+      "ordinal": 25,
+      "site": "PriorityPipeline.h:44:cudaStreamWaitEvent"
+    },
+    {
+      "ordinal": 26,
+      "site": "PriorityPipeline.h:51:cudaEventRecord"
+    },
+    {
+      "ordinal": 27,
+      "site": "PriorityPipeline.h:52:cudaStreamWaitEvent"
+    },
+    {
+      "ordinal": 28,
+      "site": "SlotReadback.h:41:cudaMemcpyAsync"
+    },
+    {
+      "ordinal": 29,
+      "site": "SlotReadback.h:43:cudaEventRecord"
+    },
+    {
+      "ordinal": 30,
+      "site": "pinning.cu:3632:cudaEventSynchronize"
+    },
+    {
+      "ordinal": 31,
+      "site": "pinning.cu:3632:cudaEventSynchronize"
+    }
+  ],
+  "binarySha256": "65ccbed5aaba11196deee70bab43a8244b91eeb51d5947e499a4a30db4fe3cd6",
+  "freshWithdrawal": false,
+  "rangeCreditEligible": false
+}

@@ -1,0 +1,24 @@
+QSB_ASYNC_DIAGNOSTIC ordinal=1 site=pinning.cu:3349:cudaHostAlloc
+QSB_ASYNC_DIAGNOSTIC ordinal=2 site=pinning.cu:3351:cudaStreamCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=3 site=PriorityPipeline.h:30:cudaDeviceGetStreamPriorityRange
+QSB_ASYNC_DIAGNOSTIC ordinal=4 site=PriorityPipeline.h:33:cudaStreamCreateWithPriority
+QSB_ASYNC_DIAGNOSTIC ordinal=5 site=PriorityPipeline.h:35:cudaEventCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=6 site=PriorityPipeline.h:37:cudaEventCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=7 site=pinning.cu:3353:cudaEventCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=8 site=SlotReadback.h:26:cudaHostAlloc
+QSB_ASYNC_DIAGNOSTIC ordinal=9 site=pinning.cu:3351:cudaStreamCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=10 site=PriorityPipeline.h:30:cudaDeviceGetStreamPriorityRange
+QSB_ASYNC_DIAGNOSTIC ordinal=11 site=PriorityPipeline.h:33:cudaStreamCreateWithPriority
+QSB_ASYNC_DIAGNOSTIC ordinal=12 site=PriorityPipeline.h:35:cudaEventCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=13 site=PriorityPipeline.h:37:cudaEventCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=14 site=pinning.cu:3353:cudaEventCreateWithFlags
+QSB_ASYNC_DIAGNOSTIC ordinal=15 site=SlotReadback.h:26:cudaHostAlloc
+QSB_ASYNC_DIAGNOSTIC ordinal=16 site=pinning.cu:3708:cudaMemsetAsync
+QSB_ASYNC_DIAGNOSTIC ordinal=17 site=PriorityPipeline.h:43:cudaEventRecord
+QSB_ASYNC_DIAGNOSTIC ordinal=18 site=PriorityPipeline.h:44:cudaStreamWaitEvent
+QSB_ASYNC_DIAGNOSTIC ordinal=19 site=PriorityPipeline.h:51:cudaEventRecord
+QSB_ASYNC_DIAGNOSTIC ordinal=20 site=PriorityPipeline.h:52:cudaStreamWaitEvent
+QSB_ASYNC_DIAGNOSTIC ordinal=21 site=SlotReadback.h:41:cudaMemcpyAsync
+QSB_ASYNC_DIAGNOSTIC ordinal=22 site=SlotReadback.h:43:cudaEventRecord
+QSB_ASYNC_DIAGNOSTIC ordinal=23 site=pinning.cu:3708:cudaMemsetAsync
+Slot input enqueue failed: unknown error
