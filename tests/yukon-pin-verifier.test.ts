@@ -9,7 +9,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { it, expect } from "vitest";
+import { it, expect, vi } from "vitest";
+vi.mock("node:fs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs")>()),
+}));
 import { createPinVerifier } from "../scripts/yukon/pin_verifier";
 import lock from "../scripts/yukon/pin_verifier_lock.json";
 it("refuses changed or symlinked adapter artifacts before starting the CPU process", async () => {
@@ -42,4 +45,52 @@ it("refuses changed or symlinked adapter artifacts before starting the CPU proce
         rmSync(root, { recursive: true, force: true });
       }
     }
+});
+
+it("executes the checked snapshot when the source path changes after the read", async () => {
+  const fs = await import("node:fs");
+  const root = mkdtempSync(path.join(tmpdir(), "qsb-pin-race-"));
+  const marker = path.join(root, "unverified-code-ran");
+  const dir = path.join(root, "scripts/yukon");
+  mkdirSync(dir, { recursive: true });
+  mkdirSync(path.join(root, "worker/cpu"), { recursive: true });
+  for (const file of [...Object.keys(lock), "pin_verifier_lock.json"])
+    copyFileSync(path.join("scripts/yukon", file), path.join(dir, file));
+  const cpuLock = JSON.parse(
+    readFileSync("scripts/yukon/pin_reference_lock.json", "utf8"),
+  );
+  for (const file of Object.keys(cpuLock))
+    copyFileSync(
+      path.join("worker/cpu", file),
+      path.join(root, "worker/cpu", file),
+    );
+  const original = fs.readFileSync;
+  let swapped = false;
+  const spy = vi.spyOn(fs, "readFileSync").mockImplementation(((
+    ...args: Parameters<typeof fs.readFileSync>
+  ) => {
+    const raw = original(...args);
+    if (
+      !swapped &&
+      typeof args[0] === "number" &&
+      raw.toString().startsWith('"""One-request public CPU bridge.')
+    ) {
+      swapped = true;
+      writeFileSync(
+        path.join(dir, "pin_verify_cli.py"),
+        `from pathlib import Path\nPath(${JSON.stringify(marker)}).touch()\nprint('{}')\n`,
+      );
+    }
+    return raw;
+  }) as typeof fs.readFileSync);
+  try {
+    await expect(
+      createPinVerifier(root)({}, {}, {}, "a".repeat(64)),
+    ).rejects.toThrow("CPU verifier rejected result");
+    expect(swapped).toBe(true);
+    expect(fs.existsSync(marker)).toBe(false);
+  } finally {
+    spy.mockRestore();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -768,3 +768,19 @@ This proves registration/failure handling, **not remote queue polling or GPU
 success**. No credentials, paid resources, image push, enrollment or production
 routing were used. Test containers were removed; the local image remains available
 for the next explicitly bounded remote validation gate.
+
+## Verifier file-race hardening
+
+CodeQL identified a check/read race in the Node CPU launcher. Files are now opened
+once with `O_NOFOLLOW`, checked as regular files through that descriptor, and read
+from the same descriptor. The exact hashed bytes, including the six locked CPU
+sources and both locks, form a private per-request directory; the child never
+reopens the original checked source tree. Temporary snapshots are removed after
+child exit or launch failure. The CLI code is taken directly from the checked
+buffer. This preserves the existing Python source-lock checks.
+
+A deterministic regression replaces the original CLI immediately after its
+successful read. The replacement does not run, while the checked CLI rejects the
+invalid request. Existing artifact/symlink rejection and real CPU Store tests
+also pass: 17 focused TypeScript tests plus typecheck. This fixes the local
+launcher finding; it does not grant release approval or image attestation.
