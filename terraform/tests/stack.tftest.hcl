@@ -15,10 +15,10 @@ run "app_role_record_denies" {
       length([
         for statement in jsondecode(aws_iam_role_policy.records[role].policy).Statement : statement
         if statement.Sid == "DenyOutpointDelete" && statement.Effect == "Deny" && contains(statement.Action, "dynamodb:DeleteItem") && contains(statement.Condition["ForAnyValue:StringLike"]["dynamodb:LeadingKeys"], "OUTPOINT#*") && !contains(statement.Action, "dynamodb:PutItem")
-      ]) == 1 && length([
+        ]) == 1 && length([
         for statement in jsondecode(aws_iam_role_policy.records[role].policy).Statement : statement
         if statement.Sid == "DenySystemRowWrites" && statement.Effect == "Deny" && contains(statement.Action, "dynamodb:PutItem") && contains(statement.Action, "dynamodb:DeleteItem") && contains(statement.Condition["ForAnyValue:StringLike"]["dynamodb:LeadingKeys"], "SYSTEM#*")
-      ]) == 1 && length([
+        ]) == 1 && length([
         for statement in jsondecode(aws_iam_role_policy.records[role].policy).Statement : statement
         if statement.Sid == "TableDataAccess" && statement.Effect == "Allow" && contains(statement.Action, "dynamodb:PutItem") && contains(statement.Action, "dynamodb:ConditionCheckItem") && !contains(keys(statement), "Condition")
       ]) == 1
