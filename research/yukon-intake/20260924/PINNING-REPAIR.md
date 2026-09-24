@@ -391,3 +391,27 @@ parameters in a read-only, network-disabled container without a GPU. It returned
 `failed`, no candidates and no verification/credit eligibility as required.
 Receipt: `runtime/no-gpu-ci.json`. This closes the no-GPU failure boundary only;
 it does not replace a successful GPU runtime or CPU positive-hit test.
+
+## GPU runtime attempt — infrastructure failure, not a passed gate
+
+Source `ac9f0cc` prepared two unfunded full-script contexts (SegWit/Taproot
+output layouts), 514 candidates each, using frozen previously tested binary
+`88cf46c4…`. Secure RTX 4090 creation returned explicit HTTP 400 no capacity;
+a fresh listing confirmed no allocation. A community RTX 4090 at $0.34/hour
+was then created. The adapter returned failure on its first request. Independent
+`torch.cuda.init()` also failed with CUDA unknown error; the binary's shared
+libraries resolved. Successful GPU runtime execution remains **unverified**.
+The second request did not run. This is not a solver correctness counterexample.
+
+Public inputs, hashes and infrastructure error evidence are preserved under
+`runtime/infrastructure-attempt/`. The pod was deleted at 19:13:36 UTC and zero
+pods confirmed, with its watchdog terminated. Approximate elapsed compute $0.008
+excludes disk/provider rounding. No search was submitted to any proof endpoint,
+no funded fixture was used and no transaction was assembled or broadcast.
+
+The execution harness originally raised before preserving the failed output;
+it now writes an explicitly incomplete partial receipt before rejecting, with a
+subprocess regression check. It never writes a successful receipt on failure.
+Future attempts should preflight CUDA health before invoking the frozen solver.
+The attempted gate must be retried on healthy capacity; prior bounded native
+checks and CPU bindings do not substitute for that gate.

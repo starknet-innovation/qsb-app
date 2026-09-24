@@ -1,0 +1,18 @@
+{
+  "pod": "3l5t9n9eetuat8",
+  "createdAt": "2026-09-24T19:12:11.659Z",
+  "deleteBy": "2026-09-24T19:42:11Z",
+  "watchdogCell": "247",
+  "pricePerHour": 0.34,
+  "commit": "ac9f0cc",
+  "secureAttempt": "HTTP400-no-capacity; empty-pods-confirmed",
+  "deletedAt": "2026-09-24T19:13:36Z",
+  "podsAfter": [],
+  "watchdogTerminated": true,
+  "approximateElapsedComputeUsd": 0.008,
+  "excludesStorageAndRounding": true,
+  "archiveSha256": "69d0a1bc57ac7b95615df6aa358fcecd414481bff89ab6915ca528fb97a0acdb",
+  "outcome": "solver adapter failed; independent torch.cuda.init CUDA unknown error",
+  "successfulGpuRuntime": false,
+  "freshWithdrawal": false
+}

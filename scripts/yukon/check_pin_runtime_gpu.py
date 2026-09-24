@@ -11,6 +11,7 @@ if __name__=='__main__':
     records=[]
     for request in json.loads(a.requests.read_text()):
         start=time.monotonic();output=run(request,a.binary,a.sha256,timeout=120)
-        if output['status']!='range-drained':raise ValueError('Native runtime failed')
         records.append({'output':output,'wallSeconds':time.monotonic()-start})
+        a.out.with_suffix('.partial.json').write_text(json.dumps({'complete':False,'runs':records},indent=2)+'\n')
+        if output['status']!='range-drained':raise ValueError('Native runtime failed; partial receipt preserved')
     a.out.write_text(json.dumps({'scope':'synthetic unfunded runtime ranges, not fresh withdrawal','runs':records,'binarySha256':a.sha256,'releaseStatus':'HOLD'},indent=2)+'\n')
