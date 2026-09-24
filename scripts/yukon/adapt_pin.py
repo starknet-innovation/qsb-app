@@ -31,6 +31,9 @@ def body(text, name, replacement):
 
 
 def adapt(text):
+    start = text.index('/* Params loader for pinning2.bin */')
+    end = text.index('typedef struct {', text.index('static int load_pinning2(', start))
+    text = text[:start] + '#include "qsb_pin_params.h"\n\n' + text[end:]
     text = body(text, 'gpu_bench_valid', '    return qsb_der32(h);')
     text = body(text, 'gpu_bench_valid_words', '''    uint8_t digest[32];
     for (int i = 0; i < 8; ++i) {
@@ -159,6 +162,7 @@ def main():
     source.write_text(adapt(source.read_text()))
     shutil.copyfile(Path(__file__).with_name('pin_contract.h'),args.out/'pinning/qsb_pin_contract.h')
     shutil.copyfile(Path(__file__).with_name('pin_recovery.h'),args.out/'pinning/qsb_pin_recovery.h')
+    shutil.copyfile(Path(__file__).with_name('pin_params.h'),args.out/'pinning/qsb_pin_params.h')
     hashes={str(p.relative_to(args.out)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(args.out.rglob('*')) if p.is_file()}
     receipt={'status':'HOLD','upstreamCommit':lock['commit'],'scope':'isolated-pinning-bounded-v2','flags':FLAGS,'files':hashes,'completeArithmeticCertified':False,'boundedSchedulerCertified':False,'deploymentAllowed':False}
     (args.out/'adaptation.json').write_text(json.dumps(receipt,indent=2)+'\n')

@@ -124,3 +124,19 @@ Source assertions check both launch sites, both generic instantiations, removal
 of the H0 bypass and the fixed hash mode. Native compilation/GPU differential
 validation of this newly reachable generic path are required; the earlier
 compiled candidate was not runnable on app geometry and is not approved.
+
+## Bounded parameter parsing
+
+The replacement loader reads at most 264 bytes and accepts only exact records
+with a supported 8–119-byte suffix. It decodes endian formats explicitly, checks
+preimage/midstate block consistency, non-overlapping sequence versus
+locktime/sighash fields, and all bounds before allocating. Read/close/allocation
+failures reject the record. No file-controlled unbounded allocation remains in
+this loader. Public curve/scalar validity still needs the subsequent checked
+initialization path; accepting a record is not proof of its transaction binding.
+
+Nineteen local tests pass, including all 219 truncations of a representative
+record, ten malformed/oversized/trailing-data cases, three valid size/layout
+boundaries with exact decoded fields, and missing input. Native CI remains
+required for the final integrated source. Recovery-only commit af31798 passed
+native CUDA compilation in Actions run 36041900102; later changes are separate.
