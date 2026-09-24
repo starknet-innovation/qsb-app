@@ -1149,7 +1149,7 @@ export function coreBinaryEnrollmentPath(): string {
 }
 
 /**
- * A checkout's expected enrollment digest is `HEAD:release/source-manifest.json`.
+ * A checkout's expected enrollment digest is `HEAD:./release/source-manifest.json`.
  * The working-tree file can be edited with `core-binary.json` and is not the record.
  * A packaged tree has no git commit; its record is `release-manifest.json` beside `tree/`.
  */
@@ -1170,7 +1170,7 @@ function gitHeadSourceManifest(root: string): ParsedReleaseManifest {
   try {
     text = execFileSync(
       "git",
-      ["-C", root, "show", "HEAD:release/source-manifest.json"],
+      ["-C", root, "show", "HEAD:./release/source-manifest.json"],
       {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],

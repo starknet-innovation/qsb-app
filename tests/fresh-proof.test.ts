@@ -1076,7 +1076,7 @@ describe("core harness judgment", () => {
     expect(named.reason).toContain("not harness evidence");
     const script = readFileSync(path.join(root, "scripts/test-core.sh"), "utf8");
     expect(script).toContain('"${ROOT}/server/runtime/core-binary.json"');
-    expect(script).toContain("HEAD:release/source-manifest.json");
+    expect(script).toContain("HEAD:./release/source-manifest.json");
     expect(script).not.toContain('"${ROOT}/release/source-manifest.json"');
     expect(script).not.toContain("QSB_CORE_MANIFEST");
     expect(script).toContain('qsb-core-regtest.XXXXXX"');
@@ -1235,6 +1235,72 @@ describe("core harness judgment", () => {
     expect(pairedJudgment.harnessRan).toBe(false);
     expect(pairedJudgment.reason).toContain("committed manifest");
     expect(pairedJudgment.reason).toContain("working-tree");
+
+    const nestedOuter = mkdtempSync(path.join(tmpdir(), "qsb-core-nested-"));
+    const nestedApp = path.join(nestedOuter, "app");
+    mkdirSync(path.join(nestedApp, "scripts"), { recursive: true });
+    mkdirSync(path.join(nestedApp, "tests"), { recursive: true });
+    mkdirSync(path.join(nestedApp, "server/runtime"), { recursive: true });
+    mkdirSync(path.join(nestedApp, "release"), { recursive: true });
+    cpSync(
+      path.join(root, "scripts/test-core.sh"),
+      path.join(nestedApp, "scripts/test-core.sh"),
+    );
+    cpSync(
+      path.join(root, "tests/core_regtest.py"),
+      path.join(nestedApp, "tests/core_regtest.py"),
+    );
+    cpSync(
+      path.join(root, "server/runtime/core-binary.json"),
+      path.join(nestedApp, "server/runtime/core-binary.json"),
+    );
+    cpSync(
+      path.join(root, "release/source-manifest.json"),
+      path.join(nestedApp, "release/source-manifest.json"),
+    );
+    const nestedGit = (args: string[]) =>
+      execFileSync("git", ["-C", nestedOuter, ...args], {
+        env: gitEnv,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    nestedGit(["init"]);
+    nestedGit(["add", "app"]);
+    nestedGit(["commit", "-m", "enroll the nested checkout"]);
+    expect(committedCoreBinarySha256(nestedApp)).toBe(
+      createHash("sha256")
+        .update(
+          readFileSync(path.join(nestedApp, "server/runtime/core-binary.json")),
+        )
+        .digest("hex"),
+    );
+    const nestedBin = mkdtempSync(path.join(tmpdir(), "qsb-nested-core-"));
+    writeFileSync(path.join(nestedBin, "bitcoind"), "#!/bin/sh\nexit 0\n");
+    writeFileSync(path.join(nestedBin, "bitcoin-cli"), "#!/bin/sh\nexit 0\n");
+    chmodSync(path.join(nestedBin, "bitcoind"), 0o755);
+    chmodSync(path.join(nestedBin, "bitcoin-cli"), 0o755);
+    const nestedReport = path.join(nestedApp, "report.json");
+    let nestedStatus = 0;
+    try {
+      execFileSync("bash", ["scripts/test-core.sh"], {
+        cwd: nestedApp,
+        env: {
+          ...process.env,
+          BITCOIN_BIN: nestedBin,
+          QSB_CORE_REPORT: nestedReport,
+        },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      nestedStatus = (error as { status?: number }).status ?? 1;
+    }
+    expect(nestedStatus).toBe(2);
+    const nestedJudgment = judgeCoreReport(
+      JSON.parse(readFileSync(nestedReport, "utf8")),
+    );
+    expect(nestedJudgment.harnessRan).toBe(false);
+    expect(nestedJudgment.reason).toContain("No reviewed Bitcoin Core binary");
+    expect(nestedJudgment.reason).not.toContain("does not match");
 
     const stdout = execFileSync("python3", ["tests/core_regtest.py"], {
       cwd: root,

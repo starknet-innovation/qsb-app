@@ -25,7 +25,7 @@ if [[ ! -x "${BIN}/bitcoind" || ! -x "${BIN}/bitcoin-cli" ]]; then
 fi
 
 # Executable names are not a reviewed Core identity. The enrollment file is
-# trusted only when its raw bytes match HEAD:release/source-manifest.json.
+# trusted only when its raw bytes match HEAD:./release/source-manifest.json.
 # The working-tree manifest is not that record.
 set +e
 python3 - "${ROOT}/server/runtime/core-binary.json" "${BIN}/bitcoind" "${BIN}/bitcoin-cli" "${ROOT}" <<'PY'
@@ -33,7 +33,7 @@ import hashlib, json, subprocess, sys
 enrollment_path, _bitcoind, _cli, root = sys.argv[1:5]
 try:
     committed = subprocess.check_output(
-        ["git", "-C", root, "show", "HEAD:release/source-manifest.json"],
+        ["git", "-C", root, "show", "HEAD:./release/source-manifest.json"],
         stderr=subprocess.DEVNULL,
     )
     manifest = json.loads(committed)
@@ -62,7 +62,7 @@ PY
 status=$?
 set -e
 if [[ "${status}" -eq 6 ]]; then
-  not_run "server/runtime/core-binary.json does not match the committed manifest at HEAD:release/source-manifest.json. An enrollment file that matches only the working-tree manifest is not harness evidence and does not close section 6."
+  not_run "server/runtime/core-binary.json does not match the committed manifest at HEAD:./release/source-manifest.json. An enrollment file that matches only the working-tree manifest is not harness evidence and does not close section 6."
 fi
 if [[ "${status}" -eq 3 ]]; then
   not_run "No reviewed Bitcoin Core binary is enrolled. An executable named bitcoind is not harness evidence and does not close section 6."
