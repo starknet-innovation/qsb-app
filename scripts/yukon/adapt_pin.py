@@ -99,6 +99,13 @@ def adapt(text):
     int easy = 0, single_hash = 1;
 
 ''' + text[end:]
+    start = text.index('    /* Use the specified GPU */')
+    end = text.index('    pinning2_params_t pp;', start)
+    gpu_setup = text[start:end]
+    text = text[:start] + text[end:]
+    text = replace(text, '    if (load_pinning2(argv[1], &pp) < 0) return 1;',
+        '    if (load_pinning2(argv[1], &pp) < 0) return 2;\n'
+        '    qsb_validate_curve_inputs(pp.neg_r_inv, pp.u2r_x, pp.u2r_y);\n' + gpu_setup)
     start = text.index('    /* Safe ranges */')
     end = text.index('    printf("\\n  === Search:', start)
     text = text[:start] + '''    const uint32_t LT_MIN = (uint32_t)range.locktime_start;

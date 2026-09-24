@@ -140,3 +140,12 @@ record, ten malformed/oversized/trailing-data cases, three valid size/layout
 boundaries with exact decoded fields, and missing input. Native CI remains
 required for the final integrated source. Recovery-only commit af31798 passed
 native CUDA compilation in Actions run 36041900102; later changes are separate.
+
+## Public curve inputs before CUDA setup
+
+A checked OpenSSL preflight now rejects zero/out-of-order scalars,
+noncanonical field coordinates, off-curve points and infinity before CUDA device
+selection or table construction. Nine additional cases cover generator/negative
+generator, order boundaries and malformed coordinates; twenty tests pass locally.
+This establishes input validity only. It does not certify table arithmetic or
+remove the need to check allocations/operations inside upstream table builders.

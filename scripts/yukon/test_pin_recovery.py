@@ -45,6 +45,16 @@ static void injected_check(int ok,const char *op) {
 #include "pin_recovery.h"
 #undef qsb_require_host
 int main(int argc,char**argv) {
+    if(argc==4) {
+        uint8_t v[3][32];
+        for(int i=0;i<3;i++) {
+            BIGNUM *b=NULL;
+            if(!BN_hex2bn(&b,argv[i+1])||BN_bn2lebinpad(b,v[i],32)!=32)return 9;
+            BN_free(b);
+        }
+        qsb_validate_curve_inputs(v[0],v[1],v[2]);
+        puts("validated");return 0;
+    }
     if(argc!=5)return 9;
     EC_GROUP *g=EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *c=BN_CTX_new();BIGNUM *order=BN_new(),*nri=BN_new(),*z=NULL;
@@ -83,6 +93,15 @@ int main(int argc,char**argv) {
                         got=self.run_case(z,nri,sign)
                         self.assertEqual(got.returncode,0,got.stderr)
                         self.assertEqual(got.stdout.splitlines()[0],want)
+
+    def test_curve_input_validation(self):
+        cases=[(1,*G,True),(N-1,*G,True),(1,G[0],P-G[1],True),
+               (0,*G,False),(N,*G,False),(1,0,0,False),
+               (1,P,G[1],False),(1,G[0],P,False),(1,G[0],G[1]^1,False)]
+        for nri,x,y,valid in cases:
+            out=subprocess.run([str(self.path/'test'),f'{nri:064x}',f'{x:064x}',f'{y:064x}'],capture_output=True,text=True)
+            self.assertEqual(out.returncode,0 if valid else 2)
+            self.assertEqual(out.stdout,'validated\n' if valid else '')
 
     def test_each_checked_failure_stops_publication(self):
         normal=self.run_case(2,1,1)

@@ -1,6 +1,7 @@
 #pragma once
 #include <openssl/bn.h>
 #include <openssl/ec.h>
+#include <openssl/obj_mac.h>
 #include <openssl/sha.h>
 // Recover and hash one public point. Infinity is a legitimate non-candidate;
 // allocation/arithmetic/serialization failures terminate without range credit.
@@ -33,4 +34,28 @@ static inline int qsb_recover_hash(const uint8_t digest[32], int recid,
     BN_free(z); BN_free(u1);
     EC_POINT_free(P); EC_POINT_free(Q); EC_POINT_free(R);
     return !infinity;
+}
+
+// Validate public scalar/point constants before table builders dereference them.
+// Invalid constants and OpenSSL errors both reject the entire range.
+static inline void qsb_validate_curve_inputs(const uint8_t nri_le[32],
+        const uint8_t x_le[32], const uint8_t y_le[32]) {
+    EC_GROUP *grp=EC_GROUP_new_by_curve_name(NID_secp256k1);
+    qsb_require_host(grp != NULL, "curve allocation");
+    BN_CTX *ctx=BN_CTX_new();
+    qsb_require_host(ctx != NULL, "curve context allocation");
+    BIGNUM *nri=BN_lebin2bn(nri_le,32,NULL), *x=BN_lebin2bn(x_le,32,NULL),
+           *y=BN_lebin2bn(y_le,32,NULL), *order=BN_new(), *field=BN_new();
+    qsb_require_host(nri && x && y && order && field, "curve constant allocation");
+    qsb_require_host(EC_GROUP_get_order(grp,order,ctx)==1 &&
+                    EC_GROUP_get_curve(grp,field,NULL,NULL,ctx)==1, "curve parameters");
+    qsb_require_host(!BN_is_zero(nri) && BN_cmp(nri,order)<0 &&
+                    BN_cmp(x,field)<0 && BN_cmp(y,field)<0, "canonical curve constants");
+    EC_POINT *R=EC_POINT_new(grp);
+    qsb_require_host(R != NULL, "input point allocation");
+    qsb_require_host(EC_POINT_set_affine_coordinates(grp,R,x,y,ctx)==1 &&
+                    EC_POINT_is_on_curve(grp,R,ctx)==1 &&
+                    EC_POINT_is_at_infinity(grp,R)==0, "input point validation");
+    EC_POINT_free(R);BN_free(nri);BN_free(x);BN_free(y);BN_free(order);BN_free(field);
+    BN_CTX_free(ctx);EC_GROUP_free(grp);
 }
