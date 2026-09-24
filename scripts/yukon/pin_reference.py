@@ -18,19 +18,42 @@ def reference(event):
     if r.returncode:raise ValueError('Public CPU reference rejected request')
     return json.loads(r.stdout)
 
-def verify(request,output,context,expected_binary):
-    from pin_runtime import validate,result_records
+# Inclusive bound in the hash-pinned application's verify_hit dispatch.
+REFERENCE_LOCKTIME_MAX=1744600000
+
+def prepare(request,context,expected_binary):
+    """Bind public context before compute; reject unsupported verifier geometry."""
+    from pin_runtime import validate
     validate(request,expected_binary)
     if not isinstance(context,dict) or set(context)!={'publicStateJson','manifest'}:raise ValueError('Unexpected public context')
     if fingerprint(context['manifest'])!=request['manifestHash']:raise ValueError('Manifest identity mismatch')
+    r=request['range']
+    if r['locktime']+r['locktimeCount']-1>REFERENCE_LOCKTIME_MAX:
+        raise ValueError('Range exceeds pinned CPU verifier locktime domain')
+    exported=reference({**context,'stage':'pinning','action':'export'})
+    if any(exported[k]!=request[k] for k in ('parameterBase64','parameterSha256')):
+        raise ValueError('Parameters differ from full transaction reference')
+    return {'contextHash':fingerprint(context),'rangeCreditEligible':False,'releaseStatus':'HOLD'}
+
+def execute(request,context,binary,expected_binary,timeout=840):
+    """Isolated prepare/compute/verify handoff; no provider or durable writes."""
+    from pin_runtime import run
+    # Snapshot caller-owned data so preflight and verification bind identical bytes.
+    request,context=json.loads(json.dumps([request,context],allow_nan=False))
+    prepare(request,context,expected_binary)
+    output=run(request,binary,expected_binary,timeout=timeout)
+    verdict=verify(request,output,context,expected_binary) if output['status']=='range-drained' else None
+    return {'output':output,'reference':verdict,'rangeCreditEligible':False,'releaseStatus':'HOLD'}
+
+def verify(request,output,context,expected_binary):
+    from pin_runtime import result_records
+    prepare(request,context,expected_binary)
     expected_keys={'protocol','requestId','manifestHash','binarySha256','parameterSha256','range','status','candidates','verified','rangeCreditEligible','releaseStatus'}
     if not isinstance(output,dict) or set(output)!=expected_keys:raise ValueError('Unexpected result envelope')
     for k in ('protocol','requestId','manifestHash','binarySha256','parameterSha256','range'):
         if type(output[k])!=type(request[k]) or output[k]!=request[k]:raise ValueError('Result binding mismatch')
     if output['status']!='range-drained' or output['verified'] is not False or output['rangeCreditEligible'] is not False or output['releaseStatus']!='HOLD':raise ValueError('Incomplete or untrusted result')
     event={**context,'stage':'pinning'}
-    exported=reference({**event,'action':'export'})
-    if any(exported[k]!=request[k] for k in ('parameterBase64','parameterSha256')):raise ValueError('Parameters differ from full transaction reference')
     records=output['candidates']
     if not isinstance(records,list) or len(records)>4096:raise ValueError('Invalid candidate count')
     lines=[]

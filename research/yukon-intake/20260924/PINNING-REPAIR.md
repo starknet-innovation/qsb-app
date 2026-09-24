@@ -481,3 +481,26 @@ The pod was deleted at 19:27:03 UTC before its 19:47:14 watchdog; zero pods were
 confirmed and the watchdog terminated. Approximate elapsed compute $0.1087
 excludes disk/provider rounding. No production deployment, spent-fixture search,
 private recovery material or broadcast was involved.
+
+## Public-context preflight and verifier domain
+
+The isolated `pin_reference.execute` handoff now snapshots public request/context,
+re-exports and binds parameters **before compute**, executes the pinned runtime,
+and invokes reference verification only for a drained result. Failed/interrupted
+runs retain their status with no reference verdict or range credit. No provider,
+durable backend or production routing is introduced.
+
+Review found a concrete interface mismatch: the low-level native research
+adapter accepts uint32 locktimes, while the hash-pinned application CPU handler
+accepts only locktimes through **1,744,600,000 inclusive**. The integrated handoff
+now rejects a range whose final candidate exceeds that bound, both before compute
+and during result verification. The standalone native adapter retains its broader
+arithmetic research domain; those tests do not establish application acceptance.
+No production CPU source, lock, GPU source or frozen binary was changed.
+
+Validation: all **43 local tests passed**. New tests exercise the last supported
+candidate, the first unsupported candidate, context rejection before compute,
+failed/interrupted handoff and successful empty-result binding. CPU export and
+binding are real; compute is mocked in these new handoff tests. Earlier native
+runtime evidence remains separately scoped; this is not a new GPU execution,
+positive-hit, durable-credit or fresh withdrawal proof.

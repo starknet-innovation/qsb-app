@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 from pin_runtime import PROTOCOL
-from pin_reference import reference,verify,fingerprint
+from pin_reference import reference,verify,fingerprint,prepare,execute,REFERENCE_LOCKTIME_MAX
 
 class ReferenceBinding(unittest.TestCase):
     @classmethod
@@ -42,3 +43,37 @@ class ReferenceBinding(unittest.TestCase):
     def test_real_negative_candidate(self):
         out={**self.out,'candidates':[{'sequence':2147483648,'locktime':500000000,'recid':0}]}
         with self.assertRaisesRegex(ValueError,'not reproduced'):verify(self.req,out,self.ctx,'a'*64)
+
+    def test_reference_domain_inclusive_boundary(self):
+        r={**self.req['range'],'locktime':REFERENCE_LOCKTIME_MAX//256*256,
+           'locktimeCount':REFERENCE_LOCKTIME_MAX%256+1}
+        req={**self.req,'range':r}
+        self.assertEqual(prepare(req,self.ctx,'a'*64)['releaseStatus'],'HOLD')
+        req['range']={**r,'locktimeCount':r['locktimeCount']+1}
+        with patch('pin_runtime.run') as compute:
+            with self.assertRaisesRegex(ValueError,'verifier locktime domain'):
+                execute(req,self.ctx,'unused','a'*64)
+            compute.assert_not_called()
+        out={**self.out,'range':req['range']}
+        with self.assertRaisesRegex(ValueError,'verifier locktime domain'):
+            verify(req,out,self.ctx,'a'*64)
+
+    def test_preflight_rejects_context_before_compute(self):
+        ctx=copy.deepcopy(self.ctx);ctx['manifest']['outputScript']='51'
+        with patch('pin_runtime.run') as compute:
+            with self.assertRaises(ValueError):execute(self.req,ctx,'unused','a'*64)
+            compute.assert_not_called()
+
+    def test_handoff_keeps_failed_compute_unverified(self):
+        for status in ('failed','interrupted'):
+            out={**self.out,'status':status}
+            with patch('pin_runtime.run',return_value=out),patch('pin_reference.verify') as check:
+                receipt=execute(self.req,self.ctx,'unused','a'*64)
+                check.assert_not_called()
+                self.assertIsNone(receipt['reference']);self.assertFalse(receipt['rangeCreditEligible'])
+
+    def test_complete_handoff_binds_real_reference_without_credit(self):
+        with patch('pin_runtime.run',return_value=self.out):
+            receipt=execute(self.req,self.ctx,'unused','a'*64)
+        self.assertTrue(receipt['reference']['referenceChecked'])
+        self.assertFalse(receipt['rangeCreditEligible'])
