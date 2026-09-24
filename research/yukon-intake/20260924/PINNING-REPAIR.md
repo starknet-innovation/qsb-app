@@ -38,3 +38,7 @@ The upstream scheduler is still unbounded. A reviewed bounded-range adapter, cov
 There is no GPU result or speedup claim from these host tests. Do not run this benchmark-derived executable as an application worker, enroll it as an approved release, or deploy it. No paid GPU resource, fixture or network transaction is used by this gate.
 
 The initial native build rejected enabling negative-Y MAC and parity-window optimizations while disabling their required carry shortcuts. Their existing fallback paths are now explicitly selected too; no upstream compiler guard was removed. The failed run is retained as [36040427216](https://github.com/starknet-innovation/qsb-app/actions/runs/36040427216).
+
+## Native compile gate passed
+
+[CI run 36040760736](https://github.com/starknet-innovation/qsb-app/actions/runs/36040760736), tested source commit `44018c1d78164797e8e47213e523aa262279ce33`, passed on native Linux x86_64. The repaired pinning binary SHA256 is `a1d882c5cf6ad4d97759462c3bf02166f34756eb727b8b03a8d9da12c7dbc08b` with CUDA 12.8.93. The explicit `-DQSB_C31=1` override was rejected. The same CI ran all twelve tests and 31,014 host predicate comparisons successfully. See [compiler receipt](pin-repair-compile.txt), [source receipt](pin-repair-source.json), and [host results](pin-repair-host.json). Report-only commits do not change the tested compiler inputs. This closes native compilation only; no GPU execution was performed.

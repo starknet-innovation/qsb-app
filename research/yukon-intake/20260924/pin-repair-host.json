@@ -1,0 +1,6 @@
+{
+  "vectors": 10338,
+  "matchingPredicateOutputs": 31014,
+  "reference": "worker/cpu/gpu_emulator.py:is_valid_der",
+  "gpuExecution": false
+}
