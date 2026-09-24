@@ -140,6 +140,15 @@ describe("local execution host rehearsal", () => {
     expect(() =>
       assertNoCredentialMaterial({ browserRequest: { apiKey: "synthetic" } }),
     ).toThrow(/CredentialMaterialRejected/);
+    expect(() =>
+      assertNoCredentialMaterial({ awsSecretAccessKey: "synthetic-secret-value" }),
+    ).toThrow(/CredentialMaterialRejected/);
+    expect(() =>
+      assertNoCredentialMaterial({ accessToken: "synthetic-token" }),
+    ).toThrow(/CredentialMaterialRejected/);
+    expect(() =>
+      assertNoCredentialMaterial({ session: "ASIAIOSFODNN7EXAMPLE" }),
+    ).toThrow(/CredentialMaterialRejected/);
     expect(() => assertLogOmitsSecret("log apiKey=synthetic", "synthetic")).toThrow(
       /CredentialMaterialRejected:log/,
     );
@@ -211,6 +220,17 @@ describe("local execution host rehearsal", () => {
     expect(lost.providerSubmissions).toBe(1);
     expect(lost.previousProcessIds).toEqual(["previous-local-pid"]);
     expect(lost.evidenceDirectory?.inode).toBe(2);
+    const preProvider = launchRecordSchema.parse({
+      ...launch,
+      state: "replacing",
+      replacement: "starting",
+      providerOutcome: "not-submitted",
+      providerSubmissions: 0,
+    });
+    delete preProvider.providerId;
+    const reconciled = applyLocalLoss(preProvider, "process-not-alive", "4242");
+    expect(reconciled.state).toBe("uncertain");
+    expect(reconciled.replacement).toBeUndefined();
     expect(lost.localLoss).toEqual({
       kind: "process-not-alive",
       remoteStopProven: false,
@@ -297,6 +317,16 @@ describe("local execution host rehearsal", () => {
         inputHash,
         directoryIdentity(statSync(root)),
       );
+      const rebound = await bindEvidenceDirectory(
+        store,
+        "owner",
+        requestId,
+        0,
+        inputHash,
+        { ...bound.evidenceDirectory!, inode: bound.evidenceDirectory!.inode + 1 },
+      );
+      expect(rebound.localLoss?.kind).toBe("evidence-directory-replaced");
+      expect(rebound.evidenceDirectory).toEqual(bound.evidenceDirectory);
       const sibling = mkdtempSync(path.join(tmpdir(), "qsb-evidence-"));
       expect(
         compareDirectoryIdentity(
@@ -331,7 +361,10 @@ describe("local execution host rehearsal", () => {
     expect(contract.broadcastAuthorized).toBe(false);
     const root = mkdtempSync(path.join(tmpdir(), "qsb-lifecycle-"));
     try {
-      const report = await rehearseLocalLifecycle(path.join(root, "evidence"));
+      const evidence = path.join(root, "evidence");
+      const report = await rehearseLocalLifecycle(evidence);
+      const again = await rehearseLocalLifecycle(evidence);
+      expect(again.interrupted).toBe(true);
       expect(report.selectedHost).toBe(false);
       expect(report.certifiesProductionHost).toBe(false);
       expect(report.interrupted).toBe(true);

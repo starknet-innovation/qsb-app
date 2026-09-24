@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Conflict, MemoryStore, type Row, type Store } from "../store";
+import { Conflict, MemoryStore, type AtomicWrite, type Row, type Store } from "../store";
 import { assertNoCredentialMaterial } from "./host-requirements";
 import {
   AUTHORITY_PK,
@@ -193,12 +193,12 @@ export async function rollbackCanonicalAcceptance(store: Store): Promise<Row> {
 export async function canonicalReservationWrites(
   store: Store,
   reservations: { owner: string; jobId: string; txid: string; vout: number }[],
-): Promise<{ row: Row; expected?: number }[]> {
+): Promise<AtomicWrite[]> {
   const authority = await store.get(AUTHORITY_PK, AUTHORITY_SK);
   if (authority?.legacyExcluded === true && authority.canonicalAccepting !== true)
     throw new Conflict("ReservationAuthorityStopped");
   const stamped = authority?.legacyExcluded === true;
-  const writes: { row: Row; expected?: number }[] = reservations.map((point) => ({
+  const writes: AtomicWrite[] = reservations.map((point) => ({
     row: {
       pk: `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`,
       sk: "RESERVATION",
@@ -210,8 +210,9 @@ export async function canonicalReservationWrites(
   }));
   if (stamped && authority)
     writes.push({
-      row: { ...authority, version: authority.version + 1 },
+      row: { ...authority },
       expected: authority.version,
+      conditionOnly: true,
     });
   return writes;
 }
@@ -269,17 +270,23 @@ function primaryKind(row: Row): InventoryKind {
   return "unclassified";
 }
 
-function releaseIdentity(row: Row): string | undefined {
-  if (typeof row.releaseId === "string") return row.releaseId;
+function releaseIdentities(row: Row): string[] {
+  const ids: string[] = [];
+  if (typeof row.releaseId === "string") ids.push(`releaseId:${row.releaseId}`);
   const job = record(row.job);
   const execution = record(job?.execution);
   const profile = record(execution?.profile);
-  if (typeof profile?.id === "string") return profile.id;
+  if (typeof profile?.id === "string") ids.push(`profile:${profile.id}`);
   const solver = record(job?.solver);
-  const descriptor = record(solver?.descriptor);
-  if (typeof descriptor?.id === "string") return descriptor.id;
-  if (typeof solver?.id === "string") return solver.id;
-  return undefined;
+  if (solver) {
+    const descriptor = record(solver.descriptor);
+    if (descriptor) ids.push(`descriptor:${stableJson(descriptor)}`);
+    if (typeof solver.releaseHash === "string")
+      ids.push(`releaseHash:${solver.releaseHash}`);
+    if (typeof solver.id === "string") ids.push(`solver:${solver.id}`);
+  }
+  if (typeof job?.releaseHash === "string") ids.push(`jobReleaseHash:${job.releaseHash}`);
+  return ids;
 }
 
 function providerNotes(row: Row): string[] {
@@ -293,7 +300,7 @@ function providerNotes(row: Row): string[] {
     (typeof job?.error === "string" && job.error.includes("Submission outcome unknown"))
   )
     notes.push("unknown-submission");
-  if (releaseIdentity(row)) notes.push("release");
+  if (releaseIdentities(row).length) notes.push("release");
   if (typeof job?.mainnetRequestHash === "string" || typeof job?.manifestHash === "string")
     notes.push("original-request");
   if (job?.coverage === "verified-hit-not-whole-range")
@@ -465,13 +472,28 @@ export function preservationFailures(before: Row[], after: Row[]): string[] {
         failures.push("CompletedCoverageDropped");
       if (typeof job.runpodId === "string" && nextJob.runpodId !== job.runpodId)
         failures.push("RollbackWouldDuplicatePaidWork");
+      const unknownSubmission =
+        typeof job.runpodId !== "string" &&
+        job.status === "paused" &&
+        typeof job.error === "string" &&
+        job.error.includes("Submission outcome unknown");
+      if (
+        unknownSubmission &&
+        (nextJob.status !== "paused" ||
+          typeof nextJob.error !== "string" ||
+          !nextJob.error.includes("Submission outcome unknown"))
+      )
+        failures.push("RollbackWouldDuplicatePaidWork");
     }
     const evidence = record(launch?.evidence);
     const nextEvidence = record(nextLaunch?.evidence);
     if (evidence && stableJson(evidence) !== stableJson(nextEvidence))
       failures.push("TerminalEvidenceChanged");
-    const releaseId = releaseIdentity(row);
-    if (releaseId && releaseIdentity(next) !== releaseId)
+    const releaseIds = releaseIdentities(row);
+    if (
+      releaseIds.length &&
+      stableJson(releaseIds) !== stableJson(releaseIdentities(next))
+    )
       failures.push("ReleaseIdentityChanged");
     if (primaryKind(row) === "unclassified" && stableJson(row) !== stableJson(next))
       failures.push("UnclassifiedRowChanged");

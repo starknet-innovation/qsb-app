@@ -29,14 +29,17 @@ export interface Store {
   put(row: Row, expected?: number): Promise<void>;
   delete(pk: string, sk: string, expected: number): Promise<void>;
   list(pk: string, prefix: string): Promise<Row[]>;
-  atomicPut(writes: { row: Row; expected?: number }[]): Promise<void>;
+  atomicPut(writes: AtomicWrite[]): Promise<void>;
 }
+export type AtomicWrite = {
+  row: Row;
+  expected?: number;
+  /** Check the row without writing it. Used for the reservation authority fence. */
+  conditionOnly?: boolean;
+};
 export class Conflict extends Error {}
 
-function rejectGuarded(
-  existing: Row | undefined,
-  writes: { row: Row; expected?: number }[],
-) {
+function rejectGuarded(existing: Row | undefined, writes: AtomicWrite[]) {
   const rejection = reservationBatchRejection(existing, writes);
   if (rejection) throw new Conflict(rejection);
 }
@@ -48,21 +51,26 @@ export class MemoryStore implements Store {
     if (row?.expiresAt && row.expiresAt < Date.now() / 1000) return;
     return row;
   }
-  async atomicPut(writes: { row: Row; expected?: number }[]) {
+  async atomicPut(writes: AtomicWrite[]) {
     rejectGuarded(this.authority(), writes);
     const seen = new Set<string>();
-    for (const { row, expected } of writes) {
+    for (const { row, expected, conditionOnly } of writes) {
       const key = `${row.pk}|${row.sk}`,
         old = this.rows.get(key);
       if (
-        seen.has(key) ||
-        (expected === undefined ? old !== undefined : old?.version !== expected)
+        !conditionOnly &&
+        (seen.has(key) ||
+          (expected === undefined ? old !== undefined : old?.version !== expected))
       )
         throw new Conflict("Input reserved or concurrent update");
-      seen.add(key);
+      if (conditionOnly && old?.version !== expected)
+        throw new Conflict("ReservationAuthorityStopped");
+      if (!conditionOnly) seen.add(key);
     }
-    for (const { row } of writes)
+    for (const { row, conditionOnly } of writes) {
+      if (conditionOnly) continue;
       this.rows.set(`${row.pk}|${row.sk}`, structuredClone(row));
+    }
   }
   async get(pk: string, sk: string) {
     const r = this.rows.get(`${pk}|${sk}`);
@@ -104,7 +112,7 @@ export class DynamoStore implements Store {
     { marshallOptions: { removeUndefinedValues: true } },
   );
   constructor(private table: string) {}
-  async atomicPut(writes: { row: Row; expected?: number }[]) {
+  async atomicPut(writes: AtomicWrite[]) {
     if (
       writes.some((write) => isReservationRow(write.row) || isAuthorityRow(write.row))
     )
@@ -114,47 +122,79 @@ export class DynamoStore implements Store {
     try {
       await this.client.send(
         new TransactWriteCommand({
-          TransactItems: steps.map((step) =>
-            step.kind === "put"
-              ? {
-                  Put: {
-                    TableName: this.table,
-                    Item: writes.find(
-                      (write) => write.row.pk === step.pk && write.row.sk === step.sk,
-                    )!.row,
-                    ConditionExpression:
-                      step.condition === "attribute_not_exists(pk)"
-                        ? "attribute_not_exists(pk)"
-                        : "#v = :v",
-                    ...(step.condition === "version"
-                      ? {
-                          ExpressionAttributeNames: { "#v": "version" },
-                          ExpressionAttributeValues: { ":v": step.expectedVersion },
-                        }
-                      : {}),
+          TransactItems: steps.map((step) => {
+            if (step.kind === "put")
+              return {
+                Put: {
+                  TableName: this.table,
+                  Item: writes.find(
+                    (write) => write.row.pk === step.pk && write.row.sk === step.sk,
+                  )!.row,
+                  ConditionExpression:
+                    step.condition === "attribute_not_exists(pk)"
+                      ? "attribute_not_exists(pk)"
+                      : "#v = :v",
+                  ...(step.condition === "version"
+                    ? {
+                        ExpressionAttributeNames: { "#v": "version" },
+                        ExpressionAttributeValues: { ":v": step.expectedVersion },
+                      }
+                    : {}),
+                },
+              };
+            if (step.kind === "authority-generation")
+              return {
+                ConditionCheck: {
+                  TableName: this.table,
+                  Key: { pk: step.pk, sk: step.sk },
+                  ConditionExpression:
+                    "#v = :v AND #excluded = :true AND #generation = :generation AND #accepting = :true AND #enforcement = :false",
+                  ExpressionAttributeNames: {
+                    "#v": "version",
+                    "#excluded": "legacyExcluded",
+                    "#generation": "generation",
+                    "#accepting": "canonicalAccepting",
+                    "#enforcement": "productionEnforcement",
                   },
-                }
-              : {
-                  ConditionCheck: {
-                    TableName: this.table,
-                    Key: { pk: step.pk, sk: step.sk },
-                    ConditionExpression: "attribute_not_exists(pk)",
+                  ExpressionAttributeValues: {
+                    ":v": step.expectedVersion,
+                    ":true": true,
+                    ":generation": step.generation,
+                    ":false": false,
                   },
                 },
-          ),
+              };
+            return {
+              ConditionCheck: {
+                TableName: this.table,
+                Key: { pk: step.pk, sk: step.sk },
+                ConditionExpression: "attribute_not_exists(pk)",
+              },
+            };
+          }),
         }),
       );
     } catch (e) {
       const reasons = (
         e as { CancellationReasons?: { Code?: string }[] }
       ).CancellationReasons;
-      const authorityIndex = steps.findIndex((step) => step.kind === "authority-absent");
+      const authorityIndex = steps.findIndex(
+        (step) => step.kind === "authority-absent" || step.kind === "authority-generation",
+      );
+      const authorityKind = steps[authorityIndex]?.kind;
       if (
         authorityCheck &&
+        authorityKind === "authority-absent" &&
         (e as Error).name === "TransactionCanceledException" &&
         reasons?.[authorityIndex]?.Code === "ConditionalCheckFailed"
       )
         throw new Conflict("LegacyWriterExcluded");
+      if (
+        authorityKind === "authority-generation" &&
+        (e as Error).name === "TransactionCanceledException" &&
+        reasons?.[authorityIndex]?.Code === "ConditionalCheckFailed"
+      )
+        throw new Conflict("ReservationAuthorityStopped");
       if ((e as Error).name === "TransactionCanceledException")
         throw new Conflict("Input reserved or concurrent update");
       throw e;

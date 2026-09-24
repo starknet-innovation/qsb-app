@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import contract from "../mainnet-capability.json";
 import { release } from "../../src/lib/model";
@@ -106,6 +106,7 @@ export async function rehearseLocalLifecycle(
   );
   let pid: number | undefined;
   let processExited = false;
+  let sibling: string | undefined;
   try {
     const started = await starter.start();
     pid = Number(started.processId);
@@ -115,8 +116,7 @@ export async function rehearseLocalLifecycle(
     processExited = true;
     const alive = processAlive(pid);
     const after = sha256Hex(readFileSync(marker));
-    const sibling = `${directory}-sibling`;
-    mkdirSync(sibling, { mode: 0o700 });
+    sibling = mkdtempSync(`${directory}-sibling-`);
     const replaced = compareDirectoryIdentity(
       bound,
       directoryIdentity(statSync(sibling)),
@@ -156,6 +156,7 @@ export async function rehearseLocalLifecycle(
         "Repeat forced interruption, recovery, deadline handling, and post-shutdown evidence checks on the selected host and retain that record. This local rehearsal does not.",
     };
   } finally {
+    if (sibling !== undefined) rmSync(sibling, { recursive: true, force: true });
     if (pid !== undefined) {
       try {
         process.kill(pid, "SIGKILL");

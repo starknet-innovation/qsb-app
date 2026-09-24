@@ -108,21 +108,36 @@ export function validateDeclaredPrivilegeBoundary(boundary: {
 }
 
 const forbiddenKeys = new Set([
-  "apiKey",
-  "api_key",
+  "apikey",
+  "apisecret",
   "secret",
-  "secretString",
+  "secretstring",
   "password",
   "passphrase",
-  "privateKey",
+  "privatekey",
   "authorization",
   "mnemonic",
   "seed",
-  "walletBackup",
+  "walletbackup",
   "token",
+  "accesstoken",
+  "accesskey",
+  "accesskeyid",
+  "secretaccesskey",
+  "awsaccesskeyid",
+  "awssecretaccesskey",
+  "sessiontoken",
+  "securitytoken",
+  "refreshtoken",
+  "credential",
+  "credentials",
 ]);
 const privateKeyPattern = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
-const awsAccessKeyPattern = /AKIA[0-9A-Z]{16}/;
+const awsAccessKeyPattern = /A(?:K|S)IA[0-9A-Z]{16}/;
+
+function credentialKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
 
 export function assertNoCredentialMaterial(value: unknown, label = "value"): void {
   if (typeof value === "string") {
@@ -132,7 +147,7 @@ export function assertNoCredentialMaterial(value: unknown, label = "value"): voi
   }
   if (!value || typeof value !== "object") return;
   for (const [key, child] of Object.entries(value)) {
-    if (forbiddenKeys.has(key))
+    if (forbiddenKeys.has(credentialKey(key)))
       throw new Error(`CredentialMaterialRejected:${label}.${key}`);
     assertNoCredentialMaterial(child, `${label}.${key}`);
   }

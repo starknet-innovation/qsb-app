@@ -295,25 +295,22 @@ describe("durable storage authority rehearsal", () => {
     });
   });
 
-  it("serializes canonical reservations on the authority generation", async () => {
+  it("admits distinct outpoints without rewriting the authority version", async () => {
     const store = new MemoryStore();
     await enableInProcessWriterExclusion(store, "store-transaction-condition");
+    const before = await store.get(AUTHORITY_PK, AUTHORITY_SK);
     const first = await canonicalReservationWrites(store, [
       { owner: "a", jobId: "j1", txid: txid("55"), vout: 0 },
     ]);
     const second = await canonicalReservationWrites(store, [
       { owner: "b", jobId: "j2", txid: txid("66"), vout: 1 },
     ]);
-    const settled = await Promise.allSettled([
-      store.atomicPut(first),
-      store.atomicPut(second),
-    ]);
-    expect(settled.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(settled.filter((result) => result.status === "rejected")).toHaveLength(1);
-    const retry = await canonicalReservationWrites(store, [
-      { owner: "b", jobId: "j2", txid: txid("66"), vout: 1 },
-    ]);
-    await store.atomicPut(retry);
+    expect(first.some((write) => write.conditionOnly)).toBe(true);
+    expect(first.some((write) => write.row.version !== before?.version && write.row.pk === AUTHORITY_PK)).toBe(
+      false,
+    );
+    await Promise.all([store.atomicPut(first), store.atomicPut(second)]);
+    expect((await store.get(AUTHORITY_PK, AUTHORITY_SK))?.version).toBe(before?.version);
     expect(await store.get(`OUTPOINT#${txid("55")}:0`, "RESERVATION")).toBeTruthy();
     expect(await store.get(`OUTPOINT#${txid("66")}:1`, "RESERVATION")).toBeTruthy();
     const duplicate = await canonicalReservationWrites(store, [
@@ -458,6 +455,69 @@ describe("durable storage authority rehearsal", () => {
     ]);
     expect(creation[0]?.pk).toBe(legacyWrite.at(-1)?.pk);
     expect(creation[0]?.sk).toBe(legacyWrite.at(-1)?.sk);
+    const held = dynamoReservationTransaction([
+      {
+        row: {
+          pk: `OUTPOINT#${txid("bb")}:1`,
+          sk: "RESERVATION",
+          version: 0,
+          authorityGeneration: 1,
+        },
+      },
+      {
+        row: {
+          pk: AUTHORITY_PK,
+          sk: AUTHORITY_SK,
+          version: 4,
+          generation: 1,
+          legacyExcluded: true,
+          canonicalAccepting: true,
+          productionEnforcement: false,
+        },
+        expected: 4,
+        conditionOnly: true,
+      },
+    ]);
+    expect(held.at(-1)).toMatchObject({
+      kind: "authority-generation",
+      expectedVersion: 4,
+      generation: 1,
+      condition: "generation",
+    });
+    const uncertain = {
+      pk: "OWNER#owner",
+      sk: "JOB#legacy-unknown",
+      version: 1,
+      job: {
+        status: "paused",
+        error: "Submission outcome unknown. Reconcile Runpod before resuming.",
+      },
+    };
+    const cleared = structuredClone(uncertain);
+    (cleared.job as { status: string }).status = "queued";
+    delete (cleared.job as { error?: string }).error;
+    expect(preservationFailures([uncertain], [cleared])).toContain(
+      "RollbackWouldDuplicatePaidWork",
+    );
+    const repinned = {
+      pk: "OWNER#owner",
+      sk: "JOB#pinned",
+      version: 1,
+      job: {
+        execution: { profile: { id: "profile-a" } },
+        solver: {
+          descriptor: { id: "solver-a", releaseHash: "aa".repeat(32) },
+          releaseHash: "bb".repeat(32),
+        },
+      },
+    };
+    const changedPin = structuredClone(repinned);
+    (
+      (changedPin.job as { solver: { descriptor: { id: string } } }).solver.descriptor
+    ).id = "solver-b";
+    expect(preservationFailures([repinned], [changedPin])).toContain(
+      "ReleaseIdentityChanged",
+    );
     const excluded = durableRows().find((row) => row.pk === AUTHORITY_PK)!;
     expect(authorityDeleteAllowed(excluded, 0)).toBe(false);
     expect(authorityDeleteAllowed({ ...excluded, legacyExcluded: false }, 0)).toBe(true);

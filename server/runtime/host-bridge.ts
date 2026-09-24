@@ -7,6 +7,7 @@ import {
 import type { PublicVault, Withdrawal } from "../../src/lib/model";
 import { Conflict, type Store } from "../store";
 import contract from "../mainnet-capability.json";
+import { compareDirectoryIdentity } from "./host-requirements";
 import { validateSolvedState } from "../../src/mainnet/solvedContract";
 import { coreSourceDigest } from "./package-release";
 import {
@@ -991,6 +992,9 @@ export function applyLocalLoss(
   if (providerTouched(launch)) {
     if (next.state !== "terminal") next.state = "uncertain";
     if (next.replacement === "starting") next.replacement = "uncertain";
+  } else if (launch.state === "replacing" || launch.replacement === "starting") {
+    next.state = "uncertain";
+    delete next.replacement;
   } else if (
     kind === "process-not-alive" &&
     launch.state === "acknowledged" &&
@@ -1052,10 +1056,19 @@ export async function bindEvidenceDirectory(
   const loaded = await loadPair(store, owner, requestId, slot);
   if (loaded.launch.bindings.inputHash !== inputHash)
     throw new Error("ImmutableInputMismatch");
-  return commit(store, loaded, {
-    ...loaded.launch,
-    evidenceDirectory: identity,
-  });
+  const existing = loaded.launch.evidenceDirectory;
+  if (!existing)
+    return commit(store, loaded, {
+      ...loaded.launch,
+      evidenceDirectory: identity,
+    });
+  if (compareDirectoryIdentity(existing, identity) === "intact")
+    return commit(store, loaded, loaded.launch);
+  return commit(
+    store,
+    loaded,
+    applyLocalLoss(loaded.launch, "evidence-directory-replaced"),
+  );
 }
 
 export function localAckStarter(

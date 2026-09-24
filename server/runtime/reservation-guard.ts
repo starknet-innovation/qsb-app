@@ -46,19 +46,41 @@ export type DynamoTransactStep =
       pk: typeof AUTHORITY_PK;
       sk: typeof AUTHORITY_SK;
       condition: "attribute_not_exists(pk)";
+    }
+  | {
+      kind: "authority-generation";
+      pk: typeof AUTHORITY_PK;
+      sk: typeof AUTHORITY_SK;
+      condition: "generation";
+      expectedVersion: number;
+      generation: number;
     };
 
 /** Reservation batches that do not write the authority row condition on its absence, so authority creation conflicts with them. */
 export function dynamoReservationTransaction(
-  writes: { row: Row; expected?: number }[],
+  writes: { row: Row; expected?: number; conditionOnly?: boolean }[],
 ): DynamoTransactStep[] {
-  const steps: DynamoTransactStep[] = writes.map(({ row, expected }) => ({
-    kind: "put",
-    pk: row.pk,
-    sk: row.sk,
-    condition: expected === undefined ? "attribute_not_exists(pk)" : "version",
-    ...(expected === undefined ? {} : { expectedVersion: expected }),
-  }));
+  const steps: DynamoTransactStep[] = writes.map(({ row, expected, conditionOnly }) =>
+    conditionOnly && isAuthorityRow(row)
+      ? {
+          kind: "authority-generation" as const,
+          pk: AUTHORITY_PK,
+          sk: AUTHORITY_SK,
+          condition: "generation" as const,
+          expectedVersion: expected ?? row.version,
+          generation: typeof row.generation === "number" ? row.generation : -1,
+        }
+      : {
+          kind: "put" as const,
+          pk: row.pk,
+          sk: row.sk,
+          condition:
+            expected === undefined
+              ? ("attribute_not_exists(pk)" as const)
+              : ("version" as const),
+          ...(expected === undefined ? {} : { expectedVersion: expected }),
+        },
+  );
   if (
     writes.some((write) => isReservationRow(write.row)) &&
     !writes.some((write) => isAuthorityRow(write.row))
@@ -106,7 +128,7 @@ export function authorityMutationRejection(
  */
 export function reservationBatchRejection(
   existingAuthority: Row | undefined,
-  writes: { row: Row; expected?: number }[],
+  writes: { row: Row; expected?: number; conditionOnly?: boolean }[],
 ): string | undefined {
   for (const { row } of writes) {
     const authorityRejection = authorityMutationRejection(existingAuthority, row);
