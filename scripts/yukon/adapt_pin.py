@@ -38,7 +38,21 @@ def adapt(text):
         digest[4*i+3] = (uint8_t)hs[i];
     }
     return qsb_der32(digest);''')
-    text = replace(text, 'ok = qsb_host_zeros(hh) >= QSB_ZEROS_N;', 'ok = qsb_der32(hh);')
+    # Replace only the locked host gate's recovery section; shared helper is
+    # exercised directly with real OpenSSL and independent curve vectors.
+    start = text.index('    BIGNUM *z = BN_bin2bn(d2, 32, NULL);', text.index('static int qsb_host_exact_hit('))
+    end = text.index('    return ok;\n}', start) + len('    return ok;')
+    text = text[:start] + '''    uint8_t hh[32];
+    if (!qsb_recover_hash(d2, recid, grp, ctx, order, nri, Ru2, hh)) return 0;
+    int ok = qsb_der32(hh);
+    return ok;''' + text[end:]
+    text = replace(text, 'if (sl > 119 || so + 3 >= sl || lo + 3 >= sl) return 0;',
+        'qsb_require_host(sl >= 4 && sl <= 119 && so <= sl - 4 && lo <= sl - 4, "host suffix bounds");')
+    text = replace(text, '    SHA256_Init(&sc);',
+        '    qsb_require_host(SHA256_Init(&sc) == 1, "host SHA init");')
+    text = replace(text, '    SHA256(d1, 32, d2);',
+        '    qsb_require_host(SHA256(d1, 32, d2) != NULL, "host double SHA");')
+
     text = replace(text, 'if (count > 64) count = 64;', 'if (!qsb_require_hit_capacity(count)) return 2;')
     text = replace(text, 'int nh = (h_hit > 64) ? 64 : (int)h_hit;', 'if (!qsb_require_hit_capacity(h_hit)) return 2;\n            int nh = (int)h_hit;')
     text = replace(text, 'int nh = (h_hit > 64) ? 64 : h_hit;', 'if (!qsb_require_hit_capacity(h_hit)) return 2;\n                int nh = (int)h_hit;', 2)
@@ -94,7 +108,7 @@ def adapt(text):
         '    printf("QSB_RANGE_DRAINED candidates=%llu\\n", (unsigned long long)total_searched);\n'
         '    printf("\\n  Done: %luM')
     # Compile-time lock: command-line flags cannot silently re-enable shortcuts.
-    prefix = '#include "qsb_pin_contract.h"\n'
+    prefix = '#include "qsb_pin_contract.h"\n#include "qsb_pin_recovery.h"\n'
     for name, value in FLAGS.items():
         prefix += f'#if defined({name}) && {name} != {value}\n#error "Unsafe override: {name}"\n#endif\n#ifndef {name}\n#define {name} {value}\n#endif\n'
     return prefix + text
@@ -120,6 +134,7 @@ def main():
     source=args.out/'pinning/pinning.cu'
     source.write_text(adapt(source.read_text()))
     shutil.copyfile(Path(__file__).with_name('pin_contract.h'),args.out/'pinning/qsb_pin_contract.h')
+    shutil.copyfile(Path(__file__).with_name('pin_recovery.h'),args.out/'pinning/qsb_pin_recovery.h')
     hashes={str(p.relative_to(args.out)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(args.out.rglob('*')) if p.is_file()}
     receipt={'status':'HOLD','upstreamCommit':lock['commit'],'scope':'isolated-pinning-bounded-v2','flags':FLAGS,'files':hashes,'completeArithmeticCertified':False,'boundedSchedulerCertified':False,'deploymentAllowed':False}
     (args.out/'adaptation.json').write_text(json.dumps(receipt,indent=2)+'\n')

@@ -68,3 +68,25 @@ Host tests exercise missing parents, a directory as output, an existing file
 blocking the results directory, and successful exact output; Linux also tests
 `/dev/full`. Fourteen unit tests pass locally (macOS skips unavailable
 `/dev/full`). CUDA and OpenSSL error handling remain separate pending work.
+
+## Checked public-point recovery
+
+The host nomination gate now uses a shared, checked OpenSSL recovery helper.
+Allocation, scalar arithmetic, point addition/inversion, compressed point
+serialization and hashing failures terminate with exit 2. Infinity returns a
+non-candidate without attempting affine serialization; doubling uses OpenSSL's
+complete point operation. Host suffix bounds and SHA initialization/double-hash
+returns are also checked. This repairs the nomination verifier, not the GPU's
+exceptional-point coverage or all table-construction paths.
+
+Sixteen local tests pass. The new helper matches independent Python affine
+secp256k1 arithmetic and SHA-256 on 96 cases (both recovery signs, two scalar
+multipliers, zero/order/wrap boundaries and deterministic public scalars).
+Thirteen synthetic failed-check injections individually terminate before output.
+These inject the checked condition, not actual OpenSSL allocator faults. The
+existing 31,014 predicate comparisons still pass. Native compilation of this
+changed source remains required; GPU curve coverage remains pending.
+
+Bounded-only implementation `23b704c947abcac80963c3cd10c616d1fe59832c`
+passed native CUDA compilation in Actions run 36041532564. It does not certify
+these subsequent publication/recovery changes.
