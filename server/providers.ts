@@ -4,7 +4,10 @@ import {
   GetSecretValueCommand,
 } from "@aws-sdk/client-secrets-manager";
 import { minerBase } from "./network";
-import { assertBroadcastPermit } from "./runtime/miner-inclusion";
+import {
+  assertBroadcastPermit,
+  assertMainnetTransportClosed,
+} from "./runtime/miner-inclusion";
 
 const minerSecrets = new SecretsManagerClient({
   region: process.env.AWS_REGION,
@@ -125,8 +128,9 @@ export class Slipstream {
   }
   async submit(hex: string, permit: unknown) {
     // Exact spend authorization is required before any miner HTTP, including
-    // the chain probe. A missing permit must not reach the network.
-    assertBroadcastPermit(permit, hex);
+    // the chain probe. A missing permit must not reach the network. A mainnet
+    // permit or the mainnet miner host stays refused in this checkout.
+    assertMainnetTransportClosed(assertBroadcastPermit(permit, hex), this.base);
     await this.assertNetwork();
     return this.request("/api/transactions", {
       method: "POST",

@@ -45,6 +45,7 @@ import {
 import { installSupervisedRoutes } from "./runtime/supervised-routes";
 import {
   MinerInclusionError,
+  assertMainnetTransportClosed,
   authorizeConfiguredSpend,
   callMinerSubmit,
   judgeInclusionEvidence,
@@ -357,6 +358,7 @@ export function createApp(
     );
     if (funding.txid !== permit.txid)
       throw new MinerInclusionError("ExactSpendMismatch");
+    assertMainnetTransportClosed(permit);
     await testMiner(body.rawTxHex, funding.txid);
     vault.funding = funding;
     vault.status = "submitted";
@@ -680,6 +682,7 @@ export function createApp(
     );
     if (checked.txid !== permit.txid)
       throw new MinerInclusionError("ExactSpendMismatch");
+    assertMainnetTransportClosed(permit);
     await testMiner(rawTxHex, checked.txid);
     job.status = "submitted";
     job.txid = checked.txid;

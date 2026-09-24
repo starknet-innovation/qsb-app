@@ -649,6 +649,26 @@ export function assertBroadcastPermit(
   return granted;
 }
 
+function targetsMainnetMiner(endpoint: string | undefined): boolean {
+  if (!endpoint) return false;
+  let host: string;
+  try {
+    host = new URL(endpoint).hostname;
+  } catch {
+    return false;
+  }
+  return host === new URL(EXTERNAL_MINER_CATALOG.mainnet.minerUrl).hostname;
+}
+
+/** This checkout does not invoke a mainnet miner transport. A permit is not activation. */
+export function assertMainnetTransportClosed(
+  permit: BroadcastPermit,
+  endpoint?: string,
+): void {
+  if (permit.chain === "mainnet" || targetsMainnetMiner(endpoint))
+    throw new MinerInclusionError("MainnetTransportRefused");
+}
+
 export async function callMinerSubmit(input: {
   permit: unknown;
   rawTxHex: string;
@@ -663,7 +683,8 @@ export async function callMinerSubmit(input: {
   mainnetEnabled: false;
   broadcastAuthorized: false;
 }> {
-  assertBroadcastPermit(input.permit, input.rawTxHex);
+  const granted = assertBroadcastPermit(input.permit, input.rawTxHex);
+  assertMainnetTransportClosed(granted);
   const transportResult = await input.transport(input.rawTxHex);
   return Object.freeze({
     format: "qsb-miner-transport-result-v1",

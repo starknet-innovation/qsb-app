@@ -136,17 +136,17 @@ async function setup(reject = false) {
     },
   };
 }
-it("saves signed intent before submission and never blindly repeats an uncertain broadcast", async () => {
+it("refuses mainnet funding transport while release broadcast stays disabled", async () => {
   const f = await setup();
   const path = "/vaults/" + f.vault.id + "/fund";
   const response = await f.app.request(req(path, f.body, f.token));
-  expect(response.status).toBe(202);
-  expect((await response.json()).submission).toEqual({
-    txid: f.tx.id,
-    status: "uncertain",
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({
+    error: "MainnetTransportRefused",
   });
-  expect((await f.app.request(req(path, f.body, f.token))).status).toBe(409);
-  expect(f.submit).toHaveBeenCalledTimes(1);
+  expect(f.submit).not.toHaveBeenCalled();
+  expect(f.test).not.toHaveBeenCalled();
+  expect(await f.store.get("OWNER#" + address, "TX#" + f.tx.id)).toBeUndefined();
   expect(release.mainnetEnabled).toBe(false);
   expect("broadcastAuthorized" in release).toBe(false);
 });
@@ -205,16 +205,17 @@ it("does not submit a withdrawal without an exact spend record", async () => {
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();
 });
-it("miner rejection leaves no funding intent and never broadcasts", async () => {
+it("does not consult a rejecting mainnet miner while transport stays closed", async () => {
   const f = await setup(true);
-  expect(
-    (
-      await f.app.request(
-        req("/vaults/" + f.vault.id + "/fund", f.body, f.token),
-      )
-    ).status,
-  ).toBe(409);
+  const response = await f.app.request(
+    req("/vaults/" + f.vault.id + "/fund", f.body, f.token),
+  );
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({
+    error: "MainnetTransportRefused",
+  });
   expect(f.submit).not.toHaveBeenCalled();
+  expect(f.test).not.toHaveBeenCalled();
   expect(
     await f.store.get("OWNER#" + address, "TX#" + f.tx.id),
   ).toBeUndefined();

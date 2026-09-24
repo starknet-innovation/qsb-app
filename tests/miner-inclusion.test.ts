@@ -332,9 +332,43 @@ describe("authorization before submit", () => {
     expect("broadcastAuthorized" in release).toBe(false);
   });
 
-  it("calls a test double only after the record matches, and that result is not inclusion", async () => {
+  it("does not invoke a mainnet transport from a permit minted while release broadcast is disabled", async () => {
     const sample = sampleTx();
     const permit = grantExactSpendPermit(grantInput("mainnet"));
+    const transport = vi.fn().mockResolvedValue({ httpStatus: 200, status: "success" });
+    await expect(
+      callMinerSubmit({ permit, rawTxHex: sample.raw, transport }),
+    ).rejects.toThrow("MainnetTransportRefused");
+    expect(transport).not.toHaveBeenCalled();
+    expect(permit.mainnetEnabled).toBe(false);
+    expect(permit.broadcastAuthorized).toBe(false);
+    const request = vi.fn();
+    vi.stubGlobal("fetch", request);
+    await expect(
+      new Slipstream("https://slipstream.mara.com").submit(sample.raw, permit),
+    ).rejects.toThrow("MainnetTransportRefused");
+    expect(request).not.toHaveBeenCalled();
+    const rehearsal = grantExactSpendPermit(
+      grantInput("testnet4", "operator-fixture", {
+        raw: sample.raw,
+        txid: sample.txid,
+      }),
+    );
+    request.mockClear();
+    await expect(
+      new Slipstream("https://slipstream.mara.com/").submit(sample.raw, rehearsal),
+    ).rejects.toThrow("MainnetTransportRefused");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("calls a test double only after a non-mainnet record matches, and that result is not inclusion", async () => {
+    const sample = sampleTx();
+    const permit = grantExactSpendPermit(
+      grantInput("testnet4", "operator-fixture", {
+        raw: sample.raw,
+        txid: sample.txid,
+      }),
+    );
     const transport = vi.fn().mockResolvedValue({ httpStatus: 200, status: "success" });
     const sent = await callMinerSubmit({
       permit,

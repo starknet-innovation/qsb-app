@@ -44,6 +44,7 @@ export const requiredReleasePaths = [
   "src/lib/releases/qsb-config-a-ranked-v2.json",
   "src/mainnet/admissionClient.ts",
   "src/mainnet/consumer.ts",
+  "src/mainnet/chain.ts",
   "src/mainnet/flow.ts",
   "src/mainnet/intent.ts",
   "src/mainnet/publicResult.ts",

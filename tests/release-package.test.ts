@@ -11,7 +11,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { enrolledSourcePaths, historicalVendorExtras } from "../server/runtime/closure";
+import {
+  enrolledSourcePaths,
+  historicalVendorExtras,
+  requiredReleasePaths,
+} from "../server/runtime/closure";
 import archivedRelease from "../src/lib/releases/qsb-config-a-ranked-v2.json";
 import { assertInsideRepo, certifyWrapper, sha256Hex } from "../server/runtime/identity";
 import {
@@ -208,6 +212,8 @@ describe("source release package", () => {
         /^[a-f0-9]{64}$/,
       );
     }
+    expect(requiredReleasePaths).toContain("src/mainnet/chain.ts");
+    expect(requiredReleasePaths).toContain("src/mainnet/flow.ts");
     const directory = mkdtempSync(path.join(tmpdir(), "qsb-release-"));
     writePackageTree(root, directory, manifest);
     const packaged = JSON.parse(
