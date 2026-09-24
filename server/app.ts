@@ -30,9 +30,16 @@ import { outputScript } from "../src/lib/transactions";
 import { hex } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
+import type { FundingLedger } from "./runtime/dispatcher";
+import { installSupervisedRoutes } from "./runtime/supervised-routes";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
+function supervisedServiceJob(job: unknown): boolean {
+  if (!job || typeof job !== "object") return false;
+  const execution = (job as { execution?: { kind?: string } }).execution;
+  return execution?.kind === "qsb-supervised-service-v1";
+}
 type Env = { Variables: { owner: string } };
 export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
 export type AuthenticatedJobPostRoutes = Pick<Hono<Env>, "post">;
@@ -48,6 +55,10 @@ export function createApp(
     installAuthenticatedJobPostRoutes?: (
       routes: AuthenticatedJobPostRoutes,
     ) => void;
+    /** Test-only in-process handoff. The default app does not admit jobs. */
+    inProcessHandoff?: boolean;
+    /** Injected chain reads for supervised admission. Never the process-wide client by default. */
+    fundingLedger?: FundingLedger;
   } = {},
 ) {
   const ledger = dependencies.chain || chain,
@@ -519,7 +530,7 @@ export function createApp(
       { row: { pk, sk, version: 0, job } },
       ...[manifest.funding, manifest.helper].map((point) => ({
         row: {
-          pk: `OUTPOINT#${point.txid}:${point.vout}`,
+          pk: `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`,
           sk: "RESERVATION",
           version: 0,
           owner,
@@ -541,8 +552,10 @@ export function createApp(
       sk = `JOB#${c.req.param("id")}`,
       row = await store.get(pk, sk);
     if (!row) return c.json({ error: "Job not found" }, 404);
-    const job = row.job as Job,
-      vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
+    const job = row.job as Job;
+    if (supervisedServiceJob(job))
+      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
+    const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
     if (!vaultRow) return c.json({ error: "Vault not found" }, 404);
     if (((vaultRow.vault as PublicVault).network ?? "mainnet") !== NETWORK_ID)
       return c.json(
@@ -584,6 +597,8 @@ export function createApp(
     const r = await store.get(pk, sk);
     if (!r) return c.json({ error: "Job not found" }, 404);
     const job = r.job as Job;
+    if (supervisedServiceJob(job))
+      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
     if (!["searching", "queued"].includes(job.status))
       return c.json({ error: "This job cannot be paused." }, 409);
     if (job.status === "searching" && !job.runpodId)
@@ -602,6 +617,8 @@ export function createApp(
       row = await store.get(pk, sk);
     if (!row) return c.json({ error: "Job not found" }, 404);
     const job = row.job as Job;
+    if (supervisedServiceJob(job))
+      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
     if (job.status !== "paused")
       return c.json({ error: "Only a paused job can be resumed." }, 409);
     if (job.error?.includes("Submission outcome unknown"))
@@ -629,6 +646,8 @@ export function createApp(
       row = await store.get(pk, sk);
     if (!row) return c.json({ error: "Job not found" }, 404);
     const job = row.job as Job;
+    if (supervisedServiceJob(job))
+      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
     if (!job.txid) return c.json({ job });
     const status = await ledger.status(job.txid),
       vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
@@ -646,20 +665,30 @@ export function createApp(
     ]);
     return c.json({ job, status });
   });
-  dependencies.installAuthenticatedJobRoutes?.({
+  const authenticatedGet = {
     get: ((path: string, ...handlers: any[]) => {
       if (path === "/api/jobs/:id/mainnet-solved-state" && handlers.length > 0)
         mainnetUiRoutes.admission = true;
       return (app.get.bind(app) as (...a: any[]) => any)(path, ...handlers);
     }) as typeof app.get,
-  });
-  dependencies.installAuthenticatedJobPostRoutes?.({
+  };
+  const registeredPosts = new Set<string>();
+  const authenticatedPost = {
     post: ((path: string, ...handlers: any[]) => {
+      registeredPosts.add(path);
       if (path === "/api/jobs/supervised" && handlers.length > 0)
         mainnetUiRoutes.creation = true;
       return (app.post.bind(app) as (...a: any[]) => any)(path, ...handlers);
     }) as typeof app.post,
-  });
+  };
+  dependencies.installAuthenticatedJobRoutes?.(authenticatedGet);
+  dependencies.installAuthenticatedJobPostRoutes?.(authenticatedPost);
+  if (dependencies.inProcessHandoff === true) {
+    installSupervisedRoutes(authenticatedGet, authenticatedPost, store, {
+      post: !registeredPosts.has("/api/jobs/supervised"),
+      ledger: dependencies.fundingLedger,
+    });
+  }
   return app;
 }
 export const app = createApp();

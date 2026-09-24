@@ -5,7 +5,8 @@
     "Private registry replaced with UNENROLLED_REGISTRY",
     "Historical endpoint IDs replaced with non-resource placeholders",
     "Explicit historical node_modules imports resolved through public package-lock.json",
-    "Historical spent-fixture identifiers replaced with placeholders; these are not an operator spent-outpoint inventory"
+    "Historical spent-fixture identifiers replaced with placeholders; these are not an operator spent-outpoint inventory",
+    "coreSourceManifest rebound to the enrolled core digest on the public copy."
   ],
   "files": [
     {
@@ -460,7 +461,7 @@
     },
     {
       "path": "source/work/yukon-mainnet-service-enrollment-20260923/capability.ts",
-      "sha256": "14902f68d89c38fdf79bca4af86ffee771ddfce767647e4058d8ef19dfe400fa",
+      "sha256": "a53fc64c51217a8c22736c65124705f6c63a950f38744fe86e8810272238540f",
       "originalSha256": "14902f68d89c38fdf79bca4af86ffee771ddfce767647e4058d8ef19dfe400fa",
       "origin": "work/yukon-mainnet-service-enrollment-20260923/capability.ts"
     },

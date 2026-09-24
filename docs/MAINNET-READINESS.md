@@ -22,10 +22,10 @@ The repository is a curated research snapshot. Some integration work and evidenc
 
 **Status: source build paths added; release enrollment remains open.** The [optimized worker](../worker/optimized/README.md) and [Linux supervisor distribution](../supervised/runtime/README.md) now build from repository source. This removes the private archive/precompiled solver input requirement. It does not certify the new artifacts or automatically reconcile historical image/CPU/runtime identities.
 
-- [ ] Package the complete reviewed API, dispatcher, runtime, CPU verifier and evidence-reader dependency closure without reads from a developer work directory.
-- [ ] Define compatible pinning and subset releases explicitly. A subset-only optimization must not be treated as a replacement for the entire solver pipeline.
+- [x] Package the complete reviewed API, dispatcher, runtime, CPU verifier and evidence-reader dependency closure without reads from a developer work directory. Evidence: `release/source-manifest.json`, rebuilt by `npm run package:release` after `npm run vendor`. The closure follows relative imports of enrolled modules and includes `package.json`, `package-lock.json`, and `tsconfig.json`. `tests/release-package.test.ts` copies that closure into a temp tree, rejects extra files, and rechecks hashes. Paths outside this checkout are rejected. This is a source closure, not an OCI image.
+- [x] Define compatible pinning and subset releases explicitly. A subset-only optimization must not be treated as a replacement for the entire solver pipeline. Evidence: the manifest pairs historical pinning with the historical subset selected by `worker/Dockerfile`. `research/optimized-subset` stays `selectedByWorkerDockerfile: false` and `replacesSolverPipeline: false`.
 - [ ] Record source commit, build inputs, compiler flags, dependency versions, native binary hashes and OCI index/platform-manifest identities. Distinguish source hashes, image config IDs and registry manifests.
-- [ ] Verify that package contents match the enrolled identities and that modified wrappers cannot inherit certification from an unchanged native executable.
+- [x] Verify that package contents match the enrolled identities and that modified wrappers cannot inherit certification from an unchanged native executable. Evidence: `verifyPackageTree` fails when a packaged wrapper byte changes. `certifyWrapper` returns `wrapper-changed` when the wrapper changes and the presented native hash does not, and `native-not-enrolled` while native executable hashes are null. No native executable is certified by this checkout.
 - [ ] Make the relevant regression tests and sanitized evidence reproducible from the release checkout. Clearly identify any evidence that remains private or externally dependent.
 - [ ] Complete independent final integration review and close concrete findings against the exact frozen artifacts.
 
@@ -37,16 +37,18 @@ The repository is a curated research snapshot. Some integration work and evidenc
 
 - [x] Implement the source connection from authenticated job creation through an atomic outbox, SQS and durable dispatch/admission/host claims. [Implementation and test limits](../supervised/README.md). A queued response remains distinct from a running search.
 - [ ] Validate that final connection on the enrolled Linux deployment, including credential provisioning, watchdogs, process failure/restart and runtime/table/image identity alignment. Local synthetic composition does not close this gate.
-- [ ] Atomically claim invocation and launch authority before starting a process. Bind owner, request, revision, phase, reservations, capability, configuration and release identity.
-- [ ] Preserve uncertain launch outcomes and late provider IDs without an automatic duplicate paid submission.
-- [ ] Finish the host bridge with bounded acknowledgement, immutable inputs, owned process identity and durable terminal evidence.
-- [ ] Exercise the packaged positive solved-state API path with the actual enrolled readers, including resumed sessions and replaced resources; rejection-only tests are insufficient.
+- [ ] Atomically claim invocation and launch authority before starting a process. Bind owner, request, revision, phase, reservations, capability, configuration and release identity. The in-process `claimLaunch` helper persists those bindings before `launchOwnedProcess` and does not close this enrolled-host item.
+- [ ] Preserve uncertain launch outcomes and late provider IDs without an automatic duplicate paid submission. The in-process tests cover an acknowledgement timeout and one late provider id. They do not close this item for the enrolled host.
+- [ ] Finish the host bridge with bounded acknowledgement, immutable inputs, owned process identity and durable terminal evidence. `localAckStarter` can record a local pid. That is not a GPU search and does not close this item.
+- [ ] Exercise the packaged positive solved-state API path with the actual enrolled readers, including resumed sessions and replaced resources; rejection-only tests are insufficient. In-process fixtures label solver, chain, and CPU facts as simulated.
 - [ ] Verify the full route from stored request through search, CPU-verified solution, sibling drain, signing-bundle export and the current browser recovery screen.
-- [ ] Recheck wrong-chain rejection, capability revocation, duplicate requests, wallet changes and existing-job guards in the final composition.
+- [ ] Recheck wrong-chain rejection, capability revocation, duplicate requests, wallet changes and existing-job guards in the final composition. In-process `tests/runtime-handoff.test.ts` covers a `testnet4` service guard, a non-mainnet request body, a different wallet session, an idempotency conflict, a second job for the same vault, and `enabled: false` on the capability row. Those tests use `createApp(store, { inProcessHandoff: true })` and do not close this enrolled-host item.
 
 **Acceptance evidence:** joined success and failure/restart scenarios against the actual packaged components and durable backend. Label simulated chain/provider/solver facts explicitly. A process acknowledgement must never count as search success, and a verified hit must never count as whole-range coverage.
 
 Terraform now defines a dormant supervised host and supporting storage, queue, IAM, backup and cleanup resources; see [runtime infrastructure](../terraform/runtime/README.md). Definition of those resources does not close the installation, application-connection or actual-host validation gates below.
+
+The source package and in-process handoff in this branch are reproducible from this checkout. They do not freeze a native release, enroll the optimized supervisor, or authorize mainnet. Do not build `worker/Dockerfile` as the experimental runtime. The experimental build paths are `npm run build:optimized` and `npm run build:runtime`. `broadcastAuthorized` and `release.mainnetEnabled` stay false.
 
 ## 3. Select and validate the production execution host
 

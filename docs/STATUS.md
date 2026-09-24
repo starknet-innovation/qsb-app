@@ -13,7 +13,7 @@ See the [complete known mainnet readiness checklist](MAINNET-READINESS.md) for t
 
 ## Remaining release work
 
-- Final integrated source/image identity, deployment isolation and permission review.
+- Final integrated source/image identity, deployment isolation and permission review. A source manifest and in-process handoff now exist in this checkout; native binary hashes, OCI identities, and a fresh CPU-verified search do not.
 - Fresh full search with the optimized final runtime, new local wallet authorization, and unchanged Core validation of that exact result.
 - Chain-correct external miner inclusion and independent confirmation. Offline regtest acceptance is not external mining certification.
 - Explicit authorization of the exact transaction, amount and fee before any mainnet broadcast.
