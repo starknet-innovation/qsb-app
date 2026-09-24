@@ -181,6 +181,8 @@ export type WalletFundingAssessment = {
 export type BroadcastPermit = {
   format: "qsb-exact-spend-permit-v1";
   chain: ExternalChainId;
+  /** Catalog miner origin agreed when the permit was minted. */
+  minerEndpoint: string;
   txid: string;
   rawTxSha256: string;
   amountSats: string;
@@ -608,6 +610,7 @@ export function grantExactSpendPermit(input: {
   return seal({
     format: "qsb-exact-spend-permit-v1",
     chain: agreement.chain,
+    minerEndpoint: EXTERNAL_MINER_CATALOG[agreement.chain].minerUrl,
     txid: tx.id,
     rawTxSha256: lower(spend.rawTxSha256),
     amountSats: spend.amountSats,
@@ -707,21 +710,12 @@ export function localTransportInvocations(
   return Object.freeze(row.seen.slice());
 }
 
-function endpointOf(value: unknown): string | undefined {
-  if (!value || typeof value !== "object" || !("endpoint" in value))
-    return undefined;
-  const endpoint = (value as { endpoint?: unknown }).endpoint;
-  return typeof endpoint === "string" ? endpoint : undefined;
-}
-
 function assertLocalMinerTransport(value: unknown): LocalMinerTransport {
-  if (typeof value === "function")
-    throw new MinerInclusionError("LiveMinerTransportRefused");
-  if (targetsLiveMiner(endpointOf(value)))
-    throw new MinerInclusionError("LiveMinerTransportRefused");
+  // Membership is identity only. Do not read properties first: a Proxy or
+  // accessor on an untrusted object can perform I/O from a get or has trap.
   if (
-    !value ||
     typeof value !== "object" ||
+    value === null ||
     !localTransports.has(value as LocalMinerTransport)
   )
     throw new MinerInclusionError("LiveMinerTransportRefused");
@@ -734,6 +728,15 @@ function assertLocalMinerTransport(value: unknown): LocalMinerTransport {
   )
     throw new MinerInclusionError("LiveMinerTransportRefused");
   return transport;
+}
+
+/** The Slipstream base must be the miner origin recorded on the permit. */
+export function assertPermitMinerEndpoint(
+  permit: BroadcastPermit,
+  endpoint: string,
+): void {
+  if (endpoint !== permit.minerEndpoint)
+    throw new MinerInclusionError("MinerEndpointMismatch");
 }
 
 /** This checkout does not invoke a mainnet miner transport. A permit is not activation. */

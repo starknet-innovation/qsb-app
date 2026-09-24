@@ -7,6 +7,7 @@ import { minerBase } from "./network";
 import {
   assertBroadcastPermit,
   assertMainnetTransportClosed,
+  assertPermitMinerEndpoint,
 } from "./runtime/miner-inclusion";
 
 const minerSecrets = new SecretsManagerClient({
@@ -128,9 +129,12 @@ export class Slipstream {
   }
   async submit(hex: string, permit: unknown) {
     // Exact spend authorization is required before any miner HTTP, including
-    // the chain probe. A missing permit must not reach the network. A mainnet
+    // the chain probe. A missing permit must not reach the network. The
+    // instance base must be the miner origin bound into the permit. A mainnet
     // permit or the mainnet miner host stays refused in this checkout.
-    assertMainnetTransportClosed(assertBroadcastPermit(permit, hex), this.base);
+    const granted = assertBroadcastPermit(permit, hex);
+    assertPermitMinerEndpoint(granted, this.base);
+    assertMainnetTransportClosed(granted, this.base);
     await this.assertNetwork();
     return this.request("/api/transactions", {
       method: "POST",

@@ -81,7 +81,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "f40b49d845d5de8b119c8a2f2008d5830c95a966c656a1f42befb504acac6a50",
+      "api": "17ea9f55391c51f5de7af5e71893fec166490a6e8f9a46bce746da3e3c6a66b1",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "c4db7617ecb6f36c503dc704b68d5aaec96053d9eaa48193fbf458d17cc17c78",
@@ -175,7 +175,7 @@
       "server/mainnet-capability.json": "703e2d6f0cac75fda24471f9d845ae71f24aeb43a31b84e9430f2d4fb5e0f704",
       "server/mainnetConfig.ts": "e995c6a9385012217326c2490f188e8382eda40fb37858e9d4f0939d86181102",
       "server/network.ts": "bf7163415b49087ba4341b59b6f9d1b736d6c37ebeb151883ab0146c61d0d66b",
-      "server/providers.ts": "b5668480b50b5320e3c95b136a2326d7c00707917d1e3c82239e561d9017568e",
+      "server/providers.ts": "816c58a8a02a8b65eaeba7963a87c6e91861639a26ff529fdf8c3cfc99f3b3fe",
       "server/runtime/capability.ts": "5695dc01ce72e1243022204014b7de5a8c662ac337aa73c52124628c8de2a797",
       "server/runtime/closure.ts": "19f30ff81ee37539608f4f17de053d6d8e9466c0daf027044403b79138923402",
       "server/runtime/core-binary.json": "e801c46615cd3b9ad84af8736cfddd7707787a1e8f29ed8afb2f07fddb4b6b96",
@@ -188,7 +188,7 @@
       "server/runtime/host-lifecycle.ts": "e10225f9cbf9abcfd0ad07dcda3ae3603704a36eb3f034c53e2dddfc02f8dd45",
       "server/runtime/host-requirements.ts": "dbfdc41524f043d7a8933039f4d1bdb52c034a5f9754f1d3843ec137d55a7eef",
       "server/runtime/identity.ts": "b42a637beb039e8d8e05b3d7ec45a339c7a9aaf6f4314af961984b09348bc4e8",
-      "server/runtime/miner-inclusion.ts": "3f72b2ec8456acdce476590c4db65ee4022bf4924ed58d3a898be7a4409e24db",
+      "server/runtime/miner-inclusion.ts": "0f6cf620b61a1e3b24e50246962ccdad366d2456a9dd356708ae4d539583e689",
       "server/runtime/package-release.ts": "8c6636bcdab04cb84e846f7244463180872d44adf9bfa7ab6e50ecf89727da6e",
       "server/runtime/reservation-guard.ts": "dcb80cd1cdbbfdc5f8807c06eb1ac5216fee28313c5f480f83bf7a92b5bdbad3",
       "server/runtime/solver-review.ts": "79e83740350af6b8115f790786d5f4a775e269f5f60175b8d3d36e0451572d2f",

@@ -359,7 +359,17 @@ describe("authorization before submit", () => {
     request.mockClear();
     await expect(
       new Slipstream("https://slipstream.mara.com/").submit(sample.raw, rehearsal),
-    ).rejects.toThrow("MainnetTransportRefused");
+    ).rejects.toThrow("MinerEndpointMismatch");
+    expect(request).not.toHaveBeenCalled();
+    expect(rehearsal.minerEndpoint).toBe(
+      "https://teststream.mara.com",
+    );
+    await expect(
+      new Slipstream("https://other-host.example", async () => undefined).submit(
+        sample.raw,
+        rehearsal,
+      ),
+    ).rejects.toThrow("MinerEndpointMismatch");
     expect(request).not.toHaveBeenCalled();
   });
 
@@ -433,6 +443,28 @@ describe("authorization before submit", () => {
       }),
     ).rejects.toThrow("LiveMinerTransportRefused");
     expect(forged).not.toHaveBeenCalled();
+    let trapped = false;
+    const hostile = new Proxy(
+      {},
+      {
+        get() {
+          trapped = true;
+          return "https://slipstream.mara.com";
+        },
+        has() {
+          trapped = true;
+          return true;
+        },
+      },
+    );
+    await expect(
+      callMinerSubmit({
+        permit,
+        rawTxHex: sample.raw,
+        transport: hostile,
+      }),
+    ).rejects.toThrow("LiveMinerTransportRefused");
+    expect(trapped).toBe(false);
   });
 
   it("does not contact Teststream submit until a permit exists", async () => {
