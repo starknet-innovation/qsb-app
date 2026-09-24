@@ -2,7 +2,7 @@
 
 **Status: NOT READY. Mainnet activation and transaction broadcast are not authorized.**
 
-Updated 23 September 2026. This is the public release checklist, distilled from the local validation record. It intentionally excludes operational identifiers, credentials, wallet material, signed transactions and private evidence locations.
+Updated 24 September 2026. This is the public release checklist, distilled from the local validation record. It intentionally excludes operational identifiers, credentials, wallet material, signed transactions and private evidence locations.
 
 The repository is a curated research snapshot. Some integration work and evidence described here exists only in the working research environment. Publication of this repository does not mean those components are deployed or reproducible from this checkout. An unchecked item below requires evidence, review and an explicit status update; a passing nearby test does not close it.
 
@@ -50,7 +50,7 @@ Terraform now defines a dormant supervised host and supporting storage, queue, I
 
 ## 3. Select and validate the production execution host
 
-**Status: open for production.** Local container and process tests do not certify a selected deployment host.
+**Status: open for production; isolated native installation passed.** The [24 September x86_64 host validation](runtime-installation/20260924-linux-validation.md) passed pinned installation, encrypted dummy credential delivery and Unix-socket watchdog tests. The host was stopped after evidence collection. Real credential/endpoint enrollment, production configuration alignment and a full provider-backed lifecycle remain open.
 
 - [ ] Select a host compatible with the reviewed Linux process-ownership, private credential channel, persistent evidence and owned CPU-container requirements.
 - [ ] Validate exact runtime paths, immutable preloaded images, execution architecture, restricted child-container permissions and the Docker/host privilege boundary.

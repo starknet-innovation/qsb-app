@@ -1,0 +1,40 @@
+{
+  "sourceCommit": "d8b820fe96245a954ff83074ab194a6fb4988596",
+  "architecture": "x86_64",
+  "installation": {
+    "format": "qsb-runtime-install-v1",
+    "runtimeManifest": "0efcca43ef7bd2599e2432c80724f1a1454e14a8c3ff2cd1ae2d4d66e346114d",
+    "dispatcherManifest": "7b58cc0d980adc7796990eab9bd18707f309b93c8ecf5f5d0d4e48d48768e7f0",
+    "executionEnabled": false
+  },
+  "archives": {
+    "runtime": "18421ac06c8834dae064b0cc3cef7fdf7344e96fadbed1cf201020905f43ff2f",
+    "dispatcher": "e239df51d9deb65c3c5cd375192d5487f7456fa1647eebf01c0193ad4290fa80",
+    "tests": "f2ae0436669176557a3665f75c8ec9f46ff6df8652b765df77fce660bfc96c80"
+  },
+  "systemdEncryptedCredentialDummyPassed": true,
+  "linuxChecks": {
+    "platform": "linux",
+    "architecture": "x86_64",
+    "checks": [
+      "exact installation and protected modes",
+      "existing installation refuses replacement",
+      "tampering rejected before publication",
+      "unlisted files rejected",
+      "symlink rejected",
+      "real Linux private FIFO and environment isolation",
+      "insecure credential file rejected",
+      "credential symlink rejected"
+    ],
+    "providerCalls": 0,
+    "realCredentials": false,
+    "mainnetEnabled": false
+  },
+  "watchdogChecks": 7,
+  "providerCalls": 0,
+  "realCredentials": false,
+  "executionEnabled": false,
+  "systemdServicesStarted": false,
+  "runtimeImagesPreloaded": true,
+  "cpuArchive": "0fd9863b30474ee05eb4b5faed7bf8210ecfc576890d28162ad0a4324dfe3cf8"
+}
