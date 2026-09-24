@@ -1,3 +1,10 @@
+import { readFileSync } from "node:fs";
+import {
+  receiveResearchPin,
+  PIN_RESEARCH_RELEASE,
+  PIN_RESEARCH_RELEASE_ID,
+  PIN_RESEARCH_RELEASE_PK,
+} from "../scripts/yukon/pin_route";
 import { execFileSync } from "node:child_process";
 import { createPinVerifier } from "../scripts/yukon/pin_verifier";
 import { createHash, randomUUID } from "node:crypto";
@@ -75,7 +82,12 @@ async function testStore() {
   return new DynamoStore(table);
 }
 
-async function fixture(real?: { context: any; request: any; output: any }) {
+async function fixture(real?: {
+  context: any;
+  request: any;
+  output: any;
+  providerId?: string;
+}) {
   const store = await testStore(),
     scope = "isolated-yukon-pr30-store",
     pk = "VALIDATION#" + scope;
@@ -84,7 +96,7 @@ async function fixture(real?: { context: any; request: any; output: any }) {
     owner: "test-owner",
     revision: 1,
     intent: "PIN#0",
-    binarySha256: "a".repeat(64),
+    binarySha256: real?.request.binarySha256 ?? "a".repeat(64),
   };
   const context = real?.context ?? {
     publicStateJson: "synthetic-test-context",
@@ -127,7 +139,7 @@ async function fixture(real?: { context: any; request: any; output: any }) {
   await inventory.reserve(0, request, async () => {});
   await inventory.submit(
     "PIN#0",
-    async () => "synthetic-provider",
+    async () => real?.providerId ?? "synthetic-provider",
     async () => {},
   );
   const { parameterBase64: _, ...fields } = request;
@@ -139,7 +151,11 @@ async function fixture(real?: { context: any; request: any; output: any }) {
     rangeCreditEligible: false,
     releaseStatus: "HOLD",
   };
-  const provider = { id: "synthetic-provider", status: "COMPLETED", output };
+  const provider = {
+    id: real?.providerId ?? "synthetic-provider",
+    status: "COMPLETED",
+    output,
+  };
   const verdict = {
     referenceChecked: true,
     contextHash: fingerprint(context),
@@ -476,5 +492,108 @@ describe("research pin drain and subset preparation", () => {
         "research_result_verified",
       );
     }
+  });
+});
+
+async function enrolledRemoteReplay() {
+  const base = "research/yukon-intake/20260924/runtime/remote-queue/";
+  const read = (name: string) => JSON.parse(readFileSync(base + name, "utf8"));
+  const raw = read("result-0.json"),
+    input = read("input-0.json");
+  const f = await fixture({
+    context: read("context-0.json"),
+    request: input.request,
+    output: raw.output.output,
+    providerId: raw.id,
+  });
+  for (const sk of ["SCOPE", "PIN#0"]) {
+    const row = (await f.store.get(f.pk, sk))!;
+    await f.store.put(
+      {
+        ...row,
+        version: row.version + 1,
+        researchReleaseId: PIN_RESEARCH_RELEASE_ID,
+      },
+      row.version,
+    );
+  }
+  const enrollment = {
+    pk: PIN_RESEARCH_RELEASE_PK,
+    sk: PIN_RESEARCH_RELEASE_ID,
+    version: 0,
+    enabled: true,
+    descriptor: PIN_RESEARCH_RELEASE,
+    endpoint: "synthetic-endpoint",
+    scopes: [f.binding.scope],
+  };
+  await f.store.put(enrollment);
+  return { ...f, raw, enrollment };
+}
+
+describe("explicit release receive route with saved actual remote output and real CPU", () => {
+  it("publishes once only under exact research enrollment, without selecting a default or granting credit", async () => {
+    const f = await enrolledRemoteReplay();
+    const result = await receiveResearchPin(f.store, f.binding, f.raw);
+    expect(result.reference.referenceChecked).toBe(true);
+    expect(result.rangeCreditEligible).toBe(false);
+    expect((await f.store.get(f.pk, "PIN#0"))?.state).toBe(
+      "research_result_verified",
+    );
+    expect((await f.store.get(f.pk, "SCOPE"))?.completedRanges).toBeUndefined();
+    await expect(
+      receiveResearchPin(f.store, f.binding, f.raw),
+    ).rejects.toThrow();
+  });
+  it("rejects disabled, mismatched image, wrong endpoint or scope, and expired enrollment", async () => {
+    for (const patch of [
+      { enabled: false },
+      {
+        descriptor: {
+          ...PIN_RESEARCH_RELEASE,
+          imageManifestSha256: "f".repeat(64),
+        },
+      },
+      { endpoint: "other" },
+      { scopes: [] },
+      { expiresAt: 9999999999 },
+    ]) {
+      const f = await enrolledRemoteReplay(),
+        before = await f.store.get(f.pk, "PIN#0");
+      await f.store.put({ ...f.enrollment, ...patch, version: 1 }, 0);
+      await expect(
+        receiveResearchPin(f.store, f.binding, f.raw),
+      ).rejects.toThrow("release");
+      expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
+    }
+  });
+  it("atomically rejects revocation after CPU verification, preserving the attached result", async () => {
+    const f = await enrolledRemoteReplay(),
+      before = await f.store.get(f.pk, "PIN#0");
+    const atomic = f.store.atomicPut.bind(f.store);
+    f.store.atomicPut = async (writes) => {
+      await f.store.put({ ...f.enrollment, enabled: false, version: 1 }, 0);
+      return atomic(writes);
+    };
+    await expect(
+      receiveResearchPin(f.store, f.binding, f.raw),
+    ).rejects.toThrow();
+    expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
+  });
+  it("atomically rejects scope routing replacement during verification", async () => {
+    const f = await enrolledRemoteReplay(),
+      before = await f.store.get(f.pk, "PIN#0");
+    const atomic = f.store.atomicPut.bind(f.store);
+    f.store.atomicPut = async (writes) => {
+      const row = (await f.store.get(f.pk, "SCOPE"))!;
+      await f.store.put(
+        { ...row, researchReleaseId: "other", version: row.version + 1 },
+        row.version,
+      );
+      return atomic(writes);
+    };
+    await expect(
+      receiveResearchPin(f.store, f.binding, f.raw),
+    ).rejects.toThrow();
+    expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
   });
 });

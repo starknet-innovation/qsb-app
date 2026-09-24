@@ -822,3 +822,31 @@ The private immutable test image is retained; no production routing changed.
 Remaining HOLD gates include positive GPU-hit publication, broader adversarial
 arithmetic assessment, independent review, actual release/launcher routing, fresh
 final-build end-to-end Core/miner proof, and the startup capacity-control issue.
+
+## Atomic release-aware receive route
+
+`pin_route.ts` composes the queue decoder, exact-source CPU runner and Store
+publication under an explicit research enrollment. Its descriptor pins the
+frozen binary, runtime manifest, OCI index and amd64 manifest. It requires the
+same release ID on scope and intent, an enabled non-expiring enrollment for that
+scope, and the matching endpoint. Both spent proof endpoints are forbidden.
+The function does not create enrollment, submit work, select a default solver,
+activate mainnet, or promote the research descriptor out of HOLD.
+
+Enrollment is a condition-only row in the same atomic transaction as result
+publication. Scope and intent versions must also equal those read before route
+selection. Revoking enrollment or replacing scope routing during CPU verification
+therefore rejects publication without losing the attached provider result.
+This guards trusted operator state; hashes and enrollment still are not remote
+image attestation.
+
+Four new composed tests use the saved actual remote response and real CPU
+verification: successful exactly-once publication without credit, mismatched or
+revoked enrollment, revocation during verification, and scope replacement during
+verification. All 21 focused TypeScript tests pass with MemoryStore; all 18 Store
+tests pass through unchanged DynamoStore against actual loopback DynamoDB Local.
+Typecheck passes. `runtime/release-route/dynamodb-local.json` records cases and
+source hashes. Test tables and container were removed. This is saved-result
+replay with synthetic intent attachment, not a live orchestrator run or another
+GPU execution. Submission/launcher routing, independent review and fresh proof
+remain open.
