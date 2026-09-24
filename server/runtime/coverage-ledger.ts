@@ -85,7 +85,9 @@ export function stageAttemptCount(stage: SearchStage): number {
 export function publishedHitRecords(candidates: readonly string[]): number {
   let count = 0;
   for (const text of candidates) {
-    const marks = text.match(/^indices=/gm);
+    // Pinning records start with sequence=. Subset records start with indices=.
+    // The CPU verifier splits on both prefixes, so either one consumes capacity.
+    const marks = text.match(/^(?:indices|sequence)=/gm);
     count += marks?.length ?? (text.length ? 1 : 0);
     if (count > HOST_HIT_CAPACITY) return count;
   }

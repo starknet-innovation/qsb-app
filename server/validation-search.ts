@@ -173,6 +173,35 @@ export async function validationTick(
     state.candidatesChecked += output.candidates.length;
     job.computeSeconds += (result.executionTime || 0) / 1000;
     if (checked.valid === true) {
+      if (output.status !== "completed" || output.checkpoint !== "range-complete") {
+        const decision = applyRange(
+          state.coverageLedger ?? emptyLedger(),
+          scope,
+          stage,
+          unit.attempt,
+          { kind: "deterministic-failure" },
+        );
+        state.coverageLedger = decision.ledger;
+        job.status = "paused";
+        job.error = "Validation range or candidate needs independent review.";
+        await save();
+        return finish(false, 0);
+      }
+      const decision = applyRange(
+        state.coverageLedger ?? emptyLedger(),
+        scope,
+        stage,
+        unit.attempt,
+        { kind: "range-complete", hitCount: records },
+      );
+      state.coverageLedger = decision.ledger;
+      if (decision.stop) {
+        job.status = "paused";
+        job.error = `Validation range stopped without credit: ${decision.reason}`;
+        await save();
+        return finish(false, 0);
+      }
+      if (decision.credited) state.completed++;
       if (job.stage === "pinning") {
         const hit = z
           .object({

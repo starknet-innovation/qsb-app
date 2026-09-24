@@ -331,10 +331,87 @@ it("does not credit a deterministic failure or a hit list past capacity", async 
   expect(provider.run).toHaveBeenCalledTimes(1);
 });
 
+it("credits a completed pinning batch that contains a CPU-valid hit", async () => {
+  await tick();
+  cpu.mockImplementation(async (input: { action?: string }) =>
+    input.action === "export"
+      ? { parameterBase64: "public", parameterSha256: "b".repeat(64) }
+      : { valid: true, sequence: 2147483648, locktime: 500000000 },
+  );
+  provider.status.mockResolvedValue(
+    completed(0, ["sequence=2147483648\nlocktime=500000000\n"]),
+  );
+  await tick();
+  const row = (await store.get(pk, sk))!;
+  expect(row.job).toMatchObject({
+    status: "queued",
+    stage: "round1",
+    solution: { sequence: 2147483648, locktime: 500000000 },
+  });
+  expect(row.validation).toMatchObject({ completed: 1 });
+  const ledger = coverageLedgerSchema.parse(
+    (row.validation as { coverageLedger: unknown }).coverageLedger,
+  );
+  expect(
+    creditedAttempts(
+      ledger,
+      {
+        sessionId: "regtest:fixture/proof",
+        solverPin: "qsb-config-a-ranked-v2-2791ed0",
+        searchPin: null,
+      },
+      "pinning",
+    ),
+  ).toEqual([{ start: 0, end: 1 }]);
+});
+
+it("does not credit or advance a valid hit whose checkpoint is incomplete", async () => {
+  await tick();
+  cpu.mockImplementation(async (input: { action?: string }) =>
+    input.action === "export"
+      ? { parameterBase64: "public", parameterSha256: "b".repeat(64) }
+      : { valid: true, sequence: 2147483648, locktime: 500000000 },
+  );
+  const blocked = completed(0, ["sequence=2147483648\nlocktime=500000000\n"]);
+  blocked.output.checkpoint = "requires-verification-or-resume";
+  provider.status.mockResolvedValue(blocked);
+  await tick();
+  const row = (await store.get(pk, sk))!;
+  expect(row.job).toMatchObject({ status: "paused", stage: "pinning" });
+  expect((row.job as Job).solution).toBeUndefined();
+  expect(row.validation).toMatchObject({
+    completed: 0,
+    coverageLedger: {
+      accounts: [
+        expect.objectContaining({
+          stopped: true,
+          stopReason: "deterministic-failure",
+          pinning: [],
+        }),
+      ],
+    },
+  });
+});
+
 it("fails closed when published hit records exceed supported capacity", async () => {
   await tick();
   provider.status.mockResolvedValue(
     completed(0, ["indices=1\n".repeat(65)]),
+  );
+  await tick();
+  const row = (await store.get(pk, sk))!;
+  expect(row.job).toMatchObject({
+    status: "paused",
+    error: expect.stringContaining("supported capacity"),
+  });
+  expect(row.validation).toMatchObject({ completed: 0 });
+  expect(cpu).toHaveBeenCalledTimes(1);
+});
+
+it("fails closed when one pinning candidate holds more than 64 sequence records", async () => {
+  await tick();
+  provider.status.mockResolvedValue(
+    completed(0, ["sequence=2147483648\nlocktime=500000000\n".repeat(65)]),
   );
   await tick();
   const row = (await store.get(pk, sk))!;
