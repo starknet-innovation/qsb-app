@@ -1,14 +1,14 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {publicSignedResult} from './publicResult';
 import {base64} from '@scure/base';
-import {validateMainnetIntent} from './intent';
+import {exactSigningIntentDisplay} from './intent';
 import {chainCheckedSigning} from './flow';
 type Flow=ReturnType<typeof chainCheckedSigning>;
 type Wallet={address:string;publicKey:string};
 type Props={contract:unknown;wallet:Wallet;walletEpoch:number;flow:Flow;signPsbt:(address:string,psbt:string,indices:number[])=>Promise<string>};
 export function MainnetApproval(props:Props){
- let parsed:ReturnType<typeof validateMainnetIntent>|undefined,error='';
- try{parsed=validateMainnetIntent(props.contract);if(parsed.contract.helperAddress!==props.wallet.address||parsed.contract.helperPublicKey!==props.wallet.publicKey)throw Error('Connected wallet differs from helper.');}catch{error='Invalid intent or wallet binding.';}
+ let parsed:ReturnType<typeof exactSigningIntentDisplay>|undefined,error='';
+ try{parsed=exactSigningIntentDisplay(props.contract);if(parsed.contract.helperAddress!==props.wallet.address||parsed.contract.helperPublicKey!==props.wallet.publicKey)throw Error('Connected wallet differs from helper.');}catch{error='Invalid intent or wallet binding.';}
  const key=parsed?`${parsed.intentHash}:${props.wallet.address}:${props.wallet.publicKey}:${props.walletEpoch}`:error;
  // Render-time boundary invalidates async results before effects run.
  const active=useRef({key,epoch:0,flow:props.flow,sign:props.signPsbt});
@@ -37,9 +37,8 @@ export function MainnetApproval(props:Props){
  }
  function downloadResult(){if(!parsed||!visible.result||visible.identity!==active.current)return;const bytes=visible.result,output=JSON.parse(bytes);if(output.intentHash!==parsed.intentHash)return;const url=URL.createObjectURL(new Blob([bytes],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`qsb-mainnet-public-signed-result-${output.requestId}.json`;a.click();URL.revokeObjectURL(url);}
  if(error||!parsed)return <section><p role="alert">{error}</p></section>;
- const m=parsed.contract.manifest;
  return <section><h2>Review exact Bitcoin mainnet transaction</h2><p>No broadcast is authorized by this screen.</p>
- <dl>{Object.entries({Chain:'Bitcoin mainnet','Helper outpoint':`${m.helper.txid}:${m.helper.vout}`,'Funding outpoint':`${m.funding.txid}:${m.funding.vout}`,'Helper input (sats)':m.helper.value,'Vault input (sats)':m.funding.value,Destination:m.destination,'Output (sats)':m.outputValue,'Fee (sats)':m.fee,'Exact intent hash':parsed.intentHash}).map(([label,value])=><React.Fragment key={label}><dt>{label}</dt><dd>{value}</dd></React.Fragment>)}</dl>
+ <dl>{parsed.lines.map(({label,value})=><React.Fragment key={label}><dt>{label}</dt><dd>{value}</dd></React.Fragment>)}</dl>
  <p role="status">{visible.status}</p><button disabled={visible.status==='checking'} onClick={()=>act(false)}>Approve this exact transaction for Xverse signing</button>
  <button disabled={visible.status!=='approved'} onClick={()=>act(true)}>Request Xverse signature — no broadcast</button>
  {visible.result&&<><button onClick={downloadResult}>Download public signed result — no broadcast</button><p data-testid="result">Helper signature verified for this exact intent. QSB consensus and chain inclusion are not established here. No broadcast is authorized.</p></>}

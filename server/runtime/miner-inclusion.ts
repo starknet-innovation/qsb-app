@@ -112,7 +112,8 @@ const spendInputSchema = z
   })
   .strict();
 
-const exactSpendSchema = z
+/** Canonical exact-spend record. Section 8 accepts this same schema and still does not broadcast. */
+export const exactSpendAuthorizationSchema = z
   .object({
     format: z.literal("qsb-exact-spend-authorization-v1"),
     chain: z.enum(["mainnet", "testnet4"]),
@@ -509,10 +510,12 @@ function assertReleaseClosed(release: {
     throw new MinerInclusionError("ActivationRefused");
 }
 
-function parseExactSpend(input: unknown): z.infer<typeof exactSpendSchema> {
+function parseExactSpend(
+  input: unknown,
+): z.infer<typeof exactSpendAuthorizationSchema> {
   if (input === undefined || input === null)
     throw new MinerInclusionError("SpendAuthorizationRequired");
-  const parsed = exactSpendSchema.safeParse(input);
+  const parsed = exactSpendAuthorizationSchema.safeParse(input);
   if (parsed.success) return parsed.data;
   const paths = parsed.error.issues.map((issue) => issue.path.join("."));
   if (

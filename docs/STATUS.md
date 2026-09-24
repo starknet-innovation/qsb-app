@@ -17,6 +17,7 @@ See the [complete known mainnet readiness checklist](MAINNET-READINESS.md) for t
 - Fresh full search with the optimized final runtime, new local wallet authorization, and unchanged Core validation of that exact result.
 - Chain-correct external miner inclusion and independent confirmation. Source gates now reject a chain mismatch, spent-regtest reuse, a submit without an exact transaction, amount, and fee, and a preflight treated as inclusion. They do not fund, broadcast, or close this gate. Offline regtest acceptance is not external mining certification.
 - Explicit authorization of the exact transaction, amount and fee before any mainnet broadcast.
+- Production activation remains unapproved. Source gates now keep a decision record unapproved, separate feature enablement from spend authorization, define the operational caps and unknown-outcome reconciliation procedure, and refuse a local build as live configuration. The operator cost field is not the experimental USD ceiling. Vault USD 10000, fee USD 1000, and GPU USD 1000 are a fail-closed check that cannot run while `release.mainnetEnabled` and `broadcastAuthorized` are false. They do not deploy or enable mainnet.
 
 The repository now includes source build paths for the optimized worker and complete imported Linux supervisor closure. Raw historical evidence is not fully exported, and historical GPU/withdrawal evidence is not reproduced by a source build. New build identities require enrollment and validation; see [source build instructions](../worker/optimized/README.md).
 

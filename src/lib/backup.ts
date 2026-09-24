@@ -120,13 +120,27 @@ export async function decryptRecovery(
     );
   }
 }
+const recoveryBackupId =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:-withdrawal|-signing)?$/i;
+
+export function recoveryBackupFilename(id: string): string {
+  if (
+    !recoveryBackupId.test(id) ||
+    id.includes("/") ||
+    id.includes("\\") ||
+    id.includes("..")
+  )
+    throw new Error("Invalid vault id.");
+  return `qsb-recovery-${id}.json`;
+}
 export function downloadBackup(contents: string, id: string) {
+  const filename = recoveryBackupFilename(id);
   const url = URL.createObjectURL(
     new Blob([contents], { type: "application/json" }),
   );
   const a = document.createElement("a");
   a.href = url;
-  a.download = `qsb-recovery-${id}.json`;
+  a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
