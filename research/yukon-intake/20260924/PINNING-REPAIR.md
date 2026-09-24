@@ -213,3 +213,23 @@ GPU batches, all exceptional points, full device overflow/fault injection or
 representative throughput. Trace and normal binaries are distinct. This is not
 a fresh withdrawal, release approval or external-miner evidence. Those remaining
 gates must use the final source/binary and genuine transaction bindings.
+
+## Exceptional denominator handoff prepared
+
+Source review confirmed that upstream marks zero-denominator active lanes unusable
+and silently drops them in the finish stage. The isolated adapter now appends a
+bounded marker after the collective for each such lane. The marker preserves its
+index/sequence/locktime and goes through the existing checked CPU gate, which
+recomputes the public transaction hash and both recovery signs using OpenSSL.
+Bit 31 distinguishes this handoff; Config A uses no second hash choice. The host
+gate is now locked on, and overflow still fails closed rather than crediting an
+incomplete range. This introduces no alternate success predicate.
+
+Two additional synthetic cases construct public R=+P and R=-P from a known
+synthetic message hash with scalar multiplier 7. These exercise the actual
+zero-denominator detector, with one doubling and one infinity branch each,
+without solving a SHA preimage or accessing any wallet. The diagnostic build
+records CPU fallback hashes/infinity as well as GPU hashes. Twenty-five host
+tests pass; native execution of this changed binary is pending. Previous native
+results remain bound to the pre-handoff binary and are not release evidence for
+this change. Specialized geometry and multi-batch gates also remain pending.

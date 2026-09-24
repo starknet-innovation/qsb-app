@@ -13,6 +13,7 @@ FLAGS = {name: 0 for name in (
     'QSB_C31', 'QSB_SHORT_CARRY', 'QSB_CARRY62', 'QSB_FIELD_SC',
     'QSB_SAS_Z9SUB_ALL', 'QSB_MUL_FOLD8_CUT', 'QSB_SQR_FOLD8_CUT', 'QSB_X3_TAIL',
     'QSB_NEG_Y_MAC', 'QSB_PARITY_WINDOW')}
+FLAGS['QSB_HOST_GATE'] = 1  # required for exact exceptional recovery
 
 
 def replace(text, old, new, count=1):
@@ -65,6 +66,15 @@ def adapt(text):
     text = replace(text, 'mkdir("results", 0755);', 'qsb_make_results();', 2)
     text = replace(text, 'FILE *f = fopen(fname, "a");', 'FILE *f = qsb_open_hits(fname);', 2)
     text = replace(text, '                fclose(f);', '                qsb_close_hits(f);', 2)
+    # A zero denominator is not a rejected candidate. Preserve its exact public
+    # sequence/locktime for the checked host gate after the GPU collective.
+    text = replace(text,
+        '    qsb_packed_prepare(prod,qzz,qy,qzzz,usable,active,batch_size,saved,roots);',
+        '''    qsb_packed_prepare(prod,qzz,qy,qzzz,usable,active,batch_size,saved,roots);
+    if (active && !usable) {
+        uint32_t pos = atomicAdd(d_hit_cnt, 1);
+        if (pos < 1024) d_hit_idx[pos] = ((uint32_t)idx) | 0x80000000u;
+    }''')
     # Both specialized and generic geometry must use the full digest predicate.
     start = text.index('#if QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32\n        if (FAST_TAIL) {')
     end = text.index('#endif', start) + len('#endif')
@@ -185,6 +195,6 @@ def main():
     hashes={str(p.relative_to(args.out)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(args.out.rglob('*')) if p.is_file()}
     receipt={'status':'HOLD','upstreamCommit':lock['commit'],'scope':'isolated-pinning-bounded-v2','flags':FLAGS,'files':hashes,'completeArithmeticCertified':False,'boundedSchedulerCertified':False,'deploymentAllowed':False}
     (args.out/'adaptation.json').write_text(json.dumps(receipt,indent=2)+'\n')
-    print(json.dumps({'status':'HOLD','files':len(hashes),'disabledShortcuts':len(FLAGS)}))
+    print(json.dumps({'status':'HOLD','files':len(hashes),'disabledShortcuts':sum(v == 0 for v in FLAGS.values())}))
 
 if __name__=='__main__': main()

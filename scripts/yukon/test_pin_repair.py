@@ -122,6 +122,9 @@ if __name__=='__main__':
     import sys
     if len(sys.argv)==2:
         source=Path(sys.argv[1]).read_text()
+        assert source.count('if (active && !usable)') == 1
+        assert 'd_hit_idx[pos] = ((uint32_t)idx) | 0x80000000u;' in source
+        assert '#define QSB_HOST_GATE 1' in source
         assert source.count('launch_pinning_pipeline<false>(') == 2
         assert source.count('launch_pinning_pipeline<true>(') == 2
         assert 'if (!fast_tail)' not in source
@@ -136,6 +139,6 @@ if __name__=='__main__':
         assert 'if (count > 64) count = 64;' not in source
         assert '(h_hit > 64) ? 64' not in source
         assert source.count('if (!qsb_require_hit_capacity(')==4
-        for name in FLAGS:assert f'#define {name} 0' in source
+        for name,value in FLAGS.items():assert f'#define {name} {value}' in source
         print(json.dumps(probe(source),indent=2))
     else: unittest.main()

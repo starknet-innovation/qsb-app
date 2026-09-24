@@ -1,4 +1,7 @@
 import unittest
+import hashlib
+import struct
+from test_pin_recovery import N
 from native_pin import check_trace, expected
 
 class NativeProtocolTests(unittest.TestCase):
@@ -8,6 +11,17 @@ class NativeProtocolTests(unittest.TestCase):
         self.assertEqual(check_trace('\n'.join(reversed(lines)),case),2)
         for bad in [lines[:1],lines+[lines[0]],[lines[0],lines[1].replace('b'*64,'c'*64)],lines+['QSB_TRACE broken']]:
             with self.assertRaises(ValueError):check_trace('\n'.join(bad),case)
+
+    def test_constructed_exception_keeps_doubling_and_infinity(self):
+        seq=2147483660;lt=500000512;nri=7
+        message=struct.pack('<III',seq,lt,1)
+        z=int.from_bytes(hashlib.sha256(hashlib.sha256(message).digest()).digest(),'big')
+        for sign,inf in [(1,1),(-1,0)]:
+            got=expected(bytes(8)+struct.pack('<I',1),seq,lt,nri,(sign*z*nri)%N)
+            self.assertEqual(got[inf],'infinity')
+            self.assertEqual(len(got[1-inf]),64)
+            line=f'QSB_TRACE seq={seq} lt={lt} ri={inf} hash=infinity'
+            self.assertEqual(check_trace(line,{'expected':{f'{seq}:{lt}:{inf}':'infinity'}}),1)
 
     def test_independent_reference_depends_on_sequence_and_locktime(self):
         suffix=bytes(8)+bytes([1,0,0,0])

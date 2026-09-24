@@ -11,18 +11,19 @@ import time
 from test_pin_recovery import G, N, mul
 
 IV=(0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19)
-TRACE=re.compile(r'^QSB_TRACE seq=(\d+) lt=(\d+) ri=([01]) hash=([0-9a-f]{64})$')
+TRACE=re.compile(r'^QSB_TRACE seq=(\d+) lt=(\d+) ri=([01]) hash=(infinity|[0-9a-f]{64})$')
 
 
-def expected(suffix, sequence, locktime):
+def expected(suffix, sequence, locktime, nri=1, rscalar=1):
     message=bytearray(suffix)
     message[:4]=struct.pack('<I',sequence)
     message[-8:-4]=struct.pack('<I',locktime)
     z=int.from_bytes(hashlib.sha256(hashlib.sha256(message).digest()).digest(),'big')
     out={}
     for ri in (0,1):
-        pt=mul((z+(1 if ri==0 else -1))%N)
-        if pt is None:raise ValueError('Synthetic case unexpectedly reaches infinity')
+        pt=mul((z*nri+(rscalar if ri==0 else -rscalar))%N)
+        if pt is None:
+            out[ri]='infinity';continue
         pub=bytes([2+(pt[1]&1)])+pt[0].to_bytes(32,'big')
         out[ri]=hashlib.sha256(pub).hexdigest()
     return out
@@ -37,7 +38,15 @@ def prepare(source, out):
     trace='''            if (active) printf("QSB_TRACE seq=%u lt=%u ri=%d hash=%08x%08x%08x%08x%08x%08x%08x%08x\\n",
                 seq_value, start_lt+(uint32_t)idx, ri, hs[0],hs[1],hs[2],hs[3],hs[4],hs[5],hs[6],hs[7]);
 '''
-    (out/'pinning/pinning_trace.cu').write_text(text.replace(needle,trace+needle))
+    diagnostic=text.replace(needle,trace+needle)
+    host='    if (!qsb_recover_hash(d2, recid, grp, ctx, order, nri, Ru2, hh)) return 0;'
+    if diagnostic.count(host)!=1:raise ValueError('Host trace context drift')
+    diagnostic=diagnostic.replace(host, '''    if (!qsb_recover_hash(d2, recid, grp, ctx, order, nri, Ru2, hh)) {
+        printf("QSB_TRACE seq=%u lt=%u ri=%d hash=infinity\\n",seq,lt,recid);return 0;
+    }
+    printf("QSB_TRACE seq=%u lt=%u ri=%d hash=",seq,lt,recid);
+    for(int j=0;j<32;j++)printf("%02x",hh[j]);printf("\\n");''')
+    (out/'pinning/pinning_trace.cu').write_text(diagnostic)
     cases=[]
     for sl in (12,75):
         suffix=bytes((i*17+3)%256 for i in range(sl-4))+struct.pack('<I',1)
@@ -52,6 +61,23 @@ def prepare(source, out):
                     for ri,h in expected(suffix,s,t).items():want[f'{s}:{t}:{ri}']=h
             cases.append({'name':f'sl{sl}-seq{seq}','params':f'params-{sl}.bin','sequence':seq,
                           'sequences':count,'locktime':lt,'locktimes':n,'expected':want})
+    # Force P=+R / P=-R with public constants derived from the synthetic hash.
+    # This changes no predicate and solves no SHA preimage; it exercises the
+    # actual denominator detector and CPU doubling/infinity handoff.
+    for sign in (1,-1):
+        seq=2147483660;lt=500000512;nri=7
+        suffix=bytes(8)+struct.pack('<I',1)
+        message=struct.pack('<II',seq,lt)+struct.pack('<I',1)
+        z=int.from_bytes(hashlib.sha256(hashlib.sha256(message).digest()).digest(),'big')
+        rscalar=(sign*z*nri)%N;point=mul(rscalar)
+        if point is None:raise ValueError('Unexpected zero scalar')
+        name=f'exception-sign{sign}'
+        raw=struct.pack('>8I',*IV)+struct.pack('<I',12)+suffix+struct.pack('<III',12,0,4)
+        raw+=nri.to_bytes(32,'little')+point[0].to_bytes(32,'little')+point[1].to_bytes(32,'little')
+        (out/f'{name}.bin').write_bytes(raw)
+        want={f'{seq}:{lt}:{ri}':h for ri,h in expected(suffix,seq,lt,nri,rscalar).items()}
+        cases.append({'name':name,'params':f'{name}.bin','sequence':seq,'sequences':1,
+                      'locktime':lt,'locktimes':1,'expected':want})
     receipt={'scope':'synthetic-public-generic-pinning-only','cases':cases,
              'sourceSha256':hashlib.sha256(text.encode()).hexdigest(),
              'traceSourceSha256':hashlib.sha256((out/'pinning/pinning_trace.cu').read_bytes()).hexdigest(),
