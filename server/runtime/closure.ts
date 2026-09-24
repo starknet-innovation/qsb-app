@@ -141,7 +141,11 @@ export const componentForPath = (relativePath: string): string => {
   if (relativePath === "server/runtime/cpu-verifier.ts") return "cpu-verifier";
   if (relativePath === "server/runtime/evidence-reader.ts")
     return "evidence-reader";
-  if (relativePath === "server/runtime/fresh-proof.ts") return "fresh-proof";
+  if (
+    relativePath === "server/runtime/fresh-proof.ts" ||
+    relativePath === "server/runtime/core-binary.json"
+  )
+    return "fresh-proof";
   if (
     relativePath.startsWith("server/runtime/") ||
     relativePath === "server/coordinator.ts" ||

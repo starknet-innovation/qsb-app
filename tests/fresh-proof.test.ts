@@ -335,8 +335,8 @@ describe("proof runner selection", () => {
     writeFileSync(
       exercise,
       [
-        'import { appendFileSync, readFileSync } from "node:fs";',
-        'import { enrolledReleaseIdentity, selectProofRunner } from "./tree/server/runtime/fresh-proof.ts";',
+        'import { appendFileSync, readFileSync, writeFileSync } from "node:fs";',
+        'import { enrolledReleaseIdentity, loadCoreBinaryEnrollment, selectProofRunner } from "./tree/server/runtime/fresh-proof.ts";',
         'const committed = JSON.parse(readFileSync(new URL("./release-manifest.json", import.meta.url), "utf8"));',
         "const enrolled = enrolledReleaseIdentity(committed);",
         "const selected = selectProofRunner({",
@@ -359,6 +359,14 @@ describe("proof runner selection", () => {
         "if (selected.mainnetEnabled !== false || selected.broadcastAuthorized !== false) throw new Error(\"activation\");",
         "if (selected.liveRunnerContacted !== false || selected.nativeBinariesEnrolled !== false) throw new Error(\"runner\");",
         "console.log(selected.sourceManifestSha256);",
+        "const core = loadCoreBinaryEnrollment();",
+        'if (core.enrolled !== false || core.bitcoindSha256 !== null) throw new Error("core-enrollment");',
+        'writeFileSync(new URL("./tree/server/runtime/core-binary.json", import.meta.url), "{\\"tampered\\":true}\\n");',
+        "let coreRejected = false;",
+        "try { loadCoreBinaryEnrollment(); } catch (error) {",
+        '  coreRejected = error instanceof Error && error.message === "CoreBinaryEnrollmentRejected";',
+        "}",
+        'if (!coreRejected) throw new Error("core-bytes");',
         'appendFileSync(new URL("./tree/server/runtime/types.ts", import.meta.url), "\\n");',
         "let rejected = false;",
         "try { enrolledReleaseIdentity(committed); } catch (error) {",
@@ -428,6 +436,42 @@ describe("freshness and disposable requests", () => {
         }),
       ),
     ).toThrow(/Spent|HistoricalFixtureRestartRefused:outpoint:/);
+    expect(() =>
+      scaffoldDisposableProofRequest(
+        requestInput({
+          spentFixtures: [{ vaultId: vaultId.toUpperCase() }],
+        }),
+      ),
+    ).toThrow(/HistoricalFixtureRestartRefused:vault:/);
+    expect(() =>
+      scaffoldDisposableProofRequest(
+        requestInput({
+          spentFixtures: [{ requestId: requestId.toUpperCase() }],
+        }),
+      ),
+    ).toThrow(/HistoricalFixtureRestartRefused:request:/);
+    expect(() =>
+      scaffoldDisposableProofRequest(
+        requestInput({
+          spentFixtures: [{ publicCommitmentHash: commitment.toUpperCase() }],
+        }),
+      ),
+    ).toThrow(/HistoricalFixtureRestartRefused:commitment:/);
+    expect(() =>
+      scaffoldDisposableProofRequest(
+        requestInput({
+          rows: [
+            {
+              pk: "OWNER#spent-case",
+              sk: "VAULT#spent-case",
+              version: 1,
+              spent: true,
+              vaultId: vaultId.toUpperCase(),
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/HistoricalFixtureRestartRefused:vault:/);
   });
 
   it("admits a new public request when the supplied inventory does not contain it", () => {
@@ -1033,6 +1077,8 @@ describe("core harness judgment", () => {
     expect(script).toContain('"${ROOT}/server/runtime/core-binary.json"');
     expect(script).toContain('"${ROOT}/release/source-manifest.json"');
     expect(script).not.toContain("QSB_CORE_MANIFEST");
+    expect(script).toContain('qsb-core-regtest.XXXXXX"');
+    expect(script).not.toContain("qsb-core-regtest.XXXXXX.json");
     const forgedRoot = mkdtempSync(path.join(tmpdir(), "qsb-core-manifest-"));
     mkdirSync(path.join(forgedRoot, "scripts"), { recursive: true });
     mkdirSync(path.join(forgedRoot, "tests"), { recursive: true });

@@ -11,6 +11,7 @@ import {
   sourceReleaseManifestSchema,
   type SourceReleaseManifest,
 } from "./package-release";
+import { sha256Hex } from "./identity";
 import { inventoryRows } from "./storage-authority";
 import { SUPERVISED_PROFILE_ID } from "./types";
 
@@ -414,10 +415,13 @@ export function spentRefsFromInventory(rows: Row[]): SpentFixtureRef[] {
       job?.status === "confirmed" ||
       job?.status === "spent";
     if (!completed) continue;
-    const requestId = text(row.requestId) ?? text(job?.id);
-    const vaultId = text(row.vaultId) ?? text(vault?.id) ?? text(job?.vaultId);
-    const publicCommitmentHash =
-      text(row.publicCommitmentHash) ?? text(row.requestHash);
+    const requestId = comparableIdentity(text(row.requestId) ?? text(job?.id));
+    const vaultId = comparableIdentity(
+      text(row.vaultId) ?? text(vault?.id) ?? text(job?.vaultId),
+    );
+    const publicCommitmentHash = comparableIdentity(
+      text(row.publicCommitmentHash) ?? text(row.requestHash),
+    );
     const label = text(row.fixtureLabel);
     if (requestId || vaultId || publicCommitmentHash || label)
       refs.push({ requestId, vaultId, publicCommitmentHash, label });
@@ -429,6 +433,10 @@ export function spentRefsFromInventory(rows: Row[]): SpentFixtureRef[] {
       pushOutpoint(refs, { txid: row.txid, vout: row.vout });
   }
   return refs;
+}
+
+function comparableIdentity(value: string | undefined): string | undefined {
+  return value?.toLowerCase();
 }
 
 function refHasIdentity(ref: SpentFixtureRef): boolean {
@@ -469,6 +477,9 @@ export function assessProofFreshness(input: {
     ...(rows ? spentRefsFromInventory(rows) : []),
   ];
   const conflicts: string[] = [];
+  const requestId = input.requestId.toLowerCase();
+  const vaultId = input.vaultId.toLowerCase();
+  const publicCommitmentHash = input.publicCommitmentHash.toLowerCase();
   if (input.fixtureLabel === HISTORICAL_XVERSE_REGTEST_WITHDRAWAL.label)
     conflicts.push(
       `fixture-label:${HISTORICAL_XVERSE_REGTEST_WITHDRAWAL.label}`,
@@ -479,15 +490,15 @@ export function assessProofFreshness(input: {
       input.fixtureLabel === ref.label
     )
       conflicts.push(`fixture-label:${ref.label}`);
-    if (ref.requestId && ref.requestId === input.requestId)
-      conflicts.push(`request:${ref.requestId}`);
-    if (ref.vaultId && ref.vaultId === input.vaultId)
-      conflicts.push(`vault:${ref.vaultId}`);
-    if (
-      ref.publicCommitmentHash &&
-      ref.publicCommitmentHash === input.publicCommitmentHash
-    )
-      conflicts.push(`commitment:${ref.publicCommitmentHash}`);
+    const refRequestId = comparableIdentity(ref.requestId);
+    const refVaultId = comparableIdentity(ref.vaultId);
+    const refCommitment = comparableIdentity(ref.publicCommitmentHash);
+    if (refRequestId && refRequestId === requestId)
+      conflicts.push(`request:${refRequestId}`);
+    if (refVaultId && refVaultId === vaultId)
+      conflicts.push(`vault:${refVaultId}`);
+    if (refCommitment && refCommitment === publicCommitmentHash)
+      conflicts.push(`commitment:${refCommitment}`);
     if (!ref.outpoint) continue;
     for (const point of input.outpoints) {
       if (sameOutpoint(ref.outpoint, point))
@@ -1136,12 +1147,28 @@ export function coreBinaryEnrollmentPath(): string {
   return fileURLToPath(new URL("./core-binary.json", import.meta.url));
 }
 
+function assertCommittedCoreBinaryBytes(bytes: Buffer): void {
+  const manifest = readCommittedManifest(checkoutRoot());
+  const expected =
+    manifest.identities.sourceFiles["server/runtime/core-binary.json"];
+  if (typeof expected !== "string" || sha256Hex(bytes) !== expected)
+    throw new Error("CoreBinaryEnrollmentRejected");
+}
+
 export function loadCoreBinaryEnrollment(
   filePath: string = coreBinaryEnrollmentPath(),
 ): CoreBinaryEnrollment {
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(filePath);
+  } catch {
+    throw new Error("CoreBinaryEnrollmentRejected");
+  }
+  if (path.resolve(filePath) === path.resolve(coreBinaryEnrollmentPath()))
+    assertCommittedCoreBinaryBytes(bytes);
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(filePath, "utf8"));
+    raw = JSON.parse(bytes.toString("utf8"));
   } catch {
     throw new Error("CoreBinaryEnrollmentRejected");
   }

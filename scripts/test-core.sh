@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${BITCOIN_BIN:-/bitcoin/bin}"
 REPORT="${QSB_CORE_REPORT:-}"
 if [[ -z "${REPORT}" ]]; then
-  REPORT="$(mktemp "${TMPDIR:-/tmp}/qsb-core-regtest.XXXXXX.json")"
+  REPORT="$(mktemp "${TMPDIR:-/tmp}/qsb-core-regtest.XXXXXX")"
 fi
 mkdir -p "$(dirname "${REPORT}")"
 
