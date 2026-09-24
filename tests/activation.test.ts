@@ -227,6 +227,21 @@ describe("activation decision", () => {
     expect(exactSpendAuthorizationSchema.safeParse(reducedExactSpend()).success).toBe(
       false,
     );
+    expect(() =>
+      requireExactSpendBesideActivation({
+        activation,
+        exactSpend: exactSpend({
+          chain: "testnet4",
+          directMainnetDecision: "not-requested",
+        }),
+      }),
+    ).toThrow("ExactTransactionAuthorizationRequired");
+    expect(() =>
+      requireExactSpendBesideActivation({
+        activation,
+        exactSpend: exactSpend({ directMainnetDecision: "not-requested" }),
+      }),
+    ).toThrow("ExactTransactionAuthorizationRequired");
     expect(
       requireExactSpendBesideActivation({
         activation,
@@ -511,6 +526,75 @@ describe("deployment verification", () => {
         ]),
       ).toThrow("SecretCommitRefused");
     }
+    const syntheticEncrypted = JSON.stringify({
+      format: "qsb-encrypted-v1",
+      ciphertext: "synthetic",
+    });
+    expect(() =>
+      assertProposedCommitHasNoSecrets([
+        {
+          path: "fixtures/cold-recovery.json",
+          text: JSON.stringify({
+            backup: syntheticEncrypted,
+            id: "synthetic",
+            fingerprint: "synthetic",
+          }),
+        },
+      ]),
+    ).toThrow("SecretCommitRefused:backup");
+    expect(() =>
+      assertProposedCommitHasNoSecrets([
+        {
+          path: "dump.json",
+          text: JSON.stringify({
+            dump: JSON.stringify({
+              format: "qsb-recovery-v1",
+              stateJson: "synthetic-state",
+            }),
+          }),
+        },
+      ]),
+    ).toThrow("SecretCommitRefused:backup");
+    expect(() =>
+      assertProposedCommitHasNoSecrets([
+        {
+          path: "deps.json",
+          text: JSON.stringify({
+            dependencies: { token: "not-a-real-secret" },
+          }),
+        },
+      ]),
+    ).toThrow("SecretCommitRefused");
+  });
+
+  it("accepts checked-in manifests whose dependency names are not secrets", () => {
+    const manifests = [
+      "package.json",
+      "package-lock.json",
+      "release/source-manifest.json",
+    ].map((relativePath) => ({
+      path: relativePath,
+      text: readFileSync(path.join(root, relativePath), "utf8"),
+    }));
+    expect(assertProposedCommitHasNoSecrets(manifests)).toMatchObject({
+      verdict: "clean",
+      secretsCommitted: false,
+      certified: true,
+      unscannedPaths: [],
+    });
+    expect(
+      assertProposedCommitHasNoSecrets([
+        {
+          path: "package.json",
+          text: JSON.stringify({
+            dependencies: {
+              "@aws-sdk/client-secrets-manager": "^3.1135.0",
+              "js-tokens": "4.0.0",
+            },
+          }),
+        },
+      ]),
+    ).toMatchObject({ verdict: "clean", certified: true });
   });
 
   it("keeps the commit-before-deploy reminder aligned with AGENTS.md", () => {

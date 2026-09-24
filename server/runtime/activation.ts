@@ -240,7 +240,11 @@ function fail(code: string): never {
   throw new ActivationError(code);
 }
 
+const embeddedBackupFormat =
+  /"format"\s*:\s*"qsb-(?:encrypted|recovery)-v1"|\\"format\\"\s*:\s*\\"qsb-(?:encrypted|recovery)-v1\\"/;
+
 function containsForbiddenBackup(value: unknown): boolean {
+  if (typeof value === "string") return embeddedBackupFormat.test(value);
   if (!value || typeof value !== "object") return false;
   if (Array.isArray(value)) return value.some(containsForbiddenBackup);
   const raw = value as Record<string, unknown>;
@@ -355,7 +359,12 @@ export function requireExactSpendBesideActivation(input: {
   if (!raw) fail("ExactTransactionAuthorizationRequired");
   if (raw.mainnetEnabled === true || raw.broadcastAuthorized === true)
     fail("ActivationRefused");
-  if (!exactSpendAuthorizationSchema.safeParse(input.exactSpend).success)
+  const spend = exactSpendAuthorizationSchema.safeParse(input.exactSpend);
+  if (
+    !spend.success ||
+    spend.data.chain !== "mainnet" ||
+    spend.data.directMainnetDecision !== "explicit"
+  )
     fail("ExactTransactionAuthorizationRequired");
   return {
     ...activation,
@@ -476,6 +485,71 @@ function refuseCredentialText(file: { path: string; text: string }): void {
     fail("SecretCommitRefused:material");
 }
 
+const dependencyMapNames = new Set([
+  "dependencies",
+  "devdependencies",
+  "peerdependencies",
+  "optionaldependencies",
+  "packages",
+]);
+
+/** npm version ranges and common dependency specifiers. Not secret material. */
+const dependencySpec =
+  /^(?:\*|(?:workspace:\*)|(?:[\^~<>=]*v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)(?:\s*\|\|\s*[\^~<>=]*v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)?|(?:npm|file|link|portal|workspace|git\+https|git\+ssh|github|http|https):[^\s]+)$/;
+
+function isDependencySpec(value: unknown): boolean {
+  return typeof value === "string" && dependencySpec.test(value.trim());
+}
+
+function credentialFieldName(key: string): boolean {
+  try {
+    assertNoCredentialMaterial({ [key]: "not-a-version" });
+    return false;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith("CredentialMaterialRejected")
+    )
+      return true;
+    throw error;
+  }
+}
+
+/** A package name or package record inside a dependency map is not a secret. */
+function dependencyNameNotSecret(child: unknown): boolean {
+  if (isDependencySpec(child)) return true;
+  return Boolean(child) && typeof child === "object";
+}
+
+function scanCommitJson(
+  value: unknown,
+  label: string,
+  inDependencyMap: boolean,
+): void {
+  if (typeof value !== "object" || value === null) {
+    assertNoCredentialMaterial(value, label);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((child, index) =>
+      scanCommitJson(child, `${label}[${index}]`, false),
+    );
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (
+      credentialFieldName(key) &&
+      !(inDependencyMap && dependencyNameNotSecret(child))
+    )
+      fail(`SecretCommitRefused:CredentialMaterialRejected:${label}.${key}`);
+    scanCommitJson(
+      child,
+      `${label}.${key}`,
+      dependencyMapNames.has(key.toLowerCase()),
+    );
+  }
+}
+
 /** JSON objects are scanned structurally. Other text is not certified clean. */
 function jsonStructurallyScanned(file: { path: string; text: string }): boolean {
   const trimmed = file.text.trim();
@@ -484,7 +558,7 @@ function jsonStructurallyScanned(file: { path: string; text: string }): boolean 
   try {
     const parsed = JSON.parse(trimmed) as unknown;
     if (containsForbiddenBackup(parsed)) fail("SecretCommitRefused:backup");
-    assertNoCredentialMaterial(parsed, file.path);
+    scanCommitJson(parsed, file.path, false);
     return true;
   } catch (error) {
     if (error instanceof ActivationError) throw error;
