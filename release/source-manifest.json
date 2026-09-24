@@ -81,7 +81,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "19450ab3eea5b0425245e025fe5db6cde1258b40394505967a561618f78ffe0d",
+      "api": "afd06ad7cba9e383f99cb1b4824b3fcc05f9a38ebc1495a77d4c315bd13d6cea",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "ab972c95f66e2f1dba11fc47c1964d5b02a6f937c2aa0c4d9cff98d9d5fe2699",
@@ -89,7 +89,7 @@
       "historical-pinning": "9e1aba0e8882ba85f46609774844a7a75283cf5358cccd9dcc49abedf80fad48",
       "historical-subset": "322de9dfdec86850b23fbc70e41c6eb29b6e2439235138d2fd61897e9438ed17",
       "optimized-subset": "d5e1105324a421b8965e953c01eb37d1316aab2989b2bc8ae6e3e93cef1edbe3",
-      "runtime": "995a2ca86c3c53f41f0044d8f2bae7d2bd2bef387bf2b68b24495625fe79c845"
+      "runtime": "fdb5ab8ef9dd84e3bdc8ba928238059716278a10520ff57f4fdcb937dc4fd540"
     },
     "imageConfig": {
       "reason": "No OCI image config digest was produced from this checkout.",
@@ -170,7 +170,7 @@
       "server/coordinator.ts": "2271cf97b06a1a94d1901bf3bb39253e4732f56a9eae7c388f413b69cdd895df",
       "server/lambda.ts": "2ec8b51b90988b49e09c9300a198c119edb4711f1441208dbfec92df64747e09",
       "server/local.ts": "7a3c1f8a57928f77e51418b92c025622bbe71a3b291cc2094e24e37eadc378bd",
-      "server/mainnet-capability.json": "51e6b35f15d6192e1c79a37d172dbb0521ea69002f7ce707fd57c2def30ac263",
+      "server/mainnet-capability.json": "ff0270d2cc71381fe4c26eb07175773b38d74a247f52fb21d634ad92ff9addd0",
       "server/mainnetConfig.ts": "e995c6a9385012217326c2490f188e8382eda40fb37858e9d4f0939d86181102",
       "server/network.ts": "bf7163415b49087ba4341b59b6f9d1b736d6c37ebeb151883ab0146c61d0d66b",
       "server/providers.ts": "b891305e079ee8b48cf7f4b2fb209f9cd1d92f7fbebf7513bf929a7c4bbaab64",
@@ -180,7 +180,7 @@
       "server/runtime/dispatcher.ts": "4fa7b465873fe0437842e85501c0ae23b667fbd1bceb7f4338fe27d8adacddda",
       "server/runtime/evidence-reader.ts": "e4c56192be96d766d294d5077c0f2c82eee0823083247551725816506291d4e4",
       "server/runtime/host-bridge.ts": "dbbc01c750bc4629d2125117cdb0e00007c23858d6de1bd3131c366e9ea3fa43",
-      "server/runtime/host-lifecycle.ts": "e56a75f37e9535490062b0fd65f795c22994b457576c6ae0d712ce7d766c4dbe",
+      "server/runtime/host-lifecycle.ts": "1a033df43a02f0a08e13c3453f415d497032a7f5bc10d085c55956d19fb7e679",
       "server/runtime/host-requirements.ts": "dbfdc41524f043d7a8933039f4d1bdb52c034a5f9754f1d3843ec137d55a7eef",
       "server/runtime/identity.ts": "b42a637beb039e8d8e05b3d7ec45a339c7a9aaf6f4314af961984b09348bc4e8",
       "server/runtime/package-release.ts": "8ade44f4134a0d6f6df9f021b2c90ea092a43247545221b043bff211332c7291",
@@ -222,7 +222,7 @@
       "supervised/archive/work/yukon-mainnet-cycling-runner-20260923/contract.ts": "7b67c5148b712bdacfebb509627f548a282877370c38d02ebfc1d6f40fddc0a5",
       "supervised/archive/work/yukon-mainnet-cycling-runner-20260923/transport.ts": "ca70755776551bca6505bbe8e953fbfd23fabd8f5ada1525308ac7be7df29f4f",
       "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/admission.ts": "4c49808f7e53a69dd40de35a8ef862c46c2935ae22301d801116743dbcf0611c",
-      "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/capability.ts": "ad4f55803a01ddd633ace9811947f6077bfed31a8747e06e3a101f03b64c1095",
+      "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/capability.ts": "dab96adf4a4f4018a3c4b071c7adc128bef585ed6b7f655299b91cbc28060de4",
       "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/dispatch.ts": "5f91018b87e75c66d89c9ecce801ae8bf0cc673b4b4bf21b3801d2d479ad8160",
       "supervised/archive/work/yukon-owned-pin-handoff-20260923/runtime-api.ts": "6f68076c31a58af12ab0897c7a4b1fc439e55e96e2eeff12665838f45a9ffdf6",
       "supervised/archive/work/yukon-pin-preflight-20260923/execution-gate.ts": "8fb2c3b1f030c33caec61a2dd91ad5735c6e98bce1f9827ed1dae47133d4bd06",

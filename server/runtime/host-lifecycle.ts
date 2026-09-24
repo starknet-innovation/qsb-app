@@ -54,6 +54,7 @@ function rehearsalLaunch(processId: string, inputHash: string): LaunchRecord {
       release: {
         profileId: "qsb-supervised-pin-v4-subset-v5",
         sourceManifestFormat: "qsb-source-release-manifest-v1",
+        coreSourceManifest: contract.coreSourceManifest,
         nativeBinariesEnrolled: false,
         broadcastAuthorized: false,
       },

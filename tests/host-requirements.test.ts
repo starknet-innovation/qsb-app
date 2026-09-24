@@ -46,6 +46,7 @@ function runningLaunch(processId: string, requestId: string): LaunchRecord {
       release: {
         profileId: "qsb-supervised-pin-v4-subset-v5",
         sourceManifestFormat: "qsb-source-release-manifest-v1",
+        coreSourceManifest: contract.coreSourceManifest,
         nativeBinariesEnrolled: false,
         broadcastAuthorized: false,
       },
@@ -266,8 +267,8 @@ describe("local execution host rehearsal", () => {
       status: string;
       runtime: { searchRunning: boolean };
     };
-    expect(job.status).toBe("paused");
-    expect(job.runtime.searchRunning).toBe(false);
+    expect(job.status).toBe("searching");
+    expect(job.runtime.searchRunning).toBe(true);
 
     const replaced = await recordLocalLoss(
       store,
