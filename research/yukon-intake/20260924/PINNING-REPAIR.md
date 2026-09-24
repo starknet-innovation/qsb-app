@@ -415,3 +415,26 @@ subprocess regression check. It never writes a successful receipt on failure.
 Future attempts should preflight CUDA health before invoking the frozen solver.
 The attempted gate must be retried on healthy capacity; prior bounded native
 checks and CPU bindings do not substitute for that gate.
+
+## Successful GPU runtime and CPU binding — passed 24 September
+
+The next secure RTX 4090 passed CUDA initialization and a small device operation
+before any solver invocation. Runtime source `af42f4e` executed the **unchanged
+frozen binary `88cf46c4…`** against the two previously prepared unfunded public
+contexts. Each range covers two sequences and 257 locktimes (514 candidates),
+with SegWit or Taproot output scripts. Both returned exact `range-drained`
+results, zero candidates, and the expected binary/parameter/manifest/range identity.
+Local pinned CPU re-export independently reproduced both parameter files and
+accepted their bindings. All transferred input files matched after retrieval.
+Receipts: `runtime/native-success/`. The previous infrastructure failure is retained.
+
+End-to-end invocation wall times were 1.171 and 1.173 seconds, including startup;
+these tiny ranges are **not throughput measurements or a performance claim**.
+No positive hit was returned, so no candidate-verification success is inferred.
+This closes the bounded successful GPU runtime plus reference-binding gate,
+not fresh search, durable coordinator, OCI queue deployment, positive-hit,
+full withdrawal or external-miner validation. Eligibility remains false/HOLD.
+
+The pod was deleted at 19:15:57 UTC, zero pods confirmed and its watchdog
+terminated. Approximate elapsed compute $0.0121 excludes disk/provider rounding.
+No funded fixture, signing material, proof endpoint or production release changed.

@@ -1,0 +1,49 @@
+{
+  "scope": "synthetic unfunded runtime ranges, not fresh withdrawal",
+  "runs": [
+    {
+      "output": {
+        "protocol": "qsb-yukon-pinning-research-v1",
+        "requestId": "unfunded-runtime-0",
+        "manifestHash": "1a6f89ad3d68eb20e1255d9ad61a62e37c59d301d70688aae7e7a7d468a8fcf8",
+        "binarySha256": "88cf46c45a63972e31af5f1c835a3b4088d6ea76af4b69e7bb0d7227d1562263",
+        "parameterSha256": "41b8e6d2326a52cfdc7e67731695c36bfb5dc6592686a85bc6e05c04a3e5ace0",
+        "range": {
+          "sequence": 2147483648,
+          "sequenceCount": 2,
+          "locktime": 500000000,
+          "locktimeCount": 257
+        },
+        "status": "range-drained",
+        "candidates": [],
+        "verified": false,
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD"
+      },
+      "wallSeconds": 1.1714388523250818
+    },
+    {
+      "output": {
+        "protocol": "qsb-yukon-pinning-research-v1",
+        "requestId": "unfunded-runtime-1",
+        "manifestHash": "3ae12f086cf821cf814aa35653b957211e903990da1dc236152e0603bf85a777",
+        "binarySha256": "88cf46c45a63972e31af5f1c835a3b4088d6ea76af4b69e7bb0d7227d1562263",
+        "parameterSha256": "5068afebfedca248e269207e8533c82802ad61a25f51073642d450d60af6f55f",
+        "range": {
+          "sequence": 2147483648,
+          "sequenceCount": 2,
+          "locktime": 500000000,
+          "locktimeCount": 257
+        },
+        "status": "range-drained",
+        "candidates": [],
+        "verified": false,
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD"
+      },
+      "wallSeconds": 1.1733615128323436
+    }
+  ],
+  "binarySha256": "88cf46c45a63972e31af5f1c835a3b4088d6ea76af4b69e7bb0d7227d1562263",
+  "releaseStatus": "HOLD"
+}

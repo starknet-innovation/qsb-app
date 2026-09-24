@@ -1,0 +1,20 @@
+[
+  {
+    "referenceChecked": true,
+    "contextHash": "cd9b2ac02f897672d3bd275b13e9e860e35cc26fccb9498066ab9a6b87382608",
+    "verdicts": [],
+    "decision": "range-drained-reference-bound",
+    "rangeCreditEligible": false,
+    "releaseStatus": "HOLD",
+    "freshWithdrawal": false
+  },
+  {
+    "referenceChecked": true,
+    "contextHash": "5d3e0661ab84e3a02c4c0cc41a44e503cbf589679289df33f5a866321786c48c",
+    "verdicts": [],
+    "decision": "range-drained-reference-bound",
+    "rangeCreditEligible": false,
+    "releaseStatus": "HOLD",
+    "freshWithdrawal": false
+  }
+]
