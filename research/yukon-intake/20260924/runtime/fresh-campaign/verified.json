@@ -1,0 +1,621 @@
+{
+  "scope": "CPU validation of downloaded compute-only campaign outputs; not withdrawal or coverage credit",
+  "planHash": "3007e98b969c6722ba859f66876a960af3f44ee43902c407af02944e98d53325",
+  "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+  "results": [
+    {
+      "attempt": 0,
+      "requestHash": "0955f8c7f9f39061eabc14ed81b12fafa0e5dde99931e1a85787163635b549f0",
+      "outputHash": "be23b628f182f9dafd2be6fd70209f5549a6a405231d7936d243b0c7d72cef02",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 25.27155000800849
+    },
+    {
+      "attempt": 1,
+      "requestHash": "34526d56bf017de0f84248aecb9aed9782486063255445058e15e0b84e9acfb8",
+      "outputHash": "f53bf35cd293af7634ce8ca2500d832a8317077af9c9152fe07c8761e7be58da",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 25.67148671200266
+    },
+    {
+      "attempt": 2,
+      "requestHash": "4fcc31d68637fe39c6b7cbe8e254e98a0442dbfb3980d4305f6236bb9e7bb111",
+      "outputHash": "361a158a126ea0f57fabe412d7a02d2538a161b3b3dc63e9157db23ada204252",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 26.32093136999174
+    },
+    {
+      "attempt": 3,
+      "requestHash": "7a5fcdc055333ab81af543d31daa18b6fab7244ec44b5d0551719277535dc923",
+      "outputHash": "b04a14520a6fc5e58812f47d4ee7e606c2d0f5e45c5370d4a574b0aeb84efff3",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 27.478968789015198
+    },
+    {
+      "attempt": 4,
+      "requestHash": "d2fabf6d6ddb1f6219feaf7c136e9f2d6403b7f3e5360b8cfb404846e936555e",
+      "outputHash": "c6ecba48d4d4f2bb3ce3bbb73a96dbfdbf83fa03fd289dccaf1777c1bf10f588",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 28.28251033302513
+    },
+    {
+      "attempt": 5,
+      "requestHash": "376dadb3c06e1b9131f090694d8be59ceb59c33e447ad01b6f2d0ee86482ce9e",
+      "outputHash": "d9fddc48a8a02ff1d6daef0b6a44467f64d869f38bcdd7524effd17835cc4f26",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 28.628597201022785
+    },
+    {
+      "attempt": 6,
+      "requestHash": "190746711f31a00009e08daede38f9ba5d461a5dfee72574babe31d775687b62",
+      "outputHash": "3ad637de67de8682ebb331ea56ddab08e8acc59c0a1b636ed839534fc6eb0ea3",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.08362049900461
+    },
+    {
+      "attempt": 7,
+      "requestHash": "104d510d1f888fa3bb6c2d1454fbce59d2dd15daf20c069faf720a08bc972d7b",
+      "outputHash": "f2620669d8e13b4bde70775779a9e2c86abbf421488163028884f2b131bc9bd3",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.185624814010225
+    },
+    {
+      "attempt": 8,
+      "requestHash": "5d8369a663b1a3698ef555fee137ce997bef5bbd114d2813e96ba0e6e06469d1",
+      "outputHash": "25ef1df9443bb9b0d254bec86ebec8adb35d76792d2081b090693ec3b70d8e7b",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 28.93434185400838
+    },
+    {
+      "attempt": 9,
+      "requestHash": "bf137f28298b9e65c00b0f54254f6900f1de282627aba3c3f47060fde5d2f774",
+      "outputHash": "fd3bc8cb447e80e7cbadb9f8fd0e9d9cb3b87ec0ac7a84be5e798ab7d745e9d6",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.430887427995913
+    },
+    {
+      "attempt": 10,
+      "requestHash": "afbb1b143be8e1ccee5557e2ef72b4b14c04e125d8179d4f804df116022d5c29",
+      "outputHash": "db5ab9797a414c1543b1e8c090bd08b75af49c908f4db85e938cc00a9ca88a37",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.031486453983234
+    },
+    {
+      "attempt": 11,
+      "requestHash": "b1aa31cd2708f0d59da572df963090a0c7db9518241d3aa3ca20da52754d04bc",
+      "outputHash": "cbff726295ec13c0a2092dbac37fad5cd675952e415cde0c53d45ac6a93899b4",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.383006111020222
+    },
+    {
+      "attempt": 12,
+      "requestHash": "d08d1082e1830a0af58416e6c9b44dbc1041ebdfd1ff753d48fd175656ed0197",
+      "outputHash": "35a31b632730e261f3e429d1cf55af8400489d9235a68e59a61f9ed6e343aa13",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.435344430996338
+    },
+    {
+      "attempt": 13,
+      "requestHash": "04057cd91b19de5240a8db36b1427d826922a4284968f560d0e7818b5267912b",
+      "outputHash": "3f6975fcbd050348103b759f17f3cf5ffcdd7c4617fd9655879a47cbff6e8e4d",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.18295403997763
+    },
+    {
+      "attempt": 14,
+      "requestHash": "07ef60cd64c0aa3e4ffc0c12d20a130950e9e47e6149df98152e90eb3a539c05",
+      "outputHash": "adab765983009f7a2e63b29c494c664bcf7dabc6b48776bd2cfad8b7be588de0",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.08444935202715
+    },
+    {
+      "attempt": 15,
+      "requestHash": "d902b3190e52b1e366d646333e3765bd75087325161fc5f6fe9b0ae13aa9cca8",
+      "outputHash": "2da1ce24df08cd874568a92dab74308d7b9656208b68e4b72a9281843251f3d2",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.133896960993297
+    },
+    {
+      "attempt": 16,
+      "requestHash": "b9f714831299826b61181ce9cae955097b508513c32ec295adb16473581632df",
+      "outputHash": "2c8b513158a26f071b2880611a0ec001b0b4e91b84a77dbd46d8e1b0d78b84ef",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.288919824000914
+    },
+    {
+      "attempt": 17,
+      "requestHash": "73da2fd145bea14a3ea09f07aaf6ffb4b963578f35987a20f772fbc2c0224f7c",
+      "outputHash": "e9eeed1909328d16e48bcca4ac86e6390274da95b496e1ece2f894906c9284f1",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.784109320986317
+    },
+    {
+      "attempt": 18,
+      "requestHash": "fdc6c9914691a8bd190e3b4676f4d532f9923a780b279d3db75b9f8c44becf9e",
+      "outputHash": "93db7ececcd7523842b161d5568f6dd8965d8a686e4f2fdffd7cbf80e4e2922c",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.332464981009252
+    },
+    {
+      "attempt": 19,
+      "requestHash": "4d6a3efe0e06939d55bf64dfdfb1ff0101c472459b5c6cceea4cda3ee5b61006",
+      "outputHash": "33ec927cceb760dd8194bbb6e9d78451141c0df6bc35c20c8a37da4366f3b6ab",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.827925584977493
+    },
+    {
+      "attempt": 20,
+      "requestHash": "c891a4ffe2bb2328817b76176ab1679ab2c1d904733851495823d0d2e8ae3d20",
+      "outputHash": "e318b6d0cc197f4a1bbea0e335072d964f3d6e9956525e3186bc556db704db52",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.780313475988805
+    },
+    {
+      "attempt": 21,
+      "requestHash": "d5738168a9f411d0a2f382cbdc0bfa437a43f17281f149aceb8dcb3db5e0376c",
+      "outputHash": "f5ae14d446c1b17f51b436eb91382ee82f2ad6036faac30b3a839dd1c4e0c8a3",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.828121279977495
+    },
+    {
+      "attempt": 22,
+      "requestHash": "b3ecc4be1a50cd0899f6e6609dc3c7a7db17c0b4fae3f4cfd2d69dc9cb0a1159",
+      "outputHash": "e4e5ef9f1af6dd53868e1b410f73ef256f5e0610a239200ce0f1509af1a40966",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.878816363983788
+    },
+    {
+      "attempt": 23,
+      "requestHash": "c26746b491ed4e73f7331f2b80c8fb478dded522891e9f23651bc5131576d122",
+      "outputHash": "61fae2a15010c6e63cf50324425977eef57e332020a265bda0240fb20936fb6b",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.83301307601505
+    },
+    {
+      "attempt": 24,
+      "requestHash": "311381a34596e37304b44f07ba470479c67003aebcdbafa5c022663c8a4066cc",
+      "outputHash": "fcea32d4eb285dd384b7696b33030b1ae10c00bfdf09d7bf49e9496b4425fa98",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 31.00531675698585
+    },
+    {
+      "attempt": 25,
+      "requestHash": "b8ede5ea29932cd0a7c279a85af0265e0aee6485c0483306cdda6d9ba8e0472f",
+      "outputHash": "921060999dbeb70b9ba603a8a69811d73286beca27aa75eb8e9aa3d13e519143",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.492745260009542
+    },
+    {
+      "attempt": 26,
+      "requestHash": "6c5dea3380a091eb08dae3fc9c353e06e16c6c8e187ebe76b8c597f1b66d189b",
+      "outputHash": "aef3a2498788cb47d738105db65e84f4daa0b880e61b2bf2bc0b411aa70d653a",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.90198824700201
+    },
+    {
+      "attempt": 27,
+      "requestHash": "8a1fb71e257464594b80d6bb0f7ac31c8265cd65334b22e023d3537564a42801",
+      "outputHash": "a00cc993bbeeabce38d43156a9a1174ab9dd9260356c05ea4a2707cdbf8a40db",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.88494336398435
+    },
+    {
+      "attempt": 28,
+      "requestHash": "d67cc0ddc0a3cad89264970b2ba3e052f8a39dd6e8cf11a23132f935f6c66ce6",
+      "outputHash": "849c35a36857c47ca744925e80492e31a6ef3d629e1a7f7f16bedf57bdeab111",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.788173492997885
+    },
+    {
+      "attempt": 29,
+      "requestHash": "9971450d45662535f8b25c148fbea69e3296163f9441636ab3bb4ccf6090f670",
+      "outputHash": "799554bfc65d522587405133b0081c40ac73c56a7ed42b512a59e86721a7ab0d",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.938609250006266
+    },
+    {
+      "attempt": 30,
+      "requestHash": "d079ae5cd7442750028eac752076c502ee1700b93f768ce60fbc7b8ec8bb1158",
+      "outputHash": "7b623e49c7cbc9c7ea87aad64c33ccbac6ddf2d5d1e5ab16bbd92a076c870513",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.838500927988207
+    },
+    {
+      "attempt": 31,
+      "requestHash": "ee3dedb4f9963d554e1a91ccb807ae8e839d1141b07bbeed1d694b7e382f0876",
+      "outputHash": "9dd18b7dda0fbed7587106da7c72c585bce8e128ebfd3d1b266cda9b306a7e17",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.939795953017892
+    },
+    {
+      "attempt": 32,
+      "requestHash": "63a004c092b16b258ed2d5714975233b30428ffd1b289b5fe1fb1b1b65159d2c",
+      "outputHash": "211effebb5b510d0a5877b300df2cfcbbc3c44d60302b145cc9a79fc4b9975a7",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.889826548984274
+    },
+    {
+      "attempt": 33,
+      "requestHash": "0d485c9e5cac663b281257aebd0f28e2f460d36af59fa96681d87574f18de16a",
+      "outputHash": "cba3a64aaadd5cb97fb1d42ecb145a676e8169d507af9b932d301ed0a7216733",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.87783297599526
+    },
+    {
+      "attempt": 34,
+      "requestHash": "c50da0314642c082149a5c36224a517cc20766452224dc9e1880c1a7647feb2d",
+      "outputHash": "2f782904805c04a64377ae0266ceef426fb1e281a7c5e8e6af2a5298ee29d0d0",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.28145194100216
+    },
+    {
+      "attempt": 35,
+      "requestHash": "4ba1d942d6b700c02dc8751e34e20b74645b067c558ff3ecdcf50e5913521919",
+      "outputHash": "8e68d777cd9800ed784e3de7d3ec2e9e7d31dd50022b385cf9ea6a85311608c7",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.787627646990586
+    },
+    {
+      "attempt": 36,
+      "requestHash": "f04c3cf967fff3496873fa83b02c2a664e9ea7ecf762922e850d6730ff479362",
+      "outputHash": "b952ea293ab292e05bc1c2262413f22bf205ce9fe2abd8f68a52bf9ec9b4540a",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.787653137987945
+    },
+    {
+      "attempt": 37,
+      "requestHash": "cd3454f31f47a0e8bc7457de823d5fcdc4bf37f3613f3ef20d6942d89cc981a1",
+      "outputHash": "467640588a643dc16785e4091b17734aff29b0dc518909602caf68b3a3b0f79b",
+      "candidateCount": 0,
+      "reference": {
+        "referenceChecked": true,
+        "contextHash": "bffff84c3d6c05c0e0e69f5af8c9d4ad6fa457433fd7701e3f52e39c73f53517",
+        "verdicts": [],
+        "decision": "range-drained-reference-bound",
+        "rangeCreditEligible": false,
+        "releaseStatus": "HOLD",
+        "freshWithdrawal": false
+      },
+      "wallSeconds": 29.78561548900325
+    }
+  ],
+  "unresolvedAttempts": [],
+  "completedRangeOutputs": 38,
+  "validCandidateFound": false,
+  "rangeCreditGranted": false,
+  "freshWithdrawal": false,
+  "releaseStatus": "HOLD"
+}

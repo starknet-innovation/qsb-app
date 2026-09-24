@@ -1053,3 +1053,27 @@ is not uploaded to or changing that running compute process. Initial downloaded
 outputs passed CPU binding with no candidates. This snapshot is progress only;
 final search outcome, complete cleanup and cost evidence will be recorded after
 termination. No new funded fixture was used.
+
+## Fresh unfunded GPU campaign: bounded negative result
+
+One Secure RTX 4090 ran the committed campaign (`db43c15`) with the unchanged
+frozen `88cf46c4…` binary. Uploaded hashes matched and the host reported one GPU.
+The search stopped normally at its budget after 38 disjoint ranges (attempts 0–37),
+reporting **756,716,800,608 candidate pairs** over 1,109.29 seconds of compute.
+There were no candidates. All 38 downloaded outputs passed full public-context,
+parameter and range binding through the actual CPU reference, with no unresolved
+attempts. Empty output binding is not exhaustive CPU recomputation of that search.
+
+`runtime/fresh-campaign/public-evidence.json` contains only the generated public
+synthetic context, plan and raw compute records. `verified.json` contains CPU
+receipts and `result.json` records the result/cleanup summary. The downloaded
+archive hash matched before deletion. The pod was deleted, zero pods and both
+completed-proof endpoints at 0/0 were confirmed by 21:00:55 UTC, and the deletion
+watchdog was then terminated. Elapsed GPU cost is approximately $0.26 excluding
+disk/billing adjustments; it is not an invoice or user pricing claim.
+
+**The positive GPU-hit gate remains open.** No predicate was weakened, no spent
+fixture was searched or spent, and no mainnet or external miner transaction was
+sent. Attempts 38–99 were not attempted; a future continuation must preserve these
+receipts and begin with unattempted work after fresh resource/price/watchdog checks.
+No continuation or replacement was submitted during this run.
