@@ -1,5 +1,7 @@
 # Isolated pinning repair — HOLD
 
+**Current status:** see [Release gates](RELEASE-GATES.md). This file is a chronological evidence log; earlier remaining-blocker paragraphs describe their original checkpoint.
+
 This successor experiment addresses three intake findings in the pinned `7e95c40` pinning source. It does not modify the original snapshot, the application's worker, any release descriptor, or the subset candidate. It does not retry the previously blocked subset repair.
 
 ## Changes

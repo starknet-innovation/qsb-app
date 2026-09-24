@@ -1,5 +1,7 @@
 # Latest Yukon intake, 24 September 2026 — HOLD
 
+For the successor pinning adaptation and its remaining application-use blockers, see the current [release gate checklist](RELEASE-GATES.md). The intake findings below describe the original upstream snapshot.
+
 This is a reproducible intake and rejection record, **not a solver upgrade**. The demo/coordinator release, historical descriptors, optimized candidate, signing commitments and production vendor sources are unchanged. No new performance or price claim is made.
 
 ## Provenance
@@ -53,4 +55,4 @@ The first working-demo path remains the coordinator release work in issue #15. T
 
 ## Follow-up isolated repair
 
-[Pinning repair](PINNING-REPAIR.md) adds a source-hash-checked successor experiment for the predicate, overflow and identified arithmetic flags. The original findings and artifacts above remain unchanged. It is still HOLD pending bounded scheduling, full error handling and native/end-to-end validation.
+[Pinning repair](PINNING-REPAIR.md) adds a source-hash-checked successor experiment for the predicate, overflow and identified arithmetic flags. The original findings and artifacts above remain unchanged. The chronological report records subsequent scheduling, error-handling, native and runtime validation. It remains HOLD for the open gates in the [current checklist](RELEASE-GATES.md).
