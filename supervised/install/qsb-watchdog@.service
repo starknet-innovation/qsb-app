@@ -1,0 +1,20 @@
+[Unit]
+Description=QSB independently owned endpoint watchdog %i
+RequiresMountsFor=/evidence
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+LoadCredentialEncrypted=runpod_api:/etc/credstore.encrypted/qsb-runpod-api
+ExecStart=/usr/local/bin/python /opt/qsb/dispatcher/credential-exec.py watchdog %i
+RuntimeDirectory=qsb-watchdogs
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+UMask=0077
+Restart=no
+TimeoutStopSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/evidence /run/qsb-watchdogs

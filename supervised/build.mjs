@@ -12,8 +12,10 @@ await build({
   define: { "import.meta.env": "undefined" },
 });
 copyFileSync("supervised/host/host.py", "supervised/dist/host.py");
+const support = ['install.py','credential-exec.py','watchdog.mjs','watchdog-entry.mjs','qsb-dispatch.service','qsb-watchdog@.service'];
+for (const name of support) copyFileSync('supervised/install/'+name,'supervised/dist/'+name);
 const files = {};
-for (const name of ["dispatcher.cjs", "host.py"])
+for (const name of ["dispatcher.cjs", "host.py", ...support])
   files[name] = createHash("sha256")
     .update(readFileSync("supervised/dist/" + name))
     .digest("hex");

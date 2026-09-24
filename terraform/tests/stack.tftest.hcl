@@ -66,7 +66,7 @@ run "dormant_runtime" {
     error_message = "Provisioned API transport must not activate the dispatcher."
   }
   assert {
-    condition = aws_cloudwatch_event_rule.dispatch[0].state == "DISABLED" && aws_lambda_function.dispatch[0].environment[0].variables.SUPERVISED_EXECUTION_ENABLED == "false" && length(aws_s3_object.dispatcher) == 3
+    condition = aws_cloudwatch_event_rule.dispatch[0].state == "DISABLED" && aws_lambda_function.dispatch[0].environment[0].variables.SUPERVISED_EXECUTION_ENABLED == "false" && length(aws_s3_object.dispatcher) == 9
     error_message = "Dispatcher artifacts must be provisioned without activation."
   }
   assert {

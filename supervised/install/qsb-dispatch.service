@@ -1,0 +1,18 @@
+[Unit]
+Description=QSB protected one-shot dispatch with systemd credential handoff
+RequiresMountsFor=/source /evidence /opt/qsb/dispatcher
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+LoadCredentialEncrypted=runpod_api:/etc/credstore.encrypted/qsb-runpod-api
+ExecStart=/usr/local/bin/python /opt/qsb/dispatcher/credential-exec.py
+UMask=0077
+Restart=no
+TimeoutStartSec=35min
+KillMode=control-group
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/evidence
