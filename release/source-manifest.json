@@ -81,7 +81,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "c9711b749cea0a690075213f1788307b5aaed258340d27e58f03fb09fc04440a",
+      "api": "1e9e0ce3b4ab62898fa6bba22b63d789130a5e983cfdc60b7dd7722bcf0f2a4b",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "c4db7617ecb6f36c503dc704b68d5aaec96053d9eaa48193fbf458d17cc17c78",
@@ -172,7 +172,7 @@
       "server/coordinator.ts": "2271cf97b06a1a94d1901bf3bb39253e4732f56a9eae7c388f413b69cdd895df",
       "server/lambda.ts": "2ec8b51b90988b49e09c9300a198c119edb4711f1441208dbfec92df64747e09",
       "server/local.ts": "7a3c1f8a57928f77e51418b92c025622bbe71a3b291cc2094e24e37eadc378bd",
-      "server/mainnet-capability.json": "703e2d6f0cac75fda24471f9d845ae71f24aeb43a31b84e9430f2d4fb5e0f704",
+      "server/mainnet-capability.json": "417ef3878bd2a89a19283a4c077dd02ee8da3226dba79b2f0f1152cda27ff9c5",
       "server/mainnetConfig.ts": "e995c6a9385012217326c2490f188e8382eda40fb37858e9d4f0939d86181102",
       "server/network.ts": "bf7163415b49087ba4341b59b6f9d1b736d6c37ebeb151883ab0146c61d0d66b",
       "server/providers.ts": "05a1769390b06449b83240fab4cbd0ecc78b0cd49f5d36ab1daef9c1cd453fc1",
@@ -229,7 +229,7 @@
       "supervised/archive/work/yukon-mainnet-cycling-runner-20260923/contract.ts": "7b67c5148b712bdacfebb509627f548a282877370c38d02ebfc1d6f40fddc0a5",
       "supervised/archive/work/yukon-mainnet-cycling-runner-20260923/transport.ts": "ca70755776551bca6505bbe8e953fbfd23fabd8f5ada1525308ac7be7df29f4f",
       "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/admission.ts": "2e29af58e69d0c839f30f1ab06b68c4468b586578dfbad3183489422f600530a",
-      "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/capability.ts": "4a42a12be0824cebeefea05808fe9bd59a5e2663e0f4243b942a3f5a4849d7bb",
+      "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/capability.ts": "4d5d7b4aeb9f72d741fd2204a4611b937b09db70af05a6e6c9a8611be60fc109",
       "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/dispatch.ts": "c5d037a115de66f70c7a0243816e6bcbb80bd469332761623badceb0c841dcb7",
       "supervised/archive/work/yukon-owned-pin-handoff-20260923/runtime-api.ts": "6f68076c31a58af12ab0897c7a4b1fc439e55e96e2eeff12665838f45a9ffdf6",
       "supervised/archive/work/yukon-pin-preflight-20260923/execution-gate.ts": "8fb2c3b1f030c33caec61a2dd91ad5735c6e98bce1f9827ed1dae47133d4bd06",
