@@ -81,7 +81,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "17ea9f55391c51f5de7af5e71893fec166490a6e8f9a46bce746da3e3c6a66b1",
+      "api": "1113834f1f93ce85f5cd96d2d3661e67f0e4af9393d39ff95efc3fcc4feeacbd",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "c4db7617ecb6f36c503dc704b68d5aaec96053d9eaa48193fbf458d17cc17c78",
@@ -167,7 +167,7 @@
       "research/optimized-subset/subset/tests/gpu_epochs/zinv32.cuh": "12303e74b178d2cfc45951ddc0c6c31b634646bacc55ea5a43097997bdd51689",
       "scripts/package-release.ts": "5b1d0d9e5169c8e83a1b9259033c710011a3d8cf46b02824a1c73708de4d2031",
       "scripts/storage-inventory.ts": "c8ecc1d3ed239f444efd50ab8bb704be13408f609aba1e80d16a5325d5e4603e",
-      "server/app.ts": "61123340157f1bc64bf55dd135fad4328e2424b6c3bd52919f94d76438958d84",
+      "server/app.ts": "808c8c6233442a2aa2952958de8ba4c559c11c68eee061308e5a430028369a20",
       "server/chain.ts": "71ec84e791cdfe5bd8217949ac72c16773a5246654c92e349a45c429a6322321",
       "server/coordinator.ts": "2271cf97b06a1a94d1901bf3bb39253e4732f56a9eae7c388f413b69cdd895df",
       "server/lambda.ts": "2ec8b51b90988b49e09c9300a198c119edb4711f1441208dbfec92df64747e09",
@@ -175,7 +175,7 @@
       "server/mainnet-capability.json": "703e2d6f0cac75fda24471f9d845ae71f24aeb43a31b84e9430f2d4fb5e0f704",
       "server/mainnetConfig.ts": "e995c6a9385012217326c2490f188e8382eda40fb37858e9d4f0939d86181102",
       "server/network.ts": "bf7163415b49087ba4341b59b6f9d1b736d6c37ebeb151883ab0146c61d0d66b",
-      "server/providers.ts": "816c58a8a02a8b65eaeba7963a87c6e91861639a26ff529fdf8c3cfc99f3b3fe",
+      "server/providers.ts": "05a1769390b06449b83240fab4cbd0ecc78b0cd49f5d36ab1daef9c1cd453fc1",
       "server/runtime/capability.ts": "5695dc01ce72e1243022204014b7de5a8c662ac337aa73c52124628c8de2a797",
       "server/runtime/closure.ts": "19f30ff81ee37539608f4f17de053d6d8e9466c0daf027044403b79138923402",
       "server/runtime/core-binary.json": "e801c46615cd3b9ad84af8736cfddd7707787a1e8f29ed8afb2f07fddb4b6b96",

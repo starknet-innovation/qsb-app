@@ -8,6 +8,7 @@ import {
   assertBroadcastPermit,
   assertMainnetTransportClosed,
   assertPermitMinerEndpoint,
+  MinerInclusionError,
 } from "./runtime/miner-inclusion";
 
 const minerSecrets = new SecretsManagerClient({
@@ -135,12 +136,9 @@ export class Slipstream {
     const granted = assertBroadcastPermit(permit, hex);
     assertPermitMinerEndpoint(granted, this.base);
     assertMainnetTransportClosed(granted, this.base);
-    await this.assertNetwork();
-    return this.request("/api/transactions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tx_hex: hex }),
-    });
+    // A permit whose origin matches this base is still not a live submit.
+    // This checkout does not probe or POST to the miner.
+    throw new MinerInclusionError("LiveMinerTransportRefused");
   }
 }
 export const runpodStatusSchema = z.object({

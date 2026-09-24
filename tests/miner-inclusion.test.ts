@@ -483,11 +483,9 @@ describe("authorization before submit", () => {
       }),
     );
     await expect(miner.submit(sample.raw, permit)).rejects.toThrow(
-      "not serving Bitcoin testnet4",
+      "LiveMinerTransportRefused",
     );
-    expect(request.mock.calls.map((call) => String(call[0]))).toEqual([
-      "https://teststream.mara.com/api/system",
-    ]);
+    expect(request).not.toHaveBeenCalled();
     expect(permit.xverseTestnet4CompatibilityEstablished).toBe(false);
     expect(permit.askUserToFund).toBe(false);
   });

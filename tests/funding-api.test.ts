@@ -32,11 +32,11 @@ async function setup(reject = false) {
   previous.addInput({ txid: "11".repeat(32), index: 0 });
   previous.addOutputAddress(address, 100000n);
   const previousTxHex = hex.encode(previous.toBytes(true, true));
-  vi.spyOn(chain, "raw").mockResolvedValue({
+  const raw = vi.spyOn(chain, "raw").mockResolvedValue({
     tx: previous,
     raw: previousTxHex,
   });
-  vi.spyOn(chain, "unspent").mockResolvedValue({
+  const unspent = vi.spyOn(chain, "unspent").mockResolvedValue({
     previousTxHex,
     confirmations: 2,
   });
@@ -108,6 +108,8 @@ async function setup(reject = false) {
     token,
     submit,
     test,
+    raw,
+    unspent,
     body: {
       rawTxHex,
       amount: "50000",
@@ -146,7 +148,17 @@ it("refuses mainnet funding transport while release broadcast stays disabled", a
   });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();
+  expect(f.raw).not.toHaveBeenCalled();
+  expect(f.unspent).not.toHaveBeenCalled();
   expect(await f.store.get("OWNER#" + address, "TX#" + f.tx.id)).toBeUndefined();
+  const stored = (
+    await f.store.get("OWNER#" + address, "VAULT#" + f.vault.id)
+  )?.vault as { status: string; funding?: unknown };
+  expect(stored.status).toBe("unfunded");
+  expect(stored.funding).toBeUndefined();
+  const again = await f.app.request(req(path, f.body, f.token));
+  expect(again.status).toBe(409);
+  expect(await again.json()).toMatchObject({ error: "MainnetTransportRefused" });
   expect(release.mainnetEnabled).toBe(false);
   expect("broadcastAuthorized" in release).toBe(false);
 });
@@ -162,6 +174,11 @@ it("does not preflight or broadcast without an exact spend record", async () => 
   });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();
+  expect(f.raw).not.toHaveBeenCalled();
+  expect(f.unspent).not.toHaveBeenCalled();
+  expect(
+    (await f.store.get("OWNER#" + address, "VAULT#" + f.vault.id))?.vault,
+  ).toMatchObject({ status: "unfunded" });
 });
 it("does not broadcast when the authorized fee differs from the transaction", async () => {
   const f = await setup();
@@ -179,6 +196,7 @@ it("does not broadcast when the authorized fee differs from the transaction", as
   expect(await response.json()).toMatchObject({ error: "ExactSpendMismatch" });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();
+  expect(f.raw).not.toHaveBeenCalled();
 });
 it("does not submit a withdrawal without an exact spend record", async () => {
   const f = await setup();
@@ -204,6 +222,47 @@ it("does not submit a withdrawal without an exact spend record", async () => {
   });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();
+  expect(f.raw).not.toHaveBeenCalled();
+  expect(f.unspent).not.toHaveBeenCalled();
+});
+it("does not save a withdrawal intent before the transport refusal", async () => {
+  const f = await setup();
+  const jobId = crypto.randomUUID();
+  await f.store.put({
+    pk: "OWNER#" + address,
+    sk: "JOB#" + jobId,
+    version: 0,
+    job: {
+      id: jobId,
+      vaultId: f.vault.id,
+      owner: address,
+      manifest: { outputValue: "50000", fee: "10000" },
+      status: "awaiting_authorization",
+    },
+  });
+  const response = await f.app.request(
+    req(
+      "/jobs/" + jobId + "/submit",
+      {
+        rawTxHex: f.body.rawTxHex,
+        exactSpend: f.body.exactSpend,
+        spentFixtureRefs: f.body.spentFixtureRefs,
+      },
+      f.token,
+    ),
+  );
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({
+    error: "MainnetTransportRefused",
+  });
+  expect(f.submit).not.toHaveBeenCalled();
+  expect(f.test).not.toHaveBeenCalled();
+  expect(f.raw).not.toHaveBeenCalled();
+  expect(f.unspent).not.toHaveBeenCalled();
+  expect(await f.store.get("OWNER#" + address, "TX#" + f.tx.id)).toBeUndefined();
+  expect(
+    (await f.store.get("OWNER#" + address, "JOB#" + jobId))?.job,
+  ).toMatchObject({ status: "awaiting_authorization" });
 });
 it("does not consult a rejecting mainnet miner while transport stays closed", async () => {
   const f = await setup(true);
@@ -216,6 +275,8 @@ it("does not consult a rejecting mainnet miner while transport stays closed", as
   });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();
+  expect(f.raw).not.toHaveBeenCalled();
+  expect(f.unspent).not.toHaveBeenCalled();
   expect(
     await f.store.get("OWNER#" + address, "TX#" + f.tx.id),
   ).toBeUndefined();
