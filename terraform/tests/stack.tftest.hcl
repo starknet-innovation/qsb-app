@@ -86,8 +86,12 @@ run "enrolled_cleanup" {
     error_message = "Only explicit endpoint enrollment activates the serialized cleanup watchdog."
   }
 }
-run "reject_missing_runtime_configuration" {
+run "reject_missing_runtime_ami" {
   command = plan
-  variables { provision_runtime = true }
+  variables {
+    provision_runtime         = true
+    runtime_ami_owner         = "123456789012"
+    runtime_availability_zone = "eu-west-1a"
+  }
   expect_failures = [aws_instance.runtime]
 }
