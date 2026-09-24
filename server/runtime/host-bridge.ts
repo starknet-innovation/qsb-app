@@ -567,10 +567,9 @@ export async function replaceOwnedProcess(
   )
     throw new Error("ReplaceRefused");
   // A paid submission may still be in flight. Replacing now would make its
-  // provider id unrecordable. Reconcile it with recordLateProviderId first. A
-  // stdout violation already refuses that result, so replacement stays the
-  // recovery path there.
-  if (launch.providerOutcome === "uncertain" && launch.stdoutProtocol !== "violated")
+  // provider id unrecordable, and replacement clears stdoutProtocol, which
+  // would re-open a result that a stdout violation refused. Reconcile it first.
+  if (launch.providerOutcome === "uncertain")
     throw new Error("ProviderSubmissionUnresolved");
   const priorState = launch.state;
   const providerSubmissions = launch.providerSubmissions;

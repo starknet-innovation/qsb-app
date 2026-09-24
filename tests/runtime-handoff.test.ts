@@ -1304,6 +1304,91 @@ describe("supervised runtime handoff", () => {
     expect(running.processId).toBe("paid-in-flight");
   });
 
+  it("refuses replacement when stdout violates during an in-flight submit", async () => {
+    const { store, admitted } = await claimedFixture();
+    let rejectStdout: (error: Error) => void = () => undefined;
+    const stdoutExclusive = new Promise<void>((_resolve, reject) => {
+      rejectStdout = reject;
+    });
+    stdoutExclusive.catch(() => undefined);
+    await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ processId: "violated-in-flight", stdoutExclusive }),
+      new Date(),
+      2000,
+    );
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered: () => void = () => undefined;
+    const inFlight = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const submitting = submitProviderOnce(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => {
+        entered();
+        await gate;
+        return { providerId: "should-not-commit" };
+      },
+    );
+    await inFlight;
+    rejectStdout(new Error("AcknowledgementRejected"));
+    const started = Date.now();
+    let protocol = "";
+    while (protocol !== "violated" && Date.now() - started < 2000) {
+      protocol =
+        (
+          (await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`))?.launch as {
+            stdoutProtocol?: string;
+          }
+        ).stdoutProtocol ?? "";
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(protocol).toBe("violated");
+    let starts = 0;
+    await expect(
+      replaceOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => {
+          starts += 1;
+          return { processId: "should-not-start" };
+        },
+        new Date(),
+        2000,
+        async () => undefined,
+      ),
+    ).rejects.toThrow(/ProviderSubmissionUnresolved/);
+    expect(starts).toBe(0);
+    release();
+    await expect(submitting).rejects.toThrow(/AcknowledgementRejected/);
+    const launch = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+    )?.launch as {
+      state: string;
+      providerId?: string;
+      stdoutProtocol?: string;
+      processId?: string;
+    };
+    expect(launch.stdoutProtocol).toBe("violated");
+    expect(launch.providerId).toBeUndefined();
+    expect(launch.state).not.toBe("running");
+    expect(launch.processId).toBe("violated-in-flight");
+  });
+
   it("replaces an uncertain paid launch only after its provider id is reconciled", async () => {
     const { store, admitted } = await claimedFixture();
     await launchOwnedProcess(
