@@ -4,6 +4,7 @@ import {
   chmodSync,
   mkdtempSync,
   readFileSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,6 +19,7 @@ import {
   assessBoundedCompute,
   assessProofFreshness,
   classifySearchEvidence,
+  committedManifestPath,
   enrolledReleaseIdentity,
   loadCoreBinaryEnrollment,
   exportDisposableSigningBundle,
@@ -30,7 +32,10 @@ import {
   type SiblingJob,
 } from "../server/runtime/fresh-proof";
 import { requiredReleasePaths } from "../server/runtime/closure";
-import { createSourceManifest } from "../server/runtime/package-release";
+import {
+  createSourceManifest,
+  writePackageTree,
+} from "../server/runtime/package-release";
 import { SUPERVISED_PROFILE_ID } from "../server/runtime/types";
 import type { Row } from "../server/store";
 
@@ -257,6 +262,57 @@ describe("proof runner selection", () => {
     expect(selected.broadcastAuthorized).toBe(false);
     expect(selected.sourceManifestSha256).toBe(fingerprint(manifest));
     expect(selected.limits.join(" ")).toContain("not substitutes");
+    expect(release.mainnetEnabled).toBe(false);
+  });
+
+  it("resolves enrollment from the packaged tree as well as the checkout", () => {
+    expect(committedManifestPath(process.cwd())).toBe(
+      path.join(process.cwd(), "release", "source-manifest.json"),
+    );
+    const directory = mkdtempSync(path.join(tmpdir(), "qsb-proof-package-"));
+    writePackageTree(process.cwd(), directory, manifest);
+    symlinkSync(
+      path.join(process.cwd(), "node_modules"),
+      path.join(directory, "node_modules"),
+      "dir",
+    );
+    const exercise = path.join(directory, "exercise-proof-gate.mts");
+    writeFileSync(
+      exercise,
+      [
+        'import { readFileSync } from "node:fs";',
+        'import { enrolledReleaseIdentity, selectProofRunner } from "./tree/server/runtime/fresh-proof.ts";',
+        'const committed = JSON.parse(readFileSync(new URL("./release-manifest.json", import.meta.url), "utf8"));',
+        "const enrolled = enrolledReleaseIdentity(committed);",
+        "const selected = selectProofRunner({",
+        '  requestedChain: "regtest",',
+        '  advertisedChain: "regtest",',
+        "  service: {",
+        '    format: "qsb-proof-service-config-v1",',
+        '    serviceId: "regtest-proof",',
+        '    configuredChain: "regtest",',
+        "    mainnetOnly: false,",
+        "    releaseProfileId: enrolled.profileId,",
+        "    sourceManifestSha256: enrolled.sourceManifestSha256,",
+        "    nativeBinariesEnrolled: false,",
+        "    mainnetEnabled: false,",
+        "    broadcastAuthorized: false,",
+        "  },",
+        "  enrolled,",
+        "});",
+        'if (selected.chain !== "regtest") throw new Error("chain");',
+        "if (selected.mainnetEnabled !== false || selected.broadcastAuthorized !== false) throw new Error(\"activation\");",
+        "if (selected.liveRunnerContacted !== false || selected.nativeBinariesEnrolled !== false) throw new Error(\"runner\");",
+        "console.log(selected.sourceManifestSha256);",
+        "",
+      ].join("\n"),
+    );
+    const output = execFileSync(
+      path.join(process.cwd(), "node_modules", ".bin", "tsx"),
+      [exercise],
+      { cwd: directory, encoding: "utf8" },
+    );
+    expect(output.trim()).toBe(fingerprint(manifest));
     expect(release.mainnetEnabled).toBe(false);
   });
 });

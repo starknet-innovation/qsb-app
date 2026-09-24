@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -76,12 +76,24 @@ function checkoutRoot(): string {
 
 type ParsedReleaseManifest = z.infer<typeof sourceReleaseManifestSchema>;
 
+/**
+ * A checkout commits `release/source-manifest.json`.
+ * `writePackageTree` emits that same document as `release-manifest.json` beside `tree/`.
+ */
+export function committedManifestPath(root: string): string {
+  const checkoutManifest = path.join(root, "release", "source-manifest.json");
+  if (existsSync(checkoutManifest)) return checkoutManifest;
+  if (path.basename(root) === "tree") {
+    const packagedManifest = path.resolve(root, "..", "release-manifest.json");
+    if (existsSync(packagedManifest)) return packagedManifest;
+  }
+  throw new Error("ReleaseManifestRejected");
+}
+
 function readCommittedManifest(root: string): ParsedReleaseManifest {
   try {
     return sourceReleaseManifestSchema.parse(
-      JSON.parse(
-        readFileSync(path.join(root, "release/source-manifest.json"), "utf8"),
-      ),
+      JSON.parse(readFileSync(committedManifestPath(root), "utf8")),
     );
   } catch (error) {
     if (error instanceof Error && error.message === "ReleaseManifestRejected")
