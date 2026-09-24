@@ -1,0 +1,18 @@
+{
+  "providerJobId": "1fe61800-d018-4981-8d7d-0591075a5673-u2",
+  "runtimeManifestSha256": "4e380441231fce434745d6116187aef06ad4086c8df9496948b65b880a7d9039",
+  "verdict": {
+    "referenceChecked": true,
+    "contextHash": "cd9b2ac02f897672d3bd275b13e9e860e35cc26fccb9498066ab9a6b87382608",
+    "verdicts": [],
+    "decision": "range-drained-reference-bound",
+    "rangeCreditEligible": false,
+    "releaseStatus": "HOLD",
+    "freshWithdrawal": false
+  },
+  "remoteQueueCompleted": true,
+  "imageAttested": false,
+  "rangeCreditGranted": false,
+  "freshWithdrawal": false,
+  "releaseStatus": "HOLD"
+}

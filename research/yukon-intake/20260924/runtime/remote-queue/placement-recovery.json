@@ -1,0 +1,20 @@
+{
+  "recordedAt": "2026-09-24T20:12:17.691481+00:00",
+  "commit": "3ee808c",
+  "pausedMinMax": [
+    0,
+    0
+  ],
+  "observedWorkersAfterPause": [],
+  "preservedJobId": "1fe61800-d018-4981-8d7d-0591075a5673-u2",
+  "jobStatusAfterPause": "IN_QUEUE",
+  "dataCentersAfter": [
+    "EU-RO-1"
+  ],
+  "restoredMinMax": [
+    0,
+    1
+  ],
+  "paidPostRepeated": false,
+  "originalDeadlineUnchanged": true
+}

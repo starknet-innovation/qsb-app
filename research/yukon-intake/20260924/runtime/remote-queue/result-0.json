@@ -1,0 +1,31 @@
+{
+  "delayTime": 683653,
+  "executionTime": 26142,
+  "id": "1fe61800-d018-4981-8d7d-0591075a5673-u2",
+  "output": {
+    "inputSha256": "fd716e75f303c61e1da3ab289a980efe28c5cf2b89d2bd75df5f01dfe1190a70",
+    "output": {
+      "binarySha256": "88cf46c45a63972e31af5f1c835a3b4088d6ea76af4b69e7bb0d7227d1562263",
+      "candidates": [],
+      "manifestHash": "1a6f89ad3d68eb20e1255d9ad61a62e37c59d301d70688aae7e7a7d468a8fcf8",
+      "parameterSha256": "41b8e6d2326a52cfdc7e67731695c36bfb5dc6592686a85bc6e05c04a3e5ace0",
+      "protocol": "qsb-yukon-pinning-research-v1",
+      "range": {
+        "locktime": 500000000,
+        "locktimeCount": 1244600000,
+        "sequence": 2147483680,
+        "sequenceCount": 16
+      },
+      "rangeCreditEligible": false,
+      "releaseStatus": "HOLD",
+      "requestId": "pr30-remote-unfunded-0",
+      "status": "range-drained",
+      "verified": false
+    },
+    "protocol": "qsb-yukon-pin-queue-v1",
+    "providerJobId": "1fe61800-d018-4981-8d7d-0591075a5673-u2",
+    "runtimeManifestSha256": "4e380441231fce434745d6116187aef06ad4086c8df9496948b65b880a7d9039"
+  },
+  "status": "COMPLETED",
+  "workerId": "q26x13t7cupw1f"
+}

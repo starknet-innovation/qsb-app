@@ -784,3 +784,41 @@ successful read. The replacement does not run, while the checked CLI rejects the
 invalid request. Existing artifact/symlink rejection and real CPU Store tests
 also pass: 17 focused TypeScript tests plus typecheck. This fixes the local
 launcher finding; it does not grant release approval or image attestation.
+
+## Actual isolated Runpod queue execution
+
+The immutable queue image (`851855ef…` index, `01cfa234…` amd64 manifest)
+completed one synthetic unfunded SegWit range through the actual Runpod SDK queue:
+**19,913,600,000 candidates in 26.142 seconds**, zero hits. The frozen normal
+`88cf46c4…` binary is unchanged. `runtime/remote-queue/` preserves the submitted
+input, public context, provider response, independent local binding verdict and
+cleanup receipt. `check_pin_queue_result.ts` binds provider ID, input digest,
+runtime-manifest digest and request/result fields before running the exact-source
+CPU verifier. The result is reference-bound; no durable range credit was granted.
+This is a queue transport/compute gate, not a positive hit or fresh withdrawal.
+
+The first US worker spent over ten minutes pulling a 12 MB layer; a direct local
+ECR download completed in 0.472 seconds with the correct hash. After committing
+and pushing the placement plan, the endpoint was paused to zero, actual zero
+workers and the original queued job were confirmed, and placement narrowed to
+EU-RO-1. The same job then ran; no paid submission was repeated. Reported queue
+delay was 683.653 seconds. This is not evidence of normal cold-start latency.
+
+**Capacity-control limitation:** although the endpoint was configured max1/min0,
+Runpod reported one RUNNING and two INITIALIZING worker records. Only one job was
+submitted. The endpoint was immediately set back to zero; the completed result
+was retained, actual zero workers confirmed, then the endpoint was deleted and
+temporary ECR delegation revoked. The planned Taproot queue job was not submitted.
+The provider's extra initializing records are not proof of three billed GPUs,
+but prevent asserting a strict one-worker provisioning cap. This remains an
+operational blocker for further queue testing until startup concurrency is
+understood or constrained. No provider support message was sent.
+
+Both spent proof endpoints remain 0/0 and no pods remain. The watchdog was
+terminated after verified cleanup, before its original deadline. Execution-only
+cost is about $0.008; startup, idle time, storage and actual billing are excluded.
+The private immutable test image is retained; no production routing changed.
+
+Remaining HOLD gates include positive GPU-hit publication, broader adversarial
+arithmetic assessment, independent review, actual release/launcher routing, fresh
+final-build end-to-end Core/miner proof, and the startup capacity-control issue.

@@ -1,0 +1,17 @@
+{
+  "runtimeManifestSha256": "4e380441231fce434745d6116187aef06ad4086c8df9496948b65b880a7d9039",
+  "request": {
+    "protocol": "qsb-yukon-pinning-research-v1",
+    "requestId": "pr30-remote-unfunded-0",
+    "manifestHash": "1a6f89ad3d68eb20e1255d9ad61a62e37c59d301d70688aae7e7a7d468a8fcf8",
+    "binarySha256": "88cf46c45a63972e31af5f1c835a3b4088d6ea76af4b69e7bb0d7227d1562263",
+    "parameterBase64": "biNPmvqmE8pOCk3ptMSt98uSkLJXHXkF3PlqOedremUsAAAAAAAAgAGQXwEAAAAAABYAFDMzMzMzMzMzMzMzMzMzMzMzMzMzAGXNHQEAAADsJgAAAAAAACQAAABDIHHx5YYZ/8iqZuN5Cpn58wnOAkYXavXZrA4VTHgn4hiSi2AFGVxa3DLkj1ADVaNKHMGdk8QJFkkhIfGMPfiP89CW/EC74GOMsBeUGCfASkce341lp+ra+L1DbRwVngs=",
+    "parameterSha256": "41b8e6d2326a52cfdc7e67731695c36bfb5dc6592686a85bc6e05c04a3e5ace0",
+    "range": {
+      "sequence": 2147483680,
+      "sequenceCount": 16,
+      "locktime": 500000000,
+      "locktimeCount": 1244600000
+    }
+  }
+}

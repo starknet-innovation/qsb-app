@@ -1,0 +1,45 @@
+{
+  "scope": "synthetic unfunded SegWit pinning queue range; not a fresh withdrawal",
+  "endpoint": "mxrcrnwn8f03o6",
+  "createdAt": "2026-09-24T20:00:52.439Z",
+  "cleanupConfirmedAt": "2026-09-24T20:14:19.208755+00:00",
+  "endpointDeleted": true,
+  "registryDelegationRevoked": true,
+  "watchdogTerminated": true,
+  "podsAfter": [],
+  "oldProofEndpointMinMax": {
+    "xbgi2q58lbyyls": [
+      0,
+      0
+    ],
+    "72cqi112b9t8qv": [
+      0,
+      0
+    ]
+  },
+  "imageSourceCommit": "d2a912c",
+  "verifierFixCommit": "affa72a",
+  "placementPlanCommit": "3ee808c",
+  "imageIndex": "851855ef0d2d1e70f9b27dc60097d3ab44c15bd0f9bdd5b624b8d4da46b9f41e",
+  "amd64Manifest": "01cfa2347438e42d5c682cb3d64e139e7e8a1cae22ef74424040cbe68712395c",
+  "binarySha256": "88cf46c45a63972e31af5f1c835a3b4088d6ea76af4b69e7bb0d7227d1562263",
+  "candidatesProcessed": 19913600000,
+  "hits": 0,
+  "executionSeconds": 26.142,
+  "queueDelaySeconds": 683.653,
+  "executionOnlyEstimateUsd": 0.007987833333333333,
+  "excludesStartupIdleStorageAndProviderBilling": true,
+  "paidSubmissions": 1,
+  "secondLayoutSubmitted": false,
+  "providerReportedWorkersDespiteMax1": {
+    "running": 1,
+    "initializing": 2
+  },
+  "responseToWorkerAnomaly": "set max0 immediately; verified zero workers; deleted endpoint",
+  "capacityControlGate": "unresolved; max1 did not prevent extra initializing worker records",
+  "remoteQueueComputePassed": true,
+  "positiveGpuHit": false,
+  "freshWithdrawal": false,
+  "mainnetEnabled": false,
+  "releaseStatus": "HOLD"
+}
