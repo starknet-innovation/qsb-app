@@ -530,7 +530,7 @@ export function createApp(
       { row: { pk, sk, version: 0, job } },
       ...[manifest.funding, manifest.helper].map((point) => ({
         row: {
-          pk: `OUTPOINT#${point.txid}:${point.vout}`,
+          pk: `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`,
           sk: "RESERVATION",
           version: 0,
           owner,

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -161,6 +162,66 @@ function walkFiles(
   return found.sort();
 }
 
+function gitNullOutput(root: string, args: string[], input?: string): string {
+  try {
+    return execFileSync("git", args, {
+      cwd: root,
+      encoding: "utf8",
+      input,
+    });
+  } catch (error) {
+    const failed = error as { status?: number; stdout?: string };
+    if (failed.status === 1 && args[0] === "check-ignore") return failed.stdout ?? "";
+    throw new Error("Release inventory is not tracked");
+  }
+}
+
+function trackedReleaseFiles(root: string, relativeDir: string): string[] {
+  return gitNullOutput(root, ["ls-files", "-z", "--", relativeDir])
+    .split("\0")
+    .filter((relativePath) => relativePath.length > 0)
+    .sort();
+}
+
+function ignoredReleaseFiles(root: string, files: readonly string[]): Set<string> {
+  if (files.length === 0) return new Set();
+  return new Set(
+    gitNullOutput(root, ["check-ignore", "-z", "--stdin"], files.join("\0"))
+      .split("\0")
+      .filter((relativePath) => relativePath.length > 0),
+  );
+}
+
+function insideGitWorkTree(root: string): boolean {
+  try {
+    return (
+      execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim() === "true"
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Enroll only the tracked inventory. Ignored files stay out, and any other file is refused. */
+export function reviewedTreeFiles(root: string, relativeDir: string): string[] {
+  const walked = walkFiles(root, relativeDir, true);
+  if (!insideGitWorkTree(root)) return walked;
+  const tracked = trackedReleaseFiles(root, relativeDir);
+  const allowed = new Set(tracked);
+  const ignored = ignoredReleaseFiles(root, walked);
+  for (const relativePath of walked) {
+    if (allowed.has(relativePath) || ignored.has(relativePath)) continue;
+    throw new Error(`Unexpected release input ${relativePath}`);
+  }
+  return tracked.filter((relativePath) =>
+    existsSync(assertInsideRepo(root, relativePath)),
+  );
+}
+
 function hashFile(root: string, relativePath: string): string {
   const absolute = assertInsideRepo(root, relativePath);
   return sha256Hex(readFileSync(absolute));
@@ -319,11 +380,14 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
     if (!existsSync(assertInsideRepo(root, relativePath)))
       throw new Error(`Missing release input ${relativePath}`);
   }
-  const pinningFiles = walkFiles(root, historicalCandidateRoots[0], true);
-  const subsetFiles = walkFiles(root, historicalCandidateRoots[1], true);
-  const enrolled = enrollHistoricalPair(pinningFiles, subsetFiles);
+  const pinningFiles = reviewedTreeFiles(root, historicalCandidateRoots[0]);
+  const subsetFiles = reviewedTreeFiles(root, historicalCandidateRoots[1]);
+  const enrolled =
+    pinningFiles.length === 0 && subsetFiles.length === 0
+      ? { pinning: false, historicalSubset: false }
+      : enrollHistoricalPair(pinningFiles, subsetFiles);
   const historical = [...pinningFiles, ...subsetFiles];
-  const optimized = walkFiles(root, optimizedSubsetRoot, true);
+  const optimized = reviewedTreeFiles(root, optimizedSubsetRoot);
   if (!optimized.length)
     throw new Error("Optimized subset source is not in this checkout");
   const sourcePaths = [...required, ...historical, ...optimized].sort();
@@ -703,15 +767,29 @@ export function verifyPackageTree(outDir: string): SourceReleaseManifest {
     if (!existsSync(path.join(treeRoot, relativePath)))
       throw new Error(`Missing release input ${relativePath}`);
   }
-  const pinningFiles = walkFiles(treeRoot, historicalCandidateRoots[0], true);
-  const subsetFiles = walkFiles(treeRoot, historicalCandidateRoots[1], true);
-  enrollHistoricalPair(pinningFiles, subsetFiles);
-  const optimized = walkFiles(treeRoot, optimizedSubsetRoot, true);
+  const enrolledPaths = Object.keys(manifest.identities.sourceFiles).sort();
+  const enrolledSet = new Set(enrolledPaths);
+  for (const relativeDir of [...historicalCandidateRoots, optimizedSubsetRoot]) {
+    for (const relativePath of walkFiles(treeRoot, relativeDir, true)) {
+      if (!enrolledSet.has(relativePath))
+        throw new Error(`Unexpected release input ${relativePath}`);
+    }
+  }
+  const pinningFiles = enrolledPaths.filter((relativePath) =>
+    relativePath.startsWith(`${historicalCandidateRoots[0]}/`),
+  );
+  const subsetFiles = enrolledPaths.filter((relativePath) =>
+    relativePath.startsWith(`${historicalCandidateRoots[1]}/`),
+  );
+  if (pinningFiles.length > 0 || subsetFiles.length > 0)
+    enrollHistoricalPair(pinningFiles, subsetFiles);
+  const optimized = enrolledPaths.filter((relativePath) =>
+    relativePath.startsWith(`${optimizedSubsetRoot}/`),
+  );
   if (!optimized.length)
     throw new Error("Optimized subset source is not in this checkout");
   const closure = [...new Set([...required, ...pinningFiles, ...subsetFiles, ...optimized])].sort();
   const walked = walkFiles(treeRoot, ".", false);
-  const enrolledPaths = Object.keys(manifest.identities.sourceFiles).sort();
   if (closure.join("\n") !== enrolledPaths.join("\n") || walked.join("\n") !== enrolledPaths.join("\n"))
     throw new Error("Packaged tree does not match the manifest path set");
   for (const [relativePath, digest] of Object.entries(

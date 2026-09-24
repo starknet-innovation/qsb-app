@@ -414,7 +414,7 @@ describe("supervised runtime handoff", () => {
       await app.request(request("/jobs/supervised", fixture.prepared.body, token))
     ).json();
     expect(admitted.runtime.searchRunning).toBe(false);
-    const claimed = await claimAdmittedLaunch(store, address, admitted.job.id);
+    const claimed = await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
     expect(claimed.bindings).toMatchObject({
       owner: address,
       requestId: admitted.job.id,
@@ -527,6 +527,18 @@ describe("supervised runtime handoff", () => {
     )?.launch as { state: string; processId?: string };
     expect(launch.state).toBe("uncertain");
     expect(launch.processId).toBeUndefined();
+    const retried = await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ processId: "retried-after-missing-child" }),
+      new Date(),
+      1000,
+    );
+    expect(retried.state).toBe("acknowledged");
+    expect(retried.processId).toBe("retried-after-missing-child");
   });
 
   it("treats stdout that follows the ack as a violation after the pipe closes", async () => {
@@ -582,7 +594,7 @@ describe("supervised runtime handoff", () => {
     const admitted = await (
       await app.request(request("/jobs/supervised", fixture.prepared.body, token))
     ).json();
-    await claimAdmittedLaunch(store, address, admitted.job.id);
+    await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
     const starter = localAckStarter(
       process.execPath,
       [
@@ -716,7 +728,7 @@ describe("supervised runtime handoff", () => {
       }
     ).job;
     expect(job.status).toBe("queued");
-    await claimAdmittedLaunch(store, address, job.id);
+    await claimAdmittedLaunch(store, address, job.id, confirmingLedger);
     const first = localAckStarter(
       process.execPath,
       [
@@ -975,7 +987,7 @@ describe("supervised runtime handoff", () => {
       fixture.prepared.body,
       confirmingLedger,
     );
-    await claimAdmittedLaunch(store, address, admitted.job.id);
+    await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
     let starts = 0;
     const start: OwnedProcessStart = async () => {
       starts += 1;
@@ -1028,7 +1040,7 @@ describe("supervised runtime handoff", () => {
       fixture.prepared.body,
       confirmingLedger,
     );
-    await claimAdmittedLaunch(store, address, admitted.job.id);
+    await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
     const noisy = localAckStarter(
       process.execPath,
       ["-e", "process.stdout.write('package loaded', () => process.exit(0))"],
@@ -1109,6 +1121,174 @@ describe("supervised runtime handoff", () => {
     ).rejects.toThrow(/Outpoint already reserved/);
   });
 
+  it("refuses a supervised reservation when a legacy uppercase outpoint exists", async () => {
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const fixture = simulatedMainnetRequest();
+    const txid = "ab".repeat(32);
+    const funding = { ...fixture.vault.funding!, txid };
+    const vault = { ...fixture.vault, funding };
+    const request = fixture.prepared.body.request as {
+      vault: typeof vault;
+      manifest: { funding: typeof funding };
+    };
+    const body = {
+      ...fixture.prepared.body,
+      request: {
+        ...request,
+        vault,
+        manifest: { ...request.manifest, funding },
+      },
+      manifest: { ...fixture.prepared.body.manifest, funding },
+    };
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${vault.id}`,
+      version: 0,
+      vault,
+    });
+    await store.put({
+      pk: `OUTPOINT#${txid.toUpperCase()}:${funding.vout}`,
+      sk: "RESERVATION",
+      version: 0,
+      owner: "legacy-owner",
+      jobId: "legacy-job",
+    });
+    await expect(
+      admitSupervisedJob(store, address, "mainnet", body, confirmingLedger),
+    ).rejects.toThrow(/Outpoint already reserved/);
+    expect(await store.get(`OUTPOINT#${txid}:${funding.vout}`, "RESERVATION")).toBeUndefined();
+  });
+
+  it("refuses a launch claim when a reserved outpoint is gone or spent", async () => {
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const fixture = simulatedMainnetRequest();
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    const admitted = await admitSupervisedJob(
+      store,
+      address,
+      "mainnet",
+      fixture.prepared.body,
+      confirmingLedger,
+    );
+    const spent = {
+      assertNetwork: async () => undefined,
+      unspent: async (point: { txid: string }) => {
+        if (point.txid === fixture.prepared.body.manifest.helper.txid)
+          throw new Error("spent");
+        return { previousTxHex: "00", confirmations: 1 };
+      },
+    };
+    await expect(
+      claimAdmittedLaunch(store, address, admitted.job.id, spent),
+    ).rejects.toThrow(/not spendable/);
+    expect(
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),
+    ).toBeUndefined();
+    const reservation = await store.get(
+      `OUTPOINT#${fixture.vault.funding!.txid.toLowerCase()}:${fixture.vault.funding!.vout}`,
+      "RESERVATION",
+    );
+    await store.delete(
+      reservation!.pk,
+      reservation!.sk,
+      reservation!.version,
+    );
+    await expect(
+      claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger),
+    ).rejects.toThrow(/no longer current/);
+    expect(
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),
+    ).toBeUndefined();
+  });
+
+  it("records a provider id on a violated launch without moving it to running", async () => {
+    const { store, admitted } = await claimedFixture();
+    let rejectStdout: (error: Error) => void = () => undefined;
+    const stdoutExclusive = new Promise<void>((_resolve, reject) => {
+      rejectStdout = reject;
+    });
+    stdoutExclusive.catch(() => undefined);
+    await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ processId: "late-violated", stdoutExclusive }),
+      new Date(),
+      2000,
+    );
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered: () => void = () => undefined;
+    const inFlight = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const submitting = submitProviderOnce(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => {
+        entered();
+        await gate;
+        return { providerId: "late-should-not-run" };
+      },
+    );
+    await inFlight;
+    rejectStdout(new Error("AcknowledgementRejected"));
+    const started = Date.now();
+    let protocol = "";
+    while (protocol !== "violated" && Date.now() - started < 2000) {
+      protocol =
+        (
+          (await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`))?.launch as {
+            stdoutProtocol?: string;
+          }
+        ).stdoutProtocol ?? "";
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await expect(
+      recordLateProviderId(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        "late-recorded",
+      ),
+    ).rejects.toThrow(/AcknowledgementRejected/);
+    const launch = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+    )?.launch as {
+      state: string;
+      providerId?: string;
+      providerOutcome?: string;
+      stdoutProtocol?: string;
+    };
+    expect(launch.providerId).toBe("late-recorded");
+    expect(launch.providerOutcome).toBe("submitted");
+    expect(launch.stdoutProtocol).toBe("violated");
+    expect(launch.state).toBe("uncertain");
+    release();
+    await expect(submitting).rejects.toThrow(/DuplicatePaidSubmission|AcknowledgementRejected/);
+    const after = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+    )?.launch as { state: string; providerId?: string };
+    expect(after.providerId).toBe("late-recorded");
+    expect(after.state).not.toBe("running");
+  });
+
   async function claimedFixture() {
     const store = new MemoryStore();
     await seedCapability(store);
@@ -1126,7 +1306,7 @@ describe("supervised runtime handoff", () => {
       fixture.prepared.body,
       confirmingLedger,
     );
-    await claimAdmittedLaunch(store, address, admitted.job.id);
+    await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
     return { store, fixture, admitted };
   }
 
@@ -1380,11 +1560,16 @@ describe("supervised runtime handoff", () => {
     )?.launch as {
       state: string;
       providerId?: string;
+      providerOutcome?: string;
+      submission?: string;
       stdoutProtocol?: string;
       processId?: string;
     };
     expect(launch.stdoutProtocol).toBe("violated");
-    expect(launch.providerId).toBeUndefined();
+    expect(launch.providerId).toBe("should-not-commit");
+    expect(launch.providerOutcome).toBe("submitted");
+    expect(launch.submission).toBeUndefined();
+    expect(launch.state).toBe("uncertain");
     expect(launch.state).not.toBe("running");
     expect(launch.processId).toBe("violated-in-flight");
   });
@@ -1797,7 +1982,7 @@ describe("supervised runtime handoff", () => {
       fixture.prepared.body,
       confirmingLedger,
     );
-    await claimAdmittedLaunch(store, address, admitted.job.id);
+    await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
     let rejectStdout: (error: Error) => void = () => undefined;
     const stdoutExclusive = new Promise<void>((_resolve, reject) => {
       rejectStdout = reject;
@@ -2136,9 +2321,18 @@ describe("supervised runtime handoff", () => {
     ).rejects.toThrow(/AcknowledgementRejected/);
     const launch = (
       await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
-    )?.launch as { state: string; providerId?: string; stdoutProtocol?: string };
+    )?.launch as {
+      state: string;
+      providerId?: string;
+      providerOutcome?: string;
+      submission?: string;
+      stdoutProtocol?: string;
+    };
     expect(launch.stdoutProtocol).toBe("violated");
-    expect(launch.providerId).toBeUndefined();
+    expect(launch.providerId).toBe("should-not-publish");
+    expect(launch.providerOutcome).toBe("submitted");
+    expect(launch.submission).toBeUndefined();
+    expect(launch.state).toBe("uncertain");
     expect(launch.state).not.toBe("running");
   });
 
@@ -2203,7 +2397,7 @@ describe("supervised runtime handoff", () => {
       },
     };
     await expect(
-      claimAdmittedLaunch(store, address, admitted.job.id),
+      claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger),
     ).rejects.toThrow(/Supervised search capability is not active/);
     expect(
       await inner.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),
@@ -2353,7 +2547,7 @@ describe("supervised runtime handoff", () => {
       row!.version,
     );
     await expect(
-      claimAdmittedLaunch(store, address, admitted.job.id),
+      claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger),
     ).rejects.toThrow(/no longer current/);
     expect(
       await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),
@@ -2396,7 +2590,7 @@ describe("supervised runtime handoff", () => {
       },
     };
     await expect(
-      claimAdmittedLaunch(store, address, admitted.job.id),
+      claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger),
     ).rejects.toThrow(/no longer current/);
     expect(
       await inner.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),

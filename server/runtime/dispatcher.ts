@@ -2,12 +2,13 @@ import { hex } from "@scure/base";
 import { z } from "zod";
 import { fingerprint, pinSolver, vaultConfiguration } from "../../src/lib/provenance";
 import {
+  release,
   type PublicVault,
   type Withdrawal,
   withdrawalSchema,
 } from "../../src/lib/model";
 import { outputScript } from "../../src/lib/transactions";
-import { Conflict, type Store } from "../store";
+import { Conflict, type Row, type Store } from "../store";
 import { validateRequest } from "../../src/mainnet/solvedContract";
 import { MAINNET_SEARCH_PROFILE } from "../../src/mainnet/submission";
 import contract from "../mainnet-capability.json";
@@ -42,6 +43,61 @@ function reservations(job: SupervisedJob): LaunchBindings["reservations"] {
     txid: point.txid,
     vout: point.vout,
   }));
+}
+
+function outpointAliasKeys(txid: string, vout: number): string[] {
+  return [
+    ...new Set([
+      `OUTPOINT#${txid}:${vout}`,
+      `OUTPOINT#${txid.toLowerCase()}:${vout}`,
+      `OUTPOINT#${txid.toUpperCase()}:${vout}`,
+    ]),
+  ];
+}
+
+async function assertAliasesFree(
+  store: Store,
+  points: { txid: string; vout: number }[],
+): Promise<void> {
+  for (const point of points) {
+    for (const pk of outpointAliasKeys(point.txid, point.vout)) {
+      if (await store.get(pk, "RESERVATION"))
+        throw new GateError(409, "Outpoint already reserved.");
+    }
+  }
+}
+
+async function currentReservation(
+  store: Store,
+  owner: string,
+  jobId: string,
+  point: { txid: string; vout: number },
+): Promise<Row> {
+  const found: Row[] = [];
+  for (const pk of outpointAliasKeys(point.txid, point.vout)) {
+    const row = await store.get(pk, "RESERVATION");
+    if (row) found.push(row);
+  }
+  const row = found[0];
+  if (
+    found.length !== 1 ||
+    !row ||
+    row.owner !== owner ||
+    row.jobId !== jobId
+  )
+    throw new GateError(409, "Outpoint reservation is no longer current.");
+  return row;
+}
+
+function sameReservation(left: Row, right: Row | undefined): boolean {
+  return (
+    !!right &&
+    left.pk === right.pk &&
+    left.sk === right.sk &&
+    left.version === right.version &&
+    left.owner === right.owner &&
+    left.jobId === right.jobId
+  );
 }
 
 function authorizedCoreDigest(): string {
@@ -158,6 +214,7 @@ export async function admitSupervisedJob(
       throw new GateError(409, "A job already exists for this vault.");
   }
   await assertSpendableFunding(ledger, owner, vault, request.manifest);
+  await assertAliasesFree(store, [request.manifest.funding, request.manifest.helper]);
   const now = new Date().toISOString();
   const job: SupervisedJob = {
     id,
@@ -230,7 +287,10 @@ export async function claimAdmittedLaunch(
   store: Store,
   owner: string,
   jobId: string,
+  ledger: FundingLedger,
 ) {
+  if (release.mainnetEnabled || contract.broadcastAuthorized)
+    throw new GateError(503, "Supervised search capability is not active.");
   const capability = await assertSearchCapability(store);
   const coreDigest = authorizedCoreDigest();
   const pk = `OWNER#${owner}`;
@@ -244,6 +304,19 @@ export async function claimAdmittedLaunch(
     if (!vaultRow) throw new GateError(404, "Vault not found");
     const vault = vaultRow.vault as PublicVault;
     assertVaultStillAdmitted(job, vault);
+    await assertSpendableFunding(ledger, owner, vault, job.manifest);
+    const fundingReservation = await currentReservation(
+      store,
+      owner,
+      job.id,
+      job.manifest.funding,
+    );
+    const helperReservation = await currentReservation(
+      store,
+      owner,
+      job.id,
+      job.manifest.helper,
+    );
     const configuration = vault.configuration ?? vaultConfiguration(vault);
     const bindings: LaunchBindings = {
       owner,
@@ -273,6 +346,8 @@ export async function claimAdmittedLaunch(
           ...writes,
           { row: capability, expected: capability.version },
           { row: vaultRow, expected: vaultRow.version },
+          { row: fundingReservation, expected: fundingReservation.version },
+          { row: helperReservation, expected: helperReservation.version },
         ]),
     };
     try {
@@ -286,6 +361,23 @@ export async function claimAdmittedLaunch(
         fingerprint(currentVault.vault) !== fingerprint(vault)
       )
         throw new GateError(409, "Confirmed vault funding is no longer current.");
+      const currentFunding = await currentReservation(
+        store,
+        owner,
+        job.id,
+        job.manifest.funding,
+      ).catch(() => undefined);
+      const currentHelper = await currentReservation(
+        store,
+        owner,
+        job.id,
+        job.manifest.helper,
+      ).catch(() => undefined);
+      if (
+        !sameReservation(fundingReservation, currentFunding) ||
+        !sameReservation(helperReservation, currentHelper)
+      )
+        throw new GateError(409, "Outpoint reservation is no longer current.");
       const current = await store.get(capability.pk, capability.sk);
       if (
         !current ||

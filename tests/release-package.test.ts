@@ -190,14 +190,42 @@ describe("source release package", () => {
       expect(paths).toContain(relativePath);
       expect(manifest.identities.sourceFiles[relativePath]).toMatch(/^[a-f0-9]{64}$/);
     }
-    expect(manifest.releases.pinning.sourcesEnrolled).toBe(true);
-    expect(manifest.releases.historicalSubset.sourcesEnrolled).toBe(true);
+    expect(manifest.releases.pinning.sourcesEnrolled).toBe(false);
+    expect(manifest.releases.historicalSubset.sourcesEnrolled).toBe(false);
     expect(
-      Object.keys(manifest.identities.sourceFiles).some(
-        (relativePath) =>
-          relativePath.includes("__pycache__") || relativePath.endsWith(".pyc"),
+      Object.keys(manifest.identities.sourceFiles).some((relativePath) =>
+        relativePath.startsWith("vendor/"),
       ),
     ).toBe(false);
+  });
+
+  it("rejects an untracked optimized file and leaves ignored files out", () => {
+    const unexpected = path.join(root, "research/optimized-subset/local-notes.txt");
+    writeFileSync(unexpected, "not tracked\n");
+    try {
+      expect(() => createSourceManifest(root)).toThrow(/Unexpected release input/);
+    } finally {
+      rmSync(unexpected, { force: true });
+    }
+    const ignored = path.join(root, "research/optimized-subset/.env");
+    writeFileSync(ignored, "SECRET=not-enrolled\n");
+    try {
+      const manifest = createSourceManifest(root);
+      expect(manifest.identities.sourceFiles["research/optimized-subset/.env"]).toBeUndefined();
+      expect(
+        Object.keys(manifest.identities.sourceFiles).some((relativePath) =>
+          relativePath.startsWith("vendor/"),
+        ),
+      ).toBe(false);
+      expect(
+        Object.keys(manifest.identities.sourceFiles).some(
+          (relativePath) =>
+            relativePath.includes("__pycache__") || relativePath.endsWith(".pyc"),
+        ),
+      ).toBe(false);
+    } finally {
+      rmSync(ignored, { force: true });
+    }
   });
 
   it("requires both historical candidate roots", () => {

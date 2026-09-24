@@ -327,6 +327,14 @@ export async function claimLaunch(
   return launch;
 }
 
+function canStartOwnedProcess(launch: LaunchRecord): boolean {
+  if (launch.replacement || launch.providerId || launch.providerSubmissions !== 0)
+    return false;
+  if (launch.providerOutcome !== "not-submitted") return false;
+  if (launch.state === "claimed" && launch.processStarts === 0) return true;
+  return launch.state === "uncertain" && launch.processId === undefined;
+}
+
 export async function launchOwnedProcess(
   store: Store,
   owner: string,
@@ -337,17 +345,26 @@ export async function launchOwnedProcess(
   now: Date,
   boundMs: number,
 ): Promise<LaunchRecord> {
-  const loaded = await loadPair(store, owner, requestId, slot);
+  let loaded = await loadPair(store, owner, requestId, slot);
   const { launch, job } = loaded;
   if (launch.bindings.inputHash !== inputHash || job.mainnetRequestHash !== inputHash)
     throw new Error("ImmutableInputMismatch");
-  if (launch.state !== "claimed" || launch.processStarts !== 0 || launch.replacement)
-    throw new Error("LaunchRefused");
-  await commit(store, loaded, {
-    ...launch,
-    state: "launching",
-    processStarts: launch.processStarts + 1,
-  });
+  for (;;) {
+    if (!canStartOwnedProcess(loaded.launch)) throw new Error("LaunchRefused");
+    try {
+      await commit(store, loaded, {
+        ...loaded.launch,
+        state: "launching",
+        processStarts: loaded.launch.processStarts + 1,
+      });
+      break;
+    } catch (error) {
+      if (!(error instanceof Conflict)) throw error;
+      const current = await loadPair(store, owner, requestId, slot);
+      if (!canStartOwnedProcess(current.launch)) throw error;
+      loaded = current;
+    }
+  }
   let started: { processId: string; stdoutExclusive?: Promise<void> } | undefined;
   try {
     const startedProcess = await start();
@@ -473,8 +490,15 @@ export async function submitProviderOnce(
     if (!submitted.providerId) throw new Error("ProviderIdentityMissing");
     for (;;) {
       const current = await loadPair(store, owner, requestId, slot);
-      if (current.launch.stdoutProtocol === "violated")
+      if (current.launch.stdoutProtocol === "violated") {
+        try {
+          await persistViolatedProvider(store, current, submitted.providerId);
+        } catch (error) {
+          if (error instanceof Conflict) continue;
+          throw error;
+        }
         throw new Error("AcknowledgementRejected");
+      }
       if (
         current.launch.providerId ||
         current.launch.providerSubmissions !== 1 ||
@@ -500,11 +524,48 @@ export async function submitProviderOnce(
       }
     }
   } catch (error) {
+    if (error instanceof Error && error.message === "AcknowledgementRejected") throw error;
     const current = await loadPair(store, owner, requestId, slot);
     if (current.launch.providerOutcome !== "uncertain")
       throw new Error("DuplicatePaidSubmission");
     throw error;
   }
+}
+
+async function persistViolatedProvider(
+  store: Store,
+  loaded: LoadedPair,
+  providerId: string,
+): Promise<void> {
+  const { launch } = loaded;
+  if (!providerId) throw new Error("ProviderIdentityMissing");
+  if (
+    launch.state === "uncertain" &&
+    launch.stdoutProtocol === "violated" &&
+    launch.providerOutcome === "submitted" &&
+    launch.providerId === providerId &&
+    launch.submission === undefined
+  )
+    return;
+  if (
+    launch.state !== "uncertain" ||
+    launch.replacement ||
+    launch.providerOutcome !== "uncertain" ||
+    launch.providerSubmissions !== 1 ||
+    launch.providerId ||
+    launch.submission !== "in-progress" ||
+    launch.stdoutProtocol !== "violated"
+  )
+    throw new Error("DuplicatePaidSubmission");
+  const next: LaunchRecord = {
+    ...launch,
+    state: "uncertain",
+    providerId,
+    providerOutcome: "submitted",
+    stdoutProtocol: "violated",
+  };
+  delete next.submission;
+  await commit(store, loaded, next);
 }
 
 export async function recordLateProviderId(
@@ -521,8 +582,10 @@ export async function recordLateProviderId(
   if (launch.bindings.inputHash !== inputHash)
     throw new Error("ImmutableInputMismatch");
   if (!providerId) throw new Error("ProviderIdentityMissing");
-  if (launch.stdoutProtocol === "violated")
+  if (launch.stdoutProtocol === "violated") {
+    await persistViolatedProvider(store, loaded, providerId);
     throw new Error("AcknowledgementRejected");
+  }
   if (
     launch.state !== "uncertain" ||
     launch.replacement ||
