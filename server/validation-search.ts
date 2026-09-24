@@ -9,7 +9,10 @@ import {
   type CoverageScope,
   type SearchStage,
   applyRange,
+  coverageAccountStopped,
   coverageLedgerSchema,
+  coversPartition,
+  creditedAttempts,
   emptyLedger,
   publishedHitRecords,
 } from "./runtime/coverage-ledger";
@@ -24,6 +27,7 @@ const stateSchema = z.object({
   active: z.array(slot).max(32),
   cancel: z.array(z.string()).max(32),
   interrupted: z.array(slot).max(32).default([]),
+  retry: z.array(z.number().int().nonnegative()).max(32).default([]),
   completed: z.number().int().nonnegative(),
   candidatesChecked: z.number().int().nonnegative(),
   coverageLedger: coverageLedgerSchema.optional(),
@@ -65,6 +69,12 @@ export async function validationTick(
     waitSeconds,
     polls: (event.polls || 0) + 1,
   });
+  const haltStopped = async (message: string) => {
+    job.status = "failed";
+    job.error = message;
+    await save();
+    return finish(false, 0);
+  };
   // Drain only ids submitted by this run before starting a new phase or stopping.
   if (state.cancel.length) {
     const id = state.cancel[0];
@@ -162,10 +172,7 @@ export async function validationTick(
         { kind: "hit-capacity", hitCount: records },
       );
       state.coverageLedger = decision.ledger;
-      job.status = "paused";
-      job.error = "Validation hit output exceeds supported capacity.";
-      await save();
-      return finish(false, 0);
+      return haltStopped("Validation hit output exceeds supported capacity.");
     }
     const checked = output.candidates.length
       ? await cpu({ ...input, action: "verify", candidates: output.candidates })
@@ -182,10 +189,9 @@ export async function validationTick(
           { kind: "deterministic-failure" },
         );
         state.coverageLedger = decision.ledger;
-        job.status = "paused";
-        job.error = "Validation range or candidate needs independent review.";
-        await save();
-        return finish(false, 0);
+        return haltStopped(
+          "Validation range or candidate needs independent review.",
+        );
       }
       const decision = applyRange(
         state.coverageLedger ?? emptyLedger(),
@@ -196,10 +202,9 @@ export async function validationTick(
       );
       state.coverageLedger = decision.ledger;
       if (decision.stop) {
-        job.status = "paused";
-        job.error = `Validation range stopped without credit: ${decision.reason}`;
-        await save();
-        return finish(false, 0);
+        return haltStopped(
+          `Validation range stopped without credit: ${decision.reason}`,
+        );
       }
       if (decision.credited) state.completed++;
       if (job.stage === "pinning") {
@@ -263,10 +268,9 @@ export async function validationTick(
         { kind: "deterministic-failure" },
       );
       state.coverageLedger = decision.ledger;
-      job.status = "paused";
-      job.error = "Validation range or candidate needs independent review.";
-      await save();
-      return finish(false, 0);
+      return haltStopped(
+        "Validation range or candidate needs independent review.",
+      );
     }
     const decision = applyRange(
       state.coverageLedger ?? emptyLedger(),
@@ -277,22 +281,63 @@ export async function validationTick(
     );
     state.coverageLedger = decision.ledger;
     if (decision.stop) {
-      job.status = "paused";
-      job.error = `Validation range stopped without credit: ${decision.reason}`;
-      await save();
-      return finish(false, 0);
+      return haltStopped(
+        `Validation range stopped without credit: ${decision.reason}`,
+      );
     }
     state.active = state.active.filter((x) => x.id !== unit.id);
     if (decision.credited) state.completed++;
   }
+  if (coverageAccountStopped(state.coverageLedger)) {
+    return haltStopped(
+      "Validation coverage stopped; this account cannot resume.",
+    );
+  }
+  if (state.interrupted.some((unit) => !unit.id)) {
+    job.status = "paused";
+    job.error =
+      "Validation submission outcome unknown; reconcile before resuming.";
+    await save();
+    return finish(false, 0);
+  }
+  const busy = new Set([
+    ...state.active.map((unit) => unit.attempt),
+    ...state.retry,
+  ]);
+  for (const unit of state.interrupted) {
+    if (unit.id && !busy.has(unit.attempt)) {
+      state.retry.push(unit.attempt);
+      busy.add(unit.attempt);
+    }
+  }
+  state.interrupted = [];
   job.updatedAt = new Date().toISOString();
   job.attempt = state.nextAttempt;
   await save();
   if (state.active.length >= state.slots) return finish(false);
+  const retryAttempt = state.retry.shift();
+  let attempt: number;
+  if (retryAttempt !== undefined) {
+    attempt = retryAttempt;
+  } else {
   try {
     workRange(job.stage, state.nextAttempt);
   } catch {
     if (state.active.length) return finish(false);
+    const stage = searchStage(job.stage);
+    const covered = coversPartition(
+      creditedAttempts(
+        state.coverageLedger ?? emptyLedger(),
+        coverageScope(event, job, selected.id),
+        stage,
+      ),
+      stage,
+    );
+    if (!covered) {
+      return haltStopped(
+        "Validation stage cannot be exhausted while a range is uncredited.",
+      );
+    }
     if (job.stage === "round1" || job.stage === "round2") {
       // A particular pin need not have a usable digest solution. No HORS
       // secrets have been disclosed, so select a fresh pin and try again.
@@ -310,15 +355,16 @@ export async function validationTick(
     await save();
     return finish(true);
   }
+    attempt = state.nextAttempt;
+  }
   if (!state.parameters) {
     state.parameters = stateSchema.shape.parameters
       .unwrap()
       .parse(await cpu({ ...input, action: "export" }));
     await save();
   }
-  const unit: { attempt: number; id?: string } = {
-    attempt: state.nextAttempt++,
-  };
+  if (retryAttempt === undefined) state.nextAttempt++;
+  const unit: { attempt: number; id?: string } = { attempt };
   state.active.push(unit);
   job.status = "searching";
   await save(); // A crash after this point pauses; it never duplicates paid work.

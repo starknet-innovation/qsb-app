@@ -32,6 +32,10 @@ import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
 import type { FundingLedger } from "./runtime/dispatcher";
 import { canonicalReservationWrites } from "./runtime/storage-authority";
+import {
+  coverageAccountStopped,
+  coverageLedgerSchema,
+} from "./runtime/coverage-ledger";
 import { installSupervisedRoutes } from "./runtime/supervised-routes";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
@@ -622,6 +626,17 @@ export function createApp(
       return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
     if (job.status !== "paused")
       return c.json({ error: "Only a paused job can be resumed." }, 409);
+    const storedLedger = z
+      .object({ coverageLedger: coverageLedgerSchema.optional() })
+      .safeParse(row.validation);
+    if (
+      storedLedger.success &&
+      coverageAccountStopped(storedLedger.data.coverageLedger)
+    )
+      return c.json(
+        { error: "Stopped coverage cannot be resumed on this account." },
+        409,
+      );
     if (job.error?.includes("Submission outcome unknown"))
       return c.json(
         { error: "Reconcile the unknown Runpod submission before retrying." },

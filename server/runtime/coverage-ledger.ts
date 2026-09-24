@@ -78,6 +78,12 @@ export function emptyLedger(): CoverageLedger {
   return { accounts: [] };
 }
 
+export function coverageAccountStopped(
+  ledger: CoverageLedger | undefined,
+): boolean {
+  return ledger?.accounts.some((account) => account.stopped) ?? false;
+}
+
 export function stageAttemptCount(stage: SearchStage): number {
   return stage === "pinning" ? PINNING_ATTEMPTS : SUBSET_ATTEMPTS;
 }
