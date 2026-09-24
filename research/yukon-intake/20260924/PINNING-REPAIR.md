@@ -737,3 +737,34 @@ All **48 Python tests pass**, including packaging whitelist/hash/overwrite tests
 This closes local assembly and offline entrypoint checks, not GPU success inside
 this image, provider queue transport, remote enrollment or fresh proof. Earlier
 native GPU tests are not silently promoted into certification of this new image.
+
+## Compute-only queue image and coordinator decoder
+
+`pin_queue.py` binds provider job ID, runtime-manifest hash and canonical input
+hash around a fresh one-request runtime child. Only bound compute is accepted.
+The child environment excludes provider credentials, output files have kernel
+size limits, and timeout/error cleanup kills and reaps its process group. Limits
+are set inside the fresh interpreter, avoiding `preexec_fn` in a threaded SDK
+worker. A non-drained/failed runtime result raises a job error, never success.
+
+The packager now emits separate `runtime` and `queue` Docker targets (select
+`--target runtime` or `--target queue` explicitly). Queue source, unchanged existing
+hash-locked dependencies and the runtime manifest have a separate binding. The
+new decoder checks queue protocol, provider ID, runtime manifest, submitted input
+hash and output/request fields before producing the Store publication envelope.
+It does not accept historical solver output as the new release or enroll itself.
+
+All **51 Python tests**, **16 TypeScript integration tests**, and typecheck pass.
+Queue tests use real child processes for credential exclusion, failure, malformed
+output, timeout and output-limit checks, and reject artifact/manifest mismatch
+before launch. The decoder rejects changed transport/result bindings.
+
+The local amd64 queue image built with the existing hash-pinned Runpod SDK 1.7.13
+and passed pip check. `runtime/queue/` records distinct OCI index/manifest/config
+identities. Actual installed SDK import and main-entry handler registration were
+checked offline/read-only with networking disabled. SDK startup was intercepted;
+the registered handler rejected no-GPU compute and wrong manifest as expected.
+This proves registration/failure handling, **not remote queue polling or GPU
+success**. No credentials, paid resources, image push, enrollment or production
+routing were used. Test containers were removed; the local image remains available
+for the next explicitly bounded remote validation gate.

@@ -410,3 +410,57 @@ export async function prepareResearchSubset(
   ]);
   return exported;
 }
+
+/** Decode the new queue protocol explicitly; never treat the old solver shape as equivalent. */
+export function decodeResearchQueueCompletion(
+  providerResult: unknown,
+  request: unknown,
+  runtimeManifestSha256: string,
+) {
+  hash.parse(runtimeManifestSha256);
+  const response = z
+    .object({
+      id: z.string().min(1),
+      status: z.literal("COMPLETED"),
+      output: z
+        .object({
+          protocol: z.literal("qsb-yukon-pin-queue-v1"),
+          providerJobId: z.string(),
+          runtimeManifestSha256: hash,
+          inputSha256: hash,
+          output: result,
+        })
+        .strict(),
+    })
+    .parse(providerResult);
+  if (
+    response.id !== response.output.providerJobId ||
+    response.output.runtimeManifestSha256 !== runtimeManifestSha256 ||
+    response.output.inputSha256 !==
+      fingerprint({ runtimeManifestSha256, request })
+  )
+    throw Error("Queue transport binding mismatch");
+  if (!request || typeof request !== "object")
+    throw Error("Missing queue request");
+  for (const key of [
+    "protocol",
+    "requestId",
+    "manifestHash",
+    "binarySha256",
+    "parameterSha256",
+    "range",
+  ]) {
+    if (
+      !isDeepStrictEqual(
+        (request as Record<string, unknown>)[key],
+        (response.output.output as any)[key],
+      )
+    )
+      throw Error("Queue output differs from submission");
+  }
+  return {
+    id: response.id,
+    status: "COMPLETED" as const,
+    output: response.output.output,
+  };
+}

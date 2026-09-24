@@ -1,0 +1,9 @@
+{
+  "format": "qsb-yukon-pin-queue-v1",
+  "dispatchAuthorized": false,
+  "files": {
+    "pin_queue.py": "f6c31da11a852f1d1f12f8bc0a3d00f90198ed020fa2c9236d4ef6f4bc4a03da",
+    "requirements.lock": "09560b11e3bdfb4a8543b210c695dbb79105c1e4ceca48ef9c1a0436dd0e0d39",
+    "runtime-manifest.json": "4e380441231fce434745d6116187aef06ad4086c8df9496948b65b880a7d9039"
+  }
+}

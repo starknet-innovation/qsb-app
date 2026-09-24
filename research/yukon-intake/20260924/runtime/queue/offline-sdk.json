@@ -1,0 +1,19 @@
+{
+  "sdkVersion": "1.7.13",
+  "sdkStartIntercepted": true,
+  "checks": [
+    {
+      "case": "no GPU",
+      "rejected": true,
+      "error": "Range did not drain"
+    },
+    {
+      "case": "wrong manifest",
+      "rejected": true,
+      "error": "Runtime manifest mismatch"
+    }
+  ],
+  "remoteQueueTested": false,
+  "gpuSuccessEstablished": false,
+  "releaseStatus": "HOLD"
+}

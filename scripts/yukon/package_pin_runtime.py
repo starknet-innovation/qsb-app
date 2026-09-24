@@ -28,7 +28,15 @@ def package(binary,out):
     (out/'bin/pinning').chmod(0o755)
     manifest={'format':'qsb-yukon-pin-runtime-v1','protocol':'qsb-yukon-pinning-research-v1','releaseStatus':'HOLD','dispatchAuthorized':False,'imageManifestDigest':None,'files':{name:hashlib.sha256(raw).hexdigest() for name,raw in sorted(snapshots.items())}}
     (out/'runtime-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    (out/'Dockerfile').write_text('FROM '+BASE+'\nRUN apt-get update && apt-get install -y --no-install-recommends python3 libssl3 && rm -rf /var/lib/apt/lists/*\nCOPY bin /opt/qsb/bin\nCOPY scripts /opt/qsb/scripts\nCOPY worker /opt/qsb/worker\nCOPY runtime-manifest.json /opt/qsb/runtime-manifest.json\nWORKDIR /opt/qsb\nENV PYTHONDONTWRITEBYTECODE=1\nENTRYPOINT ["python3", "/opt/qsb/scripts/yukon/pin_worker.py"]\n')
+    (out/'Dockerfile').write_text('FROM '+BASE+' AS runtime\nRUN apt-get update && apt-get install -y --no-install-recommends python3 libssl3 && rm -rf /var/lib/apt/lists/*\nCOPY bin /opt/qsb/bin\nCOPY scripts /opt/qsb/scripts\nCOPY worker /opt/qsb/worker\nCOPY runtime-manifest.json /opt/qsb/runtime-manifest.json\nWORKDIR /opt/qsb\nENV PYTHONDONTWRITEBYTECODE=1\nENTRYPOINT ["python3", "/opt/qsb/scripts/yukon/pin_worker.py"]\n')
+    # Queue is a separate image target and closure; it cannot enroll itself.
+    for name,source in [('pin_queue.py',ROOT/'scripts/yukon/pin_queue.py'),('requirements.lock',ROOT/'worker/optimized/requirements.lock')]:
+        if source.is_symlink():raise ValueError('Symlinked queue input')
+        (out/name).write_bytes(source.read_bytes())
+    queue={'format':'qsb-yukon-pin-queue-v1','dispatchAuthorized':False,'files':{name:hashlib.sha256((out/name).read_bytes()).hexdigest() for name in ('pin_queue.py','requirements.lock','runtime-manifest.json')}}
+    (out/'queue-binding.json').write_text(json.dumps(queue,indent=2)+'\n')
+    with (out/'Dockerfile').open('a') as f:
+        f.write('FROM runtime AS queue\nRUN apt-get update && apt-get install -y --no-install-recommends python3-venv && rm -rf /var/lib/apt/lists/*\nCOPY requirements.lock /opt/qsb/requirements.lock\nRUN python3 -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir --require-hashes --only-binary=:all: -r /opt/qsb/requirements.lock && /opt/venv/bin/pip check\nCOPY pin_queue.py queue-binding.json /opt/qsb/\nENTRYPOINT ["/opt/venv/bin/python", "-u", "/opt/qsb/pin_queue.py"]\n')
     return manifest
 
 if __name__=='__main__':

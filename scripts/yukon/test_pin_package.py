@@ -16,7 +16,7 @@ class Package(unittest.TestCase):
                 self.assertEqual(len(m['files']),11)
                 self.assertFalse(m['dispatchAuthorized']);self.assertIsNone(m['imageManifestDigest'])
                 self.assertEqual(m['releaseStatus'],'HOLD')
-                self.assertEqual(set(p.relative_to(out).as_posix() for p in out.rglob('*') if p.is_file()),set(m['files'])|{'Dockerfile','runtime-manifest.json'})
+                self.assertEqual(set(p.relative_to(out).as_posix() for p in out.rglob('*') if p.is_file()),set(m['files'])|{'Dockerfile','runtime-manifest.json','pin_queue.py','requirements.lock','queue-binding.json'})
                 with self.assertRaises(ValueError):package.package(binary,out)
     def test_wrong_binary_and_symlink_rejected_before_output(self):
         with tempfile.TemporaryDirectory() as tmp:

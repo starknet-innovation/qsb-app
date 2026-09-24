@@ -1,0 +1,13 @@
+{
+  "localTag": "qsb-pr30-pin-queue:20260924",
+  "localOciIndexDigest": "sha256:851855ef0d2d1e70f9b27dc60097d3ab44c15bd0f9bdd5b624b8d4da46b9f41e",
+  "amd64ManifestDigest": "sha256:01cfa2347438e42d5c682cb3d64e139e7e8a1cae22ef74424040cbe68712395c",
+  "configDigest": "sha256:be012d2dc61da3e79f47d8664f4f9c3ff26d2d9792ceb616a078dad2c30ae40a",
+  "queueBindingSha256": "76c3063ff40e77a3be93372048a144239a74a90a8e4f6cd5819c64cf6d38656c",
+  "runpodSdk": "1.7.13",
+  "pipCheckPassed": true,
+  "registryPushed": false,
+  "enrolled": false,
+  "remoteQueueTested": false,
+  "releaseStatus": "HOLD"
+}
