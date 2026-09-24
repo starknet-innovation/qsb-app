@@ -1,10 +1,8 @@
-import { fingerprint } from "./provenance";
-
 export const HISTORICAL_CUDA_PROGRAM_ID = "qsb-config-a-ranked-v2-2791ed0";
 
 /**
- * Identity copied onto a missing record and checked against stored records.
- * These bytes stay fixed if the archived descriptor file is edited under the same id.
+ * Program copied onto a deposit when it is created.
+ * The record is informational. Withdrawal and job pin do not compare it.
  */
 export const HISTORICAL_CUDA_PROGRAM = {
   id: HISTORICAL_CUDA_PROGRAM_ID,
@@ -13,10 +11,7 @@ export const HISTORICAL_CUDA_PROGRAM = {
     "dd99c923c5079791fc7634460d5692c7f651ad3c27d32ae6f14080ec65ca13d0",
 } as const;
 
-/**
- * Program copied onto a deposit when it opens.
- * A reviewed successor is added to the enrolled set. Recorded deposits are not rewritten.
- */
+/** Program copied onto deposits opened now. Recorded deposits are not rewritten. */
 export const ENROLLED_CUDA_PROGRAM_ID = HISTORICAL_CUDA_PROGRAM_ID;
 
 const enrolledForNewDeposits = new Set<string>([HISTORICAL_CUDA_PROGRAM_ID]);
@@ -48,12 +43,6 @@ export const WATCHED_YUKON_SUBSET = {
     "cfa5e15772e1d6764d707d6c9bd7c1bcd9b8ec9cfbe5c800a00b384e39e35ac2",
 } as const;
 
-const blockedReleaseHashes = new Set<string>([
-  WATCHED_YUKON_SUBSET.publicBuildReleaseSha256,
-  WATCHED_YUKON_SUBSET.publicBuildBinarySha256,
-  WATCHED_YUKON_SUBSET.solverReleaseHash,
-]);
-
 export function historicalCudaProgram(): CudaProgramRecord {
   return { ...HISTORICAL_CUDA_PROGRAM };
 }
@@ -74,12 +63,6 @@ function knownProgram(id: string): CudaProgramRecord | undefined {
 export function assertDepositCudaProgram(
   value: CudaProgramRecord,
 ): CudaProgramRecord {
-  if (
-    blockedReleaseHashes.has(value.releaseHash) ||
-    value.id === WATCHED_YUKON_SUBSET.solverId ||
-    value.id === WATCHED_YUKON_SUBSET.supervisedProfileId
-  )
-    throw new Error("DepositCudaProgramMismatch");
   const known = knownProgram(value.id);
   if (
     !known ||
@@ -102,17 +85,6 @@ export function programForNewDeposit(): CudaProgramRecord {
   return requireEnrolledCudaProgram(ENROLLED_CUDA_PROGRAM_ID);
 }
 
-/**
- * Existing record wins. A deposit with no record stays on the frozen historical
- * program, including when a later program is enrolled for new deposits.
- */
-export function cudaProgramForDeposit(
-  recorded: CudaProgramRecord | undefined,
-): CudaProgramRecord {
-  if (!recorded) return historicalCudaProgram();
-  return assertDepositCudaProgram(recorded);
-}
-
 export function openDeposit<T extends object>(
   vault: T,
 ): T & { cudaProgram: CudaProgramRecord } {
@@ -123,19 +95,4 @@ export function openDeposit<T extends object>(
       cudaProgram: assertDepositCudaProgram(recorded.cudaProgram),
     };
   return { ...recorded, cudaProgram: programForNewDeposit() };
-}
-
-export function assertSearchUsesDepositProgram(
-  selected: { id: string; kernelCommit: string },
-  recorded: CudaProgramRecord | undefined,
-): CudaProgramRecord {
-  const bound = cudaProgramForDeposit(recorded);
-  const releaseHash = fingerprint(selected);
-  if (
-    selected.id !== bound.id ||
-    selected.kernelCommit !== bound.kernelCommit ||
-    releaseHash !== bound.releaseHash
-  )
-    throw new Error("DepositCudaProgramMismatch");
-  return bound;
 }

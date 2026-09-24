@@ -1,5 +1,4 @@
 import { assertSolverPin, solverRelease } from "../src/lib/provenance";
-import { assertSearchUsesDepositProgram } from "../src/lib/cuda-program";
 /** Operator-created regtest jobs only. No browser/API route can create these records. */
 import { z } from "zod";
 import type { Row, Store } from "./store";
@@ -112,7 +111,6 @@ export async function validationTick(
   const selected = job.solver
     ? assertSolverPin(job.solver, vault)
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
-  assertSearchUsesDepositProgram(selected, vault.cudaProgram);
   if (
     selected.searchVersion !== searchVersion ||
     selected.kernelCommit !== release.kernelCommit ||

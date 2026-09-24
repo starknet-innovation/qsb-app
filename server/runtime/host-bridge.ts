@@ -5,7 +5,6 @@ import {
   type SolverPin,
 } from "../../src/lib/provenance";
 import type { PublicVault, Withdrawal } from "../../src/lib/model";
-import { HISTORICAL_CUDA_PROGRAM_ID } from "../../src/lib/cuda-program";
 import { Conflict, type Store } from "../store";
 import contract from "../mainnet-capability.json";
 import { compareDirectoryIdentity } from "./host-requirements";
@@ -48,11 +47,7 @@ export type SupervisedJob = {
   execution: {
     kind: "qsb-supervised-service-v1";
     network: "mainnet";
-    profile: {
-      id:
-        | typeof HISTORICAL_CUDA_PROGRAM_ID
-        | "qsb-supervised-pin-v4-subset-v5";
-    };
+    profile: { id: "qsb-supervised-pin-v4-subset-v5" };
     sourceManifestFormat: "qsb-source-release-manifest-v1";
     coreSourceManifest: string;
     nativeBinariesEnrolled: false;

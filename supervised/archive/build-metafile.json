@@ -5,7 +5,7 @@
       "imports": []
     },
     "../../src/lib/provenance.ts": {
-      "bytes": 3027,
+      "bytes": 2989,
       "imports": [
         {
           "path": "@noble/hashes/sha2.js",
@@ -84,17 +84,6 @@
       ],
       "format": "esm"
     },
-    "../../src/lib/cuda-program.ts": {
-      "bytes": 4785,
-      "imports": [
-        {
-          "path": "../../src/lib/provenance.ts",
-          "kind": "import-statement",
-          "original": "./provenance"
-        }
-      ],
-      "format": "esm"
-    },
     "work/yukon-pin-preflight-20260923/execution-gate.ts": {
       "bytes": 185,
       "imports": [],
@@ -111,7 +100,7 @@
       "format": "esm"
     },
     "work/yukon-app-routing-20260923/routing.ts": {
-      "bytes": 4635,
+      "bytes": 3933,
       "imports": [
         {
           "path": "zod",
@@ -127,11 +116,6 @@
           "path": "../../src/lib/provenance.ts",
           "kind": "import-statement",
           "original": "../../../../src/lib/provenance"
-        },
-        {
-          "path": "../../src/lib/cuda-program.ts",
-          "kind": "import-statement",
-          "original": "../../../../src/lib/cuda-program"
         },
         {
           "path": "work/yukon-pin-preflight-20260923/execution-gate.ts",
@@ -411,7 +395,7 @@
       "imports": [],
       "exports": [],
       "inputs": {},
-      "bytes": 152751
+      "bytes": 145473
     },
     "dist/service.cjs": {
       "imports": [
@@ -513,16 +497,13 @@
           "bytesInOutput": 1312
         },
         "work/yukon-app-routing-20260923/routing.ts": {
-          "bytesInOutput": 2988
+          "bytesInOutput": 2472
         },
         "../../src/lib/network.ts": {
           "bytesInOutput": 384
         },
         "../../src/lib/model.ts": {
           "bytesInOutput": 2361
-        },
-        "../../src/lib/cuda-program.ts": {
-          "bytesInOutput": 2523
         },
         "work/yukon-pin-preflight-20260923/execution-gate.ts": {
           "bytesInOutput": 90
@@ -558,7 +539,7 @@
           "bytesInOutput": 3616
         }
       },
-      "bytes": 56603
+      "bytes": 53530
     }
   }
 }
