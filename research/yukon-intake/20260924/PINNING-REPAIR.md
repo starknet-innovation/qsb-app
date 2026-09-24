@@ -572,3 +572,29 @@ private-field name with an empty value, and short commitment row). They reject
 before the compute callback. Positive CPU historical replay still passes; its
 separate regression receipt is in `runtime/state-reconstruction/`. No GPU work,
 fixture spend or deployment occurred. Durable release integration remains open.
+
+## Indexed Store publication integration
+
+`scripts/yukon/pin_store.ts` connects the research result/reference contract to the
+application `Store` transaction interface and the existing indexed pin inventory.
+It binds the completed provider ID, frozen request, expected binary, public context,
+CPU verdict, owner and revision. Scope/intent updates plus conditions on the
+provider identity index and global ID claim occur in one atomic transaction.
+Candidates move the scope to draining; empty results do not grant range credit.
+Duplicate publication, pause/revision races and changed identities fail closed.
+
+Seven tests pass using the actual application `MemoryStore` and existing
+`PinInventoryV3.reserve/submit/attach` path. The transport and CPU verifier are
+mocked in these transaction tests. Coverage includes two racing publishers, repeat
+delivery, pause and index/global-claim changes during verification, mismatched
+provider/range/context, stale owner/revision, inconsistent decisions and verifier
+failure. Typecheck passes. No database service, paid submission or GPU was used.
+
+This is an **unenrolled research integration**, not a replacement controller.
+`research_result_verified` is deliberately not an accepted production handoff
+state: it retains evidence without authorizing subset launch. The trusted CPU
+callback still needs fixed-launcher enrollment, and successful checks here do not
+certify DynamoDB service behavior. Next gates are the composed real CPU runner,
+real isolated backend, sibling drain/owned handoff and release-aware queue routing.
+Existing production controller/runtime artifacts and release selection are
+unchanged. No claim is made that the durable integration blocker is fully closed.
