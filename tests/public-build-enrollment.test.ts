@@ -1,10 +1,10 @@
-import { execFileSync } from "node:child_process";
 import {
   cpSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -156,17 +156,19 @@ describe("public build enrollment", () => {
   it("rejects an extra solver file even when every locked file matches", () => {
     const directory = materializeEnrollmentTree();
     try {
-      for (const relativePath of [
-        "research/optimized-subset/subset/tests/gpu_epochs/pair_shared.cuh",
-        "research/optimized-subset/subset/tests/gpu_epochs/tree.cu",
-      ]) {
+      for (const [relativePath, fixture] of [
+        [
+          "research/optimized-subset/subset/tests/gpu_epochs/pair_shared.cuh",
+          "tests/fixtures/public-build-4763c70/pair_shared.cuh",
+        ],
+        [
+          "research/optimized-subset/subset/tests/gpu_epochs/tree.cu",
+          "tests/fixtures/public-build-4763c70/tree.cu",
+        ],
+      ] as const) {
         writeFileSync(
           path.join(directory, relativePath),
-          execFileSync(
-            "git",
-            ["show", `4763c70dafa76c717f7d0a27e386523bab62049f:${relativePath}`],
-            { cwd: root },
-          ),
+          readFileSync(path.join(root, fixture)),
         );
       }
       const extra = "research/optimized-subset/subset/tests/gpu_epochs/extra_header.cuh";
@@ -241,6 +243,105 @@ describe("public build enrollment", () => {
       );
     } finally {
       rmSync(stillValid, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects symlinks that resolve outside the enrollment root", () => {
+    const outside = mkdtempSync(path.join(tmpdir(), "qsb-enroll-outside-"));
+    const directory = materializeEnrollmentTree();
+    try {
+      writeFileSync(path.join(outside, "runtime.py"), "outside\n");
+      rmSync(path.join(directory, "worker/optimized/runtime.py"));
+      symlinkSync(
+        path.join(outside, "runtime.py"),
+        path.join(directory, "worker/optimized/runtime.py"),
+      );
+      expect(() => enrollPublicBuild(directory)).toThrow("PublicBuildPathEscapes");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+    const externalSubset = mkdtempSync(path.join(tmpdir(), "qsb-enroll-subset-"));
+    const linked = materializeEnrollmentTree();
+    try {
+      writeFileSync(path.join(externalSubset, "extra.cu"), "outside solver\n");
+      rmSync(path.join(linked, "research/optimized-subset/subset"), {
+        recursive: true,
+      });
+      symlinkSync(
+        externalSubset,
+        path.join(linked, "research/optimized-subset/subset"),
+      );
+      expect(() => enrollPublicBuild(linked)).toThrow("PublicBuildPathEscapes");
+    } finally {
+      rmSync(linked, { recursive: true, force: true });
+      rmSync(externalSubset, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a disconnected queue stage and a decoy build stage", () => {
+    const lock = JSON.parse(
+      readFileSync(path.join(root, "worker/optimized/source-lock.json"), "utf8"),
+    ) as { buildBase: string; runtimeBase: string };
+    const disconnected = [
+      `FROM ${lock.buildBase} AS build`,
+      "COPY research/optimized-subset /src/research/optimized-subset",
+      `FROM ${lock.runtimeBase} AS runtime`,
+      "COPY --from=build /opt/qsb-validation /opt/qsb-validation",
+      "FROM alpine:3 AS queue",
+      "COPY --from=runtime /opt/qsb-validation /opt/qsb-validation",
+      "",
+    ].join("\n");
+    const directory = materializeEnrollmentTree();
+    try {
+      writeFileSync(path.join(directory, "worker/optimized/Dockerfile"), disconnected);
+      expect(() => enrollPublicBuild(directory)).toThrow(
+        "PublicBuildBaseImageMismatch",
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+    const decoy = [
+      "FROM alpine:3 AS build",
+      "COPY worker/optimized/build.py /src/worker/optimized/build.py",
+      `FROM ${lock.buildBase} AS decoy`,
+      "COPY research/optimized-subset /src/research/optimized-subset",
+      `FROM ${lock.runtimeBase} AS runtime`,
+      "COPY --from=build /opt/qsb-validation /opt/qsb-validation",
+      "COPY --from=decoy /src/research/optimized-subset /tmp/decoy",
+      "FROM runtime AS queue",
+      "",
+    ].join("\n");
+    const decoyTree = materializeEnrollmentTree();
+    try {
+      writeFileSync(path.join(decoyTree, "worker/optimized/Dockerfile"), decoy);
+      expect(() => enrollPublicBuild(decoyTree)).toThrow(
+        "PublicBuildBaseImageMismatch",
+      );
+    } finally {
+      rmSync(decoyTree, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a routing file that keeps the historical profile id only in a comment", () => {
+    const relativePath =
+      "supervised/runtime/source/work/yukon-app-routing-20260923/routing.ts";
+    const original = readFileSync(path.join(root, relativePath), "utf8");
+    const retargeted = [
+      `// qsb-supervised-pin-v4-subset-v5 ${HISTORICAL_SOLVER_RELEASE_SHA256}`,
+      original.replace(HISTORICAL_SOLVER_RELEASE_SHA256, "a".repeat(64)),
+      "",
+    ].join("\n");
+    expect(retargeted).toContain("qsb-supervised-pin-v4-subset-v5");
+    expect(retargeted).toContain(HISTORICAL_SOLVER_RELEASE_SHA256);
+    const directory = materializeEnrollmentTree();
+    try {
+      writeFileSync(path.join(directory, relativePath), retargeted);
+      expect(() => enrollPublicBuild(directory)).toThrow(
+        "SupervisedProfileRetargeted",
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

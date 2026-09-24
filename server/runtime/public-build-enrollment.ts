@@ -1,9 +1,9 @@
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import capability from "../mainnet-capability.json";
 import { release } from "../../src/lib/model";
-import { sha256Hex } from "./identity";
+import { assertInsideRepo, sha256Hex } from "./identity";
 import { parseWorkerDockerfile } from "./package-release";
 
 /**
@@ -26,10 +26,12 @@ const OPTIMIZED_SOURCE = "research/optimized-subset";
 const SUPERVISOR_SOURCE_MANIFEST = "supervised/runtime/source-manifest.json";
 const PACKAGE_LOCK = "package-lock.json";
 
-const ROUTING_FILES = [
-  "supervised/archive/work/yukon-app-routing-20260923/routing.ts",
-  "supervised/runtime/source/work/yukon-app-routing-20260923/routing.ts",
-] as const;
+const ROUTING_FILE_SHA256 = {
+  "supervised/archive/work/yukon-app-routing-20260923/routing.ts":
+    "f890d87b2b0466da3f9f5407b6e0cf9d08c391acb4db8f22cb74bc51f61440c9",
+  "supervised/runtime/source/work/yukon-app-routing-20260923/routing.ts":
+    "ec7015ee9ec8caea32068af8ebe024a3f08c2fcbd895415cea4a58cf0aa22bd2",
+} as const;
 
 export const PUBLIC_BUILD_SOURCE_COMMIT =
   "4763c70dafa76c717f7d0a27e386523bab62049f";
@@ -204,10 +206,21 @@ function fail(code: string): never {
   throw new Error(code);
 }
 
+function enrollmentPath(root: string, relativePath: string): string {
+  try {
+    return assertInsideRepo(root, relativePath);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "Release path escapes the checkout"
+    )
+      fail("PublicBuildPathEscapes");
+    throw error;
+  }
+}
+
 function readRepoFile(root: string, relativePath: string): Buffer {
-  if (path.isAbsolute(relativePath) || relativePath.split("/").includes(".."))
-    fail("PublicBuildPathEscapes");
-  const absolute = path.join(root, relativePath);
+  const absolute = enrollmentPath(root, relativePath);
   if (!existsSync(absolute)) fail(`PublicBuildMissing:${relativePath}`);
   return readFileSync(absolute);
 }
@@ -238,30 +251,25 @@ function solverLockPath(relativeFile: string): string {
 /** File inventory of subset/, matching worker/optimized/build.py. */
 function solverInventory(root: string): string[] {
   const subsetDir = path.posix.join(OPTIMIZED_SOURCE, "subset");
-  const absoluteRoot = path.join(root, subsetDir);
-  if (!existsSync(absoluteRoot)) fail(`PublicBuildMissing:${subsetDir}`);
+  enrollmentPath(root, subsetDir);
+  if (!existsSync(path.join(root, subsetDir))) fail(`PublicBuildMissing:${subsetDir}`);
   const found: string[] = [];
-  const stack = [absoluteRoot];
+  const stack = [subsetDir];
   while (stack.length) {
-    const current = stack.pop();
-    if (!current) break;
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const full = path.join(current, entry.name);
-      const relativeFile = path
-        .relative(path.join(root, OPTIMIZED_SOURCE), full)
-        .split(path.sep)
-        .join("/");
+    const relativeDir = stack.pop();
+    if (!relativeDir) break;
+    const absolute = enrollmentPath(root, relativeDir);
+    for (const entry of readdirSync(absolute, { withFileTypes: true })) {
+      const relativePath = path.posix.join(relativeDir, entry.name);
+      const relativeFile = relativePath.slice(OPTIMIZED_SOURCE.length + 1);
       if (
-        relativeFile.startsWith("../") ||
-        relativeFile === ".." ||
+        !relativePath.startsWith(`${OPTIMIZED_SOURCE}/`) ||
         relativeFile.split("/").includes("..")
       )
         fail("PublicBuildLockEscapes");
-      if (entry.isDirectory() && !entry.isSymbolicLink()) {
-        stack.push(full);
-        continue;
-      }
-      if (entry.isFile() || entry.isSymbolicLink()) found.push(relativeFile);
+      enrollmentPath(root, relativePath);
+      if (entry.isDirectory()) stack.push(relativePath);
+      else if (entry.isFile()) found.push(relativeFile);
     }
   }
   return found;
@@ -281,11 +289,8 @@ function solverDivergence(
       diverged.push(relativePath);
       continue;
     }
-    const absolute = path.join(root, relativePath);
-    const digest = lstatSync(absolute).isSymbolicLink()
-      ? null
-      : sha256Hex(readRepoFile(root, relativePath));
-    if (digest !== expected.get(relativeFile)) diverged.push(relativePath);
+    if (sha256Hex(readRepoFile(root, relativePath)) !== expected.get(relativeFile))
+      diverged.push(relativePath);
   }
   for (const relativeFile of [...actual].sort()) {
     if (!expected.has(relativeFile)) diverged.push(solverLockPath(relativeFile));
@@ -293,11 +298,15 @@ function solverDivergence(
   return diverged;
 }
 
+type StageCopy = {
+  from: string | null;
+  sources: string[];
+};
+
 type OptimizedStage = {
   name: string;
   image: string;
-  copies: string[];
-  copyFrom: string[];
+  copies: StageCopy[];
 };
 
 function stripDockerfileComment(line: string): string {
@@ -377,7 +386,7 @@ function parseOptimizedStages(text: string): OptimizedStage[] {
       const name = from[2] ?? `stage-${index}`;
       if (stages.some((stage) => stage.name === name))
         fail("PublicBuildDockerfileUnparsed");
-      current = { name, image: from[1] ?? "", copies: [], copyFrom: [] };
+      current = { name, image: from[1] ?? "", copies: [] };
       stages.push(current);
       continue;
     }
@@ -386,17 +395,20 @@ function parseOptimizedStages(text: string): OptimizedStage[] {
     if (!copy) continue;
     const tokens = dockerfileTokens(copy[1] ?? "");
     const sources: string[] = [];
+    let fromStage: string | null = null;
     for (let cursor = 0; cursor < tokens.length; cursor += 1) {
       const token = tokens[cursor] ?? "";
       if (token === "--from") {
         const value = tokens[cursor + 1];
-        if (!value || value.startsWith("--")) fail("PublicBuildDockerfileUnparsed");
-        current.copyFrom.push(value);
+        if (!value || value.startsWith("--") || fromStage)
+          fail("PublicBuildDockerfileUnparsed");
+        fromStage = value;
         cursor += 1;
         continue;
       }
       if (token.startsWith("--from=")) {
-        current.copyFrom.push(token.slice("--from=".length));
+        if (fromStage) fail("PublicBuildDockerfileUnparsed");
+        fromStage = token.slice("--from=".length);
         continue;
       }
       if (token.startsWith("--")) {
@@ -406,29 +418,33 @@ function parseOptimizedStages(text: string): OptimizedStage[] {
       sources.push(token);
     }
     if (sources.length < 2) fail("PublicBuildDockerfileUnparsed");
-    current.copies.push(...sources.slice(0, -1));
+    current.copies.push({ from: fromStage, sources: sources.slice(0, -1) });
   }
   if (!stages.length) fail("PublicBuildDockerfileUnparsed");
   return stages;
 }
 
-function reachableStages(
+function stageByName(
   stages: readonly OptimizedStage[],
-  targets: readonly string[],
-): OptimizedStage[] {
-  const byName = new Map(stages.map((stage) => [stage.name, stage]));
+  name: string,
+): OptimizedStage | undefined {
+  return stages.find((stage) => stage.name === name);
+}
+
+function derivesFromRuntime(
+  stages: readonly OptimizedStage[],
+  name: string,
+): boolean {
   const seen = new Set<string>();
-  const stack = [...targets];
-  while (stack.length) {
-    const name = stack.pop();
-    if (!name || seen.has(name)) continue;
-    const stage = byName.get(name);
-    if (!stage) fail("PublicBuildBaseImageMismatch");
-    seen.add(name);
-    if (byName.has(stage.image)) stack.push(stage.image);
-    for (const from of stage.copyFrom) if (byName.has(from)) stack.push(from);
+  let current = name;
+  while (!seen.has(current)) {
+    if (current === "runtime") return true;
+    seen.add(current);
+    const stage = stageByName(stages, current);
+    if (!stage || !stageByName(stages, stage.image)) return false;
+    current = stage.image;
   }
-  return stages.filter((stage) => seen.has(stage.name));
+  return false;
 }
 
 function copiesSolverSource(source: string): boolean {
@@ -438,36 +454,44 @@ function copiesSolverSource(source: string): boolean {
   );
 }
 
+function copiesValidationArtifact(source: string): boolean {
+  return (
+    source === "/opt/qsb-validation" || source.startsWith("/opt/qsb-validation/")
+  );
+}
+
 function assertOptimizedDockerfile(root: string): void {
   const stages = parseOptimizedStages(
     readRepoFile(root, OPTIMIZED_DOCKERFILE).toString("utf8"),
   );
-  const used = reachableStages(stages, ["runtime", "queue"]);
-  const runtime = used.find((stage) => stage.name === "runtime");
-  const build = used.find((stage) => stage.image === BUILD_BASE);
-  if (!runtime || runtime.image !== RUNTIME_BASE || !build)
+  const runtime = stageByName(stages, "runtime");
+  if (
+    !runtime ||
+    runtime.image !== RUNTIME_BASE ||
+    !derivesFromRuntime(stages, "queue")
+  )
     fail("PublicBuildBaseImageMismatch");
-  if (!used.some((stage) => stage.copies.some(copiesSolverSource)))
+  const producers = runtime.copies.filter((copy) =>
+    copy.sources.some(copiesValidationArtifact),
+  );
+  if (
+    producers.length === 0 ||
+    producers.some((copy) => stageByName(stages, copy.from ?? "")?.image !== BUILD_BASE)
+  )
+    fail("PublicBuildBaseImageMismatch");
+  if (
+    producers.some((copy) => {
+      const producer = stageByName(stages, copy.from ?? "");
+      return !producer?.copies.some((item) => item.sources.some(copiesSolverSource));
+    })
+  )
     fail("PublicBuildDockerfileMissingSolver");
   parseWorkerDockerfile(readRepoFile(root, HISTORICAL_DOCKERFILE).toString("utf8"));
 }
 
 function assertSupervisedProfileUnmoved(root: string): void {
-  const banned = [
-    HISTORICAL_DOCKERFILE,
-    OPTIMIZED_DOCKERFILE,
-    WORKER_BINARY_SHA256,
-    SOLVER_RELEASE_SHA256,
-    SUPERVISOR_ARCHIVE_SHA256,
-    OCI_INDEX_DIGEST,
-  ];
-  for (const relativePath of ROUTING_FILES) {
-    const text = readRepoFile(root, relativePath).toString("utf8");
-    if (!text.includes(HISTORICAL_SOLVER_RELEASE_SHA256))
-      fail("SupervisedProfileMissingHistoricalPin");
-    if (!text.includes("qsb-supervised-pin-v4-subset-v5"))
-      fail("SupervisedProfileMissingHistoricalPin");
-    if (banned.some((needle) => text.includes(needle)))
+  for (const [relativePath, expected] of Object.entries(ROUTING_FILE_SHA256)) {
+    if (sha256Hex(readRepoFile(root, relativePath)) !== expected)
       fail("SupervisedProfileRetargeted");
   }
 }
