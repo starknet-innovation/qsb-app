@@ -80,6 +80,7 @@ resource "aws_security_group" "runtime" {
   name        = "${var.name}-runtime"
   description = "No inbound access; outbound HTTPS for AWS, image registry and Runpod"
   vpc_id      = aws_vpc.runtime[0].id
+  ingress     = []
   egress {
     from_port   = 443
     to_port     = 443

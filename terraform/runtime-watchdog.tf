@@ -93,3 +93,17 @@ output "supervised_runtime" {
     execution_enabled            = false
   } : null
 }
+resource "aws_cloudwatch_metric_alarm" "watchdog_missing" {
+  count               = var.provision_runtime && length(var.cleanup_endpoints) > 0 ? 1 : 0
+  alarm_name          = "${var.name}-cleanup-watchdog-missing"
+  namespace           = "AWS/Lambda"
+  metric_name         = "Invocations"
+  dimensions          = { FunctionName = aws_lambda_function.watchdog[0].function_name }
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+  alarm_actions       = var.alarm_actions
+}

@@ -62,7 +62,8 @@ resource "aws_sqs_queue" "dispatch" {
   sqs_managed_sse_enabled     = true
   visibility_timeout_seconds  = 2100
   message_retention_seconds   = 1209600
-  redrive_policy              = jsonencode({ deadLetterTargetArn = aws_sqs_queue.dispatch_dead[0].arn, maxReceiveCount = 1 })
+  depends_on                  = [aws_sqs_queue.dispatch_dead]
+  redrive_policy              = jsonencode({ deadLetterTargetArn = "arn:${data.aws_partition.current.partition}:sqs:${var.region}:${var.aws_account_id}:${var.name}-dispatch-dead.fifo", maxReceiveCount = 1 })
 }
 resource "aws_dynamodb_table" "cleanup" {
   count        = local.runtime_count
