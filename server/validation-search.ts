@@ -332,41 +332,41 @@ export async function validationTick(
   if (retryAttempt !== undefined) {
     attempt = retryAttempt;
   } else {
-  try {
-    workRange(job.stage, state.nextAttempt);
-  } catch {
-    if (state.active.length) return finish(false);
-    const stage = searchStage(job.stage);
-    const covered = coversPartition(
-      creditedAttempts(
-        state.coverageLedger ?? emptyLedger(),
-        coverageScope(event, job, selected.id),
+    try {
+      workRange(job.stage, state.nextAttempt);
+    } catch {
+      if (state.active.length) return finish(false);
+      const stage = searchStage(job.stage);
+      const covered = coversPartition(
+        creditedAttempts(
+          state.coverageLedger ?? emptyLedger(),
+          coverageScope(event, job, selected.id),
+          stage,
+        ),
         stage,
-      ),
-      stage,
-    );
-    if (!covered) {
-      return haltStopped(
-        "Validation stage cannot be exhausted while a range is uncredited.",
       );
-    }
-    if (job.stage === "round1" || job.stage === "round2") {
-      // A particular pin need not have a usable digest solution. No HORS
-      // secrets have been disclosed, so select a fresh pin and try again.
-      job.stage = "pinning";
-      job.status = "queued";
-      delete job.solution;
-      delete state.parameters;
-      state.nextAttempt = state.nextPinAttempt;
-      state.pinRestarts++;
+      if (!covered) {
+        return haltStopped(
+          "Validation stage cannot be exhausted while a range is uncredited.",
+        );
+      }
+      if (job.stage === "round1" || job.stage === "round2") {
+        // A particular pin need not have a usable digest solution. No HORS
+        // secrets have been disclosed, so select a fresh pin and try again.
+        job.stage = "pinning";
+        job.status = "queued";
+        delete job.solution;
+        delete state.parameters;
+        state.nextAttempt = state.nextPinAttempt;
+        state.pinRestarts++;
+        await save();
+        return finish(false, 0);
+      }
+      job.status = "paused";
+      job.error = "Validation stage exhausted its complete range.";
       await save();
-      return finish(false, 0);
+      return finish(true);
     }
-    job.status = "paused";
-    job.error = "Validation stage exhausted its complete range.";
-    await save();
-    return finish(true);
-  }
     attempt = state.nextAttempt;
   }
   if (!state.parameters) {
