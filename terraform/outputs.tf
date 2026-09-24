@@ -1,0 +1,9 @@
+output "app_url" { value = "https://${aws_cloudfront_distribution.web.domain_name}" }
+output "api_url" { value = aws_apigatewayv2_api.api.api_endpoint }
+output "frontend_bucket" { value = aws_s3_bucket.frontend.id }
+output "cloudfront_distribution_id" { value = aws_cloudfront_distribution.web.id }
+output "table_name" { value = aws_dynamodb_table.records.name }
+output "workflow_arn" { value = aws_sfn_state_machine.withdrawal.arn }
+output "source_commit" { value = var.source_commit }
+output "transactions_enabled" { value = false }
+output "runpod_configured" { value = local.runpod }

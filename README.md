@@ -10,6 +10,7 @@ A research application for constructing and recovering quantum-safe Bitcoin vaul
 - `server/`: API, durable storage interfaces, search coordination, and transaction checks.
 - `worker/`: historical GPU worker build and public CPU verification code.
 - `tests/`: application unit tests, browser harnesses, and reference tests.
+- [terraform/](terraform/README.md): AWS research-app infrastructure, with GPUs remaining on Runpod and transaction activation disabled.
 - `research/optimized-subset/`: isolated optimized CUDA source with exact exceptional-point recovery and checked host operations. See its README before use.
 - `docs/STATUS.md`: achieved evidence summary.
 - [Mainnet readiness checklist](docs/MAINNET-READINESS.md): remaining tasks, dependencies and acceptance evidence.
@@ -40,6 +41,6 @@ The build and unit tests do not establish successful GPU execution, a fresh end-
 
 ## Publication and provenance
 
-See [publication scope](docs/PUBLICATION.md) and [third-party notices](THIRD_PARTY_NOTICES.md). The historical private ECR account is replaced with a nonfunctional placeholder in the exported release descriptor; this snapshot is **not** an attestation of that deployable image. No infrastructure deploy command is provided.
+See [publication scope](docs/PUBLICATION.md) and [third-party notices](THIRD_PARTY_NOTICES.md). The historical private ECR account is replaced with a nonfunctional placeholder in the exported release descriptor; this snapshot is **not** an attestation of that deployable image. The Terraform folder provides a separate reviewed-plan deployment path for the research app; it does not activate mainnet or deploy the experimental supervised runtime.
 
 No project-wide license has been selected for original application code yet. Existing third-party licenses remain in their respective directories. Public visibility alone does not provide a broad reuse license for the original application code.
