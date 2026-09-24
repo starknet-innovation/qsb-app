@@ -11,9 +11,12 @@
   "files": [
     {
       "path": "source/outputs/qsb-vault/server/store.ts",
-      "sha256": "50e94043277d9e156fe817b99fee384654cbf0ef9888d849998cc4cf031c1be7",
+      "sha256": "86b8a147fbdf1e8b74e9f3003dcec28b6ad51767534854906ca050fca9de6c03",
       "originalSha256": "50e94043277d9e156fe817b99fee384654cbf0ef9888d849998cc4cf031c1be7",
-      "origin": "outputs/qsb-vault/server/store.ts"
+      "origin": "outputs/qsb-vault/server/store.ts",
+      "transformations": [
+        "conditionOnly writes are version ConditionChecks and are not Put. MemoryStore checks the version and does not rewrite the row."
+      ]
     },
     {
       "path": "source/outputs/qsb-vault/src/lib/model.ts",
@@ -461,7 +464,7 @@
     },
     {
       "path": "source/work/yukon-mainnet-service-enrollment-20260923/capability.ts",
-      "sha256": "a53fc64c51217a8c22736c65124705f6c63a950f38744fe86e8810272238540f",
+      "sha256": "0e17763d57e1c8b72fbbe1eb2a86db22bac67a9c897da7308ecfea24b64a40a0",
       "originalSha256": "14902f68d89c38fdf79bca4af86ffee771ddfce767647e4058d8ef19dfe400fa",
       "origin": "work/yukon-mainnet-service-enrollment-20260923/capability.ts"
     },
@@ -545,9 +548,12 @@
     },
     {
       "path": "source/work/yukon-resource-session-locator-20260923/context.ts",
-      "sha256": "de7d2959f3f69dd7894ee6d6efb9a6425865a60a8c7e68379d6a64543a07122c",
+      "sha256": "dda8177ebc825d23a593a7e1832ffd332325b4e1f7dfa9e961bd378692ec9e42",
       "originalSha256": "de7d2959f3f69dd7894ee6d6efb9a6425865a60a8c7e68379d6a64543a07122c",
-      "origin": "work/yukon-resource-session-locator-20260923/context.ts"
+      "origin": "work/yukon-resource-session-locator-20260923/context.ts",
+      "transformations": [
+        "Reservation authority moved to SYSTEM#RESERVATION_AUTHORITY / GENERATION: generation check, authorityGeneration-stamped reservations, conditionOnly fences."
+      ]
     },
     {
       "path": "source/work/yukon-resource-session-locator-20260923/entry-hooks.ts",
@@ -557,15 +563,21 @@
     },
     {
       "path": "source/work/yukon-resource-session-locator-20260923/execution.ts",
-      "sha256": "f477455c9a6a6795c5e7a89fe0acdff678a2f540548bdc253be68ff08b4ba53a",
+      "sha256": "5d376d16d8b72fb93a372390603922a6a49a02c9f1d167b44af15bba758c1245",
       "originalSha256": "f477455c9a6a6795c5e7a89fe0acdff678a2f540548bdc253be68ff08b4ba53a",
-      "origin": "work/yukon-resource-session-locator-20260923/execution.ts"
+      "origin": "work/yukon-resource-session-locator-20260923/execution.ts",
+      "transformations": [
+        "Reservation authority moved to SYSTEM#RESERVATION_AUTHORITY / GENERATION: generation check, authorityGeneration-stamped reservations, conditionOnly fences."
+      ]
     },
     {
       "path": "source/work/yukon-resource-session-locator-20260923/resource-grant.ts",
-      "sha256": "be009b379977baa0269f1d3f693f1a044c16941b721df9f03d26f54426eecbdb",
+      "sha256": "4c2670de14f1ab0695423d3b87a26006eeb37d600adc82bb2d26e1d4a71af01b",
       "originalSha256": "be009b379977baa0269f1d3f693f1a044c16941b721df9f03d26f54426eecbdb",
-      "origin": "work/yukon-resource-session-locator-20260923/resource-grant.ts"
+      "origin": "work/yukon-resource-session-locator-20260923/resource-grant.ts",
+      "transformations": [
+        "Reservation authority moved to SYSTEM#RESERVATION_AUTHORITY / GENERATION: generation check, authorityGeneration-stamped reservations, conditionOnly fences."
+      ]
     },
     {
       "path": "source/work/yukon-resource-session-locator-20260923/retirement.ts",
@@ -575,9 +587,12 @@
     },
     {
       "path": "source/work/yukon-resource-session-locator-20260923/sessions.ts",
-      "sha256": "0c7b04180f74701859309b71074d43c3c14b3536064f64b5f093f37faf298086",
+      "sha256": "9e6c1df9fb8ebbd274a8a100840bebc5b9efd243358668ad57ff0a772e347170",
       "originalSha256": "0c7b04180f74701859309b71074d43c3c14b3536064f64b5f093f37faf298086",
-      "origin": "work/yukon-resource-session-locator-20260923/sessions.ts"
+      "origin": "work/yukon-resource-session-locator-20260923/sessions.ts",
+      "transformations": [
+        "Reservation authority moved to SYSTEM#RESERVATION_AUTHORITY / GENERATION: generation check, authorityGeneration-stamped reservations, conditionOnly fences."
+      ]
     },
     {
       "path": "source/work/yukon-retained-endpoint-retirement-20260923/retained.ts",
@@ -599,9 +614,12 @@
     },
     {
       "path": "source/work/yukon-service-solved-completion-20260923/reservations.ts",
-      "sha256": "1e01abc57f73b34b470bea52b1894193f5672e39b5fdab9fc5b264e98984bae3",
+      "sha256": "12abd5532822a5419fb0e5ce32f31619f0ec171266410c83dd6439b17dd45aa9",
       "originalSha256": "1e01abc57f73b34b470bea52b1894193f5672e39b5fdab9fc5b264e98984bae3",
-      "origin": "work/yukon-service-solved-completion-20260923/reservations.ts"
+      "origin": "work/yukon-service-solved-completion-20260923/reservations.ts",
+      "transformations": [
+        "Reservation authority moved to SYSTEM#RESERVATION_AUTHORITY / GENERATION: generation check, authorityGeneration-stamped reservations, conditionOnly fences."
+      ]
     },
     {
       "path": "source/work/yukon-v4-controller-20260923/provider-io.ts",

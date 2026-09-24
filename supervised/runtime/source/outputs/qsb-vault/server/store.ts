@@ -5,7 +5,9 @@ import {
   PutCommand,
   DeleteCommand,
   QueryCommand,
+  ScanCommand,
   TransactWriteCommand,
+  type TransactWriteCommandInput,
 } from "@aws-sdk/lib-dynamodb";
 export type Row = {
   pk: string;
@@ -14,21 +16,91 @@ export type Row = {
   expiresAt?: number;
   [key: string]: unknown;
 };
+export type RuntimeWrite = {
+  row: Row;
+  expected?: number;
+  /** Check the row without writing it. */
+  conditionOnly?: boolean;
+  remove?: boolean;
+  aliasMigration?: boolean;
+};
+type TransactItem = NonNullable<TransactWriteCommandInput["TransactItems"]>[number];
+/** conditionOnly is a version ConditionCheck. It is not a Put. */
+export function runtimeTransactItems(
+  table: string,
+  writes: RuntimeWrite[],
+): TransactItem[] {
+  return writes.map((write) => {
+    const { row, expected, conditionOnly, remove } = write;
+    const version = expected ?? row.version;
+    if (remove)
+      return {
+        Delete: {
+          TableName: table,
+          Key: { pk: row.pk, sk: row.sk },
+          ConditionExpression: "#v = :v",
+          ExpressionAttributeNames: { "#v": "version" },
+          ExpressionAttributeValues: { ":v": version },
+        },
+      };
+    if (conditionOnly)
+      return {
+        ConditionCheck: {
+          TableName: table,
+          Key: { pk: row.pk, sk: row.sk },
+          ConditionExpression: "#v = :v",
+          ExpressionAttributeNames: { "#v": "version" },
+          ExpressionAttributeValues: { ":v": version },
+        },
+      };
+    return {
+      Put: {
+        TableName: table,
+        Item: row,
+        ConditionExpression:
+          expected === undefined ? "attribute_not_exists(pk)" : "#v = :v",
+        ...(expected === undefined
+          ? {}
+          : {
+              ExpressionAttributeNames: { "#v": "version" },
+              ExpressionAttributeValues: { ":v": expected },
+            }),
+      },
+    };
+  });
+}
+function isReservationRow(row: Row) {
+  return row.sk === "RESERVATION" && row.pk.startsWith("OUTPOINT#");
+}
 export interface Store {
   get(pk: string, sk: string): Promise<Row | undefined>;
   put(row: Row, expected?: number): Promise<void>;
   delete(pk: string, sk: string, expected: number): Promise<void>;
   list(pk: string, prefix: string): Promise<Row[]>;
-  atomicPut(writes: { row: Row; expected?: number }[]): Promise<void>;
+  reservationRows(): Promise<Row[]>;
+  atomicPut(writes: RuntimeWrite[]): Promise<void>;
 }
 export class Conflict extends Error {}
 export class MemoryStore implements Store {
   readonly rows = new Map<string, Row>();
-  async atomicPut(writes: { row: Row; expected?: number }[]) {
+  async atomicPut(writes: RuntimeWrite[]) {
     const seen = new Set<string>();
-    for (const { row, expected } of writes) {
+    const removed = new Set<string>();
+    for (const { row, expected, conditionOnly, remove } of writes) {
       const key = `${row.pk}|${row.sk}`,
         old = this.rows.get(key);
+      if (conditionOnly) {
+        if (old?.version !== expected)
+          throw new Conflict("ReservationAuthorityStopped");
+        continue;
+      }
+      if (remove) {
+        if (seen.has(key) || old?.version !== (expected ?? row.version))
+          throw new Conflict("Concurrent update");
+        seen.add(key);
+        removed.add(key);
+        continue;
+      }
       if (
         seen.has(key) ||
         (expected === undefined ? old !== undefined : old?.version !== expected)
@@ -36,8 +108,12 @@ export class MemoryStore implements Store {
         throw new Conflict("Input reserved or concurrent update");
       seen.add(key);
     }
-    for (const { row } of writes)
-      this.rows.set(`${row.pk}|${row.sk}`, structuredClone(row));
+    for (const { row, conditionOnly } of writes) {
+      if (conditionOnly) continue;
+      const key = `${row.pk}|${row.sk}`;
+      if (removed.has(key)) this.rows.delete(key);
+      else this.rows.set(key, structuredClone(row));
+    }
   }
   async get(pk: string, sk: string) {
     const r = this.rows.get(`${pk}|${sk}`);
@@ -62,6 +138,11 @@ export class MemoryStore implements Store {
       .filter((r) => r.pk === pk && r.sk.startsWith(prefix))
       .map((r) => structuredClone(r));
   }
+  async reservationRows() {
+    return [...this.rows.values()]
+      .filter(isReservationRow)
+      .map((row) => structuredClone(row));
+  }
 }
 export class DynamoStore implements Store {
   private client = DynamoDBDocumentClient.from(
@@ -69,24 +150,11 @@ export class DynamoStore implements Store {
     { marshallOptions: { removeUndefinedValues: true } },
   );
   constructor(private table: string) {}
-  async atomicPut(writes: { row: Row; expected?: number }[]) {
+  async atomicPut(writes: RuntimeWrite[]) {
     try {
       await this.client.send(
         new TransactWriteCommand({
-          TransactItems: writes.map(({ row, expected }) => ({
-            Put: {
-              TableName: this.table,
-              Item: row,
-              ConditionExpression:
-                expected === undefined ? "attribute_not_exists(pk)" : "#v = :v",
-              ...(expected === undefined
-                ? {}
-                : {
-                    ExpressionAttributeNames: { "#v": "version" },
-                    ExpressionAttributeValues: { ":v": expected },
-                  }),
-            },
-          })),
+          TransactItems: runtimeTransactItems(this.table, writes),
         }),
       );
     } catch (e) {
@@ -163,6 +231,24 @@ export class DynamoStore implements Store {
       start = r.LastEvaluatedKey;
     } while (start);
     return rows;
+  }
+  async reservationRows() {
+    const rows: Row[] = [];
+    let start: Record<string, unknown> | undefined;
+    do {
+      const page = await this.client.send(
+        new ScanCommand({
+          TableName: this.table,
+          FilterExpression: "sk = :sk AND begins_with(pk, :prefix)",
+          ExpressionAttributeValues: { ":sk": "RESERVATION", ":prefix": "OUTPOINT#" },
+          ExclusiveStartKey: start,
+          ConsistentRead: true,
+        }),
+      );
+      rows.push(...((page.Items ?? []) as Row[]));
+      start = page.LastEvaluatedKey;
+    } while (start);
+    return rows.filter(isReservationRow);
   }
 }
 export const store: Store = process.env.TABLE_NAME

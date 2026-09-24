@@ -25,15 +25,19 @@ import { assertServiceChain } from "../server/runtime/capability";
 import { CONTRACT as archiveContract } from "../supervised/archive/work/yukon-mainnet-service-enrollment-20260923/capability";
 import { runEnrolledCpuVerifier } from "../server/runtime/cpu-verifier";
 import { admitSupervisedJob, claimAdmittedLaunch } from "../server/runtime/dispatcher";
+import { AUTHORITY_PK, AUTHORITY_SK } from "../server/runtime/reservation-guard";
+import { enableInProcessWriterExclusion } from "../server/runtime/storage-authority";
 import {
   acknowledgementExpired,
   acknowledgementLine,
+  bindEvidenceDirectory,
   drainSibling,
   launchOwnedProcess,
   localAckStarter,
   openSiblingSlot,
   publishSimulatedVerifiedHit,
   recordLateProviderId,
+  recordLocalLoss,
   replaceOwnedProcess,
   submitProviderOnce,
   type OwnedProcessStart,
@@ -98,19 +102,7 @@ async function seedCapability(store: MemoryStore) {
     enabled: true,
     contract,
   });
-  await store.put({
-    pk: "SYSTEM#QSB_RESERVATIONS",
-    sk: "SCHEMA",
-    version: 1,
-    format: "qsb-canonical-reservations-v1",
-    state: "active",
-    writerPolicy: "canonical-only",
-    legacyWritersStopped: true,
-    migrationComplete: true,
-    generation: 1,
-    legacyInventoryHash: "ab".repeat(32),
-    canonicalInventoryHash: "cd".repeat(32),
-  });
+  await enableInProcessWriterExclusion(store, "store-transaction-condition");
 }
 
 function memoryRetention() {
@@ -246,6 +238,7 @@ describe("supervised runtime handoff", () => {
     const racing = {
       get: store.get.bind(store),
       list: store.list.bind(store),
+      reservationRows: store.reservationRows.bind(store),
       put: store.put.bind(store),
       delete: store.delete.bind(store),
       atomicPut: async (writes: Parameters<Store["atomicPut"]>[0]) => {
@@ -286,6 +279,7 @@ describe("supervised runtime handoff", () => {
       put: (row, expected) => inner.put(row, expected),
       delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
       list: (pk, prefix) => inner.list(pk, prefix),
+      reservationRows: () => inner.reservationRows(),
       atomicPut: async (writes) => {
         const creating = writes.some((write) =>
           String(write.row.sk).startsWith("JOB#"),
@@ -554,6 +548,140 @@ describe("supervised runtime handoff", () => {
     expect(retried.state).toBe("acknowledged");
     expect(retried.processId).toBe("retried-after-missing-child");
     expect(retried.spawn).toBeUndefined();
+  });
+
+  it("does not relaunch or pay after a directory loss on a spawn that never started", async () => {
+    const { store, admitted } = await claimedFixture();
+    const starter = localAckStarter(
+      "qsb-missing-binary",
+      [],
+      1000,
+      admitted.job.mainnetRequestHash,
+    );
+    await expect(
+      launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        starter.start,
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/ProcessIdentityMissing/);
+    const identity = {
+      device: 1,
+      inode: 2,
+      mode: 0o40700,
+      uid: 0,
+      gid: 0,
+    };
+    const bound = await bindEvidenceDirectory(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      identity,
+    );
+    expect(bound.spawn).toBe("not-started");
+    expect(bound.localLoss).toBeUndefined();
+    const replaced = await bindEvidenceDirectory(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      { ...identity, inode: identity.inode + 1 },
+    );
+    expect(replaced.state).toBe("uncertain");
+    expect(replaced.spawn).toBeUndefined();
+    expect(replaced.localLoss?.kind).toBe("evidence-directory-replaced");
+    let starts = 0;
+    await expect(
+      launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => {
+          starts += 1;
+          return { processId: "should-not-start" };
+        },
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/LaunchRefused/);
+    expect(starts).toBe(0);
+    let submits = 0;
+    await expect(
+      submitProviderOnce(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => {
+          submits += 1;
+          return { providerId: "paid-after-directory-loss" };
+        },
+      ),
+    ).rejects.toThrow(/DuplicatePaidSubmission/);
+    expect(submits).toBe(0);
+
+    const missingFixture = await claimedFixture();
+    const missingStarter = localAckStarter(
+      "qsb-missing-binary",
+      [],
+      1000,
+      missingFixture.admitted.job.mainnetRequestHash,
+    );
+    await expect(
+      launchOwnedProcess(
+        missingFixture.store,
+        address,
+        missingFixture.admitted.job.id,
+        0,
+        missingFixture.admitted.job.mainnetRequestHash,
+        missingStarter.start,
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/ProcessIdentityMissing/);
+    const missing = await recordLocalLoss(
+      missingFixture.store,
+      address,
+      missingFixture.admitted.job.id,
+      0,
+      missingFixture.admitted.job.mainnetRequestHash,
+      "evidence-directory-missing",
+    );
+    expect(missing.spawn).toBeUndefined();
+    expect(missing.localLoss?.kind).toBe("evidence-directory-missing");
+    await expect(
+      launchOwnedProcess(
+        missingFixture.store,
+        address,
+        missingFixture.admitted.job.id,
+        0,
+        missingFixture.admitted.job.mainnetRequestHash,
+        async () => ({ processId: "should-not-start" }),
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/LaunchRefused/);
+    await expect(
+      submitProviderOnce(
+        missingFixture.store,
+        address,
+        missingFixture.admitted.job.id,
+        0,
+        missingFixture.admitted.job.mainnetRequestHash,
+        async () => ({ providerId: "paid-after-missing-directory" }),
+      ),
+    ).rejects.toThrow(/DuplicatePaidSubmission/);
   });
 
   it("does not start a second process when start returns no pid", async () => {
@@ -1269,7 +1397,7 @@ describe("supervised runtime handoff", () => {
       state: "active",
       writerPolicy: "canonical-only",
       legacyWritersStopped: true,
-      migrationComplete: false,
+      migrationComplete: true,
       generation: 1,
       legacyInventoryHash: "ab".repeat(32),
       canonicalInventoryHash: "cd".repeat(32),
@@ -1277,9 +1405,67 @@ describe("supervised runtime handoff", () => {
     await expect(
       admitSupervisedJob(store, address, "mainnet", body, confirmingLedger),
     ).rejects.toThrow(/Canonical reservation authority not enrolled/);
+    await store.put({
+      pk: AUTHORITY_PK,
+      sk: AUTHORITY_SK,
+      version: 0,
+      format: "qsb-reservation-authority-v1",
+      generation: 1,
+      legacyExcluded: true,
+      canonicalAccepting: false,
+      productionEnforcement: false,
+      control: "store-transaction-condition",
+      mainnetEnabled: false,
+      broadcastAuthorized: false,
+    });
+    await expect(
+      admitSupervisedJob(store, address, "mainnet", body, confirmingLedger),
+    ).rejects.toThrow(/Canonical reservation authority not enrolled/);
     expect(
       await store.get(`OUTPOINT#${txid}:${funding.vout}`, "RESERVATION"),
     ).toBeUndefined();
+  });
+
+  it("admits and claims a job after writer exclusion", async () => {
+    const store = new MemoryStore();
+    await store.put({
+      pk: "SYSTEM#QSB_MAINNET_SERVICE",
+      sk: "CAPABILITY",
+      version: 1,
+      enabled: true,
+      contract,
+    });
+    const authority = await enableInProcessWriterExclusion(
+      store,
+      "store-transaction-condition",
+    );
+    const fixture = simulatedMainnetRequest();
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    const admitted = await admitSupervisedJob(
+      store,
+      address,
+      "mainnet",
+      fixture.prepared.body,
+      confirmingLedger,
+    );
+    expect(admitted.job.reservationAuthorityGeneration).toBe(authority.generation);
+    const points = [fixture.prepared.body.manifest.funding, fixture.prepared.body.manifest.helper];
+    for (const point of points) {
+      const key = `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`;
+      expect(point.txid.toLowerCase()).toBe(key.slice("OUTPOINT#".length).split(":")[0]);
+      const reservation = await store.get(key, "RESERVATION");
+      expect(reservation?.authorityGeneration).toBe(authority.generation);
+      expect(reservation?.pk).toBe(key);
+    }
+    await claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger);
+    expect(
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),
+    ).toBeDefined();
   });
 
   it("refuses a launch claim when a reserved outpoint is gone or spent", async () => {
@@ -2077,6 +2263,7 @@ describe("supervised runtime handoff", () => {
       put: (row, expected) => inner.put(row, expected),
       delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
       list: (pk, prefix) => inner.list(pk, prefix),
+      reservationRows: () => inner.reservationRows(),
       atomicPut: async (writes) => {
         const markingUncertain = writes.some((write) => {
           const launch = write.row.launch as { state?: string } | undefined;
@@ -2529,6 +2716,7 @@ describe("supervised runtime handoff", () => {
       put: (row, expected) => inner.put(row, expected),
       delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
       list: (pk, prefix) => inner.list(pk, prefix),
+      reservationRows: () => inner.reservationRows(),
       atomicPut: async (writes) => {
         const claiming = writes.some((write) =>
           String(write.row.sk).startsWith("LAUNCH#"),
@@ -2578,17 +2766,21 @@ describe("supervised runtime handoff", () => {
       put: (row, expected) => inner.put(row, expected),
       delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
       list: (pk, prefix) => inner.list(pk, prefix),
+      reservationRows: () => inner.reservationRows(),
       atomicPut: async (writes) => {
         const claiming = writes.some((write) =>
           String(write.row.sk).startsWith("LAUNCH#"),
         );
         const fencesAuthority = writes.some(
           (write) =>
-            write.row.pk === "SYSTEM#QSB_RESERVATIONS" && write.expected !== undefined,
+            write.row.pk === AUTHORITY_PK &&
+            write.row.sk === AUTHORITY_SK &&
+            write.conditionOnly === true &&
+            write.expected !== undefined,
         );
         if (claiming && fencesAuthority && !bumped) {
           bumped = true;
-          const authority = await inner.get("SYSTEM#QSB_RESERVATIONS", "SCHEMA");
+          const authority = await inner.get(AUTHORITY_PK, AUTHORITY_SK);
           await inner.put(
             { ...authority!, version: authority!.version + 1 },
             authority!.version,
@@ -2599,10 +2791,41 @@ describe("supervised runtime handoff", () => {
     };
     await expect(
       claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger),
-    ).rejects.toThrow(/Reservation authority changed/);
+    ).rejects.toThrow(/LegacyWriterExcluded/);
     expect(bumped).toBe(true);
     expect(
       await inner.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),
+    ).toBeUndefined();
+  });
+
+  it("refuses a claim after the reservation generation changes", async () => {
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const fixture = simulatedMainnetRequest();
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    const admitted = await admitSupervisedJob(
+      store,
+      address,
+      "mainnet",
+      fixture.prepared.body,
+      confirmingLedger,
+    );
+    const key = `${AUTHORITY_PK}|${AUTHORITY_SK}`;
+    const authority = store.rows.get(key);
+    store.rows.set(key, {
+      ...authority!,
+      generation: Number(authority!.generation) + 1,
+    });
+    await expect(
+      claimAdmittedLaunch(store, address, admitted.job.id, confirmingLedger),
+    ).rejects.toThrow(/Reservation authority changed/);
+    expect(
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),
     ).toBeUndefined();
   });
 
@@ -2779,6 +3002,7 @@ describe("supervised runtime handoff", () => {
       put: (row, expected) => inner.put(row, expected),
       delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
       list: (pk, prefix) => inner.list(pk, prefix),
+      reservationRows: () => inner.reservationRows(),
       atomicPut: async (writes) => {
         const claiming = writes.some((write) =>
           String(write.row.sk).startsWith("LAUNCH#"),

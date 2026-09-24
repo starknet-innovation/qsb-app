@@ -7,11 +7,14 @@ import {
 import type { PublicVault, Withdrawal } from "../../src/lib/model";
 import { Conflict, type Store } from "../store";
 import contract from "../mainnet-capability.json";
+import { compareDirectoryIdentity } from "./host-requirements";
 import { validateSolvedState } from "../../src/mainnet/solvedContract";
 import { coreSourceDigest } from "./package-release";
 import {
+  type EvidenceDirectoryIdentity,
   type LaunchBindings,
   type LaunchRecord,
+  type LocalLossKind,
   type RuntimeView,
   type SimulatedHitFacts,
   isSearchRunning,
@@ -39,7 +42,7 @@ export type SupervisedJob = {
   manifest: Withdrawal;
   manifestHash: string;
   mainnetRequestHash: string;
-  reservationAuthorityHash: string;
+  reservationAuthorityGeneration: number;
   solver?: SolverPin;
   execution: {
     kind: "qsb-supervised-service-v1";
@@ -346,7 +349,12 @@ export async function claimLaunch(
 }
 
 function canStartOwnedProcess(launch: LaunchRecord): boolean {
-  if (launch.replacement || launch.providerId || launch.providerSubmissions !== 0)
+  if (
+    launch.replacement ||
+    launch.localLoss ||
+    launch.providerId ||
+    launch.providerSubmissions !== 0
+  )
     return false;
   if (launch.providerOutcome !== "not-submitted") return false;
   if (launch.state === "claimed" && launch.processStarts === 0) return true;
@@ -494,6 +502,7 @@ export async function submitProviderOnce(
     if (
       launch.state !== "acknowledged" ||
       launch.replacement ||
+      launch.localLoss ||
       launch.providerSubmissions !== 0 ||
       launch.providerOutcome !== "not-submitted" ||
       launch.providerId
@@ -958,6 +967,122 @@ export async function drainSibling(
 
 export function acknowledgementLine(inputHash: string): string {
   return `QSB_ACK ${inputHash}\n`;
+}
+
+function providerTouched(launch: LaunchRecord): boolean {
+  return (
+    launch.providerSubmissions > 0 ||
+    launch.providerOutcome !== "not-submitted" ||
+    launch.providerId !== undefined
+  );
+}
+
+export function applyLocalLoss(
+  launch: LaunchRecord,
+  kind: LocalLossKind,
+  observedProcessId?: string,
+): LaunchRecord {
+  if (kind === "process-not-alive") {
+    if (!launch.processId) throw new Error("ProcessIdentityMissing");
+    if (observedProcessId && observedProcessId !== launch.processId)
+      throw new Error("StaleProcess");
+  }
+  const next: LaunchRecord = {
+    ...launch,
+    localLoss: {
+      kind,
+      remoteStopProven: false,
+      providerIdentityPreserved: true,
+    },
+  };
+  delete next.spawn;
+  if (providerTouched(launch)) {
+    if (next.state !== "terminal") next.state = "uncertain";
+    if (next.replacement === "starting") next.replacement = "uncertain";
+  } else if (
+    (kind === "evidence-directory-replaced" ||
+      kind === "evidence-directory-missing") &&
+    next.state !== "terminal"
+  ) {
+    next.state = "uncertain";
+    delete next.replacement;
+  } else if (launch.state === "replacing" || launch.replacement === "starting") {
+    next.state = "uncertain";
+    delete next.replacement;
+  } else if (
+    kind === "process-not-alive" &&
+    launch.state === "acknowledged" &&
+    launch.processId
+  ) {
+    next.state = "terminal";
+    next.evidence = {
+      format: "qsb-terminal-evidence-v1",
+      inputHash: launch.bindings.inputHash,
+      processId: launch.processId,
+      outcome: "process-exit",
+      hitVerified: false,
+      wholeRangeCovered: false,
+      solverFacts: "not-run",
+      chainFacts: "not-run",
+      cpuVerification: "not-run",
+      binariesProduced: false,
+      freshSearch: false,
+    };
+  }
+  if (
+    next.providerId !== launch.providerId ||
+    next.providerOutcome !== launch.providerOutcome ||
+    next.providerSubmissions !== launch.providerSubmissions ||
+    next.processId !== launch.processId ||
+    next.evidenceDirectory?.inode !== launch.evidenceDirectory?.inode
+  )
+    throw new Error("ProviderIdentityChanged");
+  return launchRecordSchema.parse(next);
+}
+
+export async function recordLocalLoss(
+  store: Store,
+  owner: string,
+  requestId: string,
+  slot: number,
+  inputHash: string,
+  kind: LocalLossKind,
+  observedProcessId?: string,
+): Promise<LaunchRecord> {
+  const loaded = await loadPair(store, owner, requestId, slot);
+  if (loaded.launch.bindings.inputHash !== inputHash)
+    throw new Error("ImmutableInputMismatch");
+  return commit(
+    store,
+    loaded,
+    applyLocalLoss(loaded.launch, kind, observedProcessId),
+  );
+}
+
+export async function bindEvidenceDirectory(
+  store: Store,
+  owner: string,
+  requestId: string,
+  slot: number,
+  inputHash: string,
+  identity: EvidenceDirectoryIdentity,
+): Promise<LaunchRecord> {
+  const loaded = await loadPair(store, owner, requestId, slot);
+  if (loaded.launch.bindings.inputHash !== inputHash)
+    throw new Error("ImmutableInputMismatch");
+  const existing = loaded.launch.evidenceDirectory;
+  if (!existing)
+    return commit(store, loaded, {
+      ...loaded.launch,
+      evidenceDirectory: identity,
+    });
+  if (compareDirectoryIdentity(existing, identity) === "intact")
+    return commit(store, loaded, loaded.launch);
+  return commit(
+    store,
+    loaded,
+    applyLocalLoss(loaded.launch, "evidence-directory-replaced"),
+  );
 }
 
 export function localAckStarter(

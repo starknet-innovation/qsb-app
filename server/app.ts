@@ -31,6 +31,7 @@ import { hex } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
 import type { FundingLedger } from "./runtime/dispatcher";
+import { canonicalReservationWrites } from "./runtime/storage-authority";
 import { installSupervisedRoutes } from "./runtime/supervised-routes";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
@@ -528,15 +529,15 @@ export function createApp(
     };
     await store.atomicPut([
       { row: { pk, sk, version: 0, job } },
-      ...[manifest.funding, manifest.helper].map((point) => ({
-        row: {
-          pk: `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`,
-          sk: "RESERVATION",
-          version: 0,
+      ...(await canonicalReservationWrites(
+        store,
+        [manifest.funding, manifest.helper].map((point) => ({
           owner,
           jobId: id,
-        },
-      })),
+          txid: point.txid,
+          vout: point.vout,
+        })),
+      )),
     ]);
     await startWorkflow(job);
     return c.json({ job }, 201);

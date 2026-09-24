@@ -23,8 +23,12 @@ export const requiredReleasePaths = [
   "server/runtime/dispatcher.ts",
   "server/runtime/evidence-reader.ts",
   "server/runtime/host-bridge.ts",
+  "server/runtime/host-lifecycle.ts",
+  "server/runtime/host-requirements.ts",
   "server/runtime/identity.ts",
   "server/runtime/package-release.ts",
+  "server/runtime/reservation-guard.ts",
+  "server/runtime/storage-authority.ts",
   "server/runtime/supervised-routes.ts",
   "server/runtime/types.ts",
   "src/lib/model.ts",
@@ -54,6 +58,7 @@ export const requiredReleasePaths = [
   "worker/cpu/secp256k1.py",
   "worker/cpu/verify_hit.py",
   "scripts/package-release.ts",
+  "scripts/storage-inventory.ts",
 ] as const;
 
 /** Compiler, lock, and Node-requirement metadata required to check the packaged tree. */
@@ -121,8 +126,12 @@ export const componentForPath = (relativePath: string): string => {
     relativePath === "README.md"
   )
     return "build-metadata";
-  if (relativePath.startsWith("server/runtime/host-bridge.ts") || relativePath.startsWith("worker/"))
+  if (
+    relativePath.startsWith("server/runtime/host-") ||
+    relativePath.startsWith("worker/")
+  )
     return relativePath.startsWith("worker/cpu/") ? "cpu-verifier" : "runtime";
+  if (relativePath === "scripts/storage-inventory.ts") return "dispatcher";
   if (relativePath === "server/runtime/cpu-verifier.ts") return "cpu-verifier";
   if (relativePath === "server/runtime/evidence-reader.ts") return "evidence-reader";
   if (

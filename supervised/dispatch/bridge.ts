@@ -41,6 +41,7 @@ export function withCreationOutbox(store: Store): Store {
   return {
     get: store.get.bind(store),
     list: store.list.bind(store),
+    reservationRows: store.reservationRows.bind(store),
     put: store.put.bind(store),
     delete: store.delete.bind(store),
     atomicPut: async (writes) => {
@@ -182,6 +183,7 @@ export async function consumeTicket(
     ...store,
     get: store.get.bind(store),
     list: store.list.bind(store),
+    reservationRows: store.reservationRows.bind(store),
     put: store.put.bind(store),
     delete: store.delete.bind(store),
     atomicPut: async (writes) => {
