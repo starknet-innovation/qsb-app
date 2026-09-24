@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import {
+  assertReleaseProtocol,
   assertSolverPin,
   assertVaultConfiguration,
+  fingerprint,
   pinSolver,
   solverRelease,
+  archivedSolverId,
   currentSolverId,
   vaultConfiguration,
 } from "../src/lib/provenance";
@@ -76,6 +79,48 @@ describe("immutable vault and solver provenance", () => {
     const p = pinSolver(v);
     v.publicStateJson = '{"n":150,"full_script_hex":"51","config":"A"}';
     expect(() => assertSolverPin(p, v)).not.toThrow();
+  });
+  it("resolves the archived and rebuilt descriptors by id", () => {
+    expect(solverRelease(archivedSolverId).id).toBe(
+      "qsb-config-a-ranked-v2-2791ed0",
+    );
+    expect(solverRelease(currentSolverId).id).toBe(
+      "qsb-config-a-ranked-v2-d28103b",
+    );
+    expect(solverRelease(currentSolverId).protocol).toBe("qsb-config-a-v1");
+    expect(solverRelease(currentSolverId).generatorCommit).toBe(
+      solverRelease(archivedSolverId).generatorCommit,
+    );
+    expect(currentSolverId).not.toBe(archivedSolverId);
+  });
+  it("pins a new qsb-config-a-v1 vault to the newest release", () => {
+    const pin = pinSolver(vault());
+    expect(pin.descriptor.id).toBe(currentSolverId);
+    expect(pin.descriptor.protocol).toBe(vaultConfiguration(vault()).protocol);
+    expect(pin.descriptor.id).not.toBe(archivedSolverId);
+  });
+  it("still verifies a pin to the archived release", () => {
+    const v = vault();
+    const descriptor = solverRelease(archivedSolverId);
+    const configuration = vaultConfiguration(v);
+    expect(
+      assertSolverPin(
+        {
+          descriptor,
+          releaseHash: fingerprint(descriptor),
+          vaultConfigurationHash: fingerprint(configuration),
+        },
+        v,
+      ).id,
+    ).toBe(archivedSolverId);
+  });
+  it("rejects a solver pin whose protocol does not match the vault", () => {
+    expect(() =>
+      assertReleaseProtocol(
+        { protocol: "qsb-config-b-v1" },
+        { protocol: "qsb-config-a-v1" },
+      ),
+    ).toThrow("SolverProtocolMismatch");
   });
 });
 

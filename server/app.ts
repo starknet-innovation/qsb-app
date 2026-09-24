@@ -1,5 +1,6 @@
 import { mainnetUiConfig, type MainnetUiOptions } from "./mainnetConfig";
 import {
+  archivedSolverId,
   assertVaultConfiguration,
   pinSolver,
   solverRelease,
@@ -640,9 +641,9 @@ export function createApp(
     const storedLedger = z
       .object({ coverageLedger: coverageLedgerSchema.optional() })
       .safeParse(row.validation);
-    const solverPin = job.solver
-      ? job.solver.descriptor.id
-      : solverRelease("qsb-config-a-ranked-v2-2791ed0").id;
+    const solverPin = solverRelease(
+      job.solver ? job.solver.descriptor.id : archivedSolverId,
+    ).id;
     if (
       storedLedger.success &&
       coverageAccountStopped(storedLedger.data.coverageLedger, {

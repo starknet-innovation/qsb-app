@@ -37,6 +37,7 @@ npm ci
 npm run vendor
 npm test
 # Commit and push any source changes before proceeding.
+npm run deploy-identities -- --context=/path/to/clean-checkout-of-d28103baaa405dba7261f54db80f13aa279ea78e --worker-repository=<private-worker-repository> --cpu-repository=<private-cpu-repository> --tag=<tag>
 node terraform/scripts/build.mjs --network=mainnet
 export TF_VAR_source_commit="$(git rev-parse HEAD)"
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
@@ -49,7 +50,9 @@ terraform -chdir=terraform apply deployment.tfplan
 terraform -chdir=terraform output app_url
 ```
 
-`build.mjs` runs pinned upstream preparation, typecheck/frontend build, bundles both Node Lambda entrypoints (including SDK dependencies), creates deterministic Lambda ZIPs and records file SHA256s/network/commit. The build is done **before** Terraform parses `fileset`/file hashes. It does not deploy anything. The normal builder refuses a dirty tree; `--allow-dirty` permits local inspection only and records `clean:false`, which the Terraform deployment gate rejects.
+`deploy-identities` builds `worker/Dockerfile` and the CPU verifier Lambda image from commit `d28103baaa405dba7261f54db80f13aa279ea78e`, pushes both by digest, and writes `terraform/.build/deploy-identities.json`. That file is the deployment configuration's image source. It is generated, gitignored, and holds the registry location. The public solver descriptor keeps the placeholder registry host and the same digest. The command does not apply Terraform, update a live Runpod endpoint, or broadcast.
+
+`build.mjs` runs pinned upstream preparation, typecheck/frontend build, bundles both Node Lambda entrypoints (including SDK dependencies), creates deterministic Lambda ZIPs and records file SHA256s/network/commit. The build is done **before** Terraform parses `fileset`/file hashes. It does not deploy anything. The normal builder refuses a dirty tree; `--allow-dirty` permits local inspection only and records `clean:false`, which the Terraform deployment gate rejects. Terraform also requires the generated identities file and checks its digests against the current solver descriptor and `reference.zip`.
 
 Choose `--network=testnet4` and `network="testnet4"` together for a Testnet4-identity preview. Both mainnet operations and Testnet4 rehearsal remain disabled; this does not assert that the installed Xverse supports Testnet4. There is intentionally no `enable_mainnet` or rehearsal activation variable.
 

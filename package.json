@@ -15,6 +15,7 @@
     "build:optimized:queue": "docker build --platform=linux/amd64 --target queue -f worker/optimized/Dockerfile -t qsb-optimized-queue:source-v1 .",
     "test:runtime-build": "python3 supervised/runtime/test_build.py",
     "test:optimized-image": "python3 worker/optimized/test_image.py qsb-optimized:source-v1",
+    "deploy-identities": "tsx scripts/deploy-identities.ts",
     "package:release": "tsx scripts/package-release.ts",
     "inventory:storage": "tsx scripts/storage-inventory.ts",
     "harness:core": "bash scripts/test-core.sh"

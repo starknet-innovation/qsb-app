@@ -2,8 +2,10 @@ locals {
   artifacts    = "${path.module}/.build"
   build        = jsondecode(file("${local.artifacts}/manifest.json"))
   workflow_arn = "arn:${data.aws_partition.current.partition}:states:${var.region}:${var.aws_account_id}:stateMachine:${var.name}-withdrawal"
-  runpod       = var.runpod_endpoint_id != "" && var.runpod_secret_arn != ""
-  functions    = toset(["api", "coordinator", "reference"])
+  runpod            = var.runpod_endpoint_id != "" && var.runpod_secret_arn != ""
+  functions         = toset(["api", "coordinator", "reference"])
+  deploy_identities = jsondecode(file("${local.artifacts}/deploy-identities.json"))
+  current_solver    = jsondecode(file("${path.module}/../src/lib/releases/qsb-config-a-ranked-v2-d28103b.json"))
   mime = {
     html = "text/html; charset=utf-8", js = "application/javascript", mjs = "application/javascript",
     css  = "text/css", json = "application/json", svg = "image/svg+xml", wasm = "application/wasm",
@@ -28,6 +30,29 @@ resource "terraform_data" "release" {
     precondition {
       condition     = !(var.network == "mainnet" && var.provision_runtime)
       error_message = "Do not deploy the supervised runtime for the mainnet environment. Mainnet jobs use the Step Functions coordinator."
+    }
+    precondition {
+      condition = (
+        local.deploy_identities.format == "qsb-deploy-identities-v1" &&
+        local.deploy_identities.mainnetEnabled == false &&
+        local.deploy_identities.broadcastAuthorized == false &&
+        can(regex("^[a-f0-9]{40}$", local.deploy_identities.artifactCommit)) &&
+        can(regex("^sha256:[a-f0-9]{64}$", local.deploy_identities.worker.digest)) &&
+        can(regex("^sha256:[a-f0-9]{64}$", local.deploy_identities.cpuVerifier.digest)) &&
+        can(regex("^[a-f0-9]{64}$", local.deploy_identities.cpuVerifier.packageSha256)) &&
+        local.deploy_identities.worker.pull == "${local.deploy_identities.worker.repository}@${local.deploy_identities.worker.digest}" &&
+        local.deploy_identities.cpuVerifier.pull == "${local.deploy_identities.cpuVerifier.repository}@${local.deploy_identities.cpuVerifier.digest}" &&
+        local.deploy_identities.runpod.image == local.deploy_identities.worker.pull &&
+        !strcontains(local.deploy_identities.worker.repository, "000000000000") &&
+        !strcontains(local.deploy_identities.cpuVerifier.repository, "000000000000") &&
+        local.current_solver.id == "qsb-config-a-ranked-v2-d28103b" &&
+        local.current_solver.protocol == "qsb-config-a-v1" &&
+        local.current_solver.generatorCommit == "2c9172051d5c150ef0a994ca6b988a08a3ef9e85" &&
+        endswith(local.current_solver.image, "@${local.deploy_identities.worker.digest}") &&
+        startswith(local.current_solver.image, "000000000000.dkr.ecr.") &&
+        filesha256("${local.artifacts}/reference.zip") == local.deploy_identities.cpuVerifier.packageSha256
+      )
+      error_message = "Generate deploy identities from the pushed artifact commit before deployment. The coordinator image references must be registry digests."
     }
   }
 }

@@ -59,7 +59,7 @@ resource "aws_lambda_function" "coordinator" {
   memory_size                    = 512
   reserved_concurrent_executions = var.lambda_concurrency
   environment {
-    variables = merge({ TABLE_NAME = aws_dynamodb_table.records.name, QSB_NETWORK = var.network, QSB_REHEARSAL_ENABLED = "false", REFERENCE_FUNCTION = aws_lambda_function.reference.function_name }, local.runpod ? { RUNPOD_ENDPOINT_ID = var.runpod_endpoint_id, RUNPOD_SECRET_ARN = var.runpod_secret_arn } : {})
+    variables = merge({ TABLE_NAME = aws_dynamodb_table.records.name, QSB_NETWORK = var.network, QSB_REHEARSAL_ENABLED = "false", REFERENCE_FUNCTION = aws_lambda_function.reference.function_name, SOLVER_IMAGE = local.deploy_identities.runpod.image, CPU_VERIFIER_IMAGE = local.deploy_identities.cpuVerifier.pull }, local.runpod ? { RUNPOD_ENDPOINT_ID = var.runpod_endpoint_id, RUNPOD_SECRET_ARN = var.runpod_secret_arn } : {})
   }
   depends_on = [terraform_data.release, aws_iam_role_policy.logs, aws_iam_role_policy.records, aws_iam_role_policy.reference, aws_iam_role_policy.runpod]
 }

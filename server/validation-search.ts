@@ -1,4 +1,8 @@
-import { assertSolverPin, solverRelease } from "../src/lib/provenance";
+import {
+  archivedSolverId,
+  assertSolverPin,
+  solverRelease,
+} from "../src/lib/provenance";
 /** Operator-created regtest jobs only. No browser/API route can create these records. */
 import { z } from "zod";
 import type { Row, Store } from "./store";
@@ -110,7 +114,7 @@ export async function validationTick(
   // Legacy jobs retain the historical release explicitly, never the current default.
   const selected = job.solver
     ? assertSolverPin(job.solver, vault)
-    : solverRelease("qsb-config-a-ranked-v2-2791ed0");
+    : solverRelease(archivedSolverId);
   if (
     selected.searchVersion !== searchVersion ||
     selected.kernelCommit !== release.kernelCommit ||
@@ -186,7 +190,10 @@ export async function validationTick(
     state.candidatesChecked += output.candidates.length;
     job.computeSeconds += (result.executionTime || 0) / 1000;
     if (checked.valid === true) {
-      if (output.status !== "completed" || output.checkpoint !== "range-complete") {
+      if (
+        output.status !== "completed" ||
+        output.checkpoint !== "range-complete"
+      ) {
         const decision = applyRange(
           state.coverageLedger ?? emptyLedger(),
           scope,
@@ -426,7 +433,8 @@ function sameWorkRange(
 }
 
 function searchStage(stage: string): SearchStage {
-  if (stage === "pinning" || stage === "round1" || stage === "round2") return stage;
+  if (stage === "pinning" || stage === "round1" || stage === "round2")
+    return stage;
   throw new Error("InvalidValidationStage");
 }
 

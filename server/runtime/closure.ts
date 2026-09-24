@@ -44,6 +44,7 @@ export const requiredReleasePaths = [
   "src/lib/readiness.ts",
   "src/lib/transactions.ts",
   "src/lib/releases/qsb-config-a-ranked-v2.json",
+  "src/lib/releases/qsb-config-a-ranked-v2-d28103b.json",
   "src/mainnet/admissionClient.ts",
   "src/mainnet/consumer.ts",
   "src/mainnet/chain.ts",
@@ -92,6 +93,7 @@ export const unpackagedReleaseScripts = [
   "build:optimized:queue",
   "test:runtime-build",
   "test:optimized-image",
+  "deploy-identities",
 ] as const;
 
 const localSpecifier =

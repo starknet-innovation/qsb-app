@@ -1,8 +1,25 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import archived from "./releases/qsb-config-a-ranked-v2.json";
+import rebuilt from "./releases/qsb-config-a-ranked-v2-d28103b.json";
 
-// Append releases; never edit an archived descriptor or resolve through 'latest'.
+export type SolverRelease = {
+  id: string;
+  protocol: string;
+  generatorCommit: string;
+  kernelCommit: string;
+  image: string;
+  searchVersion: string;
+  compiler: string;
+  flags: { pinning: string[]; subset: string[] };
+  sourceHashes: Record<string, string>;
+};
+
+// Append releases at the end. Never edit an archived descriptor or resolve through 'latest'.
+const registry = [archived, rebuilt] as const;
+export const archivedSolverId = archived.id;
+export const currentSolverId = registry[registry.length - 1].id;
+
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value !== null && typeof value === "object")
@@ -17,11 +34,24 @@ export function canonical(value: unknown): string {
 }
 export const fingerprint = (value: unknown) =>
   bytesToHex(sha256(new TextEncoder().encode(canonical(value))));
-const archivedJson = canonical(archived);
-export const currentSolverId = archived.id;
-export function solverRelease(id: string) {
-  if (id !== archived.id) throw new Error("UnsupportedSolverRelease");
-  return JSON.parse(archivedJson) as typeof archived;
+export function solverRelease(id: string): SolverRelease {
+  const found = registry.find((release) => release.id === id);
+  if (!found) throw new Error("UnsupportedSolverRelease");
+  return JSON.parse(canonical(found)) as SolverRelease;
+}
+function newestRelease(protocol: string): SolverRelease {
+  const found = [...registry]
+    .reverse()
+    .find((release) => release.protocol === protocol);
+  if (!found) throw new Error("UnsupportedVaultProtocol");
+  return JSON.parse(canonical(found)) as SolverRelease;
+}
+export function assertReleaseProtocol(
+  descriptor: { protocol: string },
+  configuration: { protocol: string },
+) {
+  if (descriptor.protocol !== configuration.protocol)
+    throw new Error("SolverProtocolMismatch");
 }
 type VaultInput = {
   network?: string;
@@ -58,8 +88,8 @@ export function assertVaultConfiguration(
 }
 export function pinSolver(v: VaultInput & { configuration?: unknown }) {
   const configuration = assertVaultConfiguration(v);
-  if (v.config !== "A") throw new Error("UnsupportedVaultProtocol");
-  const descriptor = solverRelease(currentSolverId);
+  const descriptor = newestRelease(configuration.protocol);
+  assertReleaseProtocol(descriptor, configuration);
   return {
     descriptor,
     releaseHash: fingerprint(descriptor),
@@ -72,12 +102,14 @@ export function assertSolverPin(
   v: VaultInput & { configuration?: unknown },
 ) {
   const descriptor = solverRelease(pin.descriptor.id);
+  const configuration = assertVaultConfiguration(v);
+  assertReleaseProtocol(descriptor, configuration);
   if (
     canonical(pin.descriptor) !== canonical(descriptor) ||
     pin.releaseHash !== fingerprint(descriptor)
   )
     throw new Error("SolverReleaseMismatch");
-  if (pin.vaultConfigurationHash !== fingerprint(assertVaultConfiguration(v)))
+  if (pin.vaultConfigurationHash !== fingerprint(configuration))
     throw new Error("SolverVaultMismatch");
   return descriptor;
 }

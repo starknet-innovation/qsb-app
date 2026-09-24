@@ -1,4 +1,8 @@
-import { assertSolverPin, solverRelease } from "../src/lib/provenance";
+import {
+  archivedSolverId,
+  assertSolverPin,
+  solverRelease,
+} from "../src/lib/provenance";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
 import { chain } from "./chain";
@@ -65,6 +69,19 @@ async function configuredRunpod() {
   } catch {
     throw new Error("ComputeCredentialUnavailable");
   }
+}
+function assertConfiguredSolverImage(selected: { image: string }) {
+  const configured = process.env.SOLVER_IMAGE;
+  if (configured === undefined) return;
+  const configuredDigest = configured.slice(configured.lastIndexOf("@") + 1);
+  const pinnedDigest = selected.image.slice(
+    selected.image.lastIndexOf("@") + 1,
+  );
+  if (
+    !/^sha256:[a-f0-9]{64}$/.test(configuredDigest) ||
+    configuredDigest !== pinnedDigest
+  )
+    throw new Error("SolverImageDigestMismatch");
 }
 // Only identifiers enter workflow history. Recovery secrets never enter AWS.
 export async function handler(event: Event | { action: "providerHealth" }) {
@@ -139,7 +156,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
   // Legacy jobs retain the historical release explicitly, never the current default.
   const selected = job.solver
     ? assertSolverPin(job.solver, vault)
-    : solverRelease("qsb-config-a-ranked-v2-2791ed0");
+    : solverRelease(archivedSolverId);
   if (
     selected.searchVersion !== searchVersion ||
     selected.kernelCommit !== release.kernelCommit ||
@@ -182,6 +199,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     job.status = "searching";
     delete job.retryRequested;
     await save();
+    assertConfiguredSolverImage(selected);
     const result = await runpod.run({
       protocol: selected.protocol,
       kernelCommit: selected.kernelCommit,

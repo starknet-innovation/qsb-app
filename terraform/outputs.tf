@@ -7,3 +7,6 @@ output "workflow_arn" { value = aws_sfn_state_machine.withdrawal.arn }
 output "source_commit" { value = var.source_commit }
 output "transactions_enabled" { value = false }
 output "runpod_configured" { value = local.runpod }
+output "deploy_artifact_commit" { value = local.deploy_identities.artifactCommit }
+output "worker_image_digest" { value = local.deploy_identities.worker.digest }
+output "cpu_verifier_digest" { value = local.deploy_identities.cpuVerifier.digest }
