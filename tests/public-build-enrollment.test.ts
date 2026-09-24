@@ -1,8 +1,26 @@
+import { execFileSync } from "node:child_process";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { assertExperimentalUsdLimits } from "../server/runtime/activation";
+import {
+  enrolledSourcePaths,
+  publicBuildReadPaths,
+} from "../server/runtime/closure";
 import { selectProofRunner } from "../server/runtime/fresh-proof";
+import {
+  createSourceManifest,
+  writePackageTree,
+} from "../server/runtime/package-release";
 import {
   CPU_REFERENCE_SHA256,
   HISTORICAL_ARCHIVE_SHA256,
@@ -134,4 +152,155 @@ describe("public build enrollment", () => {
       assertExperimentalUsdLimits({ vaultUsd: 1, feeUsd: 1, gpuUsd: 1 }),
     ).toThrow("UsdLimitCheckClosed");
   });
+
+  it("rejects an extra solver file even when every locked file matches", () => {
+    const directory = materializeEnrollmentTree();
+    try {
+      for (const relativePath of [
+        "research/optimized-subset/subset/tests/gpu_epochs/pair_shared.cuh",
+        "research/optimized-subset/subset/tests/gpu_epochs/tree.cu",
+      ]) {
+        writeFileSync(
+          path.join(directory, relativePath),
+          execFileSync(
+            "git",
+            ["show", `4763c70dafa76c717f7d0a27e386523bab62049f:${relativePath}`],
+            { cwd: root },
+          ),
+        );
+      }
+      const extra = "research/optimized-subset/subset/tests/gpu_epochs/extra_header.cuh";
+      writeFileSync(path.join(directory, extra), "extra solver source\n");
+      const enrolled = enrollPublicBuild(directory);
+      expect(enrolled.solverSourceMatchesRecordedLock).toBe(false);
+      expect([...enrolled.divergedFromRecordedLock]).toEqual([extra]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects optimized Dockerfile strings that are only a comment or an unused stage", () => {
+    const lock = JSON.parse(
+      readFileSync(path.join(root, "worker/optimized/source-lock.json"), "utf8"),
+    ) as { buildBase: string; runtimeBase: string };
+    const decoy = [
+      `# FROM ${lock.buildBase} AS build`,
+      "# COPY research/optimized-subset /src/research/optimized-subset",
+      `# FROM ${lock.runtimeBase} AS runtime`,
+      `FROM ${lock.buildBase} AS unused`,
+      "COPY research/optimized-subset /src/research/optimized-subset",
+      `FROM ${lock.runtimeBase} AS also-unused`,
+      "FROM alpine:3 AS build",
+      "COPY worker/optimized/build.py /src/worker/optimized/build.py",
+      "FROM alpine:3 AS runtime",
+      "COPY --from=build /opt/qsb-validation /opt/qsb-validation",
+      "FROM runtime AS queue",
+      "",
+    ].join("\n");
+    const commented = materializeEnrollmentTree();
+    try {
+      writeFileSync(path.join(commented, "worker/optimized/Dockerfile"), decoy);
+      expect(() => enrollPublicBuild(commented)).toThrow(
+        "PublicBuildBaseImageMismatch",
+      );
+    } finally {
+      rmSync(commented, { recursive: true, force: true });
+    }
+    const unusedCopy = [
+      `FROM ${lock.buildBase} AS build`,
+      "COPY worker/optimized/build.py /src/worker/optimized/build.py",
+      "# COPY research/optimized-subset /src/research/optimized-subset",
+      `FROM ${lock.buildBase} AS unused`,
+      "COPY research/optimized-subset /src/research/optimized-subset",
+      `FROM ${lock.runtimeBase} AS runtime`,
+      "COPY --from=build /opt/qsb-validation /opt/qsb-validation",
+      "FROM runtime AS queue",
+      "",
+    ].join("\n");
+    const copied = materializeEnrollmentTree();
+    try {
+      writeFileSync(path.join(copied, "worker/optimized/Dockerfile"), unusedCopy);
+      expect(() => enrollPublicBuild(copied)).toThrow(
+        "PublicBuildDockerfileMissingSolver",
+      );
+    } finally {
+      rmSync(copied, { recursive: true, force: true });
+    }
+    const stillValid = materializeEnrollmentTree();
+    try {
+      const original = readFileSync(
+        path.join(root, "worker/optimized/Dockerfile"),
+        "utf8",
+      );
+      writeFileSync(
+        path.join(stillValid, "worker/optimized/Dockerfile"),
+        `# FROM ${lock.buildBase}\n# COPY research/optimized-subset /tmp/comment\n${original}`,
+      );
+      expect(enrollPublicBuild(stillValid).worker.dockerfile).toBe(
+        "worker/optimized/Dockerfile",
+      );
+    } finally {
+      rmSync(stillValid, { recursive: true, force: true });
+    }
+  });
+
+  it("enrolls from the packaged tree that includes the runtime-read inputs", () => {
+    const manifest = createSourceManifest(root);
+    for (const relativePath of publicBuildReadPaths) {
+      expect(enrolledSourcePaths(root)).toContain(relativePath);
+      expect(manifest.identities.sourceFiles[relativePath]).toMatch(
+        /^[a-f0-9]{64}$/,
+      );
+      expect(manifest.identities.components["public-build"]).toMatch(
+        /^[a-f0-9]{64}$/,
+      );
+    }
+    const directory = mkdtempSync(path.join(tmpdir(), "qsb-enroll-package-"));
+    try {
+      writePackageTree(root, directory, manifest);
+      const tree = path.join(directory, "tree");
+      expect(() => enrollPublicBuild(tree)).not.toThrow();
+      const enrolled = enrollPublicBuild(tree);
+      expect(enrolled.identitiesEnrolled).toBe(true);
+      expect(enrolled.executionEnabled).toBe(false);
+      expect(enrolled.mainnetEnabled).toBe(false);
+      expect(enrolled.broadcastAuthorized).toBe(false);
+      rmSync(path.join(tree, "worker/optimized/runtime.py"));
+      expect(() => enrollPublicBuild(tree)).toThrow(
+        "PublicBuildMissing:worker/optimized/runtime.py",
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
+
+const enrollmentInputs = [
+  "docs/source-build/20260924/solver-build-receipt.json",
+  "worker/optimized/source-lock.json",
+  "worker/optimized/runtime.py",
+  "worker/optimized/Dockerfile",
+  "worker/Dockerfile",
+  "package-lock.json",
+  "supervised/runtime/source-manifest.json",
+  "supervised/archive/work/yukon-app-routing-20260923/routing.ts",
+  "supervised/runtime/source/work/yukon-app-routing-20260923/routing.ts",
+  ...Object.keys(CPU_REFERENCE_SHA256).map(
+    (name) => `worker/optimized/${name}`,
+  ),
+];
+
+function materializeEnrollmentTree(): string {
+  const directory = mkdtempSync(path.join(tmpdir(), "qsb-enroll-"));
+  for (const relativePath of enrollmentInputs) {
+    const destination = path.join(directory, relativePath);
+    mkdirSync(path.dirname(destination), { recursive: true });
+    cpSync(path.join(root, relativePath), destination);
+  }
+  cpSync(
+    path.join(root, "research/optimized-subset/subset"),
+    path.join(directory, "research/optimized-subset/subset"),
+    { recursive: true },
+  );
+  return directory;
+}

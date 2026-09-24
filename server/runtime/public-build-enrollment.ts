@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import capability from "../mainnet-capability.json";
@@ -223,33 +223,231 @@ function assertDistinct(digest: string): void {
   if (historicalIdentityRejected(digest)) fail("HistoricalIdentityIsNotThisBuild");
 }
 
+function solverLockPath(relativeFile: string): string {
+  const relativePath = path.posix.normalize(
+    path.posix.join(OPTIMIZED_SOURCE, relativeFile),
+  );
+  if (
+    !relativePath.startsWith(`${OPTIMIZED_SOURCE}/subset/`) ||
+    relativePath.split("/").includes("..")
+  )
+    fail("PublicBuildLockEscapes");
+  return relativePath;
+}
+
+/** File inventory of subset/, matching worker/optimized/build.py. */
+function solverInventory(root: string): string[] {
+  const subsetDir = path.posix.join(OPTIMIZED_SOURCE, "subset");
+  const absoluteRoot = path.join(root, subsetDir);
+  if (!existsSync(absoluteRoot)) fail(`PublicBuildMissing:${subsetDir}`);
+  const found: string[] = [];
+  const stack = [absoluteRoot];
+  while (stack.length) {
+    const current = stack.pop();
+    if (!current) break;
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      const relativeFile = path
+        .relative(path.join(root, OPTIMIZED_SOURCE), full)
+        .split(path.sep)
+        .join("/");
+      if (
+        relativeFile.startsWith("../") ||
+        relativeFile === ".." ||
+        relativeFile.split("/").includes("..")
+      )
+        fail("PublicBuildLockEscapes");
+      if (entry.isDirectory() && !entry.isSymbolicLink()) {
+        stack.push(full);
+        continue;
+      }
+      if (entry.isFile() || entry.isSymbolicLink()) found.push(relativeFile);
+    }
+  }
+  return found;
+}
+
 function solverDivergence(
   root: string,
   files: Record<string, string>,
 ): string[] {
+  const expected = new Map(Object.entries(files));
+  for (const relativeFile of expected.keys()) solverLockPath(relativeFile);
+  const actual = new Set(solverInventory(root));
   const diverged: string[] = [];
-  for (const [relativeFile, expected] of Object.entries(files).sort(([left], [right]) =>
-    left.localeCompare(right),
-  )) {
-    const relativePath = path.posix.normalize(
-      path.posix.join(OPTIMIZED_SOURCE, relativeFile),
-    );
-    if (
-      !relativePath.startsWith(`${OPTIMIZED_SOURCE}/`) ||
-      relativePath.split("/").includes("..")
-    )
-      fail("PublicBuildLockEscapes");
-    if (sha256Hex(readRepoFile(root, relativePath)) !== expected)
+  for (const relativeFile of [...expected.keys()].sort()) {
+    const relativePath = solverLockPath(relativeFile);
+    if (!actual.has(relativeFile)) {
       diverged.push(relativePath);
+      continue;
+    }
+    const absolute = path.join(root, relativePath);
+    const digest = lstatSync(absolute).isSymbolicLink()
+      ? null
+      : sha256Hex(readRepoFile(root, relativePath));
+    if (digest !== expected.get(relativeFile)) diverged.push(relativePath);
+  }
+  for (const relativeFile of [...actual].sort()) {
+    if (!expected.has(relativeFile)) diverged.push(solverLockPath(relativeFile));
   }
   return diverged;
 }
 
+type OptimizedStage = {
+  name: string;
+  image: string;
+  copies: string[];
+  copyFrom: string[];
+};
+
+function stripDockerfileComment(line: string): string {
+  let quote: "'" | '"' | null = null;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (quote) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (character === "#") return line.slice(0, index);
+  }
+  return line;
+}
+
+function dockerfileInstructions(text: string): string[] {
+  const kept: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const stripped = stripDockerfileComment(raw).trim();
+    if (stripped) kept.push(stripped);
+  }
+  const logical: string[] = [];
+  let buffer = "";
+  for (const line of kept) {
+    const continued = line.endsWith("\\");
+    const piece = (continued ? line.slice(0, -1) : line).trim();
+    buffer = buffer ? `${buffer} ${piece}` : piece;
+    if (!continued) {
+      if (buffer) logical.push(buffer);
+      buffer = "";
+    }
+  }
+  if (buffer) logical.push(buffer);
+  return logical;
+}
+
+function dockerfileTokens(body: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  for (const character of body) {
+    if (quote) {
+      if (character === quote) quote = null;
+      else current += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      if (current) tokens.push(current);
+      current = "";
+      continue;
+    }
+    current += character;
+  }
+  if (quote) fail("PublicBuildDockerfileUnparsed");
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function parseOptimizedStages(text: string): OptimizedStage[] {
+  const stages: OptimizedStage[] = [];
+  let current: OptimizedStage | null = null;
+  let index = 0;
+  for (const instruction of dockerfileInstructions(text)) {
+    const from = instruction.match(
+      /^FROM\s+(?:--platform=\S+\s+)?(\S+?)(?:\s+AS\s+(\S+))?\s*$/i,
+    );
+    if (from) {
+      index += 1;
+      const name = from[2] ?? `stage-${index}`;
+      if (stages.some((stage) => stage.name === name))
+        fail("PublicBuildDockerfileUnparsed");
+      current = { name, image: from[1] ?? "", copies: [], copyFrom: [] };
+      stages.push(current);
+      continue;
+    }
+    if (!current) fail("PublicBuildDockerfileUnparsed");
+    const copy = instruction.match(/^COPY\s+([\s\S]*)$/i);
+    if (!copy) continue;
+    const tokens = dockerfileTokens(copy[1] ?? "");
+    const sources: string[] = [];
+    for (let cursor = 0; cursor < tokens.length; cursor += 1) {
+      const token = tokens[cursor] ?? "";
+      if (token === "--from") {
+        const value = tokens[cursor + 1];
+        if (!value || value.startsWith("--")) fail("PublicBuildDockerfileUnparsed");
+        current.copyFrom.push(value);
+        cursor += 1;
+        continue;
+      }
+      if (token.startsWith("--from=")) {
+        current.copyFrom.push(token.slice("--from=".length));
+        continue;
+      }
+      if (token.startsWith("--")) {
+        if (!token.includes("=")) cursor += 1;
+        continue;
+      }
+      sources.push(token);
+    }
+    if (sources.length < 2) fail("PublicBuildDockerfileUnparsed");
+    current.copies.push(...sources.slice(0, -1));
+  }
+  if (!stages.length) fail("PublicBuildDockerfileUnparsed");
+  return stages;
+}
+
+function reachableStages(
+  stages: readonly OptimizedStage[],
+  targets: readonly string[],
+): OptimizedStage[] {
+  const byName = new Map(stages.map((stage) => [stage.name, stage]));
+  const seen = new Set<string>();
+  const stack = [...targets];
+  while (stack.length) {
+    const name = stack.pop();
+    if (!name || seen.has(name)) continue;
+    const stage = byName.get(name);
+    if (!stage) fail("PublicBuildBaseImageMismatch");
+    seen.add(name);
+    if (byName.has(stage.image)) stack.push(stage.image);
+    for (const from of stage.copyFrom) if (byName.has(from)) stack.push(from);
+  }
+  return stages.filter((stage) => seen.has(stage.name));
+}
+
+function copiesSolverSource(source: string): boolean {
+  return (
+    source === "research/optimized-subset" ||
+    source.startsWith("research/optimized-subset/")
+  );
+}
+
 function assertOptimizedDockerfile(root: string): void {
-  const text = readRepoFile(root, OPTIMIZED_DOCKERFILE).toString("utf8");
-  if (!text.includes(`FROM ${BUILD_BASE}`) || !text.includes(`FROM ${RUNTIME_BASE}`))
+  const stages = parseOptimizedStages(
+    readRepoFile(root, OPTIMIZED_DOCKERFILE).toString("utf8"),
+  );
+  const used = reachableStages(stages, ["runtime", "queue"]);
+  const runtime = used.find((stage) => stage.name === "runtime");
+  const build = used.find((stage) => stage.image === BUILD_BASE);
+  if (!runtime || runtime.image !== RUNTIME_BASE || !build)
     fail("PublicBuildBaseImageMismatch");
-  if (!text.includes("COPY research/optimized-subset"))
+  if (!used.some((stage) => stage.copies.some(copiesSolverSource)))
     fail("PublicBuildDockerfileMissingSolver");
   parseWorkerDockerfile(readRepoFile(root, HISTORICAL_DOCKERFILE).toString("utf8"));
 }

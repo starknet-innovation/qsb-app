@@ -106,6 +106,23 @@ function resolveLocalSpecifier(fromFile: string, specifier: string): string {
   return `${base}.ts`;
 }
 
+/**
+ * Byte inputs read by enrollPublicBuild. They are not TypeScript imports, so
+ * their own relative imports are not part of this closure.
+ */
+export const publicBuildReadPaths = [
+  "supervised/runtime/source-manifest.json",
+  "supervised/runtime/source/work/yukon-app-routing-20260923/routing.ts",
+  "worker/optimized/Dockerfile",
+  "worker/optimized/reference/bitcoin_tx.py",
+  "worker/optimized/reference/gpu_emulator.py",
+  "worker/optimized/reference/handler.py",
+  "worker/optimized/reference/qsb_pipeline.py",
+  "worker/optimized/reference/secp256k1.py",
+  "worker/optimized/reference/verify_hit.py",
+  "worker/optimized/runtime.py",
+] as const;
+
 /** Transitive relative imports of the enrolled sources, plus build metadata. */
 export function enrolledSourcePaths(root: string): string[] {
   const seen = new Set<string>([...requiredReleasePaths]);
@@ -126,10 +143,13 @@ export function enrolledSourcePaths(root: string): string[] {
     }
   }
   for (const relativePath of buildMetadataPaths) seen.add(relativePath);
+  for (const relativePath of publicBuildReadPaths) seen.add(relativePath);
   return [...seen].sort();
 }
 
 export const componentForPath = (relativePath: string): string => {
+  if ((publicBuildReadPaths as readonly string[]).includes(relativePath))
+    return "public-build";
   if (
     relativePath === "package.json" ||
     relativePath === "package-lock.json" ||
