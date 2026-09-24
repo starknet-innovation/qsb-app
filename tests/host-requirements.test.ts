@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -419,8 +419,16 @@ describe("local execution host rehearsal", () => {
     const root = mkdtempSync(path.join(tmpdir(), "qsb-lifecycle-"));
     try {
       const evidence = path.join(root, "evidence");
+      mkdirSync(evidence, { mode: 0o700 });
+      const prior = path.join(evidence, "prior-evidence.txt");
+      writeFileSync(prior, "keep\n", { mode: 0o600 });
+      const before = statSync(evidence);
       const report = await rehearseLocalLifecycle(evidence);
       const again = await rehearseLocalLifecycle(evidence);
+      const after = statSync(evidence);
+      expect(after.ino).toBe(before.ino);
+      expect(after.dev).toBe(before.dev);
+      expect(readFileSync(prior, "utf8")).toBe("keep\n");
       expect(again.interrupted).toBe(true);
       expect(report.selectedHost).toBe(false);
       expect(report.certifiesProductionHost).toBe(false);
@@ -440,7 +448,6 @@ describe("local execution host rehearsal", () => {
       expect(report.operatorStep).toContain("selected host");
     } finally {
       rmSync(root, { recursive: true, force: true });
-      rmSync(`${path.join(root, "evidence")}-sibling`, { recursive: true, force: true });
     }
   });
 });

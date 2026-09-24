@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import contract from "../mainnet-capability.json";
 import { release } from "../../src/lib/model";
@@ -13,7 +13,7 @@ import {
   submitProviderOnce,
 } from "./host-bridge";
 import { sha256Hex } from "./identity";
-import { directoryIdentity } from "./host-requirements";
+import { compareDirectoryIdentity, directoryIdentity } from "./host-requirements";
 import { remoteWorkStopProven, type LaunchRecord } from "./types";
 
 export type LocalLifecycleReport = {
@@ -81,7 +81,9 @@ export async function rehearseLocalLifecycle(
   directory: string,
 ): Promise<LocalLifecycleReport> {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const marker = path.join(directory, "evidence.txt");
+  const callerIdentity = directoryIdentity(statSync(directory));
+  const scratch = mkdtempSync(path.join(directory, "rehearsal-"));
+  const marker = path.join(scratch, "evidence.txt");
   const inputHash = "cd".repeat(32);
   const requestId = crypto.randomUUID();
   const store = new MemoryStore();
@@ -165,20 +167,20 @@ export async function rehearseLocalLifecycle(
       requestId,
       0,
       inputHash,
-      directoryIdentity(statSync(directory)),
+      directoryIdentity(statSync(scratch)),
     );
-    if (bound.evidenceDirectory?.inode !== directoryIdentity(statSync(directory)).inode)
+    if (bound.evidenceDirectory?.inode !== directoryIdentity(statSync(scratch)).inode)
       throw new Error("EvidenceDirectoryNotBound");
-    parked = `${directory}-replaced`;
-    renameSync(directory, parked);
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    parked = `${scratch}-replaced`;
+    renameSync(scratch, parked);
+    mkdirSync(scratch, { recursive: true, mode: 0o700 });
     const replaced = await bindEvidenceDirectory(
       store,
       rehearsalOwner,
       requestId,
       0,
       inputHash,
-      directoryIdentity(statSync(directory)),
+      directoryIdentity(statSync(scratch)),
     );
     const directoryReplacementDetected =
       replaced.localLoss?.kind === "evidence-directory-replaced";
@@ -195,10 +197,10 @@ export async function rehearseLocalLifecycle(
       contract.broadcastAuthorized !== false
     )
       throw new Error("LocalLossMustNotProveRemoteStop");
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
     let removed = false;
     try {
-      statSync(directory);
+      statSync(scratch);
     } catch (error) {
       removed = (error as NodeJS.ErrnoException).code === "ENOENT";
     }
@@ -214,6 +216,8 @@ export async function rehearseLocalLifecycle(
       : undefined;
     const missingDirectoryDetected =
       removed && missing?.localLoss?.kind === "evidence-directory-missing";
+    if (compareDirectoryIdentity(callerIdentity, directoryIdentity(statSync(directory))) !== "intact")
+      throw new Error("CallerDirectoryReplaced");
     return {
       format: "qsb-local-lifecycle-rehearsal-v1",
       scope: "local-rehearsal",
@@ -240,6 +244,7 @@ export async function rehearseLocalLifecycle(
     };
   } finally {
     if (parked !== undefined) rmSync(parked, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
     if (pid !== undefined) {
       try {
         process.kill(pid, "SIGKILL");
