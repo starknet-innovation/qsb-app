@@ -1,0 +1,37 @@
+import {stageRequestManifest} from './request-manifest';
+import {validateLineage} from './lineage';
+import {fingerprint} from '../../outputs/qsb-vault/src/lib/provenance';
+import {isDeepStrictEqual} from 'node:util';
+import {createHash} from 'node:crypto';import type {CensusStore} from './census-store';import type {Blueprint} from './common';import type {EvidenceReaders} from '../yukon-signing-export-20260923/publication';
+const hash=(v:any)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');const eq=(a:any,b:any)=>isDeepStrictEqual(a,b);function need(v:any,m:string):asserts v{if(!v)throw Error(m);}
+/** Fixed application caller owns readers and source enrollment; no provider POST or initialization. */
+export async function adoptSettled(store:CensusStore,old:Blueprint,next:Blueprint,shutdown:any,readers:EvidenceReaders){
+ old=structuredClone(old);next=structuredClone(next);shutdown=structuredClone(shutdown);
+ need(['regtest','mainnet'].includes(old.network)&&old.network===next.network,'Continuation chain changed');
+ const oldRun='SUPERVISION#'+old.runId,run='SUPERVISION#'+next.runId,oldHash=hash(old),configHash=hash(next),snap=shutdown.snapshot;
+ need(old.subset.parent===next.subset.parent&&next.pin.parent===next.subset.parent&&Object.keys(next).sort().join(',')===Object.keys(old).sort().join(','),'Blueprint shape changed');
+ need(run!==oldRun&&old.pin.parent===next.pin.parent&&old.subset.scope===next.subset.scope&&old.pin.owner===next.pin.owner&&old.pin.revision===next.pin.revision&&next.pin.owner===next.subset.owner&&next.pin.revision===next.subset.revision,'Continuation scope changed');
+ need(snap?.runPk===oldRun&&snap.configHash===oldHash&&hash(snap)===shutdown.snapshotHash&&snap.durableProviderIntentsTerminal===true,'Unsettled predecessor snapshot');
+ const beforeOwner=await store.get(oldRun,'OWNER'),marker=await store.get(oldRun,'SHUTDOWN');
+ need(marker&&beforeOwner&&beforeOwner.network===old.network&&beforeOwner.status==='dispatch_stopped'&&beforeOwner.activeOperation===null&&beforeOwner.version===shutdown.durableOwnerVersion&&marker?.snapshotHash===shutdown.snapshotHash&&marker.ownerVersion===beforeOwner.version,'Predecessor owner changed');
+ need(['pin','subset'].includes(beforeOwner.lifecycle as string),'Unsupported continuation phase');
+ need(!await store.get(run,'OWNER'),'Successor already exists');const initialLineage=await validateLineage(store,beforeOwner,oldRun);
+ const scopes:any[]=[];for(const prior of snap.scopes){const s=await store.get(prior.pk,'SCOPE');need(s&&eq(s,{...prior,version:prior.version+1})&&s.phase==='paused'&&s.dispatchClosed===true&&!s.identityConflict&&s.revision===old.pin.revision&&!s.signingPreparation,'Changed or ineligible stopped scope');scopes.push(s!);}
+ const parent=scopes.find(s=>s.pk==='VALIDATION#'+old.pin.parent)!,child=scopes.find(s=>s.pk==='VALIDATION#'+old.subset.scope);
+ need(parent&&parent.network===next.network&&JSON.parse(parent.publicContext).network===next.network&&(!child||child.network===next.network)&&((beforeOwner.lifecycle==='pin'&&!child&&(parent.stopTransition as any)?.fromPhase==='pinning_searching')||(beforeOwner.lifecycle==='subset'&&child&&(parent.stopTransition as any)?.fromPhase==='subset_running'&&(child.stopTransition as any)?.fromPhase==='searching')),'Only settled searching continuation supported');
+ for(const r of snap.rows){if(r.sk.startsWith('OPERATION#'))need(r.status==='completed','Unresolved predecessor operation');if(r.sk.startsWith('CPU#'))need(r.status==='completed','Unresolved CPU');if(r.sk.startsWith('REQUEST#'))need(r.status==='resolved','Unknown/no-send cannot resume');if(r.sk.startsWith('RECOVERY'))throw Error('Recovery lifetime requires separate continuation review');}
+ for(const s of scopes){const conf=s.pk===parent.pk?next.pin:next.subset,b=s.budget as any;if(b){need(Number.isSafeInteger(conf.deadlineMs)&&Number.isSafeInteger(conf.submissionCutoffMs)&&conf.submissionCutoffMs>Date.now()&&conf.submissionCutoffMs<=conf.deadlineMs&&conf.deadlineMs>Date.now()&&conf.deadlineMs<=Date.now()+1800000&&Number.isSafeInteger(conf.maxSubmissions)&&conf.maxSubmissions>=b.claimed&&conf.maxSubmissions>=b.maxSubmissions,'Explicit nonreset bounded budget required');}need(!['historical-proof-disabled-a','historical-proof-disabled-b'].includes(conf.endpoint),'Spent endpoint prohibited');}
+ const expected={runPk:oldRun,configHash:oldHash,snapshotHash:shutdown.snapshotHash};const q=await readers.readQuiescence(),d=await readers.readFinalDrain(expected);
+ need(q.runPk===oldRun&&q.configHash===oldHash&&q.snapshotHash===shutdown.snapshotHash&&q.durableOwnerVersion===beforeOwner.version&&q.processesReaped&&q.cpuContainersAbsent&&q.registeredRecoveryReaped&&q.transportMode==='operational','Predecessor OS not reaped');
+ need(d.runPk===oldRun&&d.configHash===oldHash&&d.snapshotHash===shutdown.snapshotHash&&Array.isArray(d.endpoints)&&d.endpoints.length===2&&[old.pin.endpoint,old.subset.endpoint].every(id=>d.endpoints.some(e=>e.id===id&&e.workersMin===0&&e.workersMax===0&&e.inQueue===0&&e.inProgress===0)),'Predecessor providers not disabled/drained');
+ const known=snap.providerStatuses;need(Array.isArray(d.providers)&&d.providers.length===known.length&&known.every((p:any)=>p.terminalKnown&&d.providers.some((v:any)=>v.scope===p.scope&&v.intent===p.intent&&v.id===p.provider&&v.status===p.status)),'Terminal identity evidence differs');
+ const requests=snap.rows.filter((r:any)=>r.sk.startsWith('REQUEST#')),requestHashes:Record<string,string>={};
+ for(const r of requests){const current=await store.get(oldRun,r.sk);need(eq(current,r),'Predecessor request changed');requestHashes[r.sk]=fingerprint(r);await store.put({...r,pk:run,version:1,configHash,inherited:{runPk:oldRun,requestHash:fingerprint(r),requestKey:r.sk}});}
+ need(eq(initialLineage,await validateLineage(store,beforeOwner,oldRun)),'Predecessor lineage changed during adoption');
+ // Staged copies grant no authority before this atomic owner + both scope handoff.
+ const requestManifest=await stageRequestManifest(store,run,configHash,oldRun,requestHashes);
+ const adoption={format:'qsb-settled-adoption-v1',predecessor:oldRun,predecessorConfigHash:oldHash,snapshotHash:shutdown.snapshotHash,...requestManifest,quiescenceHash:fingerprint(q),drainHash:fingerprint(d),predecessorOwnerVersion:beforeOwner.version+1};
+ const restored=scopes.map(s=>{const conf=s.pk===parent.pk?next.pin:next.subset,{dispatchClosed,dispatchClosedBy,stopTransition,...rest}=s;return{...rest,version:s.version+1,phase:(stopTransition as any).fromPhase,supervisedRun:run,supervisedConfigHash:configHash,endpoint:conf.endpoint,...(s.budget?{budget:{...(s.budget as any),deadlineMs:conf.deadlineMs,submissionCutoffMs:conf.submissionCutoffMs,maxSubmissions:conf.maxSubmissions}}:{})};});
+ await store.atomicPut([{row:{...beforeOwner!,version:beforeOwner!.version+1,status:'superseded',successor:run},expected:beforeOwner!.version},{row:{...marker!,version:marker!.version},expected:marker!.version},...restored.map((row,i)=>({row,expected:scopes[i].version})),{row:{pk:run,sk:'OWNER',version:1,configHash,parent:next.pin.parent,owner:next.pin.owner,revision:next.pin.revision,network:next.network,status:'owned',activeOperation:null,lifecycle:beforeOwner!.lifecycle,stage:beforeOwner!.stage,adoption}}]);
+ return{runPk:run,configHash,adoption,preservedClaims:scopes.map(s=>(s.budget as any)?.claimed??null),liveExecutionAuthorized:false};
+}

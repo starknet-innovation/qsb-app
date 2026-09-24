@@ -6,6 +6,6 @@ This is not the original leaderboard submission and is not deployed by the appli
 
 For review: the generic ranked path, exact recovery helpers, and `subset/tests/gpu_epochs/tree.cu` are the relevant implementation. Specialized paths and arbitrary compiler flag combinations are not certified. More than 64 retained hit records fails closed rather than supporting unbounded output. A deterministic failure must not be credited as completed coverage or blindly retried.
 
-Component performance evidence and remaining integrated release gates are summarized in `../../docs/STATUS.md`. Complete build/runtime packaging and fresh optimized withdrawal evidence remain separate work.
+Component performance evidence and remaining integrated release gates are summarized in `../../docs/STATUS.md`. The [public optimized worker build](../../worker/optimized/README.md) now compiles these files with pinned CUDA/base-image identities and recorded flags. Fresh output identities still need enrollment, GPU validation and optimized withdrawal evidence.
 
 See LICENSE for the upstream Apache-2.0 terms. The files include local modifications; no upstream endorsement is implied.

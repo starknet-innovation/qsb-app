@@ -1,0 +1,9 @@
+import {ControlPlane} from '../yukon-indexed-controller-20260923/control-plane.mjs';
+import {validateConfig,type Config} from '../yukon-common-operational-transport-20260923/transport';
+import type{DeletionIO,Stage}from'./retirement';
+/** Fixed exact-owned deletion; legacy ControlPlane.remove cannot distinguish 204 from earlier absence. */
+export function deletionTransport(input:Config,key:string,fetcher:typeof fetch=fetch):DeletionIO{const c=validateConfig(input);if(!key||/[\r\n]/.test(key))throw Error('Runtime credential missing');const clients={pin:new ControlPlane(key,c.pin,fetcher),subset:new ControlPlane(key,c.subset,fetcher)};const id=(stage:Stage)=>{if(stage!=='pin'&&stage!=='subset')throw Error('Unknown stage');return c[stage].id;};return{
+ inspect:stage=>clients[stage].inspect(id(stage),AbortSignal.timeout(4000)),
+ async health(stage){const r=await fetcher('https://api.runpod.ai/v2/'+id(stage)+'/health',{method:'GET',redirect:'error',signal:AbortSignal.timeout(4000),headers:{authorization:'Bearer '+key}});if(!r.ok){await r.body?.cancel();throw Error('Health unavailable');}const reader=r.body?.getReader();if(!reader)throw Error('Empty health');const chunks:Uint8Array[]=[];let n=0;for(;;){const x=await reader.read();if(x.done)break;n+=x.value.length;if(n>65536){await reader.cancel();throw Error('Oversized health');}chunks.push(x.value);}const v=JSON.parse(Buffer.concat(chunks).toString());if(v.jobs?.inQueue!==0||v.jobs?.inProgress!==0)throw Error('Jobs remain');return{queued:0,inProgress:0};},
+ async remove204(stage){const r=await fetcher('https://api.runpod.io/v2/serverless/'+id(stage),{method:'DELETE',redirect:'error',signal:AbortSignal.timeout(4000),headers:{authorization:'Bearer '+key}});await r.body?.cancel();if(r.status!==204)throw Error('Exact deletion acknowledgement missing');},
+};}

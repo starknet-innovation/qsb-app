@@ -32,3 +32,8 @@ __pycache__/
 # Auditable service source archive; runtime work directories remain excluded.
 !supervised/archive/work/
 !supervised/archive/work/**
+
+# Reviewed operational source closure; build outputs remain ignored.
+!supervised/runtime/source/work/
+!supervised/runtime/source/work/**
+supervised/runtime/runtime.tar.gz

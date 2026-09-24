@@ -1,0 +1,23 @@
+import {createHash} from 'node:crypto';import {isDeepStrictEqual} from 'node:util';
+import type {Store,Row} from '../../outputs/qsb-vault/server/store';
+import type {Blueprint} from './common';
+const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
+/** Trusted source-enrolled supervisor caller only. Never transport, retry, credit or budget restoration. */
+export async function reconcileCommonNotSent(store:Store,b:Blueprint,configHash:string,pending:any,writerHash:string){
+ pending=structuredClone(pending);b=structuredClone(b);const run='SUPERVISION#'+b.runId;
+ if(!['pinning','round1','round2'].includes(pending.stage))throw Error('Invalid pending stage');
+ const pin=pending.stage==='pinning',scope=pin?b.pin.parent:b.subset.scope,c=pin?b.pin:b.subset,pk='VALIDATION#'+scope;
+ if(!/^[a-f0-9]{64}$/.test(writerHash)||pending.event!=='request_started'||pending.configHash!==configHash||pending.parent!==b.pin.parent||pending.owner!==c.owner||pending.revision!==c.revision||pending.endpoint!==c.endpoint||(!pin&&pending.scope!==scope)||!new RegExp(pin?'^PIN#(0|[1-9][0-9]*)$':'^RANGE#round[12]:(0|[1-9][0-9]*)$').test(pending.intent)||(pin?pending.scope!==undefined:!pending.intent.startsWith('RANGE#'+pending.stage+':'))||pending.requestId!=='REQUEST#'+hash(pk+':'+pending.intent)||pending.durableKey?.pk!==run||pending.durableKey?.sk!==pending.requestId||pending.durableKey?.version!==1)throw Error('Pending common binding differs');
+ const [p,s,o,q,r,i,saved,journals,...claimGroups]=await Promise.all([store.get('VALIDATION#'+b.pin.parent,'SCOPE'),store.get(pk,'SCOPE'),store.get(run,'OWNER'),store.get(run,pending.requestId),store.get(pk,pending.intent),store.get(pk,'IDENTITY#'+pending.intent),store.get(run,'NOT_SENT#'+pending.requestId),store.list(pk,'PROVIDER_OBS#'+pending.intent+':'),...'0123456789abcdef'.split('').map(prefix=>store.list('VALIDATION#YUKON_PROVIDER_IDS',prefix))]);
+ if(!p||!s||!o||!q||!r||!i||[p,s].some(x=>x.identitySchema!=='provider-index-v1'||x.owner!==c.owner||x.revision!==c.revision||x.identityConflict||x.supervisedRun!==run||x.supervisedConfigHash!==configHash||x.dispatchClosed!==true||x.dispatchClosedBy!==run)||(!pin&&(p.childScope!==scope||s.parentScope!==b.pin.parent)))throw Error('Unstopped common scopes');
+ if(o.configHash!==configHash||o.status!=='dispatch_stopped'||o.owner!==c.owner||o.revision!==c.revision||q.stage!==pending.stage||q.parent!==b.pin.parent||q.scope!==(pin?undefined:scope)||q.status!=='not_sent'||q.providerId!==undefined||q.configHash!==configHash||q.intent!==pending.intent||q.endpoint!==c.endpoint||q.owner!==c.owner||q.revision!==c.revision)throw Error('Not an exact owned no-send');
+ if(r.state!=='uncertain'||r.provider!==undefined||r.identityConflict||r.owner!==c.owner||r.revision!==c.revision||typeof r.frozen!=='string'||!Number.isSafeInteger(r.dispatchAuthorizedAtMs)||i.count!==0||i.first!==undefined||i.ambiguous!==false||i.schema!=='provider-index-v1'||i.owner!==c.owner||i.revision!==c.revision||i.intent!==r.sk||journals.length||claimGroups.flat().some(x=>x.scope===scope&&x.intent===r.sk))throw Error('Identity or unknown outcome blocks no-send');
+ const operationKey=saved?.operationKey??o.activeOperation;if(typeof operationKey!=='string')throw Error('Missing operation census');
+ const op=await store.get(run,operationKey);if(!op||op.configHash!==configHash||!['pin:submit','subset:submit','subset:run'].includes(op.kind as string)||(!saved?(op.status!=='running'||o.activeOperation!==operationKey):(op.status!=='accounted_not_sent'||o.activeOperation!==null)))throw Error('No exact failed submission operation');
+ if(op.intent!==null&&op.intent!==pending.intent)throw Error('Different submission intent');
+ const cpus=await store.list(run,'CPU#');if(cpus.some(x=>x.operationKey===operationKey&&x.status!=='completed'))throw Error('CPU remains unresolved');
+ const receipt:Row={pk:run,sk:'NOT_SENT#'+pending.requestId,version:1,format:'qsb-common-not-sent-v1',configHash,writerHash,pendingHash:hash(JSON.stringify(pending)),intent:pending.intent,scope,owner:c.owner,revision:c.revision,operationKey,frozenHash:hash(r.frozen as string),knownNoSend:true,creditGranted:false,sealEligible:false};
+ if(saved&&!isDeepStrictEqual(saved,receipt))throw Error('Saved receipt differs');
+ const fences=[p,...(p.pk===s.pk?[]:[s]),q,r,i];
+ await store.atomicPut([...(saved?[]:[{row:receipt}]),...fences.map(x=>({row:{...x,version:x.version+1},expected:x.version})),{row:{...o,version:o.version+1,activeOperation:null},expected:o.version},{row:{...op,version:op.version+1,status:'accounted_not_sent',notSentReceipt:receipt.sk},expected:op.version}]);return receipt;
+}

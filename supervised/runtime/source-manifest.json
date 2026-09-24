@@ -1,0 +1,720 @@
+{
+  "format": "qsb-public-runtime-source-v1",
+  "status": "HOLD",
+  "transformations": [
+    "Private registry replaced with UNENROLLED_REGISTRY",
+    "Historical endpoint IDs replaced with non-resource placeholders",
+    "Explicit historical node_modules imports resolved through public package-lock.json",
+    "Historical spent-fixture identifiers replaced with placeholders; these are not an operator spent-outpoint inventory"
+  ],
+  "files": [
+    {
+      "path": "source/outputs/qsb-vault/server/store.ts",
+      "sha256": "50e94043277d9e156fe817b99fee384654cbf0ef9888d849998cc4cf031c1be7",
+      "originalSha256": "50e94043277d9e156fe817b99fee384654cbf0ef9888d849998cc4cf031c1be7",
+      "origin": "outputs/qsb-vault/server/store.ts"
+    },
+    {
+      "path": "source/outputs/qsb-vault/src/lib/model.ts",
+      "sha256": "e4a05fc3dd1bd274fc643a5aa78805963afbe8bd1c1a6ad611b6405faa50bc4d",
+      "originalSha256": "e4a05fc3dd1bd274fc643a5aa78805963afbe8bd1c1a6ad611b6405faa50bc4d",
+      "origin": "outputs/qsb-vault/src/lib/model.ts"
+    },
+    {
+      "path": "source/outputs/qsb-vault/src/lib/network.ts",
+      "sha256": "74b9b709923ee52d314080254e9213a35d39cf348e5b72fe1443c9f41af8fbab",
+      "originalSha256": "74b9b709923ee52d314080254e9213a35d39cf348e5b72fe1443c9f41af8fbab",
+      "origin": "outputs/qsb-vault/src/lib/network.ts"
+    },
+    {
+      "path": "source/outputs/qsb-vault/src/lib/provenance.ts",
+      "sha256": "a0f8a8f81c3671933d1839439eecdc26959e855d9399ca34ae518ff4a7d03035",
+      "originalSha256": "a0f8a8f81c3671933d1839439eecdc26959e855d9399ca34ae518ff4a7d03035",
+      "origin": "outputs/qsb-vault/src/lib/provenance.ts"
+    },
+    {
+      "path": "source/outputs/qsb-vault/src/lib/releases/qsb-config-a-ranked-v2.json",
+      "sha256": "d320edefc247327947c4c84da195cf7e799ba5943eb5cd6a8dc157351f8d2925",
+      "originalSha256": "9d9f5b3b2ab1e2c8d2d487a61e60fdf2fbcdbdd57a20fd171a563fb98b46cbe3",
+      "origin": "outputs/qsb-vault/src/lib/releases/qsb-config-a-ranked-v2.json"
+    },
+    {
+      "path": "source/work/yukon-adaptive-flow-20260923/completion.ts",
+      "sha256": "f5483e58d9dca0cdbb87b95d9302f549275a33fcbab674a165a49153b76e80b1",
+      "originalSha256": "f5483e58d9dca0cdbb87b95d9302f549275a33fcbab674a165a49153b76e80b1",
+      "origin": "work/yukon-adaptive-flow-20260923/completion.ts"
+    },
+    {
+      "path": "source/work/yukon-app-routing-20260923/routing.ts",
+      "sha256": "ec7015ee9ec8caea32068af8ebe024a3f08c2fcbd895415cea4a58cf0aa22bd2",
+      "originalSha256": "b0f77ba516bbdd3d557bc69b0619ba3e18e13b468a40607f8eb27d9905db0e34",
+      "origin": "work/yukon-app-routing-20260923/routing.ts"
+    },
+    {
+      "path": "source/work/yukon-canonical-reservations-20260923/reservations.ts",
+      "sha256": "b68e100f22801de3c52c7545652765e12138e6ce601f7a09bddb428c6b545f94",
+      "originalSha256": "b68e100f22801de3c52c7545652765e12138e6ce601f7a09bddb428c6b545f94",
+      "origin": "work/yukon-canonical-reservations-20260923/reservations.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/activate-child.ts",
+      "sha256": "6462c13cfaec3e265c575a41d04fc627e737c1efcdd4f0ae66d46cb031ed4722",
+      "originalSha256": "6462c13cfaec3e265c575a41d04fc627e737c1efcdd4f0ae66d46cb031ed4722",
+      "origin": "work/yukon-common-census-fence-20260923/activate-child.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/census-store.ts",
+      "sha256": "53915e32fdd475fb1b9795998a3cb56696d964ae6cd1f8fbb2611e6dcaa0d4d5",
+      "originalSha256": "7b2df792bdd8a783c95d2541ef7ee18573499675396573a0a33636409f370aad",
+      "origin": "work/yukon-common-census-fence-20260923/census-store.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/census.ts",
+      "sha256": "a196f43af31e0bf8166c1d52e22e6a9c0354147dea8a2dfcf6da04f7677adca0",
+      "originalSha256": "a196f43af31e0bf8166c1d52e22e6a9c0354147dea8a2dfcf6da04f7677adca0",
+      "origin": "work/yukon-common-census-fence-20260923/census.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/common.ts",
+      "sha256": "63f2e6b4c18ccf5f21fae055b26202e2fc03db7a37222e94e646eaad646c7901",
+      "originalSha256": "63f2e6b4c18ccf5f21fae055b26202e2fc03db7a37222e94e646eaad646c7901",
+      "origin": "work/yukon-common-census-fence-20260923/common.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/composed-child.ts",
+      "sha256": "1b59d238bffc9bc5f9c854b840d63899ee63c46d98f0a740d159ed1f242f7702",
+      "originalSha256": "1b59d238bffc9bc5f9c854b840d63899ee63c46d98f0a740d159ed1f242f7702",
+      "origin": "work/yukon-common-census-fence-20260923/composed-child.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/event-factory.ts",
+      "sha256": "f4554acbc053f40c83600d438e90d11e10647343d208dd4f1a4be1e8c4b3612e",
+      "originalSha256": "42c0583f02e52dc171d7ef051556734ce7b233d0cbd1e88bf948f7eaee6b94d3",
+      "origin": "work/yukon-common-census-fence-20260923/event-factory.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/fixed-common.ts",
+      "sha256": "67aba0c21e6b406c5925c00508d99c364b66ff7318beb64c1a382d87c6c6b609",
+      "originalSha256": "67aba0c21e6b406c5925c00508d99c364b66ff7318beb64c1a382d87c6c6b609",
+      "origin": "work/yukon-common-census-fence-20260923/fixed-common.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/not-sent.ts",
+      "sha256": "ebebb122eecae3721c0d9e7796ece5d0f713314b3a8df432a55e496ce58029e3",
+      "originalSha256": "ebebb122eecae3721c0d9e7796ece5d0f713314b3a8df432a55e496ce58029e3",
+      "origin": "work/yukon-common-census-fence-20260923/not-sent.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/orchestrator.ts",
+      "sha256": "5b46538009ce4d4c89e7d6a11dc6b05e74c473c92eda0ea582233adb870a5706",
+      "originalSha256": "be07e350c793e6c7897984788c40717313f0500808ae01c797b70175ac482a45",
+      "origin": "work/yukon-common-census-fence-20260923/orchestrator.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/pin-controller.ts",
+      "sha256": "8de53db265f2f35ff30e67cc93531ceee1dc5090579efeb7b652cd07466015c1",
+      "originalSha256": "510a825f464cc920391449048ac68c0334ed9a219e65c8378608238e838d09f1",
+      "origin": "work/yukon-common-census-fence-20260923/pin-controller.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/pin.ts",
+      "sha256": "91a05d7b8c8925abaa08285210160968e1496fd3d96b210597c6f4da9ce0688e",
+      "originalSha256": "1b3f1ca691b4c11c978ed06770641508577b8b9d99ed2e00cd1c6f64ee3b7c3d",
+      "origin": "work/yukon-common-census-fence-20260923/pin.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/publish-pin.ts",
+      "sha256": "57b5527a66f2f89718a7a63cf52f8f7e222ebbe389a298749a5d8a46e04692b1",
+      "originalSha256": "57b5527a66f2f89718a7a63cf52f8f7e222ebbe389a298749a5d8a46e04692b1",
+      "origin": "work/yukon-common-census-fence-20260923/publish-pin.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/reference-binding.ts",
+      "sha256": "bae223476a6246cd4eb1899057bd5fa66d55d7146d30f0ad4e22b86a2888008c",
+      "originalSha256": "bae223476a6246cd4eb1899057bd5fa66d55d7146d30f0ad4e22b86a2888008c",
+      "origin": "work/yukon-common-census-fence-20260923/reference-binding.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/runner.ts",
+      "sha256": "41da285fd7cc24a5fdf427698267402472b2f9b163e4d1cbf7b0bf2c1a8acf60",
+      "originalSha256": "41da285fd7cc24a5fdf427698267402472b2f9b163e4d1cbf7b0bf2c1a8acf60",
+      "origin": "work/yukon-common-census-fence-20260923/runner.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/runtime-api.ts",
+      "sha256": "6f68076c31a58af12ab0897c7a4b1fc439e55e96e2eeff12665838f45a9ffdf6",
+      "originalSha256": "6f68076c31a58af12ab0897c7a4b1fc439e55e96e2eeff12665838f45a9ffdf6",
+      "origin": "work/yukon-common-census-fence-20260923/runtime-api.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/subset-child.ts",
+      "sha256": "c26e2dfa92e29714ab2c008790aa89ac82a1005c7de03efb7adabd5c4e694954",
+      "originalSha256": "2854751091b8b312eb2dba346db06f62aefdbe3c0c21b5e14242464901c2e47f",
+      "origin": "work/yukon-common-census-fence-20260923/subset-child.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/subset-controller.ts",
+      "sha256": "709fc6d69c66890bc93722868872a5bac7c4f61bc9ba2fedf9ff9536968f5d6e",
+      "originalSha256": "709fc6d69c66890bc93722868872a5bac7c4f61bc9ba2fedf9ff9536968f5d6e",
+      "origin": "work/yukon-common-census-fence-20260923/subset-controller.ts"
+    },
+    {
+      "path": "source/work/yukon-common-census-fence-20260923/subset.ts",
+      "sha256": "ab1fa1887cb7b406a8c93683d616c24749490ba3c6026a5b70acc591a1b28a48",
+      "originalSha256": "ab1fa1887cb7b406a8c93683d616c24749490ba3c6026a5b70acc591a1b28a48",
+      "origin": "work/yukon-common-census-fence-20260923/subset.ts"
+    },
+    {
+      "path": "source/work/yukon-common-operational-transport-20260923/transport.ts",
+      "sha256": "e076d4e3213607c1b0992ed609aaff7bcaa6a994833ee5c1b9f66264cf5d4bbe",
+      "originalSha256": "b4e57b5f672785f6f3f5478e96e73ce33e091066df87d1a396aaf8e079b0fc72",
+      "origin": "work/yukon-common-operational-transport-20260923/transport.ts"
+    },
+    {
+      "path": "source/work/yukon-context-cycle-20260923/cycle.ts",
+      "sha256": "b4b24d9f388298fc5670209c20e67faed5a5533e89ddc5f0f0df0493bd217188",
+      "originalSha256": "b4b24d9f388298fc5670209c20e67faed5a5533e89ddc5f0f0df0493bd217188",
+      "origin": "work/yukon-context-cycle-20260923/cycle.ts"
+    },
+    {
+      "path": "source/work/yukon-indexed-controller-20260923/control-plane.mjs",
+      "sha256": "fc67cd4a497e92ca4943d1a248c5f5104c9c1db650c019605f86190bf4a789f3",
+      "originalSha256": "10e1526f93266e46dbcb13c9a7c5dd3936c31bca7119515e13645f7e31eee815",
+      "origin": "work/yukon-indexed-controller-20260923/control-plane.mjs"
+    },
+    {
+      "path": "source/work/yukon-indexed-controller-20260923/drain.ts",
+      "sha256": "1edb44cf1a16a2af79019451f18d671c78431978587a85cca21df59354d75edd",
+      "originalSha256": "1edb44cf1a16a2af79019451f18d671c78431978587a85cca21df59354d75edd",
+      "origin": "work/yukon-indexed-controller-20260923/drain.ts"
+    },
+    {
+      "path": "source/work/yukon-indexed-controller-20260923/driver.ts",
+      "sha256": "a2f3964fb97fcbe2ae6453a7a3097325f85687cb90c4b823d7998ea4aed09e95",
+      "originalSha256": "a2f3964fb97fcbe2ae6453a7a3097325f85687cb90c4b823d7998ea4aed09e95",
+      "origin": "work/yukon-indexed-controller-20260923/driver.ts"
+    },
+    {
+      "path": "source/work/yukon-indexed-controller-20260923/execution-gate.ts",
+      "sha256": "f7f395ab5ce88eedf46a1d287f0071ddfcdafa4081350ecbdf0683d3b0edc27f",
+      "originalSha256": "a78e8d88859cdcae337851b3752c52f39392074578e075b7ace0a5e4bad7b65d",
+      "origin": "work/yukon-indexed-controller-20260923/execution-gate.ts"
+    },
+    {
+      "path": "source/work/yukon-indexed-controller-20260923/guarded-intents.ts",
+      "sha256": "1841670b92c3c47a0f0dd0ee3f49b4cc2da3ee0c764761f2bf854801329b2cd2",
+      "originalSha256": "1841670b92c3c47a0f0dd0ee3f49b4cc2da3ee0c764761f2bf854801329b2cd2",
+      "origin": "work/yukon-indexed-controller-20260923/guarded-intents.ts"
+    },
+    {
+      "path": "source/work/yukon-indexed-controller-20260923/identity-index.ts",
+      "sha256": "c73ef36cb9416ab7f004cd01f42a458d144259a61397533cbc411ce1df6cb920",
+      "originalSha256": "c73ef36cb9416ab7f004cd01f42a458d144259a61397533cbc411ce1df6cb920",
+      "origin": "work/yukon-indexed-controller-20260923/identity-index.ts"
+    },
+    {
+      "path": "source/work/yukon-indexed-controller-20260923/observations.ts",
+      "sha256": "babb14d619570506402ff23c94d9a8de0dd2805486682cbdc3b5b29a80406233",
+      "originalSha256": "babb14d619570506402ff23c94d9a8de0dd2805486682cbdc3b5b29a80406233",
+      "origin": "work/yukon-indexed-controller-20260923/observations.ts"
+    },
+    {
+      "path": "source/work/yukon-indexed-controller-20260923/provider-io.ts",
+      "sha256": "61ea3668c1d6d04beb2110c4ae34ab2e16abd094838746e986f5f17f33c6422d",
+      "originalSha256": "36c42bc3e7d59298aac0582007bb5f25428f9259f03232648f88b9771accc714",
+      "origin": "work/yukon-indexed-controller-20260923/provider-io.ts"
+    },
+    {
+      "path": "source/work/yukon-indexed-controller-20260923/publication.ts",
+      "sha256": "b3121dcfe2a940d985e124c3ff50c24e140e4cd23716dd79cf21dc5106ae3637",
+      "originalSha256": "b3121dcfe2a940d985e124c3ff50c24e140e4cd23716dd79cf21dc5106ae3637",
+      "origin": "work/yukon-indexed-controller-20260923/publication.ts"
+    },
+    {
+      "path": "source/work/yukon-indexed-controller-20260923/scheduler.ts",
+      "sha256": "07d58da1ef9ec717ebc048646bf52209e1365ad39ca0b7810b480e6cfd8cf7c9",
+      "originalSha256": "07d58da1ef9ec717ebc048646bf52209e1365ad39ca0b7810b480e6cfd8cf7c9",
+      "origin": "work/yukon-indexed-controller-20260923/scheduler.ts"
+    },
+    {
+      "path": "source/work/yukon-indexed-controller-20260923/watchdog-client.ts",
+      "sha256": "13a2c4c64f329df0604324afe7462b6fb4326533f47f82c0111c9ceb13f568fb",
+      "originalSha256": "13a2c4c64f329df0604324afe7462b6fb4326533f47f82c0111c9ceb13f568fb",
+      "origin": "work/yukon-indexed-controller-20260923/watchdog-client.ts"
+    },
+    {
+      "path": "source/work/yukon-indexed-pin-20260923/identity.ts",
+      "sha256": "3f6a1a127c42b873c05c4ab73211e26d03347dfbd1ea533ff7a9e5693ba822de",
+      "originalSha256": "3f6a1a127c42b873c05c4ab73211e26d03347dfbd1ea533ff7a9e5693ba822de",
+      "origin": "work/yukon-indexed-pin-20260923/identity.ts"
+    },
+    {
+      "path": "source/work/yukon-indexed-pin-20260923/pin-inventory-v3.ts",
+      "sha256": "4fd19bb4cca17e281894a9c231efb33a2b8b50182d07564ff792b1f790f4fe3f",
+      "originalSha256": "4fd19bb4cca17e281894a9c231efb33a2b8b50182d07564ff792b1f790f4fe3f",
+      "origin": "work/yukon-indexed-pin-20260923/pin-inventory-v3.ts"
+    },
+    {
+      "path": "source/work/yukon-joint-composition-20260923/indexed-parent-guard.ts",
+      "sha256": "fe571490835e4cbcd1cf8a1b53f6318c0d5ea2107feac64ff6911a6987677292",
+      "originalSha256": "fe571490835e4cbcd1cf8a1b53f6318c0d5ea2107feac64ff6911a6987677292",
+      "origin": "work/yukon-joint-composition-20260923/indexed-parent-guard.ts"
+    },
+    {
+      "path": "source/work/yukon-joint-composition-20260923/parent-guard-store.ts",
+      "sha256": "78bcd478cd554ad1a0a666f3977f2a77d2ebcc6dc8a2b01e479cff74a26a2bd5",
+      "originalSha256": "78bcd478cd554ad1a0a666f3977f2a77d2ebcc6dc8a2b01e479cff74a26a2bd5",
+      "origin": "work/yukon-joint-composition-20260923/parent-guard-store.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/activate-child.ts",
+      "sha256": "7ddf679d94ba5975b02443535476a463b2d526b9341f025e62e13d3f14e88c85",
+      "originalSha256": "7ddf679d94ba5975b02443535476a463b2d526b9341f025e62e13d3f14e88c85",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/activate-child.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/adoption.ts",
+      "sha256": "1da140c8b42ac86b0cf06054a2ac9a8af19c73b8c7141e9216bc05a6206e669a",
+      "originalSha256": "d7d579aff07c8c794146a666cce6c92f5a5943e8df76af4a854fc3e1e5d38833",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/adoption.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/census-store.ts",
+      "sha256": "53915e32fdd475fb1b9795998a3cb56696d964ae6cd1f8fbb2611e6dcaa0d4d5",
+      "originalSha256": "7b2df792bdd8a783c95d2541ef7ee18573499675396573a0a33636409f370aad",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/census-store.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/census.ts",
+      "sha256": "fc44da75a365e3d460002641f4141ea9fbeefcca0709a2a35785bc5141d04312",
+      "originalSha256": "fc44da75a365e3d460002641f4141ea9fbeefcca0709a2a35785bc5141d04312",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/census.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/common.ts",
+      "sha256": "b23bf92bb0a6f82843ef22b02cab82dc0b1cfe86173877cde716a15140f39da3",
+      "originalSha256": "b23bf92bb0a6f82843ef22b02cab82dc0b1cfe86173877cde716a15140f39da3",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/common.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/composed-child.ts",
+      "sha256": "1b59d238bffc9bc5f9c854b840d63899ee63c46d98f0a740d159ed1f242f7702",
+      "originalSha256": "1b59d238bffc9bc5f9c854b840d63899ee63c46d98f0a740d159ed1f242f7702",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/composed-child.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/contract.ts",
+      "sha256": "45ac2df89dcaa05907a5a6408efaef98ec56113424a0c0e7d12e0d786c73128d",
+      "originalSha256": "38f2d2c71a6b4a4c5a7153ace66a017c55ea1e458c22c98150577b54a9557356",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/contract.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/cycle-adoption.ts",
+      "sha256": "e8d041e8523af1cc791994abaa803fe8732dbe31262b1fdc4232ec29e7560894",
+      "originalSha256": "612b23dc5f57be7146c8cf5a755996e9b09d1be6640f7c1196b09b7faa024007",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/cycle-adoption.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/drain.ts",
+      "sha256": "bc653728e17f196304e2426a60711d3b692838ce419833da1ed244095e443686",
+      "originalSha256": "bc653728e17f196304e2426a60711d3b692838ce419833da1ed244095e443686",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/drain.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/driver.ts",
+      "sha256": "2c3c98266f914038e501adb3ef70c3145c40c0bd3c814fd9adcdecf0f795b9ed",
+      "originalSha256": "2c3c98266f914038e501adb3ef70c3145c40c0bd3c814fd9adcdecf0f795b9ed",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/driver.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/event-factory.ts",
+      "sha256": "f4554acbc053f40c83600d438e90d11e10647343d208dd4f1a4be1e8c4b3612e",
+      "originalSha256": "42c0583f02e52dc171d7ef051556734ce7b233d0cbd1e88bf948f7eaee6b94d3",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/event-factory.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/evidence-readers.ts",
+      "sha256": "de0a824c25a09f2a21d5fe640f52559430c91a8220b6cc48da3c97c3787a26b2",
+      "originalSha256": "de0a824c25a09f2a21d5fe640f52559430c91a8220b6cc48da3c97c3787a26b2",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/evidence-readers.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/export-core.ts",
+      "sha256": "7a927b6d23f290fec90d02334b4c47dc37411dafd4a0edf5e7c630b334e2b890",
+      "originalSha256": "37e6d51cf0dde3f334ed1775670f5a96ded9d367681d9204c48e65de2aea688f",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/export-core.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/fixed-common.ts",
+      "sha256": "d2fca05f198c926339710d21144d6364cb6b874d3eea8215e6260f4b3d26f1ec",
+      "originalSha256": "d2fca05f198c926339710d21144d6364cb6b874d3eea8215e6260f4b3d26f1ec",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/fixed-common.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/lineage.ts",
+      "sha256": "d9ff65104042429de311d6d3dfd1921fb30d9e31f7200e6be6c74f1aa639e898",
+      "originalSha256": "d9ff65104042429de311d6d3dfd1921fb30d9e31f7200e6be6c74f1aa639e898",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/lineage.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/not-sent.ts",
+      "sha256": "ebebb122eecae3721c0d9e7796ece5d0f713314b3a8df432a55e496ce58029e3",
+      "originalSha256": "ebebb122eecae3721c0d9e7796ece5d0f713314b3a8df432a55e496ce58029e3",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/not-sent.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/operational-export.ts",
+      "sha256": "71689c66e052b6d9a933459792b9dcf14197490c925d00b7f2aca6bc06059767",
+      "originalSha256": "71689c66e052b6d9a933459792b9dcf14197490c925d00b7f2aca6bc06059767",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/operational-export.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/orchestrator.ts",
+      "sha256": "5b46538009ce4d4c89e7d6a11dc6b05e74c473c92eda0ea582233adb870a5706",
+      "originalSha256": "be07e350c793e6c7897984788c40717313f0500808ae01c797b70175ac482a45",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/orchestrator.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/pin-controller.ts",
+      "sha256": "12482c973b98d0bcd8b94da3823287973c33e82d64b51ae800a5401c95d4fdb6",
+      "originalSha256": "b0196228fad90ae8adee2f8f5f5e068ba61d7d4b5e38742a7993563df96bd11a",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/pin-controller.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/pin-ready.ts",
+      "sha256": "0a85353675dcd1f07e8523237fa429d827848ceb09bfd99185607b742382de15",
+      "originalSha256": "0a85353675dcd1f07e8523237fa429d827848ceb09bfd99185607b742382de15",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/pin-ready.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/pin.ts",
+      "sha256": "27adb8a8c2d2dc046deecab6f7a2204c03bee4fe5435be1d0491ae87cb061ec9",
+      "originalSha256": "9549a310fa9082606e9a1f81cf6640d2781f42ca5a4ab90280b32bd6a8d18bbc",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/pin.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/publication.ts",
+      "sha256": "ed2b381838c45085c2abfbc703803a5f20d6f54d6d635b7c9bc67d37efc8cfe0",
+      "originalSha256": "ed2b381838c45085c2abfbc703803a5f20d6f54d6d635b7c9bc67d37efc8cfe0",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/publication.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/publish-pin.ts",
+      "sha256": "57b5527a66f2f89718a7a63cf52f8f7e222ebbe389a298749a5d8a46e04692b1",
+      "originalSha256": "57b5527a66f2f89718a7a63cf52f8f7e222ebbe389a298749a5d8a46e04692b1",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/publish-pin.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/reference-binding.ts",
+      "sha256": "bae223476a6246cd4eb1899057bd5fa66d55d7146d30f0ad4e22b86a2888008c",
+      "originalSha256": "bae223476a6246cd4eb1899057bd5fa66d55d7146d30f0ad4e22b86a2888008c",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/reference-binding.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/request-manifest.ts",
+      "sha256": "cfba77c1ba66e59e6191345db9a65faf79912320b814d55becfc593d60f3ca9a",
+      "originalSha256": "cfba77c1ba66e59e6191345db9a65faf79912320b814d55becfc593d60f3ca9a",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/request-manifest.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/runner.ts",
+      "sha256": "0418cdc60be49376f984f28b4991d2e65a227bfa876e9c8d2ae9ff7a668bb61e",
+      "originalSha256": "0418cdc60be49376f984f28b4991d2e65a227bfa876e9c8d2ae9ff7a668bb61e",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/runner.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/runtime-api.ts",
+      "sha256": "4d23e484b2c878781ddc5ca4b1c1c1fd7eeaaa6e4259edaf79ee4241eab1d5ad",
+      "originalSha256": "4d23e484b2c878781ddc5ca4b1c1c1fd7eeaaa6e4259edaf79ee4241eab1d5ad",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/runtime-api.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/status.ts",
+      "sha256": "b12a6aa8312e3423e65267fd9bda378bf706d96de78bdf6bbaa539cc137c8c80",
+      "originalSha256": "b12a6aa8312e3423e65267fd9bda378bf706d96de78bdf6bbaa539cc137c8c80",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/status.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/subset-child.ts",
+      "sha256": "9f3545add607076b74f8f8cf11804090294acc6768ed06b1185ee8cf87ef000d",
+      "originalSha256": "902903964a35e3ec26b601c439b6782fb04922c10196ce5fbcf08d79c4db5847",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/subset-child.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/subset-controller.ts",
+      "sha256": "709fc6d69c66890bc93722868872a5bac7c4f61bc9ba2fedf9ff9536968f5d6e",
+      "originalSha256": "709fc6d69c66890bc93722868872a5bac7c4f61bc9ba2fedf9ff9536968f5d6e",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/subset-controller.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/subset.ts",
+      "sha256": "63bb947932397605ee4251411413829015cff13972adf8c7542a4f37848e5057",
+      "originalSha256": "63bb947932397605ee4251411413829015cff13972adf8c7542a4f37848e5057",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/subset.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-cycling-runner-20260923/transport.ts",
+      "sha256": "6e099fca13b8fdff03ccbb38f8684405b6e2571b8352f2354609f1965c3b59c9",
+      "originalSha256": "67ab84cc2635251cbfcb59ae2a21da0958b8322fdd06cc32a49d73f3e8b95d6d",
+      "origin": "work/yukon-mainnet-cycling-runner-20260923/transport.ts"
+    },
+    {
+      "path": "source/work/yukon-mainnet-service-enrollment-20260923/capability.ts",
+      "sha256": "14902f68d89c38fdf79bca4af86ffee771ddfce767647e4058d8ef19dfe400fa",
+      "originalSha256": "14902f68d89c38fdf79bca4af86ffee771ddfce767647e4058d8ef19dfe400fa",
+      "origin": "work/yukon-mainnet-service-enrollment-20260923/capability.ts"
+    },
+    {
+      "path": "source/work/yukon-operational-distribution-sealed-20260923/controller-entry.ts",
+      "sha256": "03acbe0c9a6404f39ea7784b6ea5403e03e8d6b4865de0ba0259b292f2e648d7",
+      "originalSha256": "03acbe0c9a6404f39ea7784b6ea5403e03e8d6b4865de0ba0259b292f2e648d7",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/controller-entry.ts"
+    },
+    {
+      "path": "source/work/yukon-operational-distribution-sealed-20260923/graceful.ts",
+      "sha256": "a7432196b562bf352838ba8829d15b46d649819f5bff0079ffa25c93a6f45bef",
+      "originalSha256": "a7432196b562bf352838ba8829d15b46d649819f5bff0079ffa25c93a6f45bef",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/graceful.ts"
+    },
+    {
+      "path": "source/work/yukon-operational-distribution-sealed-20260923/predecessor.ts",
+      "sha256": "5d2d07ddfb0ac417f525568ae1c001d4106a6c5e6aeb02b5ab34c917486b4def",
+      "originalSha256": "5d2d07ddfb0ac417f525568ae1c001d4106a6c5e6aeb02b5ab34c917486b4def",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/predecessor.ts"
+    },
+    {
+      "path": "source/work/yukon-operational-distribution-sealed-20260923/retire-entry.ts",
+      "sha256": "743bddb6231498d59bf735c14536e5bc354a9ce612430defd6a1bf5b980f3add",
+      "originalSha256": "743bddb6231498d59bf735c14536e5bc354a9ce612430defd6a1bf5b980f3add",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/retire-entry.ts"
+    },
+    {
+      "path": "source/work/yukon-operational-distribution-sealed-20260923/validate.ts",
+      "sha256": "d5de50428e7b8be335e3de1a395a1ae4dae278b896d38b40a3238c10e50edc00",
+      "originalSha256": "d5de50428e7b8be335e3de1a395a1ae4dae278b896d38b40a3238c10e50edc00",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/validate.ts"
+    },
+    {
+      "path": "source/work/yukon-owned-pin-handoff-20260923/runtime-api.ts",
+      "sha256": "6f68076c31a58af12ab0897c7a4b1fc439e55e96e2eeff12665838f45a9ffdf6",
+      "originalSha256": "6f68076c31a58af12ab0897c7a4b1fc439e55e96e2eeff12665838f45a9ffdf6",
+      "origin": "work/yukon-owned-pin-handoff-20260923/runtime-api.ts"
+    },
+    {
+      "path": "source/work/yukon-owned-runtime-20260923/runtime.ts",
+      "sha256": "8ecc034710aeab7e2fdb602622f744c0081a08753a97897ecc3514e61d9c0418",
+      "originalSha256": "8ecc034710aeab7e2fdb602622f744c0081a08753a97897ecc3514e61d9c0418",
+      "origin": "work/yukon-owned-runtime-20260923/runtime.ts"
+    },
+    {
+      "path": "source/work/yukon-owned-runtime-publicstate-20260923/runtime.ts",
+      "sha256": "303da2bf9f431d018363ca3010d15a83ad0d2d456cba327f45d281a937461afe",
+      "originalSha256": "303da2bf9f431d018363ca3010d15a83ad0d2d456cba327f45d281a937461afe",
+      "origin": "work/yukon-owned-runtime-publicstate-20260923/runtime.ts"
+    },
+    {
+      "path": "source/work/yukon-pin-adapter-20260923/adapter.ts",
+      "sha256": "9ea0b6367add2f19cde06c01c51f9b83f28556ffc04b073778d428b22d643f43",
+      "originalSha256": "9ea0b6367add2f19cde06c01c51f9b83f28556ffc04b073778d428b22d643f43",
+      "origin": "work/yukon-pin-adapter-20260923/adapter.ts"
+    },
+    {
+      "path": "source/work/yukon-pin-controller-20260923/observations.ts",
+      "sha256": "a45d3f1a828f4f429771f0b8f5fb0d8f1a2fb3f54497682eb131ad5aee9c6c09",
+      "originalSha256": "a45d3f1a828f4f429771f0b8f5fb0d8f1a2fb3f54497682eb131ad5aee9c6c09",
+      "origin": "work/yukon-pin-controller-20260923/observations.ts"
+    },
+    {
+      "path": "source/work/yukon-pin-disable-20260923/disable.mjs",
+      "sha256": "67d9fa79eb21699c27bfb784466c1717be8b95829d239ae6cb5a7db0146bf8c3",
+      "originalSha256": "a3d5a87f591febf805a5f111bc165f3f7267de7959a70aba8b58aeed335da9ec",
+      "origin": "work/yukon-pin-disable-20260923/disable.mjs"
+    },
+    {
+      "path": "source/work/yukon-pin-preflight-20260923/execution-gate.ts",
+      "sha256": "b5cee04ded359d70b434cf54f91a40d9436b17c3e1be000afe77384336fffade",
+      "originalSha256": "0a1ed71250a145051d9b2baa8be30e67f47d1e90f8ceaf792180d441072f9c25",
+      "origin": "work/yukon-pin-preflight-20260923/execution-gate.ts"
+    },
+    {
+      "path": "source/work/yukon-resource-session-locator-20260923/config.ts",
+      "sha256": "83573c495ca62f08c39faff3c7a2120fe05dbd5e6631d0381b9777efd62ff52b",
+      "originalSha256": "83573c495ca62f08c39faff3c7a2120fe05dbd5e6631d0381b9777efd62ff52b",
+      "origin": "work/yukon-resource-session-locator-20260923/config.ts"
+    },
+    {
+      "path": "source/work/yukon-resource-session-locator-20260923/context.ts",
+      "sha256": "de7d2959f3f69dd7894ee6d6efb9a6425865a60a8c7e68379d6a64543a07122c",
+      "originalSha256": "de7d2959f3f69dd7894ee6d6efb9a6425865a60a8c7e68379d6a64543a07122c",
+      "origin": "work/yukon-resource-session-locator-20260923/context.ts"
+    },
+    {
+      "path": "source/work/yukon-resource-session-locator-20260923/entry-hooks.ts",
+      "sha256": "4a00e5e8e6650c4c9569e28c6e5efac33262db5712369fa94f428613ec8420c0",
+      "originalSha256": "4a00e5e8e6650c4c9569e28c6e5efac33262db5712369fa94f428613ec8420c0",
+      "origin": "work/yukon-resource-session-locator-20260923/entry-hooks.ts"
+    },
+    {
+      "path": "source/work/yukon-resource-session-locator-20260923/execution.ts",
+      "sha256": "f477455c9a6a6795c5e7a89fe0acdff678a2f540548bdc253be68ff08b4ba53a",
+      "originalSha256": "f477455c9a6a6795c5e7a89fe0acdff678a2f540548bdc253be68ff08b4ba53a",
+      "origin": "work/yukon-resource-session-locator-20260923/execution.ts"
+    },
+    {
+      "path": "source/work/yukon-resource-session-locator-20260923/resource-grant.ts",
+      "sha256": "be009b379977baa0269f1d3f693f1a044c16941b721df9f03d26f54426eecbdb",
+      "originalSha256": "be009b379977baa0269f1d3f693f1a044c16941b721df9f03d26f54426eecbdb",
+      "origin": "work/yukon-resource-session-locator-20260923/resource-grant.ts"
+    },
+    {
+      "path": "source/work/yukon-resource-session-locator-20260923/retirement.ts",
+      "sha256": "7db5dc37db01f41f20c912c987955ab8a70a7eaacc7e5b996f14634eb5e5dbaf",
+      "originalSha256": "7db5dc37db01f41f20c912c987955ab8a70a7eaacc7e5b996f14634eb5e5dbaf",
+      "origin": "work/yukon-resource-session-locator-20260923/retirement.ts"
+    },
+    {
+      "path": "source/work/yukon-resource-session-locator-20260923/sessions.ts",
+      "sha256": "0c7b04180f74701859309b71074d43c3c14b3536064f64b5f093f37faf298086",
+      "originalSha256": "0c7b04180f74701859309b71074d43c3c14b3536064f64b5f093f37faf298086",
+      "origin": "work/yukon-resource-session-locator-20260923/sessions.ts"
+    },
+    {
+      "path": "source/work/yukon-retained-endpoint-retirement-20260923/retained.ts",
+      "sha256": "32f0c16693cb96c69099aa109a8fda7525349458986bf2ac0c19ef69726f44af",
+      "originalSha256": "32f0c16693cb96c69099aa109a8fda7525349458986bf2ac0c19ef69726f44af",
+      "origin": "work/yukon-retained-endpoint-retirement-20260923/retained.ts"
+    },
+    {
+      "path": "source/work/yukon-retained-endpoint-retirement-20260923/transport.ts",
+      "sha256": "80a71f6efb65084366c86934ec5d5a9e42c67664126cafb77f791cdfb2301f7c",
+      "originalSha256": "80a71f6efb65084366c86934ec5d5a9e42c67664126cafb77f791cdfb2301f7c",
+      "origin": "work/yukon-retained-endpoint-retirement-20260923/transport.ts"
+    },
+    {
+      "path": "source/work/yukon-service-progress-20260923/progress.ts",
+      "sha256": "bda493fc3d8b895b436d0a1e5dc6ffdac6352f50c8cd815f0b824787ca6eb833",
+      "originalSha256": "bda493fc3d8b895b436d0a1e5dc6ffdac6352f50c8cd815f0b824787ca6eb833",
+      "origin": "work/yukon-service-progress-20260923/progress.ts"
+    },
+    {
+      "path": "source/work/yukon-service-solved-completion-20260923/reservations.ts",
+      "sha256": "1e01abc57f73b34b470bea52b1894193f5672e39b5fdab9fc5b264e98984bae3",
+      "originalSha256": "1e01abc57f73b34b470bea52b1894193f5672e39b5fdab9fc5b264e98984bae3",
+      "origin": "work/yukon-service-solved-completion-20260923/reservations.ts"
+    },
+    {
+      "path": "source/work/yukon-v4-controller-20260923/provider-io.ts",
+      "sha256": "61ea3668c1d6d04beb2110c4ae34ab2e16abd094838746e986f5f17f33c6422d",
+      "originalSha256": "36c42bc3e7d59298aac0582007bb5f25428f9259f03232648f88b9771accc714",
+      "origin": "work/yukon-v4-controller-20260923/provider-io.ts"
+    },
+    {
+      "path": "layout/common-linux/supervisor.py",
+      "sha256": "84ac9a5d9342948744e9bcfe4de788c5061ae29f9afb9cb8840c6d681dc4be3a",
+      "originalSha256": "84ac9a5d9342948744e9bcfe4de788c5061ae29f9afb9cb8840c6d681dc4be3a",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/common-linux/supervisor.py"
+    },
+    {
+      "path": "layout/common-linux/leader.py",
+      "sha256": "074334d59301e51022aa0d52e2ed487a3623796cf3390058437ec0f68f44f584",
+      "originalSha256": "074334d59301e51022aa0d52e2ed487a3623796cf3390058437ec0f68f44f584",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/common-linux/leader.py"
+    },
+    {
+      "path": "layout/common-linux/owned_exec.py",
+      "sha256": "b56604191d7d19aae7a0f3655b8020d9f496e0ac107e492cd6724868a2a16bf8",
+      "originalSha256": "b56604191d7d19aae7a0f3655b8020d9f496e0ac107e492cd6724868a2a16bf8",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/common-linux/owned_exec.py"
+    },
+    {
+      "path": "layout/common-linux/adaptive.py",
+      "sha256": "9ad5abf4064c22d6317db9623fa7efa4544a88ec30d14e12cb15fdcc96ebfb09",
+      "originalSha256": "9ad5abf4064c22d6317db9623fa7efa4544a88ec30d14e12cb15fdcc96ebfb09",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/common-linux/adaptive.py"
+    },
+    {
+      "path": "layout/common-linux/drain-source.ts",
+      "sha256": "bc653728e17f196304e2426a60711d3b692838ce419833da1ed244095e443686",
+      "originalSha256": "bc653728e17f196304e2426a60711d3b692838ce419833da1ed244095e443686",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/common-linux/drain-source.ts"
+    },
+    {
+      "path": "layout/owned-runtime/cpu/supervisor.py",
+      "sha256": "134069f007aa110f1088b101c2e1d5dbda17b78e747a2412ee841bb43644f02b",
+      "originalSha256": "134069f007aa110f1088b101c2e1d5dbda17b78e747a2412ee841bb43644f02b",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/owned-runtime/cpu/supervisor.py"
+    },
+    {
+      "path": "layout/owned-runtime/cpu/leader.py",
+      "sha256": "f2e3a22c929d8b75adeaaee0ce579f5205f62f257b35a6a461635805db8d49ab",
+      "originalSha256": "f2e3a22c929d8b75adeaaee0ce579f5205f62f257b35a6a461635805db8d49ab",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/owned-runtime/cpu/leader.py"
+    },
+    {
+      "path": "layout/owned-runtime/cpu/client.py",
+      "sha256": "f5f30b8b1bbae6785538b37fe61072c9571a1f85e4158bb2ef62b300866c49c5",
+      "originalSha256": "f5f30b8b1bbae6785538b37fe61072c9571a1f85e4158bb2ef62b300866c49c5",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/owned-runtime/cpu/client.py"
+    },
+    {
+      "path": "layout/owned-runtime/cpu/owned_exec.py",
+      "sha256": "b56604191d7d19aae7a0f3655b8020d9f496e0ac107e492cd6724868a2a16bf8",
+      "originalSha256": "b56604191d7d19aae7a0f3655b8020d9f496e0ac107e492cd6724868a2a16bf8",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/owned-runtime/cpu/owned_exec.py"
+    },
+    {
+      "path": "layout/owned-runtime/cpu/ownership.py",
+      "sha256": "be0b4726270bfc7b4ed79dca036d4a9f9f5dac2dc6b72609c23f8867baab589a",
+      "originalSha256": "be0b4726270bfc7b4ed79dca036d4a9f9f5dac2dc6b72609c23f8867baab589a",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/owned-runtime/cpu/ownership.py"
+    },
+    {
+      "path": "layout/owned-runtime/cpu/verify.py",
+      "sha256": "c0b29ec55b29269ed48ed61423f116cd4f2f3e0b81f584e1409c5091e7fab7d0",
+      "originalSha256": "c0b29ec55b29269ed48ed61423f116cd4f2f3e0b81f584e1409c5091e7fab7d0",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/owned-runtime/cpu/verify.py"
+    },
+    {
+      "path": "layout/owned-runtime/cpu/handoff.py",
+      "sha256": "f0b80af1ce214fe320cde3eafb05df7c2db115df838820ddefd6f3c5d710dc03",
+      "originalSha256": "f0b80af1ce214fe320cde3eafb05df7c2db115df838820ddefd6f3c5d710dc03",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/owned-runtime/cpu/handoff.py"
+    },
+    {
+      "path": "layout/owned-runtime/cpu/candidate-handoff.py",
+      "sha256": "e6ec75c81a471a9f7040f4fa78c493603f1f175a46ab4efbf61f369bb103c645",
+      "originalSha256": "e6ec75c81a471a9f7040f4fa78c493603f1f175a46ab4efbf61f369bb103c645",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/owned-runtime/cpu/candidate-handoff.py"
+    },
+    {
+      "path": "layout/owned-runtime/cpu/registry.py",
+      "sha256": "34af03ec045c9a137f44b0c9725db8038667d6582ce7e6bb9f88abf9c3377af9",
+      "originalSha256": "34af03ec045c9a137f44b0c9725db8038667d6582ce7e6bb9f88abf9c3377af9",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/owned-runtime/cpu/registry.py"
+    },
+    {
+      "path": "layout/owned-runtime/cpu/publicstate.py",
+      "sha256": "26fe26a7e0e11bb6f71483a51d75b69076d86ea3a15bd2f01869156e5c1c1b36",
+      "originalSha256": "26fe26a7e0e11bb6f71483a51d75b69076d86ea3a15bd2f01869156e5c1c1b36",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/owned-runtime/cpu/publicstate.py"
+    },
+    {
+      "path": "layout/repo/outputs/qsb-vault/worker/handler.py",
+      "sha256": "04746430c32a4970759c99a49e1ae499e1ba84b3ac9075ae1357c28714223850",
+      "originalSha256": "04746430c32a4970759c99a49e1ae499e1ba84b3ac9075ae1357c28714223850",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/repo/outputs/qsb-vault/worker/handler.py"
+    },
+    {
+      "path": "layout/repo/outputs/qsb-vault/worker/search_ranges.py",
+      "sha256": "07b0c2639e2a61b6a0306bed06a8f261f9f8c71ea1ee5d68806e3044a93c27df",
+      "originalSha256": "07b0c2639e2a61b6a0306bed06a8f261f9f8c71ea1ee5d68806e3044a93c27df",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/repo/outputs/qsb-vault/worker/search_ranges.py"
+    },
+    {
+      "path": "layout/launch.py",
+      "sha256": "2187075b4745bdab19813bc1ccba671b1697bb65dfaaf49eaa4307dc1bca4062",
+      "originalSha256": "2187075b4745bdab19813bc1ccba671b1697bb65dfaaf49eaa4307dc1bca4062",
+      "origin": "work/yukon-operational-distribution-sealed-20260923/distribution/launch.py"
+    }
+  ]
+}

@@ -22,6 +22,9 @@ rmSync(out,{recursive:true,force:true});mkdirSync(out,{recursive:true});
 cpSync('dist',path.join(out,'frontend'),{recursive:true});
 execFileSync('node',['supervised/build.mjs'],{stdio:'inherit'});
 cpSync('supervised/dist',path.join(out,'runtime'),{recursive:true});
+execFileSync('node',['supervised/runtime/build.mjs'],{stdio:'inherit'});
+cpSync('supervised/runtime/runtime.tar.gz',path.join(out,'runtime/runtime.tar.gz'));
+cpSync('supervised/runtime/dist/manifest.json',path.join(out,'runtime/runtime-manifest.json'));
 for (const [name,entry] of [['api','server/lambda.ts'],['coordinator','server/coordinator.ts'],['watchdog','terraform/runtime/watchdog.mjs'],['dispatch','supervised/dispatch/publisher.ts']]) {
   mkdirSync(path.join(out,name));
   await build({entryPoints:[entry],outfile:path.join(out,name,'index.js'),bundle:true,platform:'node',target:'node22',format:'cjs',minify:true,define:{'import.meta.env':'undefined'},logLevel:'warning'});

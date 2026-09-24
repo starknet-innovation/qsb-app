@@ -9,7 +9,12 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
-    "vendor": "python3 scripts/vendor.py"
+    "vendor": "python3 scripts/vendor.py",
+    "build:runtime": "node supervised/build.mjs && node supervised/runtime/build.mjs",
+    "build:optimized": "docker build --platform=linux/amd64 --target runtime -f worker/optimized/Dockerfile -t qsb-optimized:source-v1 .",
+    "build:optimized:queue": "docker build --platform=linux/amd64 --target queue -f worker/optimized/Dockerfile -t qsb-optimized-queue:source-v1 .",
+    "test:runtime-build": "python3 supervised/runtime/test_build.py",
+    "test:optimized-image": "python3 worker/optimized/test_image.py qsb-optimized:source-v1"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1000.0",
