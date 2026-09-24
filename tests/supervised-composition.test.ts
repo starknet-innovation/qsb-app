@@ -1,9 +1,14 @@
-import { it, expect } from "vitest";
+import { it, expect, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { Signer } from "bip322-js";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import { MemoryStore } from "../server/store";
+import { MemoryStore, type Store } from "../server/store";
+import {
+  MemoryStore as RuntimeMemoryStore,
+  runtimeTransactItems,
+} from "../supervised/runtime/source/outputs/qsb-vault/server/store";
+import { rollbackCanonicalAcceptance } from "../server/runtime/storage-authority";
 import { createSupervisedCreationApp } from "../supervised/dispatch/routes";
 import { receiveOne } from "../supervised/dispatch/queue";
 import { address, privateKey, publicKey } from "./supervised-fixture";
@@ -27,8 +32,7 @@ import { claimHost, HOST, DISTRIBUTION } from "../supervised/host/claim";
 const hash = (s: string | Uint8Array) =>
   createHash("sha256").update(s).digest("hex");
 /** Invented, unfunded public metadata. No private keys, real request files, chain or GPU execution. */
-async function prepared(authority: "generation" | "schema") {
-  const store = new MemoryStore();
+async function prepared(authority: "generation" | "schema", store: Store = new MemoryStore()) {
   const id = "10000000-0000-4000-8000-000000000001",
     jobId = "10000000-0000-4000-8000-000000000002";
   const point = (c: string) => ({
@@ -157,7 +161,7 @@ async function login(
   return (await verified.json()).token as string;
 }
 async function enrollQueued(
-  store: MemoryStore,
+  store: Store,
   address: string,
   jobId: string,
   job: { execution: unknown },
@@ -471,8 +475,9 @@ it("refuses a generation change between Lambda create and host claim", async () 
     job,
   );
   const key = `${AUTHORITY_PK}|${AUTHORITY_SK}`;
-  const authority = posted.store.rows.get(key);
-  posted.store.rows.set(key, {
+  const memory = posted.store as MemoryStore;
+  const authority = memory.rows.get(key);
+  memory.rows.set(key, {
     ...authority!,
     generation: Number(authority!.generation) + 1,
   });
@@ -526,6 +531,222 @@ it("admits nothing when only a SCHEMA reservation row is enrolled", async () => 
     await posted.store.get(
       "OWNER#" + posted.address,
       "V5_ADMISSION#" + posted.jobId,
+    ),
+  ).toBeUndefined();
+});
+vi.mock(
+  "../supervised/runtime/source/work/yukon-pin-adapter-20260923/adapter.ts",
+  () => ({
+    pinRange: () => {
+      throw new Error("pin adapter is not used at work start");
+    },
+    pinRequest: () => {
+      throw new Error("pin adapter is not used at work start");
+    },
+    pinResult: () => {
+      throw new Error("pin adapter is not used at work start");
+    },
+  }),
+);
+const executionBoundaryModule =
+  "../supervised/runtime/source/work/yukon-resource-session-locator-20260923/execution.ts";
+function censusOf(
+  runtime: RuntimeMemoryStore,
+  record?: (writes: {
+    row: { pk: string; sk: string; version: number };
+    conditionOnly?: boolean;
+    expected?: number;
+  }[]) => void,
+) {
+  return {
+    get: runtime.get.bind(runtime),
+    put: runtime.put.bind(runtime),
+    delete: runtime.delete.bind(runtime),
+    list: runtime.list.bind(runtime),
+    reservationRows: runtime.reservationRows.bind(runtime),
+    all: (pk: string) => runtime.list(pk, ""),
+    atomicPut: async (
+      writes: {
+        row: { pk: string; sk: string; version: number };
+        conditionOnly?: boolean;
+        expected?: number;
+      }[],
+    ) => {
+      record?.(writes);
+      await runtime.atomicPut(writes);
+    },
+  };
+}
+async function claimedOnRuntime() {
+  const runtime = new RuntimeMemoryStore();
+  const ready = await prepared("generation", runtime);
+  const app = createSupervisedCreationApp(ready.store, {
+    enabled: true,
+    chain: confirmingLedger,
+  });
+  const token = await login(app, ready.address);
+  const response = await app.request("/api/jobs/supervised", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(ready.body),
+  });
+  expect(response.status).toBe(201);
+  const stored = await runtime.get("OWNER#" + ready.address, "JOB#" + ready.jobId);
+  const job = stored?.job as {
+    execution: unknown;
+    manifest: {
+      funding: { txid: string; vout: number };
+      helper: { txid: string; vout: number };
+    };
+  };
+  const ticket = await enrollQueued(runtime, ready.address, ready.jobId, job);
+  await receiveOne(
+    runtime,
+    async (request) => {
+      await claimHost(runtime, request);
+      return {
+        accepted: true as const,
+        invocationId: request.invocationId,
+        executionHash: request.executionHash,
+      };
+    },
+    "https://sqs.example.invalid/supervised",
+    queueClient(ticket) as never,
+  );
+  const invocation = await runtime.get(
+    "OWNER#" + ready.address,
+    "V5_INVOCATION#" + ready.jobId,
+  );
+  return {
+    runtime,
+    address: ready.address,
+    jobId: ready.jobId,
+    job,
+    request: JSON.parse(String(invocation?.request)),
+    config: invocation?.runtimeConfig,
+  };
+}
+it("starts supervisor work on the runtime store without rewriting the generation authority", async () => {
+  const claimed = await claimedOnRuntime();
+  const authorityBefore = await claimed.runtime.get(AUTHORITY_PK, AUTHORITY_SK);
+  const reservationVersions = new Map<string, number>();
+  for (const point of [claimed.job.manifest.funding, claimed.job.manifest.helper]) {
+    const key = `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`;
+    reservationVersions.set(
+      key,
+      (await claimed.runtime.get(key, "RESERVATION"))?.version ?? -1,
+    );
+  }
+  const written: string[] = [];
+  const set = claimed.runtime.rows.set.bind(claimed.runtime.rows);
+  claimed.runtime.rows.set = (key, value) => {
+    written.push(String(key));
+    return set(key, value);
+  };
+  const batches: {
+    row: { pk: string; sk: string; version: number };
+    conditionOnly?: boolean;
+    expected?: number;
+  }[][] = [];
+  const { executionBoundary } = await import(executionBoundaryModule);
+  const boundary = await executionBoundary(
+    censusOf(claimed.runtime, (writes) => {
+      batches.push(writes);
+    }),
+    claimed.address,
+    claimed.request,
+    claimed.config,
+  );
+  written.length = 0;
+  batches.length = 0;
+  const invocationId = claimed.request.invocationId as string;
+  await boundary.store.atomicPut([
+    {
+      row: {
+        pk: "SUPERVISION#supervised-" + invocationId,
+        sk: "OWNER",
+        version: 1,
+        status: "operating",
+      },
+    },
+    {
+      row: {
+        pk: "VALIDATION#isolated-yukon-pin-" + invocationId,
+        sk: "SCOPE",
+        version: 1,
+        phase: "bootstrap",
+      },
+    },
+  ]);
+  const workStart = batches[0] ?? [];
+  const fenced = workStart.filter(
+    (write) =>
+      (write.row.pk === AUTHORITY_PK && write.row.sk === AUTHORITY_SK) ||
+      (write.row.sk === "RESERVATION" && write.row.pk.startsWith("OUTPOINT#")),
+  );
+  expect(fenced).toHaveLength(3);
+  const items = runtimeTransactItems("QsbYukonIsolatedSynthetic", workStart);
+  for (const write of fenced) {
+    const item = items[workStart.indexOf(write)];
+    expect(write.conditionOnly).toBe(true);
+    expect(item).toHaveProperty("ConditionCheck");
+    expect(item).not.toHaveProperty("Put");
+  }
+  expect(written).not.toContain(`${AUTHORITY_PK}|${AUTHORITY_SK}`);
+  for (const key of reservationVersions.keys())
+    expect(written).not.toContain(`${key}|RESERVATION`);
+  expect((await claimed.runtime.get(AUTHORITY_PK, AUTHORITY_SK))?.version).toBe(
+    authorityBefore?.version,
+  );
+  for (const [key, version] of reservationVersions)
+    expect((await claimed.runtime.get(key, "RESERVATION"))?.version).toBe(version);
+  expect(
+    (await claimed.runtime.get("OWNER#" + claimed.address, "JOB#" + claimed.jobId))?.job,
+  ).toMatchObject({ status: "bootstrapping" });
+});
+it("refuses supervisor work start after the reservation generation changes", async () => {
+  const claimed = await claimedOnRuntime();
+  const key = `${AUTHORITY_PK}|${AUTHORITY_SK}`;
+  const authority = claimed.runtime.rows.get(key);
+  claimed.runtime.rows.set(key, {
+    ...authority!,
+    generation: Number(authority!.generation) + 1,
+  });
+  const { executionBoundary } = await import(executionBoundaryModule);
+  await expect(
+    executionBoundary(
+      censusOf(claimed.runtime),
+      claimed.address,
+      claimed.request,
+      claimed.config,
+    ),
+  ).rejects.toThrow(/Paused or changed admission/);
+  expect(
+    await claimed.runtime.get(
+      "SUPERVISION#supervised-" + claimed.request.invocationId,
+      "OWNER",
+    ),
+  ).toBeUndefined();
+});
+it("refuses supervisor work start after canonical acceptance is stopped", async () => {
+  const claimed = await claimedOnRuntime();
+  await rollbackCanonicalAcceptance(claimed.runtime);
+  const { executionBoundary } = await import(executionBoundaryModule);
+  await expect(
+    executionBoundary(
+      censusOf(claimed.runtime),
+      claimed.address,
+      claimed.request,
+      claimed.config,
+    ),
+  ).rejects.toThrow(/Canonical reservation authority not enrolled/);
+  expect(
+    await claimed.runtime.get(
+      "SUPERVISION#supervised-" + claimed.request.invocationId,
+      "OWNER",
     ),
   ).toBeUndefined();
 });

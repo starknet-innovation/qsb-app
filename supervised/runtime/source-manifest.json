@@ -11,9 +11,12 @@
   "files": [
     {
       "path": "source/outputs/qsb-vault/server/store.ts",
-      "sha256": "50e94043277d9e156fe817b99fee384654cbf0ef9888d849998cc4cf031c1be7",
+      "sha256": "86b8a147fbdf1e8b74e9f3003dcec28b6ad51767534854906ca050fca9de6c03",
       "originalSha256": "50e94043277d9e156fe817b99fee384654cbf0ef9888d849998cc4cf031c1be7",
-      "origin": "outputs/qsb-vault/server/store.ts"
+      "origin": "outputs/qsb-vault/server/store.ts",
+      "transformations": [
+        "conditionOnly writes are version ConditionChecks and are not Put. MemoryStore checks the version and does not rewrite the row."
+      ]
     },
     {
       "path": "source/outputs/qsb-vault/src/lib/model.ts",
@@ -560,7 +563,7 @@
     },
     {
       "path": "source/work/yukon-resource-session-locator-20260923/execution.ts",
-      "sha256": "7f8169cf953766062fad30b321db68327410fda93ec776d8810cb4d3d85903d1",
+      "sha256": "5d376d16d8b72fb93a372390603922a6a49a02c9f1d167b44af15bba758c1245",
       "originalSha256": "f477455c9a6a6795c5e7a89fe0acdff678a2f540548bdc253be68ff08b4ba53a",
       "origin": "work/yukon-resource-session-locator-20260923/execution.ts",
       "transformations": [
