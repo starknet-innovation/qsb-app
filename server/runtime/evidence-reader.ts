@@ -2,7 +2,21 @@ import { fingerprint } from "../../src/lib/provenance";
 import { validateSolvedState } from "../../src/mainnet/solvedContract";
 import type { Store } from "../store";
 import { assertSearchCapability, GateError } from "./capability";
-import { launchRecordSchema } from "./types";
+import { launchRecordSchema, type LaunchRecord } from "./types";
+
+/** A stopped sibling with no provider submission does not block the signing handoff. */
+function siblingStoppedWithoutWork(record: LaunchRecord): boolean {
+  const evidence = record.evidence;
+  if (record.state !== "terminal" || !evidence) return false;
+  if (record.providerSubmissions !== 0 || record.providerId) return false;
+  if (
+    evidence.hitVerified !== false ||
+    evidence.freshSearch !== false ||
+    evidence.wholeRangeCovered !== false
+  )
+    return false;
+  return evidence.outcome === "drained" || evidence.outcome === "process-exit";
+}
 
 /** Reads durable terminal evidence. It does not read a developer work directory. */
 export async function readAdmittedSolvedBundle(
@@ -30,7 +44,7 @@ export async function readAdmittedSolvedBundle(
     throw new GateError(409, "Process acknowledgement is not search success.");
   for (const record of records) {
     if (record.bindings.slot === 0) continue;
-    if (record.state !== "terminal" || record.evidence?.outcome !== "drained")
+    if (!siblingStoppedWithoutWork(record))
       throw new GateError(409, "Sibling work is not drained.");
   }
   const bundle = validateSolvedState(primary.evidence.bundle);

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { componentForPath } from "./closure";
@@ -56,6 +56,44 @@ export function assertEnrolledCpuSources(root: string): void {
       manifest.identities.components["cpu-verifier"]
   )
     throw new Error("CpuVerifierNotEnrolled");
+  assertPythonImportClosure(root, enrolled);
+}
+
+const pythonImport = /^(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)/gm;
+
+function localPythonModules(text: string): string[] {
+  const names = new Set<string>();
+  for (const match of text.matchAll(pythonImport)) {
+    const name = match[1];
+    if (name) names.add(name);
+  }
+  return [...names];
+}
+
+/** A local module imported by the verifier must itself be in the enrolled set. */
+function assertPythonImportClosure(
+  root: string,
+  enrolled: Record<string, string>,
+): void {
+  const pending = Object.keys(enrolled).filter(
+    (relativePath) =>
+      relativePath.startsWith("worker/cpu/") && relativePath.endsWith(".py"),
+  );
+  const seen = new Set(pending);
+  while (pending.length > 0) {
+    const relativePath = pending.pop();
+    if (!relativePath) break;
+    const text = readFileSync(assertInsideRepo(root, relativePath), "utf8");
+    for (const name of localPythonModules(text)) {
+      const imported = `worker/cpu/${name}.py`;
+      if (!existsSync(path.join(root, imported))) continue;
+      if (!enrolled[imported]) throw new Error("CpuVerifierNotEnrolled");
+      if (!seen.has(imported)) {
+        seen.add(imported);
+        pending.push(imported);
+      }
+    }
+  }
 }
 
 /** Runs the enrolled public CPU verifier. A rejection is not search success. */
@@ -92,11 +130,17 @@ export async function runEnrolledCpuVerifier(
       if (code !== 0)
         reject(new Error(stderr.trim() || `CpuVerifierExit:${code ?? "null"}`));
       else {
-        const parsed = JSON.parse(stdout) as {
-          ok: boolean;
-          result?: unknown;
-          error?: string;
-        };
+        let parsed: { ok?: boolean; result?: unknown; error?: string };
+        try {
+          parsed = JSON.parse(stdout) as {
+            ok?: boolean;
+            result?: unknown;
+            error?: string;
+          };
+        } catch {
+          reject(new Error("CpuVerifierOutputRejected"));
+          return;
+        }
         resolve(
           parsed.ok
             ? { ok: true, result: parsed.result, source: "worker/cpu/handler.py" }

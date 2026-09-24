@@ -6,6 +6,7 @@ import * as btc from "@scure/btc-signer";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../server/app";
+import { createSupervisedCreationApp } from "../supervised/dispatch/routes";
 import { Conflict, MemoryStore, type Store } from "../server/store";
 import contract from "../server/mainnet-capability.json";
 import { release } from "../src/lib/model";
@@ -105,12 +106,76 @@ function memoryRetention() {
 }
 
 describe("supervised runtime handoff", () => {
+  it("keeps in-process admission off the default app and behind the dispatcher", async () => {
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const closed = simulatedMainnetRequest();
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${closed.vault.id}`,
+      version: 0,
+      vault: closed.vault,
+    });
+    const plain = createApp(store);
+    const token = await login(plain);
+    expect(
+      (await plain.request(request("/jobs/supervised", closed.prepared.body, token)))
+        .status,
+    ).toBe(404);
+    const dispatched = createSupervisedCreationApp(store);
+    const dispatchedToken = await login(dispatched);
+    const refused = await dispatched.request(
+      request("/jobs/supervised", closed.prepared.body, dispatchedToken),
+    );
+    expect(refused.status).toBe(503);
+    expect(await refused.json()).toEqual({
+      error: "Supervised job creation is disabled.",
+    });
+  });
+
+  it("returns the existing job when a concurrent create loses the write", async () => {
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const closed = simulatedMainnetRequest();
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${closed.vault.id}`,
+      version: 0,
+      vault: closed.vault,
+    });
+    let conflicted = false;
+    const racing = {
+      get: store.get.bind(store),
+      list: store.list.bind(store),
+      put: store.put.bind(store),
+      delete: store.delete.bind(store),
+      atomicPut: async (writes: Parameters<Store["atomicPut"]>[0]) => {
+        await store.atomicPut(writes);
+        if (!conflicted) {
+          conflicted = true;
+          throw new Conflict("concurrent");
+        }
+      },
+    } satisfies Store;
+    const admitted = await admitSupervisedJob(
+      racing,
+      address,
+      "mainnet",
+      closed.prepared.body,
+    );
+    expect(admitted.created).toBe(false);
+    expect(admitted.job.id).toBe(closed.prepared.request.manifest.idempotencyKey);
+    expect(
+      [...store.rows.values()].filter((row) => String(row.sk).startsWith("JOB#")),
+    ).toHaveLength(1);
+  });
+
   it("keeps the default service closed and rejects the final composition guards", async () => {
     expect(release.mainnetEnabled).toBe(false);
     expect(contract.broadcastAuthorized).toBe(false);
     expect(() => assertServiceChain("testnet4")).toThrow(/not Bitcoin mainnet/);
     const store = new MemoryStore();
-    const app = createApp(store);
+    const app = createApp(store, { inProcessHandoff: true });
     const config = await (await app.request(request("/config"))).json();
     expect(config.mainnetEnabled).toBe(false);
     expect(config.operationsEnabled).toBe(false);
@@ -206,7 +271,7 @@ describe("supervised runtime handoff", () => {
 
   it("preserves an uncertain process launch without starting another process", async () => {
     const store = new MemoryStore();
-    const app = createApp(store);
+    const app = createApp(store, { inProcessHandoff: true });
     await seedCapability(store);
     const fixture = simulatedMainnetRequest();
     await store.put({
@@ -304,7 +369,7 @@ describe("supervised runtime handoff", () => {
 
   it("records one late provider id after an uncertain paid attempt", async () => {
     const store = new MemoryStore();
-    const app = createApp(store);
+    const app = createApp(store, { inProcessHandoff: true });
     await seedCapability(store);
     const fixture = simulatedMainnetRequest();
     await store.put({
@@ -421,7 +486,7 @@ describe("supervised runtime handoff", () => {
       source: "worker/cpu/handler.py",
     });
     const store = new MemoryStore();
-    const app = createApp(store);
+    const app = createApp(store, { inProcessHandoff: true });
     await seedCapability(store);
     const fixture = simulatedMainnetRequest();
     await store.put({
@@ -1117,7 +1182,7 @@ describe("supervised runtime handoff", () => {
 
   it("refuses legacy pause, resume, and submit for a supervised job", async () => {
     const store = new MemoryStore();
-    const app = createApp(store);
+    const app = createApp(store, { inProcessHandoff: true });
     await seedCapability(store);
     const fixture = simulatedMainnetRequest();
     await store.put({

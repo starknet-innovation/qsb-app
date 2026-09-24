@@ -54,6 +54,8 @@ export function createApp(
     installAuthenticatedJobPostRoutes?: (
       routes: AuthenticatedJobPostRoutes,
     ) => void;
+    /** Test-only in-process handoff. The default app does not admit jobs. */
+    inProcessHandoff?: boolean;
   } = {},
 ) {
   const ledger = dependencies.chain || chain,
@@ -667,16 +669,22 @@ export function createApp(
       return (app.get.bind(app) as (...a: any[]) => any)(path, ...handlers);
     }) as typeof app.get,
   };
+  const registeredPosts = new Set<string>();
   const authenticatedPost = {
     post: ((path: string, ...handlers: any[]) => {
+      registeredPosts.add(path);
       if (path === "/api/jobs/supervised" && handlers.length > 0)
         mainnetUiRoutes.creation = true;
       return (app.post.bind(app) as (...a: any[]) => any)(path, ...handlers);
     }) as typeof app.post,
   };
-  installSupervisedRoutes(authenticatedGet, authenticatedPost, store);
   dependencies.installAuthenticatedJobRoutes?.(authenticatedGet);
   dependencies.installAuthenticatedJobPostRoutes?.(authenticatedPost);
+  if (dependencies.inProcessHandoff === true) {
+    installSupervisedRoutes(authenticatedGet, authenticatedPost, store, {
+      post: !registeredPosts.has("/api/jobs/supervised"),
+    });
+  }
   return app;
 }
 export const app = createApp();

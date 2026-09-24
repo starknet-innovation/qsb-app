@@ -33,28 +33,31 @@ export function installSupervisedRoutes(
   read: GetRoutes,
   write: PostRoutes,
   store: Store,
+  options: { post?: boolean } = {},
 ): void {
-  write.post("/api/jobs/supervised", async (c: RouteContext) => {
-    try {
-      const admitted = await admitSupervisedJob(
-        store,
-        c.get("owner"),
-        NETWORK_ID,
-        await c.req.json(),
-      );
-      return c.json(
-        {
-          job: admitted.job,
-          runtime: admitted.job.runtime,
-        },
-        admitted.created ? 201 : 200,
-      );
-    } catch (error) {
-      const refused = gate(error);
-      if (refused) return c.json(refused.body, refused.status);
-      throw error;
-    }
-  });
+  if (options.post !== false) {
+    write.post("/api/jobs/supervised", async (c: RouteContext) => {
+      try {
+        const admitted = await admitSupervisedJob(
+          store,
+          c.get("owner"),
+          NETWORK_ID,
+          await c.req.json(),
+        );
+        return c.json(
+          {
+            job: admitted.job,
+            runtime: admitted.job.runtime,
+          },
+          admitted.created ? 201 : 200,
+        );
+      } catch (error) {
+        const refused = gate(error);
+        if (refused) return c.json(refused.body, refused.status);
+        throw error;
+      }
+    });
+  }
   read.get("/api/jobs/:id/mainnet-solved-state", async (c: RouteContext) => {
     try {
       const admitted = await readAdmittedSolvedBundle(

@@ -123,8 +123,15 @@ export async function admitSupervisedJob(
       })),
     ]);
   } catch (error) {
-    if (error instanceof Conflict)
+    if (error instanceof Conflict) {
+      const raced = await store.get(pk, `JOB#${id}`);
+      if (raced) {
+        const racedJob = raced.job as SupervisedJob;
+        if (racedJob.mainnetRequestHash === requestHash)
+          return { job: racedJob, created: false };
+      }
       throw new GateError(409, "Outpoint already reserved.");
+    }
     throw error;
   }
   return { job: stored, created: true };

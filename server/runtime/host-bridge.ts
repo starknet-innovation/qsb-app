@@ -700,7 +700,21 @@ export async function drainSibling(
     throw new Error("SiblingProviderMustBeReconciled");
   if (launch.replacement || launch.state === "replacing")
     throw new Error("ReplaceInProgress");
-  if (launch.state === "terminal") return launch;
+  if (launch.state === "terminal") {
+    if (
+      launch.evidence?.outcome === "process-exit" &&
+      launch.providerSubmissions === 0 &&
+      !launch.providerId &&
+      launch.evidence.hitVerified === false &&
+      launch.evidence.freshSearch === false
+    ) {
+      return commit(store, loaded, {
+        ...launch,
+        evidence: { ...launch.evidence, outcome: "drained" },
+      });
+    }
+    return launch;
+  }
   const live =
     launch.state === "launching" ||
     (launch.processId !== undefined &&
@@ -827,6 +841,9 @@ export function localAckStarter(
       child.stdout.on("data", (chunk: Buffer) => {
         text += chunk.toString("utf8");
         consider();
+      });
+      child.stderr.on("data", () => {
+        // Discard diagnostics so a full stderr pipe cannot stall the child.
       });
       child.on("error", (error) => {
         if (acked) rejectExclusive(error);
