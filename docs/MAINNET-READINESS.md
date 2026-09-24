@@ -16,7 +16,7 @@ The repository is a curated research snapshot. Some integration work and evidenc
 | Queue/runtime | Bounded actual GPU/OCI queue execution and cancellation/drain tests; immutable package identities recorded locally. | A complete fresh pinning-to-both-subsets search through the final application and runtime. |
 | Durable coordination | Local database transactions, concurrent claims, uncertain submissions, restart recovery, publication and session/replacement handoff tests. Some tests use actual Linux processes and CPU verification. | Production AWS permissions, complete production migration, or live-provider facts where tests supplied simulated responses. |
 | Browser/API | Backup encryption, one-time intent handling, wallet-lifetime guards, existing-job selection, authenticated route and configuration tests. | Successful final deployed UI/API/runtime composition; browser tests mock wallet, chain or QSB operations where stated. |
-| Public checkout | 152 unit tests and the TypeScript/Vite build passed in this checkout after pinned dependency preparation. The initial public export recorded 134. | Browser/GPU tests, deployment, or a fresh withdrawal reproduced from this public checkout. |
+| Public checkout | 158 unit tests and the TypeScript/Vite build passed in this checkout after pinned dependency preparation. The initial public export recorded 134. | Browser/GPU tests, deployment, or a fresh withdrawal reproduced from this public checkout. |
 
 ## 1. Complete and freeze the distributable release
 
@@ -95,7 +95,7 @@ Still open:
 Still open:
 
 - **4.1** Export the selected regional table without secrets and inventory that file. A partial public exclusion list, including any export from this checkout, is not global freshness proof.
-- **4.2** Deny the already deployed legacy writer roles `dynamodb:PutItem` and `dynamodb:TransactWriteItems` before enabling canonical acceptance in that account. This checkout rejects a frontend flag, capability marker, and paused workflow, and its store rejects the old reservation shape once `legacyExcluded` is set. That in-process condition does not stop an old binary.
+- **4.2** Deny the already deployed legacy writer roles `dynamodb:PutItem` and `dynamodb:TransactWriteItems` before enabling canonical acceptance in that account. This checkout rejects a frontend flag, capability marker, and paused workflow. A reservation transaction that does not write the authority row also conditions on that key being absent, so creating the authority row conflicts with an in-flight legacy write. That still does not stop an old binary whose transactions omit the condition. `canonicalAccepting: false` cannot be set back to true.
 - **4.3** The source model in `permissionModel` separates API, runtime, and operator data, secret, and evidence actions, and canonical reservation writes use a transaction. `productionIamReviewed` and `livePermissionsVerified` stay false. Review the real roles against that model.
 - **4.4** Re-run migration and the authority-generation concurrency check with the selected region's IAM. DynamoDB Local does not certify that behavior. MemoryStore concurrency in `tests/storage-authority.test.ts` is only a rehearsal.
 
