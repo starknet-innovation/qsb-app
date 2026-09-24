@@ -11,7 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { enrolledSourcePaths } from "../server/runtime/closure";
+import { enrolledSourcePaths, historicalVendorExtras } from "../server/runtime/closure";
+import archivedRelease from "../src/lib/releases/qsb-config-a-ranked-v2.json";
 import { assertInsideRepo, certifyWrapper, sha256Hex } from "../server/runtime/identity";
 import {
   assertCompatibleStages,
@@ -202,16 +203,17 @@ describe("source release package", () => {
 
   it("packages the Dockerfile historical inputs and checks the tree inside the checkout", () => {
     const manifest = createSourceManifest(root);
+    const archivedHashes = archivedRelease.sourceHashes as Record<string, string>;
+    expect(archivedRelease.id).toBe("qsb-config-a-ranked-v2-2791ed0");
+    for (const [relativePath, digest] of Object.entries(historicalVendorExtras)) {
+      expect(archivedHashes[relativePath]).toBeUndefined();
+      expect(manifest.identities.sourceFiles[relativePath]).toBe(digest);
+    }
     for (const relativePath of [
-      "vendor/challenge/candidates/pinning/COPYING",
-      "vendor/challenge/candidates/pinning/RESEARCH.md",
-      "vendor/challenge/candidates/pinning/SOURCE-MANIFEST.json",
       "vendor/challenge/candidates/pinning/pinning.cu",
-      "vendor/challenge/candidates/subset/COPYING",
-      "vendor/challenge/candidates/subset/TREE_INVERSE.md",
       "vendor/challenge/candidates/subset/subset.cu",
     ]) {
-      expect(manifest.identities.sourceFiles[relativePath]).toMatch(/^[a-f0-9]{64}$/);
+      expect(manifest.identities.sourceFiles[relativePath]).toBe(archivedHashes[relativePath]);
     }
     const directory = path.join(root, "release/dist");
     writePackageTree(root, directory, manifest);

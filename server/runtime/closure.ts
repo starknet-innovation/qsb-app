@@ -145,4 +145,18 @@ export const historicalCandidateRoots = [
   "vendor/challenge/candidates/subset",
 ] as const;
 
+/** Licenses and notes. Kept out of the archived solver descriptor. */
+export const historicalVendorExtras: Record<string, string> = {
+  "vendor/challenge/candidates/pinning/COPYING":
+    "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+  "vendor/challenge/candidates/pinning/RESEARCH.md":
+    "e7a32a084d2f8eafb1cbe7774a9826b36506bf37059d5b2573a6fe38d61db2a8",
+  "vendor/challenge/candidates/pinning/SOURCE-MANIFEST.json":
+    "9ad8ae159e6dd05c6c52c55bd1311f1346068176c41211f548e848afe8da6aac",
+  "vendor/challenge/candidates/subset/COPYING":
+    "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+  "vendor/challenge/candidates/subset/TREE_INVERSE.md":
+    "4457a27fbbd4af653045efe5f1d3507871b698eaf9e28d5a4de21fcb3bde318a",
+};
+
 export const optimizedSubsetRoot = "research/optimized-subset";

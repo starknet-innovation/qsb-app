@@ -15,6 +15,7 @@ import {
   componentForPath,
   enrolledSourcePaths,
   historicalCandidateRoots,
+  historicalVendorExtras,
   optimizedSubsetRoot,
   unpackagedReleaseScripts,
 } from "./closure";
@@ -278,11 +279,21 @@ function hashFile(root: string, relativePath: string): string {
   return sha256Hex(readFileSync(absolute));
 }
 
-/** Historical Dockerfile inputs come from the tracked sourceHashes allowlist, not git. */
+/** Historical Dockerfile inputs are the archived source hashes plus the license and notes allowlist. */
 export function reviewedVendorFiles(root: string, relativeDir: string): string[] {
-  const pinned = Object.entries(archived.sourceHashes)
-    .filter(([relativePath]) => relativePath.startsWith(`${relativeDir}/`))
-    .sort(([left], [right]) => left.localeCompare(right));
+  const pins = new Map<string, string>();
+  for (const [relativePath, digest] of Object.entries({
+    ...archived.sourceHashes,
+    ...historicalVendorExtras,
+  })) {
+    if (!relativePath.startsWith(`${relativeDir}/`)) continue;
+    const archivedDigest = (archived.sourceHashes as Record<string, string>)[relativePath];
+    const extraDigest = historicalVendorExtras[relativePath];
+    if (archivedDigest && extraDigest && archivedDigest !== extraDigest)
+      throw new Error(`Historical source hash mismatch ${relativePath}`);
+    pins.set(relativePath, digest);
+  }
+  const pinned = [...pins.entries()].sort(([left], [right]) => left.localeCompare(right));
   const allowed = new Set(pinned.map(([relativePath]) => relativePath));
   for (const relativePath of walkFiles(root, relativeDir, false)) {
     if (!allowed.has(relativePath))
