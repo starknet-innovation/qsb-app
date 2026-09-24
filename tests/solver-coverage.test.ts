@@ -19,7 +19,6 @@ import {
   type SearchStage,
 } from "../server/runtime/coverage-ledger";
 import {
-  checkoutRoot,
   holdSolverSourceGap,
   judgeEvidence,
   readHoldSolverBinding,
@@ -28,7 +27,7 @@ import {
 } from "../server/runtime/solver-review";
 
 const root = process.cwd();
-const holdSolver = readHoldSolverBinding(checkoutRoot);
+const holdSolver = readHoldSolverBinding();
 const pinA = "2147483648:500000000";
 
 function credit(

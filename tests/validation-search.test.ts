@@ -427,6 +427,21 @@ it("does not credit or advance a valid hit whose checkpoint is incomplete", asyn
   });
 });
 
+it("does not credit a 64-record completed batch from the truncating worker", async () => {
+  await tick();
+  provider.status.mockResolvedValue(
+    completed(0, ["indices=1\n".repeat(64)]),
+  );
+  await tick();
+  const row = (await store.get(pk, sk))!;
+  expect(row.job).toMatchObject({
+    status: "failed",
+    error: expect.stringContaining("supported capacity"),
+  });
+  expect(row.validation).toMatchObject({ completed: 0 });
+  expect(cpu).toHaveBeenCalledTimes(1);
+});
+
 it("fails closed when published hit records exceed supported capacity", async () => {
   await tick();
   provider.status.mockResolvedValue(

@@ -16,7 +16,7 @@ import {
   emptyLedger,
   publishedHitRecords,
 } from "./runtime/coverage-ledger";
-import { checkoutRoot, readHoldSolverBinding } from "./runtime/solver-review";
+import { readHoldSolverBinding } from "./runtime/solver-review";
 const slot = z.object({
   attempt: z.number().int().nonnegative(),
   id: z.string().optional(),
@@ -70,7 +70,7 @@ export async function validationTick(
     waitSeconds,
     polls: (event.polls || 0) + 1,
   });
-  const holdSolver = readHoldSolverBinding(checkoutRoot);
+  const holdSolver = readHoldSolverBinding();
   const haltStopped = async (message: string, accountedUnitId?: string) => {
     if (accountedUnitId !== undefined)
       state.active = state.active.filter((unit) => unit.id !== accountedUnitId);
@@ -166,7 +166,9 @@ export async function validationTick(
       throw Error("ValidationRangeMismatch");
     const records = publishedHitRecords(output.candidates);
     const scope = coverageScope(event, job, selected.id);
-    if (records > 64) {
+    // The historical worker truncates at 64 and still reports range-complete.
+    // An exact 64-record file is not credited as a finished range.
+    if (records >= 64) {
       const decision = applyRange(
         state.coverageLedger ?? emptyLedger(),
         scope,

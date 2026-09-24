@@ -4,14 +4,19 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { HoldSolverBinding } from "./coverage-ledger";
 import { sha256Hex } from "./identity";
+import holdSolverReceiptJson from "../../docs/source-build/20260924/solver-build-receipt.json";
 
-/** Checkout root for this module, including inside a packaged tree. */
-export const checkoutRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../..",
-);
+/**
+ * Checkout root for review and tests. Callers that run inside the coordinator
+ * bundle must not call this: that bundle does not define `import.meta.url`.
+ */
+export function checkoutRoot(): string {
+  return path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../..",
+  );
+}
 
-const HOLD_SOLVER_RECEIPT = "docs/source-build/20260924/solver-build-receipt.json";
 const HOLD_SOLVER_LOCK = "worker/optimized/source-lock.json";
 const OPTIMIZED_SOURCE = "research/optimized-subset";
 
@@ -285,11 +290,9 @@ function readRepoFile(root: string, relativePath: string): Buffer {
   return readFileSync(absolute);
 }
 
-/** The public HOLD solver receipt. This checkout does not enroll or execute it. */
-export function readHoldSolverBinding(root: string): HoldSolverBinding {
-  const receipt = holdReceiptSchema.parse(
-    JSON.parse(readRepoFile(root, HOLD_SOLVER_RECEIPT).toString("utf8")),
-  );
+/** The inlined HOLD solver receipt. This checkout does not enroll or execute it. */
+export function readHoldSolverBinding(): HoldSolverBinding {
+  const receipt = holdReceiptSchema.parse(holdSolverReceiptJson);
   if (
     !receipt.flags.includes("-DZLAB_TRIM=0") ||
     !receipt.flags.includes("-DQSB_PAIR_SHARED=0")
@@ -308,9 +311,7 @@ export function readHoldSolverBinding(root: string): HoldSolverBinding {
  * Source that differs from the lock that built that binary cannot inherit it.
  */
 export function holdSolverSourceGap(root: string): HoldSolverSourceGap {
-  const receipt = holdReceiptSchema.parse(
-    JSON.parse(readRepoFile(root, HOLD_SOLVER_RECEIPT).toString("utf8")),
-  );
+  const receipt = holdReceiptSchema.parse(holdSolverReceiptJson);
   const lockBytes = readRepoFile(root, HOLD_SOLVER_LOCK);
   if (sha256Hex(lockBytes) !== receipt.sourceLockSha256)
     throw new Error("HOLD solver source lock does not match the receipt");
@@ -330,7 +331,7 @@ export function holdSolverSourceGap(root: string): HoldSolverSourceGap {
     const actual = sha256Hex(readRepoFile(root, relativePath));
     if (actual !== expected) diverged.push(relativePath);
   }
-  const binding = readHoldSolverBinding(root);
+  const binding = readHoldSolverBinding();
   const sourceMatchesHoldBuild = diverged.length === 0;
   return {
     binding,
