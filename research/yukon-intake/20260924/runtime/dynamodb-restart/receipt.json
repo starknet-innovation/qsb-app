@@ -1,0 +1,30 @@
+{
+  "scope": "Fresh process after externally performed database restart; mocked provider and CPU",
+  "completedRowUnchanged": true,
+  "uncertainRowUnchanged": true,
+  "duplicatePublicationRejected": true,
+  "cpuCallsOnDuplicate": 0,
+  "resubmissionRejected": true,
+  "providerCallsAfterRestart": 0,
+  "lateIdentityAttachedToOriginalIntent": true,
+  "testTableDeleted": true,
+  "freshProcess": true,
+  "gpuExecuted": false,
+  "awsRegionalCertification": false,
+  "freshWithdrawal": false,
+  "releaseStatus": "HOLD",
+  "imageDigest": "amazon/dynamodb-local@sha256:ff89bd48ff32cd8d9be5fee8873b65b8854dc408f1afe881be6eb00247bc0dab",
+  "restart": {
+    "method": "docker kill --signal KILL then docker start, persistent disposable volume",
+    "exitCode": 137,
+    "firstStartedAt": "2026-09-24T19:42:36.487337876Z",
+    "killedAt": "2026-09-24T19:42:49.685855465Z",
+    "restartedAt": "2026-09-24T19:42:49.864039674Z"
+  },
+  "cleanup": {
+    "testTableDeleted": true,
+    "containerRemoved": true,
+    "volumeRemoved": true
+  },
+  "checkerSha256": "3450626a8ce17df885c7318bc1d8b550ca0e15ca9958f025ffee4d76b288da13"
+}

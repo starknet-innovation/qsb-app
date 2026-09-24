@@ -649,3 +649,28 @@ No AWS regional resource, GPU, deployed release or fixture was touched. This
 closes the local database API gate, not regional IAM/availability, crash/restart
 durability or full enrolled lifecycle validation. Drain/handoff, release routing
 and fresh GPU/end-to-end gates remain required.
+
+## Abrupt database restart and fresh-process reconciliation
+
+`check_pin_restart.ts` seeded a real local DynamoStore with a published research
+candidate and a separate uncertain submission (mock transport throws after the
+durable submission claim). After both records were acknowledged, DynamoDB Local
+was killed with SIGKILL (exit 137), restarted on the same disposable persistent
+volume, and checked by a new Node process. It compared both rows against their
+pre-restart canonical hashes before attempting any mutation.
+
+Both rows survived unchanged. Repeated publication rejected before invoking CPU
+verification; retrying the uncertain submission rejected before its send callback.
+The reconciled late provider ID then attached to the original intent via the
+existing indexed identity protocol, and another submission attempt still rejected.
+There were **zero provider callback calls after restart**. This tests uncertainty
+preservation and duplicate prevention, not recovery by blind retry.
+
+`runtime/dynamodb-restart/receipt.json` records the database stop/start observations,
+result assertions, checker hash and cleanup. The test table was deleted; container
+and volume were removed and container absence checked. Standalone checker typecheck
+passes. The checker only accepts a loopback endpoint and fixed public dummy
+credentials. CPU verdict and transport in this specific restart test are mocked;
+the preceding real CPU/DynamoDB composition remains separate evidence. This closes
+the tested local abrupt-restart case, not regional AWS guarantees, all crash points,
+provider drain, enrolled release routing or fresh GPU/full-withdrawal proof.
