@@ -13,10 +13,22 @@ resource "aws_iam_role_policy" "logs" {
   role     = aws_iam_role.lambda[each.key].id
   policy   = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = ["logs:CreateLogStream", "logs:PutLogEvents"], Resource = "${aws_cloudwatch_log_group.lambda[each.key].arn}:*" }] })
 }
+# API and coordinator share one table policy. PutItem may create OUTPOINT# reservations.
+# DeleteItem, UpdateItem, and BatchWriteItem are denied on OUTPOINT#*. Writes are denied on
+# SYSTEM#*. ConditionCheckItem stays allowed, so an authority or capability fence is a condition
+# check. ForAnyValue is required on these denies: ForAllValues is true when LeadingKeys is
+# absent, and a mixed batch must not skip the deny. No operator role is granted system-row writes.
 resource "aws_iam_role_policy" "records" {
   for_each = toset(["api", "coordinator"])
   role     = aws_iam_role.lambda[each.key].id
-  policy   = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:ConditionCheckItem"], Resource = aws_dynamodb_table.records.arn }] })
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      for statement in jsondecode(file("${path.module}/policies/app-records.json")) : merge(statement, {
+        Resource = aws_dynamodb_table.records.arn
+      })
+    ]
+  })
 }
 resource "aws_iam_role_policy" "runpod" {
   count = local.runpod ? 1 : 0

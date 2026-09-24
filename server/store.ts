@@ -183,7 +183,11 @@ export class MemoryStore implements Store {
       )
         throw new Conflict("Input reserved or concurrent update");
       if (conditionOnly && old?.version !== expected)
-        throw new Conflict("ReservationAuthorityStopped");
+        throw new Conflict(
+          isAuthorityRow(row) || isReservationRow(row)
+            ? "ReservationAuthorityStopped"
+            : "Input reserved or concurrent update",
+        );
       if (!conditionOnly) seen.add(key);
     }
     for (const { row, conditionOnly, remove } of writes) {

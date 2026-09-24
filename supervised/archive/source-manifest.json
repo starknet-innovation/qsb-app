@@ -5,7 +5,7 @@
       "path": "work/yukon-mainnet-service-enrollment-20260923/dispatch.ts",
       "source": "work/yukon-mainnet-service-enrollment-20260923/dispatch.ts",
       "originalSha256": "4ef7db56f9992bfcf6774d5376354a5ccdf87232c4ef25a657383bf26dd76054",
-      "sha256": "c5d037a115de66f70c7a0243816e6bcbb80bd469332761623badceb0c841dcb7",
+      "sha256": "68a635de9833ccf06b8e623f622fa534a57bca3258544616708c398a9d0016be",
       "transformations": [
         "Relative app imports target public app; package imports resolve installed dependencies.",
         "Reservation authority moved to SYSTEM#RESERVATION_AUTHORITY / GENERATION: generation check, authorityGeneration-stamped reservations, conditionOnly fences."
@@ -15,7 +15,7 @@
       "path": "work/yukon-mainnet-service-enrollment-20260923/admission.ts",
       "source": "work/yukon-mainnet-service-enrollment-20260923/admission.ts",
       "originalSha256": "881b90537c79b85686451de9d1b81e1e9dd074d3f134b4ea90515ca47c74010b",
-      "sha256": "2e29af58e69d0c839f30f1ab06b68c4468b586578dfbad3183489422f600530a",
+      "sha256": "86310440b9b9f7d11d9cf306bba63b4f501e12eb1a2b875e6e948cb2d40d6441",
       "transformations": [
         "Relative app imports target public app; package imports resolve installed dependencies.",
         "Reservation authority moved to SYSTEM#RESERVATION_AUTHORITY / GENERATION: generation check, authorityGeneration-stamped reservations, conditionOnly fences."
@@ -25,7 +25,7 @@
       "path": "work/yukon-mainnet-service-enrollment-20260923/capability.ts",
       "source": "work/yukon-mainnet-service-enrollment-20260923/capability.ts",
       "originalSha256": "14902f68d89c38fdf79bca4af86ffee771ddfce767647e4058d8ef19dfe400fa",
-      "sha256": "b249ef056eccc48862ee95a1c9f958171ec7a4ad4ae026cb84fbb77b3bc1b90c",
+      "sha256": "7dc5189fd2cbeea1efe53c33fdb1d2fbfde89f61aaea4690f3d501c41c4c9766",
       "transformations": [
         "Relative app imports target public app; package imports resolve installed dependencies.",
         "coreSourceManifest rebound to the enrolled core digest on the public copy."
