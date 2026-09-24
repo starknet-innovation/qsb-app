@@ -954,3 +954,27 @@ release transaction race, one-time transition and pre-export revocation checks.
 They do not establish a positive GPU hit or a fresh withdrawal. Evidence and
 source hashes: `runtime/release-handoff/local-tests.json`. Test tables and the
 disposable container were removed.
+
+## Actual CPU positive result through the release route
+
+`check_pin_positive_route.ts` accepts an explicitly supplied public signing bundle
+for CPU-only historical replay. It exports real pinning parameters, constructs a
+clearly synthetic queue response for the already known public solution, and calls
+`receiveResearchPin` with the actual source-locked CPU verifier. The resulting
+candidate enters draining; `handoffResearchPin` then re-verifies the pin and exports
+both round parameters through the actual CPU exporter. MemoryStore exercises the
+complete publication-to-preparation transition with no coverage credit or paid
+dispatch authorization. A duplicate handoff is rejected.
+
+Two additional runs establish that release revocation at the final drain read and
+an unresolved sibling leave the winning intent unchanged and the scope draining.
+These use the same real CPU path, not the mocked CPU export in the transaction
+unit tests. The sanitized receipt `runtime/release-handoff/positive-cpu-route.json`
+records source, context and parameter hashes. Typecheck passed. The public bundle
+itself is not copied into this PR.
+
+This closes local positive-result composition with the real CPU verifier. It does
+not attest that the new GPU binary discovered this hit: the provider response and
+queue observations are synthetic. No GPU computation, paid provider request,
+fixture spend, broadcast or new withdrawal occurred. Positive GPU discovery,
+live composed orchestration, independent review and fresh end-to-end gates remain.
