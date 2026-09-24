@@ -121,7 +121,7 @@ resource "aws_backup_selection" "evidence" {
 
 # Public dispatcher package only. Protected runtime installation/enrollment remains explicit.
 resource "aws_s3_object" "dispatcher" {
-  for_each               = var.provision_runtime ? toset(["dispatcher.cjs", "host.py", "manifest.json", "install.py", "credential-exec.py", "watchdog.mjs", "watchdog-entry.mjs", "qsb-dispatch.service", "qsb-watchdog@.service", "runtime.tar.gz", "runtime-manifest.json"]) : toset([])
+  for_each               = local.runtime_count == 1 ? toset(["dispatcher.cjs", "host.py", "manifest.json", "install.py", "credential-exec.py", "watchdog.mjs", "watchdog-entry.mjs", "qsb-dispatch.service", "qsb-watchdog@.service", "runtime.tar.gz", "runtime-manifest.json"]) : toset([])
   bucket                 = aws_s3_bucket.runtime[0].id
   key                    = "releases/${var.source_commit}/dispatcher/${each.key}"
   source                 = "${local.artifacts}/runtime/${each.key}"

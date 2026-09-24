@@ -33,7 +33,7 @@ The repository is a curated research snapshot. Some integration work and evidenc
 
 ## 2. Finish the application-to-runtime integration
 
-**Status: partial.** Creation, admission, durable coordination, current-state resolution and process ownership have separate scoped tests. Their final joined path remains a release gate.
+**Status: partial.** Mainnet job creation is the Step Functions coordinator; see [mainnet job pipeline](MAINNET-PIPELINE.md). The supervised dispatcher is not mounted on that Lambda. Creation, admission, durable coordination, current-state resolution and process ownership have separate scoped tests. Their final joined path remains a release gate.
 
 - [x] Implement the source connection from authenticated job creation through an atomic outbox, SQS and durable dispatch/admission/host claims. [Implementation and test limits](../supervised/README.md). A queued response remains distinct from a running search.
 - [ ] Validate that final connection on the enrolled Linux deployment, including credential provisioning, watchdogs, process failure/restart and runtime/table/image identity alignment. Local synthetic composition does not close this gate.

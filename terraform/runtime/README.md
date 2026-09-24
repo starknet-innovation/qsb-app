@@ -1,6 +1,6 @@
 # Supervised runtime infrastructure
 
-The Terraform now includes the infrastructure for the long-running CPU supervisor while leaving GPUs on Runpod. Set `provision_runtime=true` to create it. This is separate from enabling a search: **the API advertises execution disabled and both host runtime units are masked at boot.**
+This folder describes the long-running CPU supervisor while leaving GPUs on Runpod. It is **not** the mainnet job path. `network = "mainnet"` rejects `provision_runtime = true`. Mainnet jobs are created by `createApp`, started with `startWorkflow`, and run by the Step Functions coordinator. See [mainnet pipeline](../../docs/MAINNET-PIPELINE.md).
 
 ## What is provisioned
 
@@ -19,7 +19,9 @@ No automatic host replacement/ASG is configured: replacement must reconcile proc
 
 ## Configure a dormant host
 
-Add these non-secret settings to your ignored `terraform.tfvars`:
+Do not use these settings for a mainnet environment. `network = "mainnet"` rejects `provision_runtime`.
+
+Add these non-secret settings to your ignored `terraform.tfvars` only for a non-mainnet plan:
 
 ```hcl
 provision_runtime         = true

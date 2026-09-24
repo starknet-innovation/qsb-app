@@ -1,5 +1,5 @@
 variable "provision_runtime" {
-  description = "Provision the dormant supervised CPU host and its supporting infrastructure. Does not start a dispatcher or GPUs."
+  description = "Provision the dormant supervised CPU host. Refused when network is mainnet; that environment uses the Step Functions coordinator and must leave this false."
   type        = bool
   default     = false
 }

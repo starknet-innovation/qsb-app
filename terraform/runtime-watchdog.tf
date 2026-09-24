@@ -83,7 +83,7 @@ resource "aws_cloudwatch_metric_alarm" "watchdog_errors" {
   alarm_actions       = var.alarm_actions
 }
 output "supervised_runtime" {
-  value = var.provision_runtime ? {
+  value = local.runtime_count == 1 ? {
     instance_id                  = aws_instance.runtime[0].id
     evidence_volume              = aws_ebs_volume.evidence[0].id
     artifact_and_evidence_bucket = aws_s3_bucket.runtime[0].id
@@ -94,7 +94,7 @@ output "supervised_runtime" {
   } : null
 }
 resource "aws_cloudwatch_metric_alarm" "watchdog_missing" {
-  count               = var.provision_runtime && length(var.cleanup_endpoints) > 0 ? 1 : 0
+  count               = local.runtime_count == 1 && length(var.cleanup_endpoints) > 0 ? 1 : 0
   alarm_name          = "${var.name}-cleanup-watchdog-missing"
   namespace           = "AWS/Lambda"
   metric_name         = "Invocations"

@@ -4,7 +4,7 @@ Implemented application path:
 
 `authenticated create → atomic JOB + outbox → scheduled publisher → FIFO SQS → one-shot host consumer → dispatch/admission/host claim → sealed Linux supervisor`
 
-`dispatch/routes.ts` retains authenticated owner, public transaction/chain checks, reservation authority and capability fencing. The browser cannot supply a command or launch a process. The Lambda entry installs this route with `SUPERVISED_EXECUTION_ENABLED=false` by default. Legacy routes retain their existing default behavior.
+`dispatch/routes.ts` retains authenticated owner, public transaction/chain checks, reservation authority and capability fencing. The browser cannot supply a command or launch a process. That route is off the mainnet path: the deployed mainnet Lambda uses `createApp` and does not mount `installSupervisedCreation`. A non-mainnet process can still construct `createSupervisedCreationApp` with `SUPERVISED_EXECUTION_ENABLED=false` by default. Legacy coordinator routes retain their existing default behavior.
 
 Job creation and its notification commit together. The publisher waits for an operator-created `OWNER#<owner>/DISPATCH_CONFIG#<jobId>` row with version >=1, enabled=true, matching immutable jobHash and validated runtime config. That row has no browser/API write route; existing broad API database IAM is not a separate security boundary against compromised application code. Queue messages contain only owner, job ID and creation hash. They are hints, not authorization.
 
