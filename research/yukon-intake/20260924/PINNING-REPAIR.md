@@ -996,3 +996,19 @@ and global-identity changes, and exclusion of searching/uncertain intents. All
 loopback DynamoDB Local using mocked provider reads. The empty table list and
 disposable container removal were verified. Evidence: `runtime/terminal-reconciliation/`.
 This is cleanup integration, not new GPU discovery or live provider certification.
+
+## Composed late sibling drain and positive handoff
+
+The positive CPU route check now includes an injected uncertain-sibling crash
+snapshot with its durable identity index. Handoff rejects the unknown ID, then
+rejects the attached ID without terminal evidence. A pending provider response
+cannot resolve that evidence. After a synthetic CANCELLED status passes atomic
+terminal reconciliation, the actual CPU handoff exports both parameter sets and
+advances exactly once, without coverage credit or dispatch authorization.
+
+`runtime/terminal-reconciliation/positive-route.json` preserves the new receipt
+separately from earlier runs. CPU cryptographic verification/export are real;
+MemoryStore, provider responses and the crash snapshot are local test inputs.
+This does not demonstrate a second live submission or a fresh GPU hit. The
+complete replay and typecheck passed; no paid resource or network broadcast was
+used. The remaining live, independent-review and end-to-end gates stay open.

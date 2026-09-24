@@ -1,0 +1,58 @@
+{
+  "scope": "Actual CPU known-solution replay through release-enrolled publication and handoff; MemoryStore; synthetic provider envelope and drain observations",
+  "results": [
+    {
+      "scenario": "positive",
+      "contextHash": "8181d95d4a75b1a927c922b41e2729cd3c2bd0d845c561ee3654db4a834ab36a",
+      "parameters": {
+        "round1": "eb0c9275bed41802078f5f2f4c12b0b2116e5668ff24e498e15a98a9093019f5",
+        "round2": "ceb4e80ef6b6a9c10560db9bc11e767b4f2e513c1fecc4ba839d7e42180d2eea"
+      },
+      "duplicateHandoffRejected": true,
+      "dispatchAuthorized": false
+    },
+    {
+      "scenario": "revoke-at-drain",
+      "handoffRejected": true,
+      "winnerUnchanged": true,
+      "drainReads": 1
+    },
+    {
+      "scenario": "unknown-sibling",
+      "handoffRejected": true,
+      "winnerUnchanged": true,
+      "drainReads": 0
+    },
+    {
+      "scenario": "late-sibling-terminal",
+      "contextHash": "8181d95d4a75b1a927c922b41e2729cd3c2bd0d845c561ee3654db4a834ab36a",
+      "parameters": {
+        "round1": "eb0c9275bed41802078f5f2f4c12b0b2116e5668ff24e498e15a98a9093019f5",
+        "round2": "ceb4e80ef6b6a9c10560db9bc11e767b4f2e513c1fecc4ba839d7e42180d2eea"
+      },
+      "duplicateHandoffRejected": true,
+      "uncertainBlocked": true,
+      "attachedNonterminalBlocked": true,
+      "pendingStatusRejected": true,
+      "terminalSiblingRequired": true,
+      "injectedCrashSnapshot": true,
+      "dispatchAuthorized": false
+    }
+  ],
+  "gpuExecuted": false,
+  "paidProviderCalls": 0,
+  "rangeSearched": false,
+  "fixtureSpentThisRun": false,
+  "positiveGpuHitEstablished": false,
+  "freshWithdrawal": false,
+  "releaseStatus": "HOLD",
+  "releaseId": "89a17e790d4cef121d4f7c2e17e1a019fa6818bf7e8f2197b7ae9e54937bb8fb",
+  "sourceSha256": {
+    "scripts/yukon/pin_terminal.ts": "3b1ad840ee11e70daad98a5540709100be2a5e075f88032378623562c8e65db1",
+    "scripts/yukon/pin_route.ts": "ef2eff5ef8c49e173c8c5be70fd65fe2232d05cb7430605ad2e7ba115f4aac68",
+    "scripts/yukon/pin_store.ts": "ef611ef7031cbec172c34217376b62821aba8b648230e2d3e247319a0658349a",
+    "scripts/yukon/pin_verifier.ts": "b65c6888cb25a19fed602bcf541272a1a69ac0367d51f5f0430eedd7edf36899",
+    "scripts/yukon/pin_verifier_lock.json": "a33244213232bca9e6be64469af9134f59402b111ce7fdeeac920c45e5548b08"
+  },
+  "scriptSha256": "66dcb14fed2d4b9eb3caa5d6619f6df7174f643b3c2aa41758b00408bcf8719a"
+}

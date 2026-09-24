@@ -1,3 +1,4 @@
+import { recordResearchPinTerminal } from "./pin_terminal";
 /** CPU-only historical public replay through the enrolled Store route. No GPU or network transport. */
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
@@ -44,6 +45,7 @@ for (const scenario of [
   "positive",
   "revoke-at-drain",
   "unknown-sibling",
+  "late-sibling-terminal",
 ] as const) {
   const store = new MemoryStore();
   const binding = {
@@ -85,6 +87,8 @@ for (const scenario of [
   });
   const inventory = new PinInventoryV3(store, binding.scope, binding.owner, 1);
   await inventory.reserve(0, input.request, async () => {});
+  if (scenario === "late-sibling-terminal")
+    await inventory.reserve(1, input.request, async () => {});
   // This callback returns an inert ID locally; no live provider API exists in this script.
   await inventory.submit(
     "PIN#0",
@@ -135,6 +139,25 @@ for (const scenario of [
       },
     ]);
   }
+  if (scenario === "late-sibling-terminal") {
+    // Inject a durable uncertain-sibling snapshot to exercise crash reconciliation.
+    // This is not a second scheduler submission or proof of concurrent dispatch.
+    const s = (await store.get(pk, "SCOPE"))!,
+      sibling = (await store.get(pk, "PIN#1"))!;
+    await store.atomicPut([
+      { row: { ...s, version: s.version + 1 }, expected: s.version },
+      {
+        row: {
+          ...sibling,
+          version: sibling.version + 1,
+          state: "uncertain",
+          dispatchAuthorizedAtMs: Date.now(),
+          researchReleaseId: PIN_RESEARCH_RELEASE_ID,
+        },
+        expected: sibling.version,
+      },
+    ]);
+  }
   let drainReads = 0;
   const observe = async () => {
     drainReads++;
@@ -149,7 +172,40 @@ for (const scenario of [
       observedAtMs: Date.now(),
     };
   };
-  if (scenario === "positive") {
+  if (scenario === "late-sibling-terminal") {
+    await assert.rejects(
+      handoffResearchPin(store, binding, observe),
+      /Unresolved sibling/,
+    );
+    await inventory.attach("PIN#1", "synthetic-late-sibling");
+    await assert.rejects(
+      handoffResearchPin(store, binding, observe),
+      /Missing sibling terminal/,
+    );
+    assert.equal(drainReads, 0);
+    const siblingBinding = { ...binding, intent: "PIN#1" };
+    await assert.rejects(
+      recordResearchPinTerminal(store, siblingBinding, async () => ({
+        id: "synthetic-late-sibling",
+        status: "IN_PROGRESS",
+      })),
+    );
+    await assert.rejects(
+      handoffResearchPin(store, binding, observe),
+      /Missing sibling terminal/,
+    );
+    await recordResearchPinTerminal(
+      store,
+      siblingBinding,
+      async (endpoint, id) => {
+        assert.equal(endpoint, release.endpoint);
+        assert.equal(id, "synthetic-late-sibling");
+        return { id, status: "CANCELLED" };
+      },
+    );
+    assert.equal((await store.get(pk, "SCOPE"))?.phase, "pinning_draining");
+  }
+  if (scenario === "positive" || scenario === "late-sibling-terminal") {
     const handoff = await handoffResearchPin(store, binding, observe);
     assert.deepEqual(handoff.pin, input.pin);
     assert.equal(handoff.dispatchAuthorized, false);
@@ -170,6 +226,15 @@ for (const scenario of [
         ]),
       ),
       duplicateHandoffRejected: true,
+      ...(scenario === "late-sibling-terminal"
+        ? {
+            uncertainBlocked: true,
+            attachedNonterminalBlocked: true,
+            pendingStatusRejected: true,
+            terminalSiblingRequired: true,
+            injectedCrashSnapshot: true,
+          }
+        : {}),
       dispatchAuthorized: false,
     });
   } else {
@@ -203,6 +268,7 @@ writeFileSync(
       releaseId: PIN_RESEARCH_RELEASE_ID,
       sourceSha256: Object.fromEntries(
         [
+          "scripts/yukon/pin_terminal.ts",
           "scripts/yukon/pin_route.ts",
           "scripts/yukon/pin_store.ts",
           "scripts/yukon/pin_verifier.ts",
