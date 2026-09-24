@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { release } from "../../src/lib/model";
+import capability from "../mainnet-capability.json";
 import { assertNoCredentialMaterial } from "./host-requirements";
 import { exactSpendAuthorizationSchema } from "./miner-inclusion";
 
@@ -30,6 +32,7 @@ export const RUNBOOK_RULES = {
   remoteStop: "Loss of a local process is not proof that remote GPU work stopped.",
   exactSpend:
     "Every proposed mainnet spend requires a separate exact-transaction authorization.",
+  costField: "The operator cost field is not the experimental USD ceiling.",
   commit: COMMIT_BEFORE_DEPLOY,
 } as const;
 
@@ -73,7 +76,7 @@ const decisionSchema = z
     limitations: z.array(z.string().min(1).max(500)).min(1).max(20),
     evidenceLinks: z.array(z.string().min(1).max(200)).max(20),
     featureEnablementRequested: z.boolean(),
-    spendAuthorizationRequested: z.literal(false),
+    spendRecordRequested: z.literal(false),
     technicalGatesClosed: z.literal(false),
     publicationIsActivation: z.literal(false),
     mainnetEnabled: z.literal(false),
@@ -151,6 +154,7 @@ const runbookSchema = z
     maxConcurrentSearches: z.literal(CONCURRENCY_CAP.maxConcurrentSearches),
     maxGpuWorkers: z.literal(CONCURRENCY_CAP.maxGpuWorkers),
     minIdleWorkers: z.literal(CONCURRENCY_CAP.minIdleWorkers),
+    costUnit: z.literal("operator-units"),
     maxCostUnits: positiveUnits,
     deadline: z.string().datetime(),
     now: z.string().datetime(),
@@ -193,7 +197,10 @@ export type RunbookAcceptance = {
   maxConcurrentSearches: 1;
   maxGpuWorkers: 1;
   minIdleWorkers: 0;
+  costUnit: "operator-units";
   maxCostUnits: string;
+  costFieldIsUsdCeiling: false;
+  usdLimitsEvaluated: false;
   deadline: string;
   cleanupWatchdogId: string;
   alerts: readonly (typeof REQUIRED_ALERTS)[number][];
@@ -247,7 +254,7 @@ function refuseActivationFlags(raw: Record<string, unknown>): void {
     fail("ActivationRefused");
   if (raw.section8Closed === true) fail("ActivationNotApproved");
   if (raw.publicationIsActivation === true) fail("PublicationIsNotActivation");
-  if (raw.spendAuthorizationRequested === true) fail("SpendIsNotFeatureEnablement");
+  if (raw.spendRecordRequested === true) fail("SpendIsNotFeatureEnablement");
   if (raw.technicalGatesClosed === true) fail("TechnicalGatesOpen");
 }
 
@@ -269,7 +276,7 @@ export function defaultActivationDecision(): ActivationDecision {
     limitations: [...OPEN_RELEASE_GATES],
     evidenceLinks: [],
     featureEnablementRequested: false,
-    spendAuthorizationRequested: false,
+    spendRecordRequested: false,
     technicalGatesClosed: false,
     publicationIsActivation: false,
     mainnetEnabled: false,
@@ -524,12 +531,56 @@ function numberAboveCap(value: unknown, cap: number): boolean {
   return typeof value === "number" && value > cap;
 }
 
+/**
+ * Experimental USD envelope: vault 10000, fee 1000, GPU 1000.
+ * This is the only encoding of those ceilings. It cannot run while
+ * release.mainnetEnabled and broadcastAuthorized are false, and it does
+ * not read the operator cost field or approve activation.
+ */
+function usdLimitCheckCanRun(): boolean {
+  return Boolean(release.mainnetEnabled) && Boolean(capability.broadcastAuthorized);
+}
+
+export function assertExperimentalUsdLimits(amounts: {
+  vaultUsd: number;
+  feeUsd: number;
+  gpuUsd: number;
+}): never {
+  if (!usdLimitCheckCanRun()) fail("UsdLimitCheckClosed");
+  const vaultUsdLimit = 10_000;
+  const feeUsdLimit = 1_000;
+  const gpuUsdLimit = 1_000;
+  const withinEnvelope =
+    Number.isSafeInteger(amounts.vaultUsd) &&
+    Number.isSafeInteger(amounts.feeUsd) &&
+    Number.isSafeInteger(amounts.gpuUsd) &&
+    amounts.vaultUsd >= 0 &&
+    amounts.vaultUsd <= vaultUsdLimit &&
+    amounts.feeUsd >= 0 &&
+    amounts.feeUsd <= feeUsdLimit &&
+    amounts.gpuUsd >= 0 &&
+    amounts.gpuUsd <= gpuUsdLimit;
+  if (!withinEnvelope) fail("UsdCeilingExceeded");
+  fail("ActivationNotApproved");
+}
+
+function claimsCostFieldIsUsd(raw: Record<string, unknown>): boolean {
+  return (
+    raw.costUnit === "usd" ||
+    raw.maxCostUnitsIsUsdCeiling === true ||
+    "vaultUsd" in raw ||
+    "feeUsd" in raw ||
+    "gpuUsd" in raw
+  );
+}
+
 /** Accepts a written procedure. It does not provision workers or start cleanup. */
 export function acceptOperationalRunbook(input: unknown): RunbookAcceptance {
   assertNoCredentialMaterial(input);
   const raw = record(input);
   if (!raw) fail("RunbookIncomplete");
   refuseActivationFlags(raw);
+  if (claimsCostFieldIsUsd(raw)) fail("CostFieldIsNotUsdCeiling");
   if (
     numberAboveCap(raw.maxConcurrentSearches, CONCURRENCY_CAP.maxConcurrentSearches) ||
     numberAboveCap(raw.maxGpuWorkers, CONCURRENCY_CAP.maxGpuWorkers) ||
@@ -569,7 +620,10 @@ export function acceptOperationalRunbook(input: unknown): RunbookAcceptance {
     maxConcurrentSearches: 1,
     maxGpuWorkers: 1,
     minIdleWorkers: 0,
+    costUnit: "operator-units",
     maxCostUnits: parsed.data.maxCostUnits,
+    costFieldIsUsdCeiling: false,
+    usdLimitsEvaluated: false,
     deadline: parsed.data.deadline,
     cleanupWatchdogId: parsed.data.cleanupWatchdogId,
     alerts: REQUIRED_ALERTS,

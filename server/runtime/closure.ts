@@ -4,6 +4,7 @@ import { assertInsideRepo } from "./identity";
 
 /** Files the public checkout can package without reading a developer work directory. */
 export const requiredReleasePaths = [
+  "AGENTS.md",
   "docs/source-build/20260924/solver-build-receipt.json",
   "server/app.ts",
   "server/chain.ts",
@@ -150,6 +151,7 @@ export const componentForPath = (relativePath: string): string => {
   )
     return "fresh-proof";
   if (
+    relativePath === "AGENTS.md" ||
     relativePath === "server/runtime/miner-inclusion.ts" ||
     relativePath === "server/runtime/activation.ts"
   )

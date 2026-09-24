@@ -11,8 +11,9 @@ The checked-in capability limit is `providerGpuLimit: 1` in `server/mainnet-capa
 - `maxConcurrentSearches`: 1
 - `maxGpuWorkers`: 1
 - `minIdleWorkers`: 0
-- `maxCostUnits`: a positive integer the operator writes into the plan before any compute. This checkout does not choose a dollar amount. A missing or zero ceiling is refused.
-- A plan above the concurrency cap is refused. `acceptOperationalRunbook` does not provision workers. `executed` and `provisioned` stay false.
+- `costUnit` is `operator-units`. `maxCostUnits` is a positive integer of those units. The operator cost field is not the experimental USD ceiling. A plan that labels the field as USD, or that supplies `vaultUsd`, `feeUsd`, or `gpuUsd` on the runbook, is refused with `CostFieldIsNotUsdCeiling`.
+- The experimental USD limits are vault 10000, fee 1000, and GPU 1000. They are encoded only in `assertExperimentalUsdLimits`. That check cannot run while `release.mainnetEnabled` and `broadcastAuthorized` are false: it throws `UsdLimitCheckClosed` and does not compare amounts. It does not read `maxCostUnits`, approve activation, or authorize a spend.
+- A missing or zero operator cost ceiling is refused. A plan above the concurrency cap is refused. `acceptOperationalRunbook` does not provision workers. `executed`, `provisioned`, and `usdLimitsEvaluated` stay false. `costFieldIsUsdCeiling` stays false.
 
 ## Deadlines
 

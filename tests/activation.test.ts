@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { hex } from "@scure/base";
 import * as btc from "@scure/btc-signer";
@@ -15,6 +16,7 @@ import {
   agentsDeploymentRule,
   assessDeploymentRecord,
   assertCommitBeforeDeploy,
+  assertExperimentalUsdLimits,
   assertProposedCommitHasNoSecrets,
   defaultActivationDecision,
   evaluateActivation,
@@ -23,6 +25,8 @@ import {
   reconcilePaidOutcome,
   requireExactSpendBesideActivation,
 } from "../server/runtime/activation";
+import { requiredReleasePaths } from "../server/runtime/closure";
+import { writePackageTree } from "../server/runtime/package-release";
 import {
   EXTERNAL_MINER_CATALOG,
   HISTORICAL_REGTEST_FIXTURE_LABEL,
@@ -77,6 +81,7 @@ function runbook(overrides: Record<string, unknown> = {}) {
     maxConcurrentSearches: CONCURRENCY_CAP.maxConcurrentSearches,
     maxGpuWorkers: CONCURRENCY_CAP.maxGpuWorkers,
     minIdleWorkers: CONCURRENCY_CAP.minIdleWorkers,
+    costUnit: "operator-units" as const,
     maxCostUnits: "1000",
     deadline,
     now,
@@ -114,6 +119,7 @@ function exactSpend(overrides: Record<string, unknown> = {}) {
     rawTxSha256: "22".repeat(32),
     amountSats: "50000",
     feeSats: "1000",
+    inputs: [{ txid: "11".repeat(32), vout: 1, valueSats: "51000" }],
     directMainnetDecision: "explicit" as const,
     mainnetEnabled: false as const,
     broadcastAuthorized: false as const,
@@ -191,7 +197,7 @@ describe("activation decision", () => {
       evaluateActivation(decision({ section8Closed: true })),
     ).toThrow("ActivationNotApproved");
     expect(() =>
-      evaluateActivation(decision({ spendAuthorizationRequested: true })),
+      evaluateActivation(decision({ spendRecordRequested: true })),
     ).toThrow("SpendIsNotFeatureEnablement");
   });
 
@@ -249,7 +255,7 @@ describe("activation decision", () => {
           "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
         ),
       ).address!,
-      1000n,
+      50000n,
     );
     const rawTxHex = hex.encode(tx.toBytes(true, true));
     const record = exactSpend({
@@ -496,6 +502,20 @@ describe("deployment verification", () => {
     for (const rule of Object.values(RUNBOOK_RULES)) expect(runbook).toContain(rule);
     expect(runbook).toContain("providerGpuLimit");
     expect(runbook).toContain("retry: false");
+    expect(runbook).toContain(RUNBOOK_RULES.costField);
+  });
+
+  it("reads AGENTS.md from the packaged source tree", () => {
+    expect(requiredReleasePaths).toContain("AGENTS.md");
+    const out = mkdtempSync(path.join(tmpdir(), "qsb-activation-"));
+    try {
+      writePackageTree(root, out);
+      const packaged = path.join(out, "tree");
+      expect(existsSync(path.join(packaged, "AGENTS.md"))).toBe(true);
+      readAgentsDeploymentRule(packaged);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
   });
 });
 
@@ -508,7 +528,10 @@ describe("operational runbook", () => {
       maxConcurrentSearches: 1,
       maxGpuWorkers: 1,
       minIdleWorkers: 0,
+      costUnit: "operator-units",
       maxCostUnits: "1000",
+      costFieldIsUsdCeiling: false,
+      usdLimitsEvaluated: false,
       unknownPaidOutcome: "reconcile",
       blindRetry: false,
       rollbackAuthorizesSpend: false,
@@ -528,6 +551,29 @@ describe("operational runbook", () => {
     expect(() =>
       acceptOperationalRunbook(runbook({ maxCostUnits: "0" })),
     ).toThrow("CostCapRequired");
+    expect(() =>
+      acceptOperationalRunbook(runbook({ costUnit: "usd" })),
+    ).toThrow("CostFieldIsNotUsdCeiling");
+    expect(() =>
+      acceptOperationalRunbook(runbook({ vaultUsd: 10000 })),
+    ).toThrow("CostFieldIsNotUsdCeiling");
+    expect(acceptOperationalRunbook(runbook({ maxCostUnits: "10000" }))).toMatchObject({
+      maxCostUnits: "10000",
+      costUnit: "operator-units",
+      costFieldIsUsdCeiling: false,
+      usdLimitsEvaluated: false,
+      section8Closed: false,
+      mainnetEnabled: false,
+      broadcastAuthorized: false,
+    });
+    expect(release.mainnetEnabled).toBe(false);
+    expect(capability.broadcastAuthorized).toBe(false);
+    expect(() =>
+      assertExperimentalUsdLimits({ vaultUsd: 10000, feeUsd: 1000, gpuUsd: 1000 }),
+    ).toThrow("UsdLimitCheckClosed");
+    expect(() =>
+      assertExperimentalUsdLimits({ vaultUsd: 10001, feeUsd: 1001, gpuUsd: 1001 }),
+    ).toThrow("UsdLimitCheckClosed");
     expect(() =>
       acceptOperationalRunbook(runbook({ deadline: now })),
     ).toThrow("DeadlineRequired");
