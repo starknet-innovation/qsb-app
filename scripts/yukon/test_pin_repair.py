@@ -122,6 +122,11 @@ if __name__=='__main__':
     import sys
     if len(sys.argv)==2:
         source=Path(sys.argv[1]).read_text()
+        assert source.count('launch_pinning_pipeline<false>(') == 2
+        assert source.count('launch_pinning_pipeline<true>(') == 2
+        assert 'if (!fast_tail)' not in source
+        assert 'if (gpu_bench_valid_h0(_SHA256Pubkey33H0(pb)))' not in source
+        assert 'int easy = 0, single_hash = 1;' in source
         assert 'seq += effective_total' not in source
         assert source.count('seq_offset < range.sequence_count') == 2
         assert source.count('qsb_batch_size(lt_range - lt_off') == 2

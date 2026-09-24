@@ -106,3 +106,21 @@ calls/output after each injected failure in a three-operation sequence. This is
 not 41-site native fault injection: active-path GPU failure validation and the
 helper-header CUDA calls remain to be audited. Table-construction OpenSSL checks,
 GPU exceptional coverage, runtime integration and fresh proof are still pending.
+
+## Generic launch compatibility correction
+
+Further effective-path inspection found two additional blockers: upstream main
+refused all non-leaderboard layouts, and its FAST_TAIL finish used an H0-only
+leading-zero shortcut before the repaired full-digest predicate. Both prevented
+the earlier component repairs from establishing an app-compatible solver.
+
+The isolated adapter now instantiates both existing launch specializations,
+selects FAST_TAIL only for its exact geometry and uses the generic specialization
+otherwise. It removes the H0-only nomination bypass, so all layouts reach the
+full-digest DER predicate. `single_hash=1` is fixed to the application's existing
+Config A worker convention: one SHA-256 of the recovered public key; the
+transaction preimage remains double SHA-256. No easy/debug mode is accepted.
+Source assertions check both launch sites, both generic instantiations, removal
+of the H0 bypass and the fixed hash mode. Native compilation/GPU differential
+validation of this newly reachable generic path are required; the earlier
+compiled candidate was not runnable on app geometry and is not approved.

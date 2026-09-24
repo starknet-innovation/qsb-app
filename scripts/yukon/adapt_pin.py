@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import shutil
 from validate import LOCK, check_source_lock, function
@@ -60,6 +61,22 @@ def adapt(text):
     text = replace(text, 'mkdir("results", 0755);', 'qsb_make_results();', 2)
     text = replace(text, 'FILE *f = fopen(fname, "a");', 'FILE *f = qsb_open_hits(fname);', 2)
     text = replace(text, '                fclose(f);', '                qsb_close_hits(f);', 2)
+    # Both specialized and generic geometry must use the full digest predicate.
+    start = text.index('#if QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32\n        if (FAST_TAIL) {')
+    end = text.index('#endif', start) + len('#endif')
+    text = text[:start] + '// Full-digest DER check below applies to every geometry.' + text[end:]
+    start = text.index('    if (!fast_tail) {')
+    end = text.index('#if QSB_SHA_UNIF', start)
+    text = text[:start] + text[end:]
+    needle = '            launch_pinning_pipeline<true>('
+    if text.count(needle) != 2: raise ValueError('Launch inventory changed')
+    # Instantiate the upstream generic specialization rather than changing its
+    # hashing semantics; choose the specialized path only for its exact layout.
+    starts = [m.start() for m in re.finditer(re.escape(needle), text)]
+    for start in reversed(starts):
+        end = text.index(');', start) + 2
+        call = text[start:end]
+        text = text[:start] + '            if (fast_tail) {\n' + call + '\n            } else {\n' + call.replace('<true>', '<false>') + '\n            }' + text[end:]
     # Replace the benchmark CLI, including all easy/debug/sequence overrides.
     start = text.index('    if (argc < 2) {', text.index('int main('))
     end = text.index('    /* Use the specified GPU */', start)
@@ -76,7 +93,7 @@ def adapt(text):
         return 2;
     }
     int gpu_index = (int)selected_gpu;
-    int easy = 0, single_hash = 0;
+    int easy = 0, single_hash = 1;
 
 ''' + text[end:]
     start = text.index('    /* Safe ranges */')
