@@ -29,6 +29,8 @@ export async function readAdmittedSolvedBundle(
   if (!rows.length) throw new GateError(404, "Solved state is not admitted.");
   const records = rows.map((row) => launchRecordSchema.parse(row.launch));
   const primary = records.find((record) => record.bindings.slot === 0);
+  if (primary?.stdoutProtocol === "violated")
+    throw new GateError(409, "Solved evidence failed the stdout protocol.");
   if (!primary?.evidence || primary.evidence.outcome !== "verified-hit")
     throw new GateError(404, "Solved state is not admitted.");
   if (

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { NETWORK_ID } from "../../src/lib/network";
 import type { Store } from "../store";
 import { GateError } from "./capability";
-import { admitSupervisedJob } from "./dispatcher";
+import { admitSupervisedJob, type FundingLedger } from "./dispatcher";
 import {
   exportSigningHandoff,
   readAdmittedSolvedBundle,
@@ -33,16 +33,19 @@ export function installSupervisedRoutes(
   read: GetRoutes,
   write: PostRoutes,
   store: Store,
-  options: { post?: boolean } = {},
+  options: { post?: boolean; ledger?: FundingLedger } = {},
 ): void {
   if (options.post !== false) {
     write.post("/api/jobs/supervised", async (c: RouteContext) => {
       try {
+        if (!options.ledger)
+          throw new GateError(503, "Supervised funding ledger is not configured.");
         const admitted = await admitSupervisedJob(
           store,
           c.get("owner"),
           NETWORK_ID,
           await c.req.json(),
+          options.ledger,
         );
         return c.json(
           {

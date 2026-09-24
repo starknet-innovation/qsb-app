@@ -56,11 +56,21 @@ export const requiredReleasePaths = [
   "scripts/package-release.ts",
 ] as const;
 
-/** Compiler and lock metadata required to type-check the packaged tree. */
+/** Compiler, lock, and Node-requirement metadata required to check the packaged tree. */
 export const buildMetadataPaths = [
   "package.json",
   "package-lock.json",
   "tsconfig.json",
+  "README.md",
+] as const;
+
+/** Scripts whose entrypoints are outside this source package. */
+export const unpackagedReleaseScripts = [
+  "build:runtime",
+  "build:optimized",
+  "build:optimized:queue",
+  "test:runtime-build",
+  "test:optimized-image",
 ] as const;
 
 const localSpecifier =
@@ -101,7 +111,8 @@ export const componentForPath = (relativePath: string): string => {
   if (
     relativePath === "package.json" ||
     relativePath === "package-lock.json" ||
-    relativePath === "tsconfig.json"
+    relativePath === "tsconfig.json" ||
+    relativePath === "README.md"
   )
     return "build-metadata";
   if (relativePath.startsWith("server/runtime/host-bridge.ts") || relativePath.startsWith("worker/"))

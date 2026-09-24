@@ -20,6 +20,7 @@ import {
   retainedMainnetSubmission,
 } from "../src/mainnet/submission";
 import { retainedRequests } from "../src/mainnet/retainedRequest";
+import { validateRequest } from "../src/mainnet/solvedContract";
 import { assertServiceChain } from "../server/runtime/capability";
 import { runEnrolledCpuVerifier } from "../server/runtime/cpu-verifier";
 import { admitSupervisedJob, claimAdmittedLaunch } from "../server/runtime/dispatcher";
@@ -41,6 +42,7 @@ import {
   writePackageTree,
 } from "../server/runtime/package-release";
 import { isSearchRunning } from "../server/runtime/types";
+import { readAdmittedSolvedBundle } from "../server/runtime/evidence-reader";
 import {
   address,
   privateKey,
@@ -48,6 +50,18 @@ import {
   simulatedFacts,
   simulatedMainnetRequest,
 } from "./supervised-fixture";
+
+const confirmingLedger = {
+  assertNetwork: async () => undefined,
+  unspent: async () => ({ previousTxHex: "00", confirmations: 1 }),
+};
+
+function handoffApp(store: MemoryStore) {
+  return createApp(store, {
+    inProcessHandoff: true,
+    fundingLedger: confirmingLedger,
+  });
+}
 
 const request = (path: string, body?: unknown, token?: string) =>
   new Request(`http://localhost/api${path}`, {
@@ -167,6 +181,7 @@ describe("supervised runtime handoff", () => {
       address,
       "mainnet",
       closed.prepared.body,
+      confirmingLedger,
     );
     expect(admitted.created).toBe(false);
     expect(admitted.job.id).toBe(closed.prepared.request.manifest.idempotencyKey);
@@ -207,7 +222,7 @@ describe("supervised runtime handoff", () => {
       },
     };
     await expect(
-      admitSupervisedJob(store, address, "mainnet", fixture.prepared.body),
+      admitSupervisedJob(store, address, "mainnet", fixture.prepared.body, confirmingLedger),
     ).rejects.toThrow(/Supervised search capability is not active/);
     expect(
       [...inner.rows.values()].filter(
@@ -222,7 +237,7 @@ describe("supervised runtime handoff", () => {
     expect(contract.broadcastAuthorized).toBe(false);
     expect(() => assertServiceChain("testnet4")).toThrow(/not Bitcoin mainnet/);
     const store = new MemoryStore();
-    const app = createApp(store, { inProcessHandoff: true });
+    const app = handoffApp(store);
     const config = await (await app.request(request("/config"))).json();
     expect(config.mainnetEnabled).toBe(false);
     expect(config.operationsEnabled).toBe(false);
@@ -318,7 +333,7 @@ describe("supervised runtime handoff", () => {
 
   it("preserves an uncertain process launch without starting another process", async () => {
     const store = new MemoryStore();
-    const app = createApp(store, { inProcessHandoff: true });
+    const app = handoffApp(store);
     await seedCapability(store);
     const fixture = simulatedMainnetRequest();
     await store.put({
@@ -341,6 +356,7 @@ describe("supervised runtime handoff", () => {
       capability: "search-only",
       release: {
         profileId: "qsb-supervised-pin-v4-subset-v5",
+        coreSourceManifest: contract.coreSourceManifest,
         nativeBinariesEnrolled: false,
         broadcastAuthorized: false,
       },
@@ -416,7 +432,7 @@ describe("supervised runtime handoff", () => {
 
   it("records one late provider id after an uncertain paid attempt", async () => {
     const store = new MemoryStore();
-    const app = createApp(store, { inProcessHandoff: true });
+    const app = handoffApp(store);
     await seedCapability(store);
     const fixture = simulatedMainnetRequest();
     await store.put({
@@ -533,7 +549,7 @@ describe("supervised runtime handoff", () => {
       source: "worker/cpu/handler.py",
     });
     const store = new MemoryStore();
-    const app = createApp(store, { inProcessHandoff: true });
+    const app = handoffApp(store);
     await seedCapability(store);
     const fixture = simulatedMainnetRequest();
     await store.put({
@@ -820,6 +836,7 @@ describe("supervised runtime handoff", () => {
       address,
       "mainnet",
       fixture.prepared.body,
+      confirmingLedger,
     );
     await claimAdmittedLaunch(store, address, admitted.job.id);
     let starts = 0;
@@ -872,6 +889,7 @@ describe("supervised runtime handoff", () => {
       address,
       "mainnet",
       fixture.prepared.body,
+      confirmingLedger,
     );
     await claimAdmittedLaunch(store, address, admitted.job.id);
     const noisy = localAckStarter(
@@ -948,9 +966,9 @@ describe("supervised runtime handoff", () => {
       version: 0,
       vault: secondVault,
     });
-    await admitSupervisedJob(store, address, "mainnet", first.prepared.body);
+    await admitSupervisedJob(store, address, "mainnet", first.prepared.body, confirmingLedger);
     await expect(
-      admitSupervisedJob(store, address, "mainnet", body),
+      admitSupervisedJob(store, address, "mainnet", body, confirmingLedger),
     ).rejects.toThrow(/Outpoint already reserved/);
   });
 
@@ -969,6 +987,7 @@ describe("supervised runtime handoff", () => {
       address,
       "mainnet",
       fixture.prepared.body,
+      confirmingLedger,
     );
     await claimAdmittedLaunch(store, address, admitted.job.id);
     return { store, fixture, admitted };
@@ -1243,7 +1262,7 @@ describe("supervised runtime handoff", () => {
 
   it("refuses legacy pause, resume, and submit for a supervised job", async () => {
     const store = new MemoryStore();
-    const app = createApp(store, { inProcessHandoff: true });
+    const app = handoffApp(store);
     await seedCapability(store);
     const fixture = simulatedMainnetRequest();
     await store.put({
@@ -1445,6 +1464,7 @@ describe("supervised runtime handoff", () => {
       address,
       "mainnet",
       fixture.prepared.body,
+      confirmingLedger,
     );
     await claimAdmittedLaunch(store, address, admitted.job.id);
     let rejectStdout: (error: Error) => void = () => undefined;
@@ -1800,6 +1820,7 @@ describe("supervised runtime handoff", () => {
       address,
       "mainnet",
       fixture.prepared.body,
+      confirmingLedger,
     );
     let revoked = false;
     const store: Store = {
@@ -1899,5 +1920,287 @@ describe("supervised runtime handoff", () => {
     expect(launch.evidence?.outcome).toBeUndefined();
     process.kill(Number(acknowledged.processId), "SIGKILL");
     await Promise.all(starter.exits);
+  });
+
+  it("refuses an unfunded vault before writing a job or reservation", async () => {
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const fixture = simulatedMainnetRequest();
+    const body = structuredClone(fixture.prepared.body);
+    body.request.vault.status = "unfunded";
+    delete body.request.vault.funding;
+    const parsed = validateRequest(body.request);
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${parsed.vault.id}`,
+      version: 0,
+      vault: parsed.vault,
+    });
+    await expect(
+      admitSupervisedJob(store, address, "mainnet", body, confirmingLedger),
+    ).rejects.toThrow(/Confirmed original mainnet owner, vault and route required/);
+    expect(
+      [...store.rows.values()].filter(
+        (row) =>
+          String(row.sk).startsWith("JOB#") || String(row.pk).startsWith("OUTPOINT#"),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("refuses admission when the funding ledger reports a spent outpoint", async () => {
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const fixture = simulatedMainnetRequest();
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    await expect(
+      admitSupervisedJob(store, address, "mainnet", fixture.prepared.body, {
+        assertNetwork: async () => undefined,
+        unspent: async () => {
+          throw new Error("spent");
+        },
+      }),
+    ).rejects.toThrow(/not spendable/);
+    expect(
+      [...store.rows.values()].filter((row) => String(row.sk).startsWith("JOB#")),
+    ).toHaveLength(0);
+  });
+
+  it("refuses a claim after the vault is no longer confirmed", async () => {
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const fixture = simulatedMainnetRequest();
+    await store.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    const admitted = await admitSupervisedJob(
+      store,
+      address,
+      "mainnet",
+      fixture.prepared.body,
+      confirmingLedger,
+    );
+    const row = await store.get(`OWNER#${address}`, `VAULT#${fixture.vault.id}`);
+    await store.put(
+      {
+        ...row!,
+        version: row!.version + 1,
+        vault: { ...fixture.vault, status: "spent" },
+      },
+      row!.version,
+    );
+    await expect(
+      claimAdmittedLaunch(store, address, admitted.job.id),
+    ).rejects.toThrow(/no longer current/);
+    expect(
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),
+    ).toBeUndefined();
+  });
+
+  it("does not claim a launch when the vault row changes during the claim", async () => {
+    const inner = new MemoryStore();
+    await seedCapability(inner);
+    const fixture = simulatedMainnetRequest();
+    await inner.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    const admitted = await admitSupervisedJob(
+      inner,
+      address,
+      "mainnet",
+      fixture.prepared.body,
+      confirmingLedger,
+    );
+    let bumped = false;
+    const store: Store = {
+      get: (pk, sk) => inner.get(pk, sk),
+      put: (row, expected) => inner.put(row, expected),
+      delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
+      list: (pk, prefix) => inner.list(pk, prefix),
+      atomicPut: async (writes) => {
+        const claiming = writes.some((write) =>
+          String(write.row.sk).startsWith("LAUNCH#"),
+        );
+        if (claiming && !bumped) {
+          bumped = true;
+          const vault = await inner.get(`OWNER#${address}`, `VAULT#${fixture.vault.id}`);
+          await inner.put({ ...vault!, version: vault!.version + 1 }, vault!.version);
+        }
+        await inner.atomicPut(writes);
+      },
+    };
+    await expect(
+      claimAdmittedLaunch(store, address, admitted.job.id),
+    ).rejects.toThrow(/no longer current/);
+    expect(
+      await inner.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),
+    ).toBeUndefined();
+  });
+
+  it("invalidates a verified hit when stdout violates after terminal evidence", async () => {
+    const { store, admitted, fixture } = await claimedFixture();
+    let rejectStdout: (error: Error) => void = () => undefined;
+    const stdoutExclusive = new Promise<void>((_resolve, reject) => {
+      rejectStdout = reject;
+    });
+    stdoutExclusive.catch(() => undefined);
+    const acknowledged = await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ processId: "terminal-watch", stdoutExclusive }),
+      new Date(),
+      2000,
+    );
+    await submitProviderOnce(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ providerId: "simulated-provider" }),
+    );
+    await publishSimulatedVerifiedHit(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      acknowledged.processId ?? "",
+      simulatedFacts,
+      fixture.bundle,
+    );
+    rejectStdout(new Error("AcknowledgementRejected"));
+    const started = Date.now();
+    let protocol = "";
+    while (protocol !== "violated" && Date.now() - started < 2000) {
+      protocol =
+        (
+          (await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`))?.launch as {
+            stdoutProtocol?: string;
+          }
+        ).stdoutProtocol ?? "";
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await expect(
+      readAdmittedSolvedBundle(store, address, admitted.job.id),
+    ).rejects.toThrow(/stdout protocol/);
+    const launch = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+    )?.launch as { evidence?: unknown; stdoutProtocol?: string };
+    expect(launch.stdoutProtocol).toBe("violated");
+    expect(launch.evidence).toBeUndefined();
+  });
+
+  it("promotes a provider-free uncertain launch after replacement", async () => {
+    const { store, admitted } = await claimedFixture();
+    let rejectStdout: (error: Error) => void = () => undefined;
+    const stdoutExclusive = new Promise<void>((_resolve, reject) => {
+      rejectStdout = reject;
+    });
+    stdoutExclusive.catch(() => undefined);
+    await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ processId: "uncertain-process", stdoutExclusive }),
+      new Date(),
+      2000,
+    );
+    rejectStdout(new Error("AcknowledgementRejected"));
+    const started = Date.now();
+    let state = "acknowledged";
+    while (state !== "uncertain" && Date.now() - started < 2000) {
+      state = (
+        (await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`))?.launch as {
+          state: string;
+        }
+      ).state;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(state).toBe("uncertain");
+    const replaced = await replaceOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ processId: "replacement-after-uncertain" }),
+      new Date(),
+      2000,
+      async () => undefined,
+    );
+    expect(replaced.state).toBe("acknowledged");
+    expect(replaced.stdoutProtocol).toBeUndefined();
+    expect(replaced.processId).toBe("replacement-after-uncertain");
+    const running = await submitProviderOnce(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ providerId: "after-replacement" }),
+    );
+    expect(running.state).toBe("running");
+    expect(running.providerId).toBe("after-replacement");
+  });
+
+  it("reports an uncertain launch with a submitted provider as still running", async () => {
+    const { store, admitted } = await claimedFixture();
+    let rejectStdout: (error: Error) => void = () => undefined;
+    const stdoutExclusive = new Promise<void>((_resolve, reject) => {
+      rejectStdout = reject;
+    });
+    stdoutExclusive.catch(() => undefined);
+    await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ processId: "paid-process", stdoutExclusive }),
+      new Date(),
+      2000,
+    );
+    await submitProviderOnce(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ providerId: "still-billed" }),
+    );
+    rejectStdout(new Error("AcknowledgementRejected"));
+    const started = Date.now();
+    let searchRunning = false;
+    while (!searchRunning && Date.now() - started < 2000) {
+      const job = (await store.get(`OWNER#${address}`, `JOB#${admitted.job.id}`))?.job as {
+        status: string;
+        runtime: { state: string; searchRunning: boolean };
+      };
+      searchRunning = job.runtime.searchRunning;
+      if (searchRunning) expect(job.status).toBe("searching");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(searchRunning).toBe(true);
+    const launch = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+    )?.launch as Parameters<typeof isSearchRunning>[0];
+    expect(launch.state).toBe("uncertain");
+    expect(isSearchRunning(launch)).toBe(true);
   });
 });

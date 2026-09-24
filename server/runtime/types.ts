@@ -10,6 +10,7 @@ export const releaseBindingSchema = z
   .object({
     profileId: z.literal(SUPERVISED_PROFILE_ID),
     sourceManifestFormat: z.literal(RELEASE_MANIFEST_FORMAT),
+    coreSourceManifest: z.string().regex(/^[a-f0-9]{64}$/),
     nativeBinariesEnrolled: z.literal(false),
     broadcastAuthorized: z.literal(false),
   })
@@ -138,10 +139,10 @@ export function isSearchRunning(record: LaunchRecord): boolean {
   switch (record.state) {
     case "claimed":
     case "launching":
-    case "uncertain":
     case "acknowledged":
     case "terminal":
       return false;
+    case "uncertain":
     case "replacing":
       return (
         record.providerOutcome === "submitted" && record.providerId !== undefined

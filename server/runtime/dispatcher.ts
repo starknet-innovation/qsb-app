@@ -1,18 +1,31 @@
+import { hex } from "@scure/base";
 import { z } from "zod";
 import { fingerprint, pinSolver, vaultConfiguration } from "../../src/lib/provenance";
 import {
   type PublicVault,
+  type Withdrawal,
   withdrawalSchema,
 } from "../../src/lib/model";
+import { outputScript } from "../../src/lib/transactions";
 import { Conflict, type Store } from "../store";
 import { validateRequest } from "../../src/mainnet/solvedContract";
 import { MAINNET_SEARCH_PROFILE } from "../../src/mainnet/submission";
+import contract from "../mainnet-capability.json";
 import { assertSearchCapability, assertServiceChain, GateError } from "./capability";
 import {
   claimLaunch,
   type SupervisedJob,
 } from "./host-bridge";
+import { coreSourceDigest } from "./package-release";
 import { RELEASE_MANIFEST_FORMAT, type LaunchBindings } from "./types";
+
+export type FundingLedger = {
+  assertNetwork: () => Promise<void>;
+  unspent: (
+    point: { txid: string; vout: number; value: string },
+    script: string,
+  ) => Promise<unknown>;
+};
 
 const bodySchema = z
   .object({
@@ -31,11 +44,74 @@ function reservations(job: SupervisedJob): LaunchBindings["reservations"] {
   }));
 }
 
+function authorizedCoreDigest(): string {
+  const digest = coreSourceDigest(process.cwd());
+  if (digest !== contract.coreSourceManifest)
+    throw new GateError(503, "Supervised search capability is not active.");
+  return digest;
+}
+
+function assertConfirmedFunding(
+  owner: string,
+  vault: PublicVault,
+  manifest: Withdrawal,
+): void {
+  if (
+    vault.status !== "confirmed" ||
+    vault.network !== "mainnet" ||
+    vault.paymentAddress !== owner ||
+    !vault.funding ||
+    fingerprint(vault.funding) !== fingerprint(manifest.funding) ||
+    hex.encode(outputScript(manifest.destination)).toLowerCase() !==
+      manifest.outputScript.toLowerCase() ||
+    BigInt(manifest.outputValue) <= 0n ||
+    BigInt(manifest.fee) <= 0n ||
+    BigInt(manifest.funding.value) + BigInt(manifest.helper.value) !==
+      BigInt(manifest.outputValue) + BigInt(manifest.fee)
+  )
+    throw new GateError(
+      409,
+      "Confirmed original mainnet owner, vault and route required.",
+    );
+}
+
+async function assertSpendableFunding(
+  ledger: FundingLedger,
+  owner: string,
+  vault: PublicVault,
+  manifest: Withdrawal,
+): Promise<void> {
+  try {
+    await ledger.assertNetwork();
+    await ledger.unspent(manifest.funding, vault.scriptHex);
+    await ledger.unspent(manifest.helper, hex.encode(outputScript(owner)));
+  } catch (error) {
+    if (error instanceof GateError) throw error;
+    throw new GateError(409, "Confirmed vault funding is not spendable.");
+  }
+}
+
+function assertVaultStillAdmitted(job: SupervisedJob, vault: PublicVault): void {
+  if (vault.status !== "confirmed" || !vault.funding)
+    throw new GateError(409, "Confirmed vault funding is no longer current.");
+  if (fingerprint(vault.funding) !== fingerprint(job.manifest.funding))
+    throw new GateError(409, "Confirmed vault funding is no longer current.");
+  let solver: ReturnType<typeof pinSolver>;
+  try {
+    solver = pinSolver(vault);
+  } catch {
+    throw new GateError(409, "Vault solver pin no longer matches the admitted job.");
+  }
+  if (!job.solver || fingerprint(solver) !== fingerprint(job.solver))
+    throw new GateError(409, "Vault solver pin no longer matches the admitted job.");
+}
+
 export async function admitSupervisedJob(
   store: Store,
   owner: string,
   serviceNetwork: string,
   body: unknown,
+  ledger: FundingLedger,
 ): Promise<{ job: SupervisedJob; created: boolean }> {
   assertServiceChain(serviceNetwork);
   const capability = await assertSearchCapability(store);
@@ -62,6 +138,8 @@ export async function admitSupervisedJob(
   const vault = vaultRow.vault as PublicVault;
   if (fingerprint(vault) !== fingerprint(request.vault))
     throw new GateError(409, "Vault does not match the original request.");
+  assertConfirmedFunding(owner, vault, request.manifest);
+  const coreDigest = authorizedCoreDigest();
   const id = request.manifest.idempotencyKey;
   const requestHash = fingerprint(request);
   const existing = await store.get(pk, `JOB#${id}`);
@@ -79,6 +157,7 @@ export async function admitSupervisedJob(
     if (job.vaultId === request.id && job.id !== id)
       throw new GateError(409, "A job already exists for this vault.");
   }
+  await assertSpendableFunding(ledger, owner, vault, request.manifest);
   const now = new Date().toISOString();
   const job: SupervisedJob = {
     id,
@@ -97,6 +176,7 @@ export async function admitSupervisedJob(
       network: "mainnet",
       profile: { id: MAINNET_SEARCH_PROFILE },
       sourceManifestFormat: RELEASE_MANIFEST_FORMAT,
+      coreSourceManifest: coreDigest,
       nativeBinariesEnrolled: false,
       broadcastAuthorized: false,
     },
@@ -152,47 +232,60 @@ export async function claimAdmittedLaunch(
   jobId: string,
 ) {
   const capability = await assertSearchCapability(store);
-  const guarded: Store = {
-    get: (pk, sk) => store.get(pk, sk),
-    list: (pk, prefix) => store.list(pk, prefix),
-    put: (row, expected) => store.put(row, expected),
-    delete: (pk, sk, expected) => store.delete(pk, sk, expected),
-    atomicPut: (writes) =>
-      store.atomicPut([
-        ...writes,
-        { row: capability, expected: capability.version },
-      ]),
-  };
+  const coreDigest = authorizedCoreDigest();
   const pk = `OWNER#${owner}`;
   const jobRow = await store.get(pk, `JOB#${jobId}`);
   if (!jobRow) throw new GateError(404, "Job not found");
   const job = jobRow.job as SupervisedJob;
-  const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
-  if (!vaultRow) throw new GateError(404, "Vault not found");
-  const vault = vaultRow.vault as PublicVault;
-  const configuration = vault.configuration ?? vaultConfiguration(vault);
-  const bindings: LaunchBindings = {
-    owner,
-    requestId: job.id,
-    revision: job.revision,
-    phase: job.stage,
-    slot: 0,
-    reservations: reservations(job),
-    capability: "search-only",
-    configurationHash: fingerprint(configuration),
-    release: {
-      profileId: job.execution.profile.id,
-      sourceManifestFormat: job.execution.sourceManifestFormat,
-      nativeBinariesEnrolled: false,
-      broadcastAuthorized: false,
-    },
-    inputHash: job.mainnetRequestHash,
-  };
+  if (job.execution.coreSourceManifest !== coreDigest)
+    throw new GateError(503, "Supervised search capability is not active.");
   for (;;) {
+    const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
+    if (!vaultRow) throw new GateError(404, "Vault not found");
+    const vault = vaultRow.vault as PublicVault;
+    assertVaultStillAdmitted(job, vault);
+    const configuration = vault.configuration ?? vaultConfiguration(vault);
+    const bindings: LaunchBindings = {
+      owner,
+      requestId: job.id,
+      revision: job.revision,
+      phase: job.stage,
+      slot: 0,
+      reservations: reservations(job),
+      capability: "search-only",
+      configurationHash: fingerprint(configuration),
+      release: {
+        profileId: job.execution.profile.id,
+        sourceManifestFormat: job.execution.sourceManifestFormat,
+        coreSourceManifest: coreDigest,
+        nativeBinariesEnrolled: false,
+        broadcastAuthorized: false,
+      },
+      inputHash: job.mainnetRequestHash,
+    };
+    const guarded: Store = {
+      get: (rowPk, sk) => store.get(rowPk, sk),
+      list: (rowPk, prefix) => store.list(rowPk, prefix),
+      put: (row, expected) => store.put(row, expected),
+      delete: (rowPk, sk, expected) => store.delete(rowPk, sk, expected),
+      atomicPut: (writes) =>
+        store.atomicPut([
+          ...writes,
+          { row: capability, expected: capability.version },
+          { row: vaultRow, expected: vaultRow.version },
+        ]),
+    };
     try {
       return await claimLaunch(guarded, vault, bindings);
     } catch (error) {
       if (!(error instanceof Conflict)) throw error;
+      const currentVault = await store.get(pk, `VAULT#${job.vaultId}`);
+      if (
+        !currentVault ||
+        currentVault.version !== vaultRow.version ||
+        fingerprint(currentVault.vault) !== fingerprint(vault)
+      )
+        throw new GateError(409, "Confirmed vault funding is no longer current.");
       const current = await store.get(capability.pk, capability.sk);
       if (
         !current ||

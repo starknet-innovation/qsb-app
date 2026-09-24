@@ -6,7 +6,9 @@ import {
 } from "../../src/lib/provenance";
 import type { PublicVault, Withdrawal } from "../../src/lib/model";
 import { Conflict, type Store } from "../store";
+import contract from "../mainnet-capability.json";
 import { validateSolvedState } from "../../src/mainnet/solvedContract";
+import { coreSourceDigest } from "./package-release";
 import {
   type LaunchBindings,
   type LaunchRecord,
@@ -43,6 +45,7 @@ export type SupervisedJob = {
     network: "mainnet";
     profile: { id: "qsb-supervised-pin-v4-subset-v5" };
     sourceManifestFormat: "qsb-source-release-manifest-v1";
+    coreSourceManifest: string;
     nativeBinariesEnrolled: false;
     broadcastAuthorized: false;
   };
@@ -89,7 +92,6 @@ function watchExclusiveStdout(
         if (
           current.launch.processId !== started.processId ||
           current.launch.bindings.inputHash !== inputHash ||
-          current.launch.state === "terminal" ||
           current.launch.state === "replacing" ||
           current.launch.replacement ||
           current.launch.stdoutProtocol === "violated"
@@ -100,11 +102,13 @@ function watchExclusiveStdout(
           current.launch.submission === "in-progress" &&
           current.launch.providerOutcome === "uncertain";
         if (current.launch.state === "uncertain" && !submissionInProgress) return;
-        await commit(store, current, {
+        const next: LaunchRecord = {
           ...current.launch,
-          state: "uncertain",
           stdoutProtocol: "violated",
-        });
+        };
+        if (current.launch.state === "terminal") delete next.evidence;
+        else next.state = "uncertain";
+        await commit(store, current, next);
         return;
       } catch (error) {
         if (error instanceof Conflict) continue;
@@ -174,6 +178,11 @@ function jobForLaunch(job: SupervisedJob, launch: LaunchRecord): SupervisedJob {
       delete next.error;
       return next;
     case "uncertain":
+      if (isSearchRunning(launch)) {
+        next.status = "searching";
+        delete next.error;
+        return next;
+      }
       next.status = "paused";
       next.error =
         launch.providerSubmissions === 0
@@ -245,6 +254,13 @@ function assertBindingsMatch(job: SupervisedJob, vault: PublicVault, bindings: L
     throw new Error("ImmutableInputMismatch");
   if (job.stage !== bindings.phase) throw new Error("PhaseMismatch");
   if (job.execution.profile.id !== bindings.release.profileId)
+    throw new Error("ReleaseMismatch");
+  const digest = coreSourceDigest(process.cwd());
+  if (
+    bindings.release.coreSourceManifest !== digest ||
+    bindings.release.coreSourceManifest !== contract.coreSourceManifest ||
+    job.execution.coreSourceManifest !== digest
+  )
     throw new Error("ReleaseMismatch");
   if (
     job.execution.broadcastAuthorized !== false ||
@@ -568,9 +584,13 @@ export async function replaceOwnedProcess(
       : current.launch.previousProcessIds;
     const rest = { ...current.launch };
     delete rest.replacement;
+    delete rest.stdoutProtocol;
+    const providerFree = providerSubmissions === 0 && providerId === undefined;
+    if (providerFree) delete rest.submission;
+    const state = priorState === "uncertain" && providerFree ? "acknowledged" : priorState;
     const replaced = await commit(store, current, {
       ...rest,
-      state: priorState,
+      state,
       processId: started.processId,
       previousProcessIds: previous,
       acknowledgement: {

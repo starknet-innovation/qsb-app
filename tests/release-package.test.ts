@@ -17,6 +17,7 @@ import {
   componentIdentities,
   createSourceManifest,
   enrollHistoricalPair,
+  nodeRequirementFromReadme,
   serializeManifest,
   verifyPackageTree,
   writePackageTree,
@@ -65,6 +66,24 @@ describe("source release package", () => {
       "000000000000.dkr.ecr",
     );
     expect(manifest.buildInputs.imageBuildStatus).toBe("not-produced");
+    expect(manifest.buildInputs.node).toBe(">=22");
+    expect(manifest.buildInputs.nodeSource).toBe("README.md");
+    expect(manifest.identities.sourceFiles["README.md"]).toMatch(/^[a-f0-9]{64}$/);
+    const packagedScripts = JSON.parse(
+      readFileSync(path.join(root, "package.json"), "utf8"),
+    ).scripts as Record<string, string>;
+    expect(packagedScripts["build:runtime"]).toContain("supervised/build.mjs");
+    const directoryForScripts = mkdtempSync(path.join(tmpdir(), "qsb-scripts-"));
+    writePackageTree(root, directoryForScripts, manifest);
+    const packaged = JSON.parse(
+      readFileSync(path.join(directoryForScripts, "tree/package.json"), "utf8"),
+    ) as { scripts: Record<string, string> };
+    expect(packaged.scripts["build:runtime"]).toBeUndefined();
+    expect(packaged.scripts["build:optimized"]).toBeUndefined();
+    expect(packaged.scripts["package:release"]).toContain("package-release");
+    expect(readFileSync(path.join(directoryForScripts, "tree/README.md"), "utf8")).toContain(
+      "Requires Node.js 22 or newer",
+    );
     expect(manifest.buildInputs.dockerfileFlags.pinning).toEqual([
       "-O3",
       "-arch=sm_${CUDA_ARCH}",
@@ -234,6 +253,23 @@ describe("source release package", () => {
     rmSync(path.join(directory, "tree/server/runtime/dispatcher.ts"));
     writeFileSync(incompletePath, JSON.stringify(incomplete));
     expect(() => verifyPackageTree(directory)).toThrow(/Missing release input/);
+  });
+
+  it("rejects a packaged README whose Node requirement changed", () => {
+    const manifest = createSourceManifest(root);
+    const directory = mkdtempSync(path.join(tmpdir(), "qsb-readme-"));
+    writePackageTree(root, directory, manifest);
+    const readme = path.join(directory, "tree/README.md");
+    writeFileSync(
+      readme,
+      readFileSync(readme, "utf8").replace("Node.js 22", "Node.js 18"),
+    );
+    expect(() => verifyPackageTree(directory)).toThrow(
+      /enrolled identity: README.md/,
+    );
+    expect(() => nodeRequirementFromReadme("Requires Node.js 18 or newer")).toThrow(
+      /README Node requirement is not enrolled/,
+    );
   });
 
   it("refuses release paths outside this checkout", () => {

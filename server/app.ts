@@ -30,6 +30,7 @@ import { outputScript } from "../src/lib/transactions";
 import { hex } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
+import type { FundingLedger } from "./runtime/dispatcher";
 import { installSupervisedRoutes } from "./runtime/supervised-routes";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
@@ -56,6 +57,8 @@ export function createApp(
     ) => void;
     /** Test-only in-process handoff. The default app does not admit jobs. */
     inProcessHandoff?: boolean;
+    /** Injected chain reads for supervised admission. Never the process-wide client by default. */
+    fundingLedger?: FundingLedger;
   } = {},
 ) {
   const ledger = dependencies.chain || chain,
@@ -683,6 +686,7 @@ export function createApp(
   if (dependencies.inProcessHandoff === true) {
     installSupervisedRoutes(authenticatedGet, authenticatedPost, store, {
       post: !registeredPosts.has("/api/jobs/supervised"),
+      ledger: dependencies.fundingLedger,
     });
   }
   return app;

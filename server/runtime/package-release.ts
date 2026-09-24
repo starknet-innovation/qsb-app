@@ -15,6 +15,7 @@ import {
   enrolledSourcePaths,
   historicalCandidateRoots,
   optimizedSubsetRoot,
+  unpackagedReleaseScripts,
 } from "./closure";
 import { assertInsideRepo, sha256Hex } from "./identity";
 import { RELEASE_MANIFEST_FORMAT } from "./types";
@@ -165,6 +166,56 @@ function hashFile(root: string, relativePath: string): string {
   return sha256Hex(readFileSync(absolute));
 }
 
+const NODE_REQUIREMENT_SENTENCE = "Requires Node.js 22 or newer";
+
+/** The Node requirement is the sentence in the enrolled README, not a free-standing literal. */
+export function nodeRequirementFromReadme(text: string): {
+  node: ">=22";
+  nodeSource: "README.md";
+} {
+  if (!text.includes(NODE_REQUIREMENT_SENTENCE))
+    throw new Error("README Node requirement is not enrolled");
+  return { node: ">=22", nodeSource: "README.md" };
+}
+
+/** Drop build scripts whose files are not part of this source package. */
+export function packagedPackageJson(checkoutText: string): string {
+  const parsed = JSON.parse(checkoutText) as {
+    scripts?: Record<string, string>;
+  };
+  if (parsed.scripts) {
+    const scripts = { ...parsed.scripts };
+    for (const name of unpackagedReleaseScripts) delete scripts[name];
+    parsed.scripts = scripts;
+  }
+  return `${JSON.stringify(parsed, null, 2)}\n`;
+}
+
+const CORE_COMPONENTS = ["cpu-verifier", "dispatcher", "runtime"] as const;
+
+/** Digest of the dispatcher, host bridge, and CPU verifier bytes authorized for a launch. */
+export function coreSourceDigest(root: string): string {
+  const sourceFiles: Record<string, string> = {};
+  for (const relativePath of enrolledSourcePaths(root)) {
+    const component = componentForPath(relativePath);
+    if (
+      component !== "cpu-verifier" &&
+      component !== "dispatcher" &&
+      component !== "runtime"
+    )
+      continue;
+    sourceFiles[relativePath] = hashFile(root, relativePath);
+  }
+  const components = componentIdentities(sourceFiles);
+  const lines: string[] = [];
+  for (const name of CORE_COMPONENTS) {
+    const digest = components[name];
+    if (!digest) throw new Error("CoreSourceIncomplete");
+    lines.push(`${name}:${digest}`);
+  }
+  return sha256Hex(lines.join("\n"));
+}
+
 export function componentIdentities(
   sourceFiles: Record<string, string>,
 ): Record<string, string> {
@@ -218,12 +269,16 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
     "utf8",
   );
   const built = parseWorkerDockerfile(dockerfileText);
-  const packageJson = JSON.parse(
+  const packagedPackage = packagedPackageJson(
     readFileSync(assertInsideRepo(root, "package.json"), "utf8"),
-  ) as {
+  );
+  const packageJson = JSON.parse(packagedPackage) as {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
+  const nodeRequirement = nodeRequirementFromReadme(
+    readFileSync(assertInsideRepo(root, "README.md"), "utf8"),
+  );
   const required = enrolledSourcePaths(root);
   for (const relativePath of required) {
     if (!existsSync(assertInsideRepo(root, relativePath)))
@@ -238,8 +293,12 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
     throw new Error("Optimized subset source is not in this checkout");
   const sourcePaths = [...required, ...historical, ...optimized].sort();
   const sourceFiles: Record<string, string> = {};
-  for (const relativePath of sourcePaths)
-    sourceFiles[relativePath] = hashFile(root, relativePath);
+  for (const relativePath of sourcePaths) {
+    sourceFiles[relativePath] =
+      relativePath === "package.json"
+        ? sha256Hex(packagedPackage)
+        : hashFile(root, relativePath);
+  }
   const components = componentIdentities(sourceFiles);
   const manifest: SourceReleaseManifest = {
     format: RELEASE_MANIFEST_FORMAT,
@@ -252,9 +311,9 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
         "Bind git rev-parse HEAD only after this packaging commit is chosen. This manifest does not invent a commit.",
     },
     buildInputs: {
-      node: ">=22",
-      nodeSource: "README.md",
-      packageJsonSha256: hashFile(root, "package.json"),
+      node: nodeRequirement.node,
+      nodeSource: nodeRequirement.nodeSource,
+      packageJsonSha256: sha256Hex(packagedPackage),
       packageLockSha256: hashFile(root, "package-lock.json"),
       dependencies: packageJson.dependencies,
       devDependencies: packageJson.devDependencies,
@@ -365,7 +424,14 @@ export function writePackageTree(
     if (!destination.startsWith(path.resolve(outDir) + path.sep))
       throw new Error("Release path escapes the checkout");
     mkdirSync(path.dirname(destination), { recursive: true });
-    copyFileSync(source, destination);
+    if (relativePath === "package.json") {
+      writeFileSync(
+        destination,
+        packagedPackageJson(readFileSync(source, "utf8")),
+      );
+    } else {
+      copyFileSync(source, destination);
+    }
   }
   writeFileSync(
     path.join(outDir, "release-manifest.json"),
@@ -496,20 +562,27 @@ function assertSourceDerivedFields(
 ): void {
   const dockerfile = readPackagedFile(treeRoot, "worker/Dockerfile").toString("utf8");
   const built = parseWorkerDockerfile(dockerfile);
-  const packageJson = JSON.parse(
-    readPackagedFile(treeRoot, "package.json").toString("utf8"),
-  ) as {
+  const packageJsonText = readPackagedFile(treeRoot, "package.json").toString("utf8");
+  const packageJson = JSON.parse(packageJsonText) as {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
+    scripts?: Record<string, string>;
   };
-  const packageJsonSha256 = sha256Hex(readPackagedFile(treeRoot, "package.json"));
+  for (const name of unpackagedReleaseScripts) {
+    if (packageJson.scripts && name in packageJson.scripts)
+      throw new Error("Packaged release advertises an unusable build script");
+  }
+  const nodeRequirement = nodeRequirementFromReadme(
+    readPackagedFile(treeRoot, "README.md").toString("utf8"),
+  );
+  const packageJsonSha256 = sha256Hex(packageJsonText);
   const packageLockSha256 = sha256Hex(readPackagedFile(treeRoot, "package-lock.json"));
   const archivedRelease = JSON.parse(
     readPackagedFile(treeRoot, "src/lib/releases/qsb-config-a-ranked-v2.json").toString("utf8"),
   ) as { image: string };
   const expectedBuild = {
-    node: ">=22" as const,
-    nodeSource: "README.md" as const,
+    node: nodeRequirement.node,
+    nodeSource: nodeRequirement.nodeSource,
     packageJsonSha256,
     packageLockSha256,
     dependencies: packageJson.dependencies,
