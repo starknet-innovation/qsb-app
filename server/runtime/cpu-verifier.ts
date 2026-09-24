@@ -21,16 +21,18 @@ except Exception as error:
     json.dump({"ok": False, "error": type(error).__name__ + ": " + str(error)}, sys.stdout)
 `;
 
-/** Manifest locations for a checkout and for a packaged tree. Never the module URL. */
+/**
+ * A packaged tree trusts only the sibling release-manifest.json.
+ * An in-tree release/source-manifest.json cannot override that file.
+ * A checkout with no sibling manifest uses release/source-manifest.json.
+ */
 function trustedManifestPath(root: string): string {
-  const candidates = [
-    path.join(root, "release", "source-manifest.json"),
-    path.join(root, "release-manifest.json"),
-    path.resolve(root, "..", "release-manifest.json"),
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
+  const packaged = path.resolve(root, "..", "release-manifest.json");
+  if (existsSync(packaged)) return packaged;
+  const checkout = path.join(root, "release", "source-manifest.json");
+  if (existsSync(checkout)) return checkout;
+  const colocated = path.join(root, "release-manifest.json");
+  if (existsSync(colocated)) return colocated;
   throw new Error("CpuVerifierNotEnrolled");
 }
 

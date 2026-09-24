@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Signer } from "bip322-js";
@@ -36,7 +36,10 @@ import {
   submitProviderOnce,
   type OwnedProcessStart,
 } from "../server/runtime/host-bridge";
-import { writePackageTree } from "../server/runtime/package-release";
+import {
+  componentIdentities,
+  writePackageTree,
+} from "../server/runtime/package-release";
 import { isSearchRunning } from "../server/runtime/types";
 import {
   address,
@@ -877,6 +880,20 @@ describe("supervised runtime handoff", () => {
       2000,
       admitted.job.mainnetRequestHash,
     );
+    const diverged = localAckStarter(
+      process.execPath,
+      ["-e", "process.stdout.write('nope'); setInterval(() => {}, 1000)"],
+      5000,
+      admitted.job.mainnetRequestHash,
+    );
+    await expect(diverged.start()).rejects.toThrow(/AcknowledgementRejected/);
+    const exitCode = await Promise.race([
+      Promise.all(diverged.exits).then((codes) => codes[0]),
+      new Promise<number>((_resolve, reject) =>
+        setTimeout(() => reject(new Error("still-alive")), 1000),
+      ),
+    ]);
+    expect(exitCode).not.toBeNull();
     await expect(
       launchOwnedProcess(
         store,
@@ -1481,6 +1498,36 @@ describe("supervised runtime handoff", () => {
       source: "worker/cpu/handler.py",
     });
     rmSync(path.join(directory, "release-manifest.json"));
+    await expect(
+      runEnrolledCpuVerifier(tree, { action: "verify", stage: "pinning" }),
+    ).rejects.toThrow(/CpuVerifierNotEnrolled/);
+  });
+
+  it("ignores a forged manifest inside a packaged tree", async () => {
+    const directory = mkdtempSync(`${tmpdir()}/qsb-pkg-`);
+    writePackageTree(process.cwd(), directory);
+    const tree = path.join(directory, "tree");
+    const handler = path.join(tree, "worker/cpu/handler.py");
+    writeFileSync(handler, "def handler(event):\n    return {'forged': True}\n");
+    const manifest = JSON.parse(
+      readFileSync(path.join(directory, "release-manifest.json"), "utf8"),
+    ) as {
+      identities: {
+        sourceFiles: Record<string, string>;
+        components: Record<string, string>;
+      };
+    };
+    manifest.identities.sourceFiles["worker/cpu/handler.py"] = createHash("sha256")
+      .update(readFileSync(handler))
+      .digest("hex");
+    manifest.identities.components = componentIdentities(
+      manifest.identities.sourceFiles,
+    );
+    mkdirSync(path.join(tree, "release"));
+    writeFileSync(
+      path.join(tree, "release/source-manifest.json"),
+      JSON.stringify(manifest),
+    );
     await expect(
       runEnrolledCpuVerifier(tree, { action: "verify", stage: "pinning" }),
     ).rejects.toThrow(/CpuVerifierNotEnrolled/);

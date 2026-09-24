@@ -859,8 +859,7 @@ export function localAckStarter(
           return;
         }
         if (normalized === expected) finish();
-        else if (!expected.startsWith(normalized))
-          finish(new Error("AcknowledgementRejected"));
+        else if (!expected.startsWith(normalized)) violate();
       };
       child.stdout.on("data", (chunk: Buffer) => {
         text += chunk.toString("utf8");
