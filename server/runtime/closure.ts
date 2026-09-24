@@ -25,6 +25,7 @@ export const requiredReleasePaths = [
   "server/runtime/cpu-verifier.ts",
   "server/runtime/dispatcher.ts",
   "server/runtime/evidence-reader.ts",
+  "server/runtime/fresh-proof.ts",
   "server/runtime/host-bridge.ts",
   "server/runtime/host-lifecycle.ts",
   "server/runtime/host-requirements.ts",
@@ -138,7 +139,13 @@ export const componentForPath = (relativePath: string): string => {
     return relativePath.startsWith("worker/cpu/") ? "cpu-verifier" : "runtime";
   if (relativePath === "scripts/storage-inventory.ts") return "dispatcher";
   if (relativePath === "server/runtime/cpu-verifier.ts") return "cpu-verifier";
-  if (relativePath === "server/runtime/evidence-reader.ts") return "evidence-reader";
+  if (relativePath === "server/runtime/evidence-reader.ts")
+    return "evidence-reader";
+  if (
+    relativePath === "server/runtime/fresh-proof.ts" ||
+    relativePath === "server/runtime/core-binary.json"
+  )
+    return "fresh-proof";
   if (
     relativePath.startsWith("server/runtime/") ||
     relativePath === "server/coordinator.ts" ||
@@ -146,7 +153,8 @@ export const componentForPath = (relativePath: string): string => {
     relativePath === "scripts/package-release.ts"
   )
     return "dispatcher";
-  if (relativePath.startsWith("research/optimized-subset/")) return "optimized-subset";
+  if (relativePath.startsWith("research/optimized-subset/"))
+    return "optimized-subset";
   if (relativePath.startsWith("vendor/challenge/candidates/pinning/"))
     return "historical-pinning";
   if (relativePath.startsWith("vendor/challenge/candidates/subset/"))

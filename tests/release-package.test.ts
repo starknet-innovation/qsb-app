@@ -49,7 +49,9 @@ describe("source release package", () => {
     expect(manifest.releases.optimizedSubset.selectedByWorkerDockerfile).toBe(
       false,
     );
-    expect(manifest.releases.optimizedSubset.replacesSolverPipeline).toBe(false);
+    expect(manifest.releases.optimizedSubset.replacesSolverPipeline).toBe(
+      false,
+    );
     expect(manifest.releases.pinning.compatiblePipelinePartner).toBe(
       "historicalSubset",
     );
@@ -57,7 +59,9 @@ describe("source release package", () => {
       "pinning",
     );
     expect(manifest.identities.nativeBinaries.pinning.value).toBeNull();
-    expect(manifest.identities.nativeBinaries.historicalSubset.value).toBeNull();
+    expect(
+      manifest.identities.nativeBinaries.historicalSubset.value,
+    ).toBeNull();
     expect(manifest.identities.nativeBinaries.optimizedSubset.value).toBeNull();
     expect(manifest.identities.imageConfig.value).toBeNull();
     expect(manifest.identities.ociIndex.value).toBeNull();
@@ -65,9 +69,9 @@ describe("source release package", () => {
     expect(manifest.identities.registryManifest.placeholderIsDeployable).toBe(
       false,
     );
-    expect(manifest.identities.registryManifest.historicalPlaceholder).toContain(
-      "000000000000.dkr.ecr",
-    );
+    expect(
+      manifest.identities.registryManifest.historicalPlaceholder,
+    ).toContain("000000000000.dkr.ecr");
     expect(manifest.buildInputs.imageBuildStatus).toBe("not-produced");
     expect(manifest.buildInputs.node).toBe(">=22");
     expect(manifest.buildInputs.nodeSource).toBe("README.md");
@@ -135,7 +139,10 @@ describe("source release package", () => {
     expect(manifest.buildInputs.defaultArchFlags.historicalSubset).toContain(
       "-arch=sm_89",
     );
-    const dockerfile = readFileSync(path.join(root, "worker/Dockerfile"), "utf8");
+    const dockerfile = readFileSync(
+      path.join(root, "worker/Dockerfile"),
+      "utf8",
+    );
     expect(dockerfile).toContain("vendor/challenge/candidates");
     expect(dockerfile).not.toMatch(
       /^\s*(?:COPY|ADD)\s+\S*research\/optimized-subset/m,
@@ -143,7 +150,8 @@ describe("source release package", () => {
     expect(
       certifyWrapper(
         {
-          wrapperSha256: manifest.identities.sourceFiles["worker/handler.py"] ?? "",
+          wrapperSha256:
+            manifest.identities.sourceFiles["worker/handler.py"] ?? "",
           nativeSha256: manifest.identities.nativeBinaries.pinning.value,
         },
         {
@@ -166,7 +174,10 @@ describe("source release package", () => {
       wrapperSha256: sha256Hex(readFileSync(wrapper)),
       nativeSha256: "ab".repeat(32),
     };
-    writeFileSync(wrapper, `${readFileSync(wrapper, "utf8")}\n# wrapper changed\n`);
+    writeFileSync(
+      wrapper,
+      `${readFileSync(wrapper, "utf8")}\n# wrapper changed\n`,
+    );
     expect(() => verifyPackageTree(directory)).toThrow(/enrolled identity/);
     expect(
       certifyWrapper(enrolled, {
@@ -193,8 +204,21 @@ describe("source release package", () => {
       "tsconfig.json",
     ]) {
       expect(paths).toContain(relativePath);
-      expect(manifest.identities.sourceFiles[relativePath]).toMatch(/^[a-f0-9]{64}$/);
+      expect(manifest.identities.sourceFiles[relativePath]).toMatch(
+        /^[a-f0-9]{64}$/,
+      );
     }
+    const directory = mkdtempSync(path.join(tmpdir(), "qsb-release-"));
+    writePackageTree(root, directory, manifest);
+    const packaged = JSON.parse(
+      readFileSync(path.join(directory, "tree/package.json"), "utf8"),
+    ) as { scripts: Record<string, string> };
+    expect(packaged.scripts["harness:core"]).toBeUndefined();
+    expect(
+      JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).scripts[
+        "harness:core"
+      ],
+    ).toBe("bash scripts/test-core.sh");
     expect(manifest.releases.pinning.sourcesEnrolled).toBe(true);
     expect(manifest.releases.historicalSubset.sourcesEnrolled).toBe(true);
     expect(manifest.identities.sourceFiles["vendor/challenge/candidates/pinning/pinning.cu"]).toMatch(
