@@ -183,12 +183,12 @@ describe("source release package", () => {
     forged.identities.nativeBinaries.historicalSubset.value = "ab".repeat(32);
     forged.identities.nativeBinaries.historicalSubset.status = "produced";
     writeFileSync(manifestPath, JSON.stringify(forged));
-    expect(() => verifyPackageTree(directory)).toThrow(/did not produce/);
+    expect(() => verifyPackageTree(directory)).toThrow(/nativeBinaries/);
     forged.identities.nativeBinaries.historicalSubset.value = null;
     forged.identities.nativeBinaries.historicalSubset.status = "not-produced";
     forged.identities.nativeBinaries.optimizedSubset.value = "cd".repeat(32);
     writeFileSync(manifestPath, JSON.stringify(forged));
-    expect(() => verifyPackageTree(directory)).toThrow(/did not produce/);
+    expect(() => verifyPackageTree(directory)).toThrow(/nativeBinaries/);
     writePackageTree(root, directory, manifest);
     const bytecode = path.join(directory, "tree/injected/__pycache__/stale.pyc");
     mkdirSync(path.dirname(bytecode), { recursive: true });
@@ -208,6 +208,22 @@ describe("source release package", () => {
     components.format = "qsb-other";
     writeFileSync(manifestPathAgain, JSON.stringify(components));
     expect(() => verifyPackageTree(directory)).toThrow(/format/);
+    writePackageTree(root, directory, manifest);
+    const derived = JSON.parse(readFileSync(manifestPathAgain, "utf8")) as {
+      sourceCommit: { status: string; value: string | null };
+      buildInputs: { images: { build: string } };
+      releases: { pinning: { sourcesEnrolled: boolean } };
+    };
+    derived.sourceCommit = { status: "bound", value: "ab".repeat(32) };
+    writeFileSync(manifestPathAgain, JSON.stringify(derived));
+    expect(() => verifyPackageTree(directory)).toThrow();
+    writePackageTree(root, directory, manifest);
+    const images = JSON.parse(readFileSync(manifestPathAgain, "utf8")) as {
+      buildInputs: { images: { build: string } };
+    };
+    images.buildInputs.images.build = "forged.example/image:latest";
+    writeFileSync(manifestPathAgain, JSON.stringify(images));
+    expect(() => verifyPackageTree(directory)).toThrow(/build inputs/);
   });
 
   it("refuses release paths outside this checkout", () => {

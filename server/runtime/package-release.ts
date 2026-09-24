@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 import archived from "../../src/lib/releases/qsb-config-a-ranked-v2.json";
 import {
   componentForPath,
@@ -372,10 +373,197 @@ export function writePackageTree(
   );
 }
 
+const absentIdentitySchema = z
+  .object({
+    status: z.literal("not-produced"),
+    value: z.null(),
+    reason: z.string().min(1),
+  })
+  .strict();
+
+const sourceReleaseManifestSchema = z
+  .object({
+    format: z.literal(RELEASE_MANIFEST_FORMAT),
+    mainnetEnabled: z.literal(false),
+    broadcastAuthorized: z.literal(false),
+    sourceCommit: z
+      .object({
+        status: z.literal("unbound"),
+        value: z.null(),
+        reason: z.string().min(1),
+      })
+      .strict(),
+    buildInputs: z
+      .object({
+        node: z.literal(">=22"),
+        nodeSource: z.literal("README.md"),
+        packageJsonSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        packageLockSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        dependencies: z.record(z.string(), z.string()),
+        devDependencies: z.record(z.string(), z.string()),
+        compiler: z.literal("CUDA 12.8.1 nvcc"),
+        cudaArchDefault: z.string().min(1),
+        dockerfileFlags: z
+          .object({
+            pinning: z.array(z.string()),
+            historicalSubset: z.array(z.string()),
+          })
+          .strict(),
+        defaultArchFlags: z
+          .object({
+            pinning: z.array(z.string()),
+            historicalSubset: z.array(z.string()),
+          })
+          .strict(),
+        images: z
+          .object({ build: z.string().min(1), runtime: z.string().min(1) })
+          .strict(),
+        runpodPin: z.string().min(1),
+        imageBuildStatus: z.literal("not-produced"),
+      })
+      .strict(),
+    releases: z
+      .object({
+        pinning: z
+          .object({
+            role: z.literal("historical-pipeline-stage"),
+            replacesSolverPipeline: z.literal(false),
+            selectedByWorkerDockerfile: z.literal(true),
+            compatiblePipelinePartner: z.literal("historicalSubset"),
+            sourcesEnrolled: z.boolean(),
+          })
+          .strict(),
+        historicalSubset: z
+          .object({
+            role: z.literal("historical-pipeline-stage"),
+            replacesSolverPipeline: z.literal(false),
+            selectedByWorkerDockerfile: z.literal(true),
+            compatiblePipelinePartner: z.literal("pinning"),
+            sourcesEnrolled: z.boolean(),
+          })
+          .strict(),
+        optimizedSubset: z
+          .object({
+            role: z.literal("isolated-research"),
+            replacesSolverPipeline: z.literal(false),
+            selectedByWorkerDockerfile: z.literal(false),
+            compatiblePipelinePartner: z.null(),
+            sourcesEnrolled: z.boolean(),
+            note: z.literal(
+              "research/optimized-subset is not selected by worker/Dockerfile and is not a substitute for the pinning plus historical subset pipeline.",
+            ),
+          })
+          .strict(),
+      })
+      .strict(),
+    identities: z
+      .object({
+        sourceFiles: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/)),
+        components: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/)),
+        nativeBinaries: z
+          .object({
+            pinning: absentIdentitySchema,
+            historicalSubset: absentIdentitySchema,
+            optimizedSubset: absentIdentitySchema,
+          })
+          .strict(),
+        imageConfig: absentIdentitySchema,
+        ociIndex: absentIdentitySchema,
+        registryManifest: absentIdentitySchema
+          .extend({
+            historicalPlaceholder: z.string().min(1),
+            placeholderIsDeployable: z.literal(false),
+          })
+          .strict(),
+      })
+      .strict(),
+    privateEvidence: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
+
+function readPackagedFile(treeRoot: string, relativePath: string): Buffer {
+  if (relativePath.split("/").includes("..") || path.isAbsolute(relativePath))
+    throw new Error("Release path escapes the checkout");
+  const absolute = path.resolve(treeRoot, relativePath);
+  if (!absolute.startsWith(treeRoot + path.sep))
+    throw new Error("Release path escapes the checkout");
+  return readFileSync(absolute);
+}
+
+function assertSourceDerivedFields(
+  manifest: SourceReleaseManifest,
+  treeRoot: string,
+): void {
+  const dockerfile = readPackagedFile(treeRoot, "worker/Dockerfile").toString("utf8");
+  const built = parseWorkerDockerfile(dockerfile);
+  const packageJson = JSON.parse(
+    readPackagedFile(treeRoot, "package.json").toString("utf8"),
+  ) as {
+    dependencies: Record<string, string>;
+    devDependencies: Record<string, string>;
+  };
+  const packageJsonSha256 = sha256Hex(readPackagedFile(treeRoot, "package.json"));
+  const packageLockSha256 = sha256Hex(readPackagedFile(treeRoot, "package-lock.json"));
+  const archivedRelease = JSON.parse(
+    readPackagedFile(treeRoot, "src/lib/releases/qsb-config-a-ranked-v2.json").toString("utf8"),
+  ) as { image: string };
+  const expectedBuild = {
+    node: ">=22" as const,
+    nodeSource: "README.md" as const,
+    packageJsonSha256,
+    packageLockSha256,
+    dependencies: packageJson.dependencies,
+    devDependencies: packageJson.devDependencies,
+    compiler: "CUDA 12.8.1 nvcc" as const,
+    cudaArchDefault: built.cudaArch,
+    dockerfileFlags: {
+      pinning: built.pinningFlags,
+      historicalSubset: built.subsetFlags,
+    },
+    defaultArchFlags: {
+      pinning: expandArch(built.pinningFlags, built.cudaArch),
+      historicalSubset: expandArch(built.subsetFlags, built.cudaArch),
+    },
+    images: { build: built.buildImage, runtime: built.runtimeImage },
+    runpodPin: built.runpodPin,
+    imageBuildStatus: "not-produced" as const,
+  };
+  const stable = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      return `{${Object.keys(record)
+        .sort()
+        .map((key) => `${key}:${stable(record[key])}`)
+        .join(",")}}`;
+    }
+    return JSON.stringify(value);
+  };
+  if (stable(manifest.buildInputs) !== stable(expectedBuild))
+    throw new Error("Packaged build inputs do not match the packaged sources");
+  const pinningEnrolled = Object.keys(manifest.identities.sourceFiles).some((file) =>
+    file.startsWith("vendor/challenge/candidates/pinning/"),
+  );
+  const subsetEnrolled = Object.keys(manifest.identities.sourceFiles).some((file) =>
+    file.startsWith("vendor/challenge/candidates/subset/"),
+  );
+  const optimizedEnrolled = Object.keys(manifest.identities.sourceFiles).some((file) =>
+    file.startsWith("research/optimized-subset/"),
+  );
+  if (
+    manifest.releases.pinning.sourcesEnrolled !== pinningEnrolled ||
+    manifest.releases.historicalSubset.sourcesEnrolled !== subsetEnrolled ||
+    manifest.releases.optimizedSubset.sourcesEnrolled !== optimizedEnrolled ||
+    manifest.identities.registryManifest.historicalPlaceholder !== archivedRelease.image
+  )
+    throw new Error("Packaged release metadata does not match the packaged sources");
+}
+
 export function verifyPackageTree(outDir: string): SourceReleaseManifest {
-  const manifest = JSON.parse(
-    readFileSync(path.join(outDir, "release-manifest.json"), "utf8"),
-  ) as SourceReleaseManifest;
+  const parsed = sourceReleaseManifestSchema.parse(
+    JSON.parse(readFileSync(path.join(outDir, "release-manifest.json"), "utf8")),
+  );
+  const manifest = parsed as SourceReleaseManifest;
   if (manifest.format !== RELEASE_MANIFEST_FORMAT)
     throw new Error("Release manifest format is not enrolled");
   assertCompatibleStages(manifest);
@@ -421,5 +609,6 @@ export function verifyPackageTree(outDir: string): SourceReleaseManifest {
     if (components[name] !== manifest.identities.components[name])
       throw new Error(`Packaged component does not match enrolled identity: ${name}`);
   }
+  assertSourceDerivedFields(manifest, treeRoot);
   return manifest;
 }

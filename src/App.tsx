@@ -1,3 +1,4 @@
+import { legacySearchControls } from "./lib/jobControls";
 import { vaultConfiguration } from "./lib/provenance";
 import { NETWORK_ID, NETWORK_CONFIG } from "./lib/network";
 import { operationsAllowed } from "./lib/readiness";
@@ -673,7 +674,7 @@ export default function App() {
                         Review and authorize
                       </button>
                     )}
-                    {j.status === "paused" && (
+                    {legacySearchControls(j).resume && (
                       <button
                         className="secondary"
                         onClick={() =>
@@ -721,7 +722,7 @@ export default function App() {
                         Refresh confirmation
                       </button>
                     )}
-                    {["queued", "searching"].includes(j.status) && (
+                    {legacySearchControls(j).pause && (
                       <button
                         className="secondary"
                         onClick={() =>
