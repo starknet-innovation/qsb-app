@@ -566,6 +566,12 @@ export async function replaceOwnedProcess(
     launch.previousProcessIds.length >= PROCESS_HISTORY_LIMIT
   )
     throw new Error("ReplaceRefused");
+  // A paid submission may still be in flight. Replacing now would make its
+  // provider id unrecordable. Reconcile it with recordLateProviderId first. A
+  // stdout violation already refuses that result, so replacement stays the
+  // recovery path there.
+  if (launch.providerOutcome === "uncertain" && launch.stdoutProtocol !== "violated")
+    throw new Error("ProviderSubmissionUnresolved");
   const priorState = launch.state;
   const providerSubmissions = launch.providerSubmissions;
   const providerId = launch.providerId;

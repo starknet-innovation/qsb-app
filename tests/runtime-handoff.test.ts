@@ -1246,6 +1246,115 @@ describe("supervised runtime handoff", () => {
     await Promise.all(starter.exits);
   });
 
+  it("refuses replacement while a paid submission is in flight", async () => {
+    const { store, admitted } = await claimedFixture();
+    await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ processId: "paid-in-flight" }),
+      new Date(),
+      2000,
+    );
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered: () => void = () => undefined;
+    const inFlight = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const submitting = submitProviderOnce(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => {
+        entered();
+        await gate;
+        return { providerId: "in-flight-provider" };
+      },
+    );
+    await inFlight;
+    let starts = 0;
+    await expect(
+      replaceOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => {
+          starts += 1;
+          return { processId: "should-not-start" };
+        },
+        new Date(),
+        2000,
+        async () => undefined,
+      ),
+    ).rejects.toThrow(/ProviderSubmissionUnresolved/);
+    expect(starts).toBe(0);
+    release();
+    const running = await submitting;
+    expect(running.state).toBe("running");
+    expect(running.providerId).toBe("in-flight-provider");
+    expect(running.processId).toBe("paid-in-flight");
+  });
+
+  it("replaces an uncertain paid launch only after its provider id is reconciled", async () => {
+    const { store, admitted } = await claimedFixture();
+    await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ processId: "timed-out-submit" }),
+      new Date(),
+      2000,
+    );
+    await expect(
+      submitProviderOnce(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => {
+          throw new Error("provider timeout");
+        },
+      ),
+    ).rejects.toThrow(/provider timeout/);
+    const replace = () =>
+      replaceOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => ({ processId: "after-reconcile" }),
+        new Date(),
+        2000,
+        async () => undefined,
+      );
+    await expect(replace()).rejects.toThrow(/ProviderSubmissionUnresolved/);
+    await recordLateProviderId(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      "reconciled-provider",
+    );
+    const replaced = await replace();
+    expect(replaced.state).toBe("running");
+    expect(replaced.processId).toBe("after-reconcile");
+    expect(replaced.providerId).toBe("reconciled-provider");
+  });
+
   it("drains a live sibling only after the process is stopped", async () => {
     const { store, admitted } = await claimedFixture();
     await openSiblingSlot(store, address, admitted.job.id, admitted.job.mainnetRequestHash);
