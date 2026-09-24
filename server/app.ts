@@ -26,6 +26,7 @@ import { Conflict, store as defaultStore, type Store } from "./store";
 import { slipstream, MinerAuthenticationError } from "./providers";
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { chain, ChainError, type Esplora } from "./chain";
+import { coordinatorPublicSolvedResult } from "../src/mainnet/coordinatorResult";
 import { outputScript } from "../src/lib/transactions";
 import { hex } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
@@ -468,6 +469,35 @@ export function createApp(
       ),
     }),
   );
+  app.get("/api/jobs/:id/solved-result", async (c) => {
+    c.header("Cache-Control", "no-store");
+    if (NETWORK_ID !== "mainnet")
+      return c.json(
+        { error: "Solved results are delivered on Bitcoin mainnet." },
+        404,
+      );
+    const row = await store.get(
+      `OWNER#${c.get("owner")}`,
+      `JOB#${c.req.param("id")}`,
+    );
+    if (!row) return c.json({ error: "Job not found" }, 404);
+    const job = row.job as Job;
+    if (job.owner !== c.get("owner"))
+      return c.json({ error: "Job not found" }, 404);
+    if (supervisedServiceJob(job))
+      return c.json(
+        {
+          error:
+            "Supervised jobs are not delivered by the coordinator result.",
+        },
+        409,
+      );
+    try {
+      return c.json(coordinatorPublicSolvedResult(job));
+    } catch {
+      return c.json({ error: "Solved result is not available." }, 404);
+    }
+  });
   app.post("/api/jobs", async (c) => {
     const manifest = withdrawalSchema.parse(await c.req.json());
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
