@@ -233,3 +233,11 @@ records CPU fallback hashes/infinity as well as GPU hashes. Twenty-five host
 tests pass; native execution of this changed binary is pending. Previous native
 results remain bound to the pre-handoff binary and are not release evidence for
 this change. Specialized geometry and multi-batch gates also remain pending.
+
+The next native plan additionally covers the exact specialized 9995-byte layout
+with a public 155-block prefix, two consecutive sequences and partial batches.
+It tests both scalar multiplier 1 / point G and order-minus-one / point 3G.
+A checked host OpenSSL midstate exporter is independently checked by padding
+complete messages and comparing with hashlib; 26 host tests pass. The oracle
+hashes the entire prefix+suffix rather than trusting the exported midstate.
+These newly prepared specialized cases have not yet run on a GPU.

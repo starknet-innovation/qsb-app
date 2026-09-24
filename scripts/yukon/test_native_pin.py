@@ -2,9 +2,17 @@ import unittest
 import hashlib
 import struct
 from test_pin_recovery import N
+from sha_midstate import midstate
 from native_pin import check_trace, expected
 
 class NativeProtocolTests(unittest.TestCase):
+    def test_midstate_export_matches_complete_sha(self):
+        for message in [b'',b'abc',bytes(range(256))]:
+            pad=message+b'\x80'
+            pad+=bytes((56-len(pad)%64)%64)+struct.pack('>Q',len(message)*8)
+            self.assertEqual(struct.pack('>8I',*midstate(pad)),hashlib.sha256(message).digest())
+        with self.assertRaises(ValueError):midstate(b'x')
+
     def test_trace_requires_exact_coverage(self):
         case={'expected':{'2147483648:500000000:0':'a'*64,'2147483648:500000000:1':'b'*64}}
         lines=[f'QSB_TRACE seq=2147483648 lt=500000000 ri={i} hash={h*64}' for i,h in [(0,'a'),(1,'b')]]

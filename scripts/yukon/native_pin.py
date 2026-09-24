@@ -9,16 +9,17 @@ import struct
 import subprocess
 import time
 from test_pin_recovery import G, N, mul
+from sha_midstate import midstate
 
 IV=(0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19)
 TRACE=re.compile(r'^QSB_TRACE seq=(\d+) lt=(\d+) ri=([01]) hash=(infinity|[0-9a-f]{64})$')
 
 
-def expected(suffix, sequence, locktime, nri=1, rscalar=1):
+def expected(suffix, sequence, locktime, nri=1, rscalar=1, prefix=b'', seq_offset=0):
     message=bytearray(suffix)
-    message[:4]=struct.pack('<I',sequence)
+    message[seq_offset:seq_offset+4]=struct.pack('<I',sequence)
     message[-8:-4]=struct.pack('<I',locktime)
-    z=int.from_bytes(hashlib.sha256(hashlib.sha256(message).digest()).digest(),'big')
+    z=int.from_bytes(hashlib.sha256(hashlib.sha256(prefix+message).digest()).digest(),'big')
     out={}
     for ri in (0,1):
         pt=mul((z*nri+(rscalar if ri==0 else -rscalar))%N)
@@ -61,6 +62,22 @@ def prepare(source, out):
                     for ri,h in expected(suffix,s,t).items():want[f'{s}:{t}:{ri}']=h
             cases.append({'name':f'sl{sl}-seq{seq}','params':f'params-{sl}.bin','sequence':seq,
                           'sequences':count,'locktime':lt,'locktimes':n,'expected':want})
+    # Exact upstream FAST_TAIL geometry, with a real 155-block public prefix.
+    prefix=bytes((i*29+7)%256 for i in range(9920))
+    state=midstate(prefix)
+    suffix=bytes((i*13+11)%256 for i in range(71))+struct.pack('<I',1)
+    for nri,rscalar in [(1,1),(N-1,3)]:
+        point=mul(rscalar);name='fast-tail-unit' if nri==1 else 'fast-tail-order-edge'
+        raw=struct.pack('>8I',*state)+struct.pack('<I',75)+suffix+struct.pack('<III',9995,31,67)
+        raw+=nri.to_bytes(32,'little')+point[0].to_bytes(32,'little')+point[1].to_bytes(32,'little')
+        (out/f'{name}.bin').write_bytes(raw)
+        seq=2147483680;lt=500000768;count=2;n=129
+        want={}
+        for s in range(seq,seq+count):
+            for t in range(lt,lt+n):
+                for ri,h in expected(suffix,s,t,nri,rscalar,prefix,31).items():want[f'{s}:{t}:{ri}']=h
+        cases.append({'name':name,'params':f'{name}.bin','sequence':seq,'sequences':count,
+                      'locktime':lt,'locktimes':n,'expected':want})
     # Force P=+R / P=-R with public constants derived from the synthetic hash.
     # This changes no predicate and solves no SHA preimage; it exercises the
     # actual denominator detector and CPU doubling/infinity handoff.
@@ -78,7 +95,7 @@ def prepare(source, out):
         want={f'{seq}:{lt}:{ri}':h for ri,h in expected(suffix,seq,lt,nri,rscalar).items()}
         cases.append({'name':name,'params':f'{name}.bin','sequence':seq,'sequences':1,
                       'locktime':lt,'locktimes':1,'expected':want})
-    receipt={'scope':'synthetic-public-generic-pinning-only','cases':cases,
+    receipt={'scope':'synthetic-public-generic-specialized-exception-pinning','cases':cases,
              'sourceSha256':hashlib.sha256(text.encode()).hexdigest(),
              'traceSourceSha256':hashlib.sha256((out/'pinning/pinning_trace.cu').read_bytes()).hexdigest(),
              'freshWithdrawal':False,'gpuExecuted':False}
