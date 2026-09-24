@@ -389,7 +389,7 @@ export function createApp(
       { ...row, status, checkedAt, version: row.version + 1 },
       row.version,
     );
-    const section7Inclusion = judgeInclusionEvidence({
+    const judgment = judgeInclusionEvidence({
       ...(inMiner
         ? {
             httpStatus: 200,
@@ -414,6 +414,16 @@ export function createApp(
         : {}),
       expectedTxid: id,
     });
+    // Only this route queried Esplora. A caller-supplied record stays unconfirmed.
+    const observedByThisCheckout =
+      chainResult.status === "fulfilled" &&
+      judgment.structurallyComplete &&
+      !judgment.overclaim;
+    const section7Inclusion = {
+      ...judgment,
+      independentlyConfirmed: observedByThisCheckout,
+      observedByThisCheckout,
+    };
     return c.json({
       txid: id,
       status,

@@ -104,6 +104,14 @@ const candidateSchema = z
   })
   .strict();
 
+const spendInputSchema = z
+  .object({
+    txid: hash64,
+    vout: z.number().int().min(0).max(0xffffffff),
+    valueSats: positiveSats,
+  })
+  .strict();
+
 const exactSpendSchema = z
   .object({
     format: z.literal("qsb-exact-spend-authorization-v1"),
@@ -112,6 +120,7 @@ const exactSpendSchema = z
     rawTxSha256: hash64,
     amountSats: positiveSats,
     feeSats: positiveSats,
+    inputs: z.array(spendInputSchema).min(1).max(8),
     directMainnetDecision: z.enum(["explicit", "not-requested"]),
     mainnetEnabled: z.literal(false),
     broadcastAuthorized: z.literal(false),
@@ -365,14 +374,58 @@ export function rawTransactionSha256(rawTxHex: string): string {
 
 function inputOutpoints(tx: btc.Transaction): Outpoint[] {
   const points: Outpoint[] = [];
+  const seen = new Set<string>();
   for (let index = 0; index < tx.inputsLength; index += 1) {
     const input = tx.getInput(index);
     if (!input.txid || input.index === undefined)
       throw new MinerInclusionError("ExactSpendMismatch");
-    points.push({ txid: hex.encode(input.txid).toLowerCase(), vout: input.index });
+    const point = {
+      txid: hex.encode(input.txid).toLowerCase(),
+      vout: input.index,
+    };
+    const key = `${point.txid}:${point.vout}`;
+    if (seen.has(key)) throw new MinerInclusionError("ExactSpendMismatch");
+    seen.add(key);
+    points.push(point);
   }
   if (points.length === 0) throw new MinerInclusionError("ExactSpendMismatch");
   return points;
+}
+
+/** Amount is output 0. Fee is authorized input value minus every output. No chain read. */
+function assertSpendMatchesTransaction(
+  tx: btc.Transaction,
+  amountSats: string,
+  feeSats: string,
+  inputs: readonly { txid: string; vout: number; valueSats: string }[],
+): void {
+  const points = inputOutpoints(tx);
+  if (inputs.length !== points.length || tx.outputsLength < 1)
+    throw new MinerInclusionError("ExactSpendMismatch");
+  let inputTotal = 0n;
+  for (let index = 0; index < points.length; index += 1) {
+    const declared = inputs[index];
+    const point = points[index];
+    if (
+      !declared ||
+      !point ||
+      lower(declared.txid) !== point.txid ||
+      declared.vout !== point.vout
+    )
+      throw new MinerInclusionError("ExactSpendMismatch");
+    inputTotal += BigInt(declared.valueSats);
+  }
+  let outputTotal = 0n;
+  for (let index = 0; index < tx.outputsLength; index += 1) {
+    const amount = tx.getOutput(index).amount;
+    if (amount === undefined) throw new MinerInclusionError("ExactSpendMismatch");
+    if (index === 0 && amount !== BigInt(amountSats))
+      throw new MinerInclusionError("ExactSpendMismatch");
+    outputTotal += amount;
+  }
+  const fee = inputTotal - outputTotal;
+  if (fee !== BigInt(feeSats) || fee <= 0n)
+    throw new MinerInclusionError("ExactSpendMismatch");
 }
 
 function refOutpoints(ref: SpentRef): Outpoint[] {
@@ -583,6 +636,12 @@ export function grantExactSpendPermit(input: {
     spend.feeSats !== candidate.feeSats
   )
     throw new MinerInclusionError("ExactSpendMismatch");
+  assertSpendMatchesTransaction(
+    tx,
+    spend.amountSats,
+    spend.feeSats,
+    spend.inputs,
+  );
   switch (agreement.chain) {
     case "mainnet":
       if (spend.directMainnetDecision !== "explicit")
@@ -843,7 +902,8 @@ const inclusionSchema = z
 
 export type InclusionJudgment = {
   format: "qsb-inclusion-judgment-v1";
-  independentlyConfirmed: boolean;
+  structurallyComplete: boolean;
+  independentlyConfirmed: false;
   preflightIsInclusion: false;
   httpSuccessIsInclusion: false;
   section7Closed: false;
@@ -855,6 +915,7 @@ export type InclusionJudgment = {
 
 const INCLUSION_LIMITS = [
   "This helper does not contact a chain provider or miner.",
+  "A caller-supplied block record is structural completeness, not independent confirmation.",
   "HTTP success, a mempool preflight, and a miner-reported confirmation are not inclusion.",
   "A matching block hash, height, and transaction id do not close section 7 in this checkout.",
 ] as const;
@@ -882,7 +943,7 @@ export function judgeInclusionEvidence(input: unknown): InclusionJudgment {
       "A report cannot close section 7. This checkout did not observe the chain.";
   else if (blockOk)
     reason =
-      "The supplied record has a block hash, block height, and the same transaction id. This judgment does not contact a chain, and it does not close section 7.";
+      "The supplied record is structurally complete. This helper did not query a chain provider, so it is not independent confirmation, and it does not close section 7.";
   else if (
     evidence.preflightAllowed === true ||
     evidence.mempoolAccepted === true
@@ -897,7 +958,8 @@ export function judgeInclusionEvidence(input: unknown): InclusionJudgment {
       "Independent inclusion requires a confirmed block hash, block height, and the same transaction id.";
   return {
     format: "qsb-inclusion-judgment-v1",
-    independentlyConfirmed: blockOk && !overclaim,
+    structurallyComplete: blockOk,
+    independentlyConfirmed: false,
     preflightIsInclusion: false,
     httpSuccessIsInclusion: false,
     section7Closed: false,

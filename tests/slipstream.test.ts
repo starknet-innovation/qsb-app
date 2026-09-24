@@ -106,10 +106,11 @@ it("requires chain confirmation and owner authentication", async () => {
     chain: { confirmations: 2, blockHeight: 100 },
     section7Inclusion: {
       independentlyConfirmed: true,
+      structurallyComplete: true,
       section7Closed: false,
       preflightIsInclusion: false,
       httpSuccessIsInclusion: false,
-      observedByThisCheckout: false,
+      observedByThisCheckout: true,
     },
   });
   expect(f.submit).not.toHaveBeenCalled();

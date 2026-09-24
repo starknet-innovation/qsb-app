@@ -36,9 +36,13 @@ const sampleAddress = btc.p2wpkh(
 function sampleTx(vout = 1) {
   const tx = new btc.Transaction();
   tx.addInput({ txid: "11".repeat(32), index: vout, sequence: 0xfffffffe });
-  tx.addOutputAddress(sampleAddress, 1000n);
+  tx.addOutputAddress(sampleAddress, 50000n);
   const raw = hex.encode(tx.toBytes(true, true));
-  return { raw, txid: tx.id };
+  return {
+    raw,
+    txid: tx.id,
+    inputs: [{ txid: "11".repeat(32), vout, valueSats: "51000" }],
+  };
 }
 
 function parties(
@@ -100,6 +104,7 @@ function exactSpend(
   chain: ExternalChainId,
   raw: string,
   txid: string,
+  inputs: { txid: string; vout: number; valueSats: string }[],
   overrides: Record<string, unknown> = {},
 ) {
   return {
@@ -109,6 +114,7 @@ function exactSpend(
     rawTxSha256: rawTransactionSha256(raw),
     amountSats: "50000",
     feeSats: "1000",
+    inputs,
     directMainnetDecision:
       chain === "mainnet" ? ("explicit" as const) : ("not-requested" as const),
     mainnetEnabled: false as const,
@@ -125,6 +131,7 @@ function grantInput(
     txid?: string;
     exact?: Record<string, unknown>;
     candidate?: Record<string, unknown>;
+    inputs?: { txid: string; vout: number; valueSats: string }[];
     refs?: unknown;
     release?: { mainnetEnabled?: boolean; broadcastAuthorized?: boolean };
     parties?: ReturnType<typeof parties>;
@@ -133,10 +140,11 @@ function grantInput(
   const sample = sampleTx();
   const raw = overrides.raw ?? sample.raw;
   const txid = overrides.txid ?? sample.txid;
+  const inputs = overrides.inputs ?? sample.inputs;
   return {
     parties: overrides.parties ?? parties(chain, app),
     candidate: candidate(chain, raw, txid, overrides.candidate),
-    exactSpend: exactSpend(chain, raw, txid, overrides.exact),
+    exactSpend: exactSpend(chain, raw, txid, inputs, overrides.exact),
     spentFixtureRefs: overrides.refs ?? [spentRef()],
     release: overrides.release ?? { mainnetEnabled: false as const },
   };
@@ -250,6 +258,7 @@ describe("spent regtest reuse", () => {
           ],
           raw: sample.raw,
           txid: sample.txid,
+          inputs: sample.inputs,
         }),
       ),
     ).toThrow("SpentRegtestReuseRefused");
@@ -290,6 +299,23 @@ describe("authorization before submit", () => {
     expect(() =>
       grantExactSpendPermit(
         grantInput("mainnet", "xverse", { exact: { feeSats: "1001" } }),
+      ),
+    ).toThrow("ExactSpendMismatch");
+    const underpaid = new btc.Transaction();
+    underpaid.addInput({
+      txid: "11".repeat(32),
+      index: 1,
+      sequence: 0xfffffffe,
+    });
+    underpaid.addOutputAddress(sampleAddress, 1000n);
+    const underpaidRaw = hex.encode(underpaid.toBytes(true, true));
+    expect(() =>
+      grantExactSpendPermit(
+        grantInput("mainnet", "xverse", {
+          raw: underpaidRaw,
+          txid: underpaid.id,
+          inputs: [{ txid: "11".repeat(32), vout: 1, valueSats: "51000" }],
+        }),
       ),
     ).toThrow("ExactSpendMismatch");
     expect(() =>
@@ -511,6 +537,7 @@ describe("preflight is not inclusion", () => {
     ]) {
       const judgment = judgeInclusionEvidence(evidence);
       expect(judgment.independentlyConfirmed).toBe(false);
+      expect(judgment.structurallyComplete).toBe(false);
       expect(judgment.preflightIsInclusion).toBe(false);
       expect(judgment.httpSuccessIsInclusion).toBe(false);
       expect(judgment.section7Closed).toBe(false);
@@ -518,7 +545,7 @@ describe("preflight is not inclusion", () => {
     }
   });
 
-  it("accepts supplied block and transaction evidence without closing section 7", () => {
+  it("treats a supplied block record as structural completeness, not confirmation", () => {
     const judgment = judgeInclusionEvidence({
       httpStatus: 200,
       preflightAllowed: true,
@@ -532,7 +559,8 @@ describe("preflight is not inclusion", () => {
         txid,
       },
     });
-    expect(judgment.independentlyConfirmed).toBe(true);
+    expect(judgment.structurallyComplete).toBe(true);
+    expect(judgment.independentlyConfirmed).toBe(false);
     expect(judgment.preflightIsInclusion).toBe(false);
     expect(judgment.section7Closed).toBe(false);
     expect(judgment.observedByThisCheckout).toBe(false);

@@ -122,6 +122,7 @@ async function setup(reject = false) {
         rawTxSha256: rawTransactionSha256(rawTxHex),
         amountSats: "50000",
         feeSats: "10000",
+        inputs: [{ txid: previous.id, vout: 0, valueSats: "100000" }],
         directMainnetDecision: "explicit" as const,
         mainnetEnabled: false as const,
         broadcastAuthorized: false as const,
