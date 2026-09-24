@@ -35,7 +35,15 @@ export type SearchEvidenceKind =
   "not-run" | "known-solution-replay" | "synthetic-no-hit" | "mocked-success";
 
 const hash64 = z.string().regex(/^[a-f0-9]{64}$/);
-const sats = z.string().regex(/^[1-9][0-9]{0,14}$/);
+/** Positive sats only, capped at the same supply limit as src/lib/model.ts. */
+const BITCOIN_SUPPLY_SATS = 2100000000000000n;
+const sats = z
+  .string()
+  .regex(/^[1-9][0-9]*$/)
+  .refine(
+    (value) => BigInt(value) <= BITCOIN_SUPPLY_SATS,
+    "Amount exceeds Bitcoin supply",
+  );
 const proofChainSchema = z.enum(["mainnet", "regtest", "testnet4"]);
 
 const proofServiceSchema = z

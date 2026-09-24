@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
@@ -330,6 +331,34 @@ describe("freshness and disposable requests", () => {
       }),
     );
     expect(sameVaultDifferentRequest.restartsHistoricalFixture).toBe(false);
+    const supply = "2100000000000000";
+    const atSupply = scaffoldDisposableProofRequest(
+      requestInput({ amountSats: supply, feeSats: "1" }),
+    );
+    expect(atSupply.amountSats).toBe(supply);
+    expect(() =>
+      scaffoldDisposableProofRequest(
+        requestInput({ amountSats: "2100000000000001", feeSats: "1" }),
+      ),
+    ).toThrow(/Amount exceeds Bitcoin supply/);
+    expect(() =>
+      scaffoldDisposableProofRequest(
+        requestInput({ amountSats: "0", feeSats: "1" }),
+      ),
+    ).toThrow();
+    expect(
+      assessBoundedCompute(
+        {
+          explicitlyAuthorized: true,
+          minIdleWorkers: 0,
+          maxCostUnits: "1000000000000000",
+          deadline: "2026-09-25T00:00:00.000Z",
+          workerId: "worker-a",
+          cleanupWatchdogs: [{ id: "watchdog-a", independentOfWorker: true }],
+        },
+        new Date("2026-09-24T00:00:00.000Z"),
+      ).maxCostUnits,
+    ).toBe("1000000000000000");
     const fundingTxid = "44".repeat(32);
     expect(() =>
       scaffoldDisposableProofRequest(
@@ -781,6 +810,31 @@ describe("core harness judgment", () => {
     expect(classified.syntheticNoHitIsNotFreshSearch).toBe(true);
     expect(classified.mockedSuccessIsNotFreshSearch).toBe(true);
     expect(judgeCoreReport(classified).section6Closed).toBe(false);
+    const digestDir = mkdtempSync(path.join(tmpdir(), "qsb-core-digest-"));
+    const bitcoindPath = path.join(digestDir, "bitcoind");
+    const bitcoinCliPath = path.join(digestDir, "bitcoin-cli");
+    writeFileSync(bitcoindPath, "bitcoind-bytes");
+    writeFileSync(bitcoinCliPath, "bitcoin-cli-bytes");
+    const recorded = JSON.parse(
+      execFileSync(
+        "python3",
+        [
+          "-c",
+          "import json,sys; from tests.core_regtest import core_binary_digests; print(json.dumps(core_binary_digests(sys.argv[1], sys.argv[2])))",
+          bitcoindPath,
+          bitcoinCliPath,
+        ],
+        { cwd: root, encoding: "utf8" },
+      ),
+    );
+    expect(recorded.bitcoindSha256).toBe(
+      createHash("sha256").update("bitcoind-bytes").digest("hex"),
+    );
+    expect(recorded.bitcoinCliSha256).toBe(
+      createHash("sha256").update("bitcoin-cli-bytes").digest("hex"),
+    );
+    const source = readFileSync(path.join(root, "tests/core_regtest.py"), "utf8");
+    expect(source).toContain("'coreBinaries': core_binary_digests");
     expect(requiredReleasePaths).not.toContain("scripts/test-core.sh");
     expect(requiredReleasePaths).not.toContain("tests/core_regtest.py");
     expect(

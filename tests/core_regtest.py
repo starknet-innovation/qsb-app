@@ -39,6 +39,16 @@ def annotate_section6(result):
     return result
 
 
+def core_binary_digests(bitcoind, bitcoin_cli):
+    """SHA-256 of the executables this harness actually runs."""
+    def digest(path):
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    return {
+        'bitcoindSha256': digest(bitcoind),
+        'bitcoinCliSha256': digest(bitcoin_cli),
+    }
+
+
 def main():
     if os.environ.get('QSB_CORE_CLASSIFY_ONLY') == '1':
         report = annotate_section6({
@@ -91,8 +101,13 @@ def run_regtest():
             address = rpc('getnewaddress', wallet=True)
             destination = bytes.fromhex(rpc('getaddressinfo', address, wallet=True)['scriptPubKey'])
             rpc('generatetoaddress', 101, address)
-            result = {'harnessRan': True, 'core': rpc('getnetworkinfo')['subversion'], 'network': 'regtest',
-                      'tests': []}
+            result = {
+                'harnessRan': True,
+                'core': rpc('getnetworkinfo')['subversion'],
+                'network': 'regtest',
+                'coreBinaries': core_binary_digests(BIN / 'bitcoind', BIN / 'bitcoin-cli'),
+                'tests': [],
+            }
 
             def mine(raw):
                 block = rpc('generateblock', address, [raw])['hash']
