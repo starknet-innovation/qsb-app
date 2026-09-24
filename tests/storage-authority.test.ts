@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { release } from "../src/lib/model";
 import contract from "../server/mainnet-capability.json";
-import { MemoryStore, type Row } from "../server/store";
+import { MemoryStore, type Row, type Store } from "../server/store";
 import { AUTHORITY_PK, AUTHORITY_SK } from "../server/runtime/reservation-guard";
 import { inventorySnapshot } from "../scripts/storage-inventory";
 import {
@@ -149,7 +149,11 @@ describe("durable storage authority rehearsal", () => {
       }),
     ).toThrow(/LiveIamNotReviewed/);
     expect(permissionModel.roles.operator.data).toContain("TransactWriteItems");
+    expect(permissionModel.roles.operator.data).toContain("Scan");
     expect(permissionModel.roles.operator.data).not.toContain("PutItem");
+    expect(permissionModel.roles.operator.data).not.toContain("DeleteItem");
+    expect(permissionModel.roles.api.data).not.toContain("Scan");
+    expect(permissionModel.roles.runtime.data).not.toContain("Scan");
     expect(() =>
       assertPermissionSeparation({
         ...permissionModel,
@@ -297,7 +301,48 @@ describe("durable storage authority rehearsal", () => {
       jobId: "job-1",
     });
     const mixed = txid("ab").toUpperCase();
-    const aliasStore = new MemoryStore();
+    const inner = new MemoryStore();
+    const events: string[] = [];
+    const aliasStore: Store = {
+      get: (pk, sk) => inner.get(pk, sk),
+      put: (row, expected) => inner.put(row, expected),
+      delete: async (pk, sk, expected) => {
+        events.push("delete-item");
+        await inner.delete(pk, sk, expected);
+      },
+      list: (pk, prefix) => inner.list(pk, prefix),
+      reservationRows: async () => {
+        const authority = await inner.get(AUTHORITY_PK, AUTHORITY_SK);
+        events.push(
+          authority?.legacyExcluded === true && authority.canonicalAccepting === false
+            ? "scan-under-fence"
+            : "scan-open",
+        );
+        return inner.reservationRows();
+      },
+      atomicPut: async (writes) => {
+        if (
+          writes.some(
+            (write) =>
+              write.row.pk === AUTHORITY_PK &&
+              write.row.canonicalAccepting === false &&
+              write.conditionOnly !== true,
+          )
+        )
+          events.push("fence");
+        if (writes.some((write) => write.remove === true)) events.push("transact-delete");
+        if (
+          writes.some(
+            (write) =>
+              write.row.pk === AUTHORITY_PK &&
+              write.row.canonicalAccepting === true &&
+              write.conditionOnly !== true,
+          )
+        )
+          events.push("accept");
+        await inner.atomicPut(writes);
+      },
+    };
     await aliasStore.put({
       pk: `OUTPOINT#${mixed}:0`,
       sk: "RESERVATION",
@@ -305,16 +350,21 @@ describe("durable storage authority rehearsal", () => {
       owner: "owner",
       jobId: "job-legacy",
     });
-    await expect(
-      canonicalReservationWrites(aliasStore, [
-        { owner: "other", jobId: "job-new", txid: mixed.toLowerCase(), vout: 0 },
-      ]),
-    ).rejects.toThrow(/ReservationAliasUnresolved/);
+    const pendingAdmission = await canonicalReservationWrites(aliasStore, [
+      { owner: "other", jobId: "job-new", txid: mixed.toLowerCase(), vout: 0 },
+    ]);
+    expect(events).toEqual([]);
+    expect(pendingAdmission.some((write) => write.row.pk === `OUTPOINT#${mixed.toLowerCase()}:0`)).toBe(
+      true,
+    );
     await enableInProcessWriterExclusion(aliasStore, "store-transaction-condition");
-    expect(await aliasStore.get(`OUTPOINT#${mixed}:0`, "RESERVATION")).toBeUndefined();
+    expect(events).toEqual(["fence", "scan-under-fence", "transact-delete", "accept"]);
+    expect(events).not.toContain("delete-item");
+    expect(await inner.get(`OUTPOINT#${mixed}:0`, "RESERVATION")).toBeUndefined();
     expect(
-      await aliasStore.get(`OUTPOINT#${mixed.toLowerCase()}:0`, "RESERVATION"),
+      await inner.get(`OUTPOINT#${mixed.toLowerCase()}:0`, "RESERVATION"),
     ).toMatchObject({ owner: "owner", jobId: "job-legacy" });
+    expect((await inner.get(AUTHORITY_PK, AUTHORITY_SK))?.canonicalAccepting).toBe(true);
     const conflictStore = new MemoryStore();
     await conflictStore.put({
       pk: `OUTPOINT#${mixed}:1`,
@@ -333,7 +383,23 @@ describe("durable storage authority rehearsal", () => {
     await expect(
       enableInProcessWriterExclusion(conflictStore, "store-transaction-condition"),
     ).rejects.toThrow(/ReservationAliasConflict/);
-    expect(await conflictStore.get(AUTHORITY_PK, AUTHORITY_SK)).toBeUndefined();
+    expect(await conflictStore.get(AUTHORITY_PK, AUTHORITY_SK)).toMatchObject({
+      legacyExcluded: true,
+      canonicalAccepting: false,
+    });
+    await expect(
+      legacyReservationWrite(conflictStore, {
+        owner: "owner",
+        jobId: "job-c",
+        txid: txid("77"),
+        vout: 0,
+      }),
+    ).rejects.toThrow(/ReservationAuthorityStopped/);
+    await expect(
+      canonicalReservationWrites(conflictStore, [
+        { owner: "owner", jobId: "job-c", txid: txid("77"), vout: 1 },
+      ]),
+    ).rejects.toThrow(/ReservationAuthorityStopped/);
     expect(inferDrainFromAggregate({ running: 0, queued: 0 })).toEqual({
       drainProven: false,
       completionProven: false,
@@ -648,6 +714,18 @@ describe("durable storage authority rehearsal", () => {
       },
     };
     expect(inventoryRows([nestedCleanup]).counts["cleanup-history"]).toBe(1);
+    const hiddenTopLevel: Row = {
+      pk: withCleanup.pk,
+      sk: withCleanup.sk,
+      version: withCleanup.version,
+      job: {
+        status: "queued",
+        validation: structuredClone(withCleanup.validation),
+      },
+    };
+    expect(preservationFailures([withCleanup], [hiddenTopLevel])).toContain(
+      "CleanupHistoryShrunk",
+    );
   });
 
   it("runs the inventory command on a snapshot file", () => {

@@ -42,6 +42,12 @@ export type DynamoTransactStep =
       expectedVersion?: number;
     }
   | {
+      kind: "delete";
+      pk: string;
+      sk: string;
+      expectedVersion: number;
+    }
+  | {
       kind: "authority-absent";
       pk: typeof AUTHORITY_PK;
       sk: typeof AUTHORITY_SK;
@@ -54,33 +60,71 @@ export type DynamoTransactStep =
       condition: "generation";
       expectedVersion: number;
       generation: number;
+    }
+  | {
+      kind: "authority-reconciling";
+      pk: typeof AUTHORITY_PK;
+      sk: typeof AUTHORITY_SK;
+      condition: "reconciling";
+      expectedVersion: number;
+      generation: number;
     };
+
+function acceptancePermanentlyStopped(existing: Row | undefined): boolean {
+  return (
+    existing?.acceptanceStopped === true || existing?.rollbackScope === "local-dry-run"
+  );
+}
 
 /** Reservation batches that do not write the authority row condition on its absence, so authority creation conflicts with them. */
 export function dynamoReservationTransaction(
-  writes: { row: Row; expected?: number; conditionOnly?: boolean }[],
+  writes: {
+    row: Row;
+    expected?: number;
+    conditionOnly?: boolean;
+    remove?: boolean;
+  }[],
 ): DynamoTransactStep[] {
-  const steps: DynamoTransactStep[] = writes.map(({ row, expected, conditionOnly }) =>
-    conditionOnly && isAuthorityRow(row)
-      ? {
-          kind: "authority-generation" as const,
+  const steps: DynamoTransactStep[] = writes.map(({ row, expected, conditionOnly, remove }) => {
+    if (remove)
+      return {
+        kind: "delete" as const,
+        pk: row.pk,
+        sk: row.sk,
+        expectedVersion: expected ?? row.version,
+      };
+    if (conditionOnly && isAuthorityRow(row)) {
+      const generation = typeof row.generation === "number" ? row.generation : -1;
+      const expectedVersion = expected ?? row.version;
+      if (row.canonicalAccepting === false)
+        return {
+          kind: "authority-reconciling" as const,
           pk: AUTHORITY_PK,
           sk: AUTHORITY_SK,
-          condition: "generation" as const,
-          expectedVersion: expected ?? row.version,
-          generation: typeof row.generation === "number" ? row.generation : -1,
-        }
-      : {
-          kind: "put" as const,
-          pk: row.pk,
-          sk: row.sk,
-          condition:
-            expected === undefined
-              ? ("attribute_not_exists(pk)" as const)
-              : ("version" as const),
-          ...(expected === undefined ? {} : { expectedVersion: expected }),
-        },
-  );
+          condition: "reconciling" as const,
+          expectedVersion,
+          generation,
+        };
+      return {
+        kind: "authority-generation" as const,
+        pk: AUTHORITY_PK,
+        sk: AUTHORITY_SK,
+        condition: "generation" as const,
+        expectedVersion,
+        generation,
+      };
+    }
+    return {
+      kind: "put" as const,
+      pk: row.pk,
+      sk: row.sk,
+      condition:
+        expected === undefined
+          ? ("attribute_not_exists(pk)" as const)
+          : ("version" as const),
+      ...(expected === undefined ? {} : { expectedVersion: expected }),
+    };
+  });
   if (
     writes.some((write) => isReservationRow(write.row)) &&
     !writes.some((write) => isAuthorityRow(write.row))
@@ -106,7 +150,13 @@ export function authorityMutationRejection(
     return "ProductionEnforcementRefused";
   if (existing?.legacyExcluded === true && row.legacyExcluded !== true)
     return "RollbackWouldReviveWriters";
-  if (existing?.canonicalAccepting === false && row.canonicalAccepting !== false)
+  if (
+    existing?.canonicalAccepting === false &&
+    acceptancePermanentlyStopped(existing) &&
+    row.canonicalAccepting !== false
+  )
+    return "RollbackWouldReviveWriters";
+  if (existing?.acceptanceStopped === true && row.acceptanceStopped !== true)
     return "RollbackWouldReviveWriters";
   if (
     existing?.legacyExcluded === true &&
@@ -128,7 +178,12 @@ export function authorityMutationRejection(
  */
 export function reservationBatchRejection(
   existingAuthority: Row | undefined,
-  writes: { row: Row; expected?: number; conditionOnly?: boolean }[],
+  writes: {
+    row: Row;
+    expected?: number;
+    conditionOnly?: boolean;
+    aliasMigration?: boolean;
+  }[],
 ): string | undefined {
   for (const { row } of writes) {
     const authorityRejection = authorityMutationRejection(existingAuthority, row);
@@ -143,8 +198,23 @@ export function reservationBatchRejection(
     if (enablesExclusion) return "LegacyWriterExcluded";
     return undefined;
   }
-  if (existingAuthority.canonicalAccepting !== true)
+  if (existingAuthority.canonicalAccepting !== true) {
+    if (acceptancePermanentlyStopped(existingAuthority))
+      return "ReservationAuthorityStopped";
+    const migrating =
+      reservations.length > 0 && reservations.every((write) => write.aliasMigration === true);
+    const holdsFence = writes.some(
+      (write) =>
+        isAuthorityRow(write.row) &&
+        write.conditionOnly === true &&
+        write.expected === existingAuthority.version &&
+        write.row.legacyExcluded === true &&
+        write.row.canonicalAccepting === false &&
+        write.row.generation === existingAuthority.generation,
+    );
+    if (migrating && holdsFence) return undefined;
     return "ReservationAuthorityStopped";
+  }
   const generation = existingAuthority.generation;
   if (typeof generation !== "number") return "LegacyWriterExcluded";
   const stamped = reservations.every(

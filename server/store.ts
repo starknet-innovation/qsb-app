@@ -17,6 +17,7 @@ import {
   isAuthorityRow,
   isReservationRow,
   reservationBatchRejection,
+  type DynamoTransactStep,
 } from "./runtime/reservation-guard";
 export type Row = {
   pk: string;
@@ -38,7 +39,102 @@ export type AtomicWrite = {
   expected?: number;
   /** Check the row without writing it. Used for the reservation authority fence. */
   conditionOnly?: boolean;
+  /** Remove the row in the same transaction. This is TransactWriteItems, not DeleteItem. */
+  remove?: boolean;
+  /** Rewrite an existing mixed-case reservation while canonical acceptance is still off. */
+  aliasMigration?: boolean;
 };
+
+function transactItem(table: string, step: DynamoTransactStep, writes: AtomicWrite[]) {
+  switch (step.kind) {
+    case "put":
+      return {
+        Put: {
+          TableName: table,
+          Item: writes.find(
+            (write) =>
+              write.row.pk === step.pk && write.row.sk === step.sk && write.remove !== true,
+          )!.row,
+          ConditionExpression:
+            step.condition === "attribute_not_exists(pk)"
+              ? "attribute_not_exists(pk)"
+              : "#v = :v",
+          ...(step.condition === "version"
+            ? {
+                ExpressionAttributeNames: { "#v": "version" },
+                ExpressionAttributeValues: { ":v": step.expectedVersion },
+              }
+            : {}),
+        },
+      };
+    case "delete":
+      return {
+        Delete: {
+          TableName: table,
+          Key: { pk: step.pk, sk: step.sk },
+          ConditionExpression: "#v = :v",
+          ExpressionAttributeNames: { "#v": "version" },
+          ExpressionAttributeValues: { ":v": step.expectedVersion },
+        },
+      };
+    case "authority-generation":
+      return {
+        ConditionCheck: {
+          TableName: table,
+          Key: { pk: step.pk, sk: step.sk },
+          ConditionExpression:
+            "#v = :v AND #excluded = :true AND #generation = :generation AND #accepting = :true AND #enforcement = :false",
+          ExpressionAttributeNames: {
+            "#v": "version",
+            "#excluded": "legacyExcluded",
+            "#generation": "generation",
+            "#accepting": "canonicalAccepting",
+            "#enforcement": "productionEnforcement",
+          },
+          ExpressionAttributeValues: {
+            ":v": step.expectedVersion,
+            ":true": true,
+            ":generation": step.generation,
+            ":false": false,
+          },
+        },
+      };
+    case "authority-reconciling":
+      return {
+        ConditionCheck: {
+          TableName: table,
+          Key: { pk: step.pk, sk: step.sk },
+          ConditionExpression:
+            "#v = :v AND #excluded = :true AND #generation = :generation AND #accepting = :false AND #enforcement = :false",
+          ExpressionAttributeNames: {
+            "#v": "version",
+            "#excluded": "legacyExcluded",
+            "#generation": "generation",
+            "#accepting": "canonicalAccepting",
+            "#enforcement": "productionEnforcement",
+          },
+          ExpressionAttributeValues: {
+            ":v": step.expectedVersion,
+            ":true": true,
+            ":generation": step.generation,
+            ":false": false,
+          },
+        },
+      };
+    case "authority-absent":
+      return {
+        ConditionCheck: {
+          TableName: table,
+          Key: { pk: step.pk, sk: step.sk },
+          ConditionExpression: "attribute_not_exists(pk)",
+        },
+      };
+    default: {
+      const neverStep: never = step;
+      throw new Error(`Unhandled transaction step: ${String(neverStep)}`);
+    }
+  }
+}
 export class Conflict extends Error {}
 
 function rejectGuarded(existing: Row | undefined, writes: AtomicWrite[]) {
@@ -56,9 +152,15 @@ export class MemoryStore implements Store {
   async atomicPut(writes: AtomicWrite[]) {
     rejectGuarded(this.authority(), writes);
     const seen = new Set<string>();
-    for (const { row, expected, conditionOnly } of writes) {
+    for (const { row, expected, conditionOnly, remove } of writes) {
       const key = `${row.pk}|${row.sk}`,
         old = this.rows.get(key);
+      if (remove) {
+        if (seen.has(key) || old?.version !== (expected ?? row.version))
+          throw new Conflict("Concurrent update");
+        seen.add(key);
+        continue;
+      }
       if (
         !conditionOnly &&
         (seen.has(key) ||
@@ -69,9 +171,10 @@ export class MemoryStore implements Store {
         throw new Conflict("ReservationAuthorityStopped");
       if (!conditionOnly) seen.add(key);
     }
-    for (const { row, conditionOnly } of writes) {
-      if (conditionOnly) continue;
-      this.rows.set(`${row.pk}|${row.sk}`, structuredClone(row));
+    for (const { row, conditionOnly, remove } of writes) {
+      const key = `${row.pk}|${row.sk}`;
+      if (remove) this.rows.delete(key);
+      else if (!conditionOnly) this.rows.set(key, structuredClone(row));
     }
   }
   async get(pk: string, sk: string) {
@@ -129,56 +232,7 @@ export class DynamoStore implements Store {
     try {
       await this.client.send(
         new TransactWriteCommand({
-          TransactItems: steps.map((step) => {
-            if (step.kind === "put")
-              return {
-                Put: {
-                  TableName: this.table,
-                  Item: writes.find(
-                    (write) => write.row.pk === step.pk && write.row.sk === step.sk,
-                  )!.row,
-                  ConditionExpression:
-                    step.condition === "attribute_not_exists(pk)"
-                      ? "attribute_not_exists(pk)"
-                      : "#v = :v",
-                  ...(step.condition === "version"
-                    ? {
-                        ExpressionAttributeNames: { "#v": "version" },
-                        ExpressionAttributeValues: { ":v": step.expectedVersion },
-                      }
-                    : {}),
-                },
-              };
-            if (step.kind === "authority-generation")
-              return {
-                ConditionCheck: {
-                  TableName: this.table,
-                  Key: { pk: step.pk, sk: step.sk },
-                  ConditionExpression:
-                    "#v = :v AND #excluded = :true AND #generation = :generation AND #accepting = :true AND #enforcement = :false",
-                  ExpressionAttributeNames: {
-                    "#v": "version",
-                    "#excluded": "legacyExcluded",
-                    "#generation": "generation",
-                    "#accepting": "canonicalAccepting",
-                    "#enforcement": "productionEnforcement",
-                  },
-                  ExpressionAttributeValues: {
-                    ":v": step.expectedVersion,
-                    ":true": true,
-                    ":generation": step.generation,
-                    ":false": false,
-                  },
-                },
-              };
-            return {
-              ConditionCheck: {
-                TableName: this.table,
-                Key: { pk: step.pk, sk: step.sk },
-                ConditionExpression: "attribute_not_exists(pk)",
-              },
-            };
-          }),
+          TransactItems: steps.map((step) => transactItem(this.table, step, writes)),
         }),
       );
     } catch (e) {
@@ -186,7 +240,10 @@ export class DynamoStore implements Store {
         e as { CancellationReasons?: { Code?: string }[] }
       ).CancellationReasons;
       const authorityIndex = steps.findIndex(
-        (step) => step.kind === "authority-absent" || step.kind === "authority-generation",
+        (step) =>
+          step.kind === "authority-absent" ||
+          step.kind === "authority-generation" ||
+          step.kind === "authority-reconciling",
       );
       const authorityKind = steps[authorityIndex]?.kind;
       if (
@@ -197,7 +254,8 @@ export class DynamoStore implements Store {
       )
         throw new Conflict("LegacyWriterExcluded");
       if (
-        authorityKind === "authority-generation" &&
+        (authorityKind === "authority-generation" ||
+          authorityKind === "authority-reconciling") &&
         (e as Error).name === "TransactionCanceledException" &&
         reasons?.[authorityIndex]?.Code === "ConditionalCheckFailed"
       )

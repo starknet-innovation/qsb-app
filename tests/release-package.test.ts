@@ -89,8 +89,12 @@ describe("source release package", () => {
     expect(packaged.scripts["test:e2e"]).toBeUndefined();
     expect(packaged.scripts.typecheck).toBeUndefined();
     expect(packaged.scripts.vendor).toBeUndefined();
-    expect(Object.keys(packaged.scripts)).toEqual(["package:release"]);
+    expect(Object.keys(packaged.scripts)).toEqual([
+      "package:release",
+      "inventory:storage",
+    ]);
     expect(packaged.scripts["package:release"]).toContain("package-release");
+    expect(packaged.scripts["inventory:storage"]).toContain("storage-inventory");
     const packagedReadme = readFileSync(
       path.join(directoryForScripts, "tree/README.md"),
       "utf8",

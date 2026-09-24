@@ -94,6 +94,15 @@ export function assertPermissionSeparation(
     throw new Error("OperatorAuthorityMutationRequiresTransaction");
   if (model.roles.operator.data.includes("PutItem"))
     throw new Error("OperatorPutItemIsNotAuthorityScoped");
+  if (model.roles.operator.data.includes("DeleteItem"))
+    throw new Error("OperatorDeleteItemIsNotAuthorityScoped");
+  if (
+    model.roles.api.data.includes("Scan") ||
+    model.roles.runtime.data.includes("Scan")
+  )
+    throw new Error("AdmissionMustNotScanReservations");
+  if (!model.roles.operator.data.includes("Scan"))
+    throw new Error("CutoverRequiresReservationScan");
 }
 
 export type MigrationBackend =
@@ -162,8 +171,8 @@ async function loadReservationRows(store: Store): Promise<Row[]> {
   return store.reservationRows();
 }
 
-/** Rewrite mixed-case outpoint keys before canonical acceptance can miss them. */
-async function canonicalizeReservationKeys(store: Store): Promise<void> {
+/** Rewrite mixed-case outpoint keys while the non-accepting fence is already held. */
+async function canonicalizeReservationKeys(store: Store, authority: Row): Promise<void> {
   const rows = (await loadReservationRows(store)).filter(isReservationRow);
   const groups = new Map<string, Row[]>();
   for (const row of rows) {
@@ -180,17 +189,32 @@ async function canonicalizeReservationKeys(store: Store): Promise<void> {
       throw new Error("ReservationAliasConflict");
     const aliases = group.filter((row) => row.pk !== canonical);
     if (!aliases.length) continue;
+    const writes: AtomicWrite[] = [];
     if (!group.some((row) => row.pk === canonical)) {
       const source = aliases[0];
       if (!source) continue;
-      await store.put({
-        ...source,
-        pk: canonical,
-        sk: "RESERVATION",
-        version: 0,
+      writes.push({
+        aliasMigration: true,
+        row: { ...source, pk: canonical, sk: "RESERVATION", version: 0 },
       });
     }
-    for (const alias of aliases) await store.delete(alias.pk, alias.sk, alias.version);
+    for (const alias of aliases)
+      writes.push({
+        aliasMigration: true,
+        remove: true,
+        row: alias,
+        expected: alias.version,
+      });
+    writes.push({
+      conditionOnly: true,
+      expected: authority.version,
+      row: {
+        ...authority,
+        legacyExcluded: true,
+        canonicalAccepting: false,
+      },
+    });
+    await store.atomicPut(writes);
   }
 }
 
@@ -200,17 +224,34 @@ export async function enableInProcessWriterExclusion(
 ): Promise<Row> {
   if (control !== "store-transaction-condition")
     throw new Error("InsufficientWriterExclusion");
-  await canonicalizeReservationKeys(store);
-  const existing = await store.get(AUTHORITY_PK, AUTHORITY_SK);
-  if (existing?.legacyExcluded === true && existing.canonicalAccepting === true)
-    return existing;
-  if (existing) throw new Error("AuthorityGenerationConflict");
-  const row: Row = {
-    pk: AUTHORITY_PK,
-    sk: AUTHORITY_SK,
-    version: 0,
-    format: "qsb-reservation-authority-v1",
-    generation: 1,
+  let authority = await store.get(AUTHORITY_PK, AUTHORITY_SK);
+  if (authority?.acceptanceStopped === true || authority?.rollbackScope === "local-dry-run")
+    throw new Error("RollbackWouldReviveWriters");
+  if (authority?.legacyExcluded === true && authority.canonicalAccepting === true)
+    return authority;
+  if (authority && !(authority.legacyExcluded === true && authority.canonicalAccepting === false))
+    throw new Error("AuthorityGenerationConflict");
+  if (!authority) {
+    authority = {
+      pk: AUTHORITY_PK,
+      sk: AUTHORITY_SK,
+      version: 0,
+      format: "qsb-reservation-authority-v1",
+      generation: 1,
+      legacyExcluded: true,
+      canonicalAccepting: false,
+      productionEnforcement: false,
+      control,
+      mainnetEnabled: false,
+      broadcastAuthorized: false,
+    };
+    await store.atomicPut([{ row: authority }]);
+  }
+  await canonicalizeReservationKeys(store, authority);
+  const current = (await store.get(AUTHORITY_PK, AUTHORITY_SK)) ?? authority;
+  const accepting: Row = {
+    ...current,
+    version: current.version + 1,
     legacyExcluded: true,
     canonicalAccepting: true,
     productionEnforcement: false,
@@ -218,8 +259,8 @@ export async function enableInProcessWriterExclusion(
     mainnetEnabled: false,
     broadcastAuthorized: false,
   };
-  await store.atomicPut([{ row }]);
-  return row;
+  await store.atomicPut([{ row: accepting, expected: current.version }]);
+  return accepting;
 }
 
 export async function rollbackCanonicalAcceptance(store: Store): Promise<Row> {
@@ -230,6 +271,7 @@ export async function rollbackCanonicalAcceptance(store: Store): Promise<Row> {
     ...existing,
     version: existing.version + 1,
     canonicalAccepting: false,
+    acceptanceStopped: true,
     legacyExcluded: true,
     productionEnforcement: false,
     awsLegacyWriterDenied: false,
@@ -262,17 +304,6 @@ export async function canonicalReservationWrites(
   const authority = await store.get(AUTHORITY_PK, AUTHORITY_SK);
   if (authority?.legacyExcluded === true && authority.canonicalAccepting !== true)
     throw new Conflict("ReservationAuthorityStopped");
-  const existing = await loadReservationRows(store);
-  for (const point of reservations) {
-    const canonical = `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`;
-    if (
-      existing.some((row) => {
-        const key = canonicalOutpointPk(row.pk);
-        return key === canonical && row.pk !== canonical;
-      })
-    )
-      throw new Conflict("ReservationAliasUnresolved");
-  }
   const stamped = authority?.legacyExcluded === true;
   const writes: AtomicWrite[] = reservations.map((point) => ({
     row: {
@@ -383,9 +414,19 @@ function pausedUnknownSubmission(job: Record<string, unknown> | undefined): bool
   );
 }
 
-/** Validation drain state is stored on the JOB row, not inside `job`. */
+/** Top-level `row.validation` is authoritative. Nested `job.validation` is only a fallback. */
+function validationPlacement(
+  row: Row,
+): { where: "top" | "nested"; value: Record<string, unknown> } | undefined {
+  const top = record(row.validation);
+  if (top) return { where: "top", value: top };
+  const nested = record(record(row.job)?.validation);
+  if (nested) return { where: "nested", value: nested };
+  return undefined;
+}
+
 function validationState(row: Row): Record<string, unknown> | undefined {
-  return record(row.validation) ?? record(record(row.job)?.validation);
+  return validationPlacement(row)?.value;
 }
 
 function completedValidationRanges(validation: Record<string, unknown> | undefined): boolean {
@@ -596,22 +637,23 @@ export function preservationFailures(before: Row[], after: Row[]): string[] {
       )
         failures.push("RollbackWouldDuplicatePaidWork");
     }
-    const beforeCleanup = validationState(row);
-    const nextCleanup = validationState(next);
+    const beforeCleanup = validationPlacement(row);
+    const nextCleanup = validationPlacement(next);
     if (beforeCleanup) {
-      if (!nextCleanup) failures.push("CleanupHistoryShrunk");
+      if (!nextCleanup || (beforeCleanup.where === "top" && nextCleanup.where !== "top"))
+        failures.push("CleanupHistoryShrunk");
       else {
         for (const field of ["active", "cancel", "interrupted"] as const) {
-          const previous = Array.isArray(beforeCleanup[field])
-            ? beforeCleanup[field]
+          const previous = Array.isArray(beforeCleanup.value[field])
+            ? beforeCleanup.value[field]
             : [];
-          const following = Array.isArray(nextCleanup[field])
-            ? nextCleanup[field]
+          const following = Array.isArray(nextCleanup.value[field])
+            ? nextCleanup.value[field]
             : [];
           if (!isPrefix(previous, following)) failures.push("CleanupHistoryShrunk");
         }
-        const beforeCompleted = beforeCleanup.completed;
-        const nextCompleted = nextCleanup.completed;
+        const beforeCompleted = beforeCleanup.value.completed;
+        const nextCompleted = nextCleanup.value.completed;
         if (
           typeof beforeCompleted === "number" &&
           beforeCompleted > 0 &&
