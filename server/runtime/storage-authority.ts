@@ -323,10 +323,20 @@ function pausedUnknownSubmission(job: Record<string, unknown> | undefined): bool
   );
 }
 
+/** Validation drain state is stored on the JOB row, not inside `job`. */
+function validationState(row: Row): Record<string, unknown> | undefined {
+  return record(row.validation) ?? record(record(row.job)?.validation);
+}
+
+function completedValidationRanges(validation: Record<string, unknown> | undefined): boolean {
+  return typeof validation?.completed === "number" && validation.completed > 0;
+}
+
 function providerNotes(row: Row): string[] {
   const notes: string[] = [];
   const launch = record(row.launch);
   const job = record(row.job);
+  const validation = validationState(row);
   if (typeof launch?.providerId === "string" || hasProviderId(job))
     notes.push("provider-identity");
   if (
@@ -336,11 +346,14 @@ function providerNotes(row: Row): string[] {
     searchingWithoutProvider(job)
   )
     notes.push("unknown-submission");
-  if (record(job?.validation)) notes.push("cleanup-history");
+  if (validation) notes.push("cleanup-history");
   if (releaseIdentities(row).length) notes.push("release");
   if (typeof job?.mainnetRequestHash === "string" || typeof job?.manifestHash === "string")
     notes.push("original-request");
-  if (job?.coverage === "verified-hit-not-whole-range")
+  if (
+    job?.coverage === "verified-hit-not-whole-range" ||
+    completedValidationRanges(validation)
+  )
     notes.push("completed-coverage");
   if (launch?.providerSubmissions !== undefined)
     notes.push(`providerSubmissions:${String(launch.providerSubmissions)}`);
@@ -522,21 +535,29 @@ export function preservationFailures(before: Row[], after: Row[]): string[] {
         !pausedUnknownSubmission(nextJob)
       )
         failures.push("RollbackWouldDuplicatePaidWork");
-      const beforeCleanup = record(job.validation);
-      const nextCleanup = record(nextJob.validation);
-      if (beforeCleanup) {
-        if (!nextCleanup) failures.push("CleanupHistoryShrunk");
-        else {
-          for (const field of ["active", "cancel", "interrupted"] as const) {
-            const previous = Array.isArray(beforeCleanup[field])
-              ? beforeCleanup[field]
-              : [];
-            const following = Array.isArray(nextCleanup[field])
-              ? nextCleanup[field]
-              : [];
-            if (!isPrefix(previous, following)) failures.push("CleanupHistoryShrunk");
-          }
+    }
+    const beforeCleanup = validationState(row);
+    const nextCleanup = validationState(next);
+    if (beforeCleanup) {
+      if (!nextCleanup) failures.push("CleanupHistoryShrunk");
+      else {
+        for (const field of ["active", "cancel", "interrupted"] as const) {
+          const previous = Array.isArray(beforeCleanup[field])
+            ? beforeCleanup[field]
+            : [];
+          const following = Array.isArray(nextCleanup[field])
+            ? nextCleanup[field]
+            : [];
+          if (!isPrefix(previous, following)) failures.push("CleanupHistoryShrunk");
         }
+        const beforeCompleted = beforeCleanup.completed;
+        const nextCompleted = nextCleanup.completed;
+        if (
+          typeof beforeCompleted === "number" &&
+          beforeCompleted > 0 &&
+          (typeof nextCompleted !== "number" || nextCompleted < beforeCompleted)
+        )
+          failures.push("CompletedCoverageDropped");
       }
     }
     const evidence = record(launch?.evidence);
@@ -606,6 +627,7 @@ export async function importSnapshot(
   reason: string;
 }> {
   const snapshot = snapshotSchema.parse(snapshotInput);
+  assertNoCredentialMaterial(snapshot.rows);
   const assessment = assessMigrationBackend(snapshot.backend);
   if (snapshot.backend !== "memory-store") throw new Error(assessment.reason);
   if (store.rows.size !== 0) throw new Error("MigrationTargetNotEmpty");

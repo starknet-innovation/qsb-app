@@ -333,6 +333,13 @@ describe("durable storage authority rehearsal", () => {
       await source.put(row);
     await enableInProcessWriterExclusion(source, "store-transaction-condition");
     const snapshot = exportSnapshot(memoryRows(source));
+    const poisoned = structuredClone(snapshot);
+    (poisoned.rows[0] as Row).apiKey = "synthetic";
+    const rejected = new MemoryStore();
+    await expect(importSnapshot(rejected, poisoned)).rejects.toThrow(
+      /CredentialMaterialRejected/,
+    );
+    expect(rejected.rows.size).toBe(0);
     expect(snapshot.globalFreshness).toBe(false);
     expect(snapshot.productionCutover).toBe(false);
     expect(snapshot.dynamodbLocalCertifiesIam).toBe(false);
@@ -555,6 +562,30 @@ describe("durable storage authority rehearsal", () => {
       pk: "OWNER#owner",
       sk: "JOB#embedded-cleanup",
       version: 1,
+      job: { status: "queued" },
+      validation: {
+        active: [{ attempt: 1, id: "provider-1" }],
+        cancel: ["provider-1"],
+        interrupted: [{ attempt: 0 }],
+        completed: 3,
+      },
+    };
+    expect(inventoryRows([withCleanup]).counts["cleanup-history"]).toBe(1);
+    expect(inventoryRows([withCleanup]).counts["completed-coverage"]).toBe(1);
+    const droppedCleanup = structuredClone(withCleanup);
+    droppedCleanup.validation.active = [];
+    expect(preservationFailures([withCleanup], [droppedCleanup])).toContain(
+      "CleanupHistoryShrunk",
+    );
+    const droppedCompleted = structuredClone(withCleanup);
+    droppedCompleted.validation.completed = 1;
+    expect(preservationFailures([withCleanup], [droppedCompleted])).toContain(
+      "CompletedCoverageDropped",
+    );
+    const nestedCleanup = {
+      pk: "OWNER#owner",
+      sk: "JOB#nested-cleanup",
+      version: 1,
       job: {
         validation: {
           active: [{ attempt: 1, id: "provider-1" }],
@@ -563,13 +594,7 @@ describe("durable storage authority rehearsal", () => {
         },
       },
     };
-    expect(inventoryRows([withCleanup]).counts["cleanup-history"]).toBe(1);
-    const droppedCleanup = structuredClone(withCleanup);
-    (droppedCleanup.job as { validation: { active: unknown[] } }).validation.active =
-      [];
-    expect(preservationFailures([withCleanup], [droppedCleanup])).toContain(
-      "CleanupHistoryShrunk",
-    );
+    expect(inventoryRows([nestedCleanup]).counts["cleanup-history"]).toBe(1);
   });
 
   it("runs the inventory command on a snapshot file", () => {
