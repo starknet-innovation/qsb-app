@@ -1,0 +1,128 @@
+{
+  "scope": "Actual loopback DynamoDB Local and real CPU process; saved remote response replay with mocked transport reads; not a process-restart test",
+  "passed": 28,
+  "failed": 0,
+  "cases": [
+    {
+      "name": "research pin publication through real Store and indexed submission publishes a candidate once and requests drain without range credit",
+      "status": "passed"
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission allows only one racing publication",
+      "status": "passed"
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission rejects pause or provider identity changes during CPU verification atomically",
+      "status": "passed"
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission rejects mismatched provider, range and CPU context without writes",
+      "status": "passed"
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission records empty drained results without granting coverage",
+      "status": "passed"
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission preserves attached work when verification fails or ownership is stale",
+      "status": "passed"
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission rejects a global provider claim changed during verification",
+      "status": "passed"
+    },
+    {
+      "name": "real CPU process composed with Store publication binds a real public export and records an empty result without credit",
+      "status": "passed"
+    },
+    {
+      "name": "real CPU process composed with Store publication rejects a false candidate from actual full-transaction CPU verification",
+      "status": "passed"
+    },
+    {
+      "name": "real CPU process composed with Store publication retains pause fencing around a successful real CPU process",
+      "status": "passed"
+    },
+    {
+      "name": "research pin drain and subset preparation prepares both round parameters only once and never authorizes dispatch",
+      "status": "passed"
+    },
+    {
+      "name": "research pin drain and subset preparation refuses reserved or uncertain sibling work",
+      "status": "passed"
+    },
+    {
+      "name": "research pin drain and subset preparation rejects busy, stale or wrong endpoint observations without advancing",
+      "status": "passed"
+    },
+    {
+      "name": "research pin drain and subset preparation rejects a pause during handoff and a corrupted parameter digest",
+      "status": "passed"
+    },
+    {
+      "name": "explicit release receive route with saved actual remote output and real CPU publishes once only under exact research enrollment, without selecting a default or granting credit",
+      "status": "passed"
+    },
+    {
+      "name": "explicit release receive route with saved actual remote output and real CPU rejects disabled, mismatched image, wrong endpoint or scope, and expired enrollment",
+      "status": "passed"
+    },
+    {
+      "name": "explicit release receive route with saved actual remote output and real CPU atomically rejects revocation after CPU verification, preserving the attached result",
+      "status": "passed"
+    },
+    {
+      "name": "explicit release receive route with saved actual remote output and real CPU atomically rejects scope routing replacement during verification",
+      "status": "passed"
+    },
+    {
+      "name": "release-fenced submission with real CPU preflight and mocked paid transport allows one racing submission and freezes the exact queue envelope",
+      "status": "passed"
+    },
+    {
+      "name": "release-fenced submission with real CPU preflight and mocked paid transport rejects release revocation in provider preflight before the paid call",
+      "status": "passed"
+    },
+    {
+      "name": "release-fenced submission with real CPU preflight and mocked paid transport retains uncertainty and never repeats a transport call after an unknown outcome",
+      "status": "passed"
+    },
+    {
+      "name": "release-fenced submission with real CPU preflight and mocked paid transport preserves a returned provider ID after release revocation during the paid call",
+      "status": "passed"
+    },
+    {
+      "name": "release-fenced submission with real CPU preflight and mocked paid transport rejects invalid public parameters before reservation or provider access",
+      "status": "passed"
+    },
+    {
+      "name": "release-fenced submission with real CPU preflight and mocked paid transport does not treat receive enrollment as execution or startup-capacity authorization",
+      "status": "passed"
+    },
+    {
+      "name": "known-ID reconciliation after uncertain research submission binds real saved queue evidence and CPU verification before attaching the ID without resubmission",
+      "status": "passed"
+    },
+    {
+      "name": "known-ID reconciliation after uncertain research submission preserves a late ID after pause and release revocation without resuming or publishing",
+      "status": "passed"
+    },
+    {
+      "name": "known-ID reconciliation after uncertain research submission retains uncertainty for missing, nonterminal or substituted provider evidence",
+      "status": "passed"
+    },
+    {
+      "name": "known-ID reconciliation after uncertain research submission rejects an endpoint change during the provider read before identity journaling",
+      "status": "passed"
+    }
+  ],
+  "sourceSha256": {
+    "scripts/yukon/pin_reconcile.ts": "a715c1bc496cacfe4c7508130a7f19bf2afa56a62c4f28810e1cb018afcfb468",
+    "tests/yukon-pin-store.test.ts": "e2c511c868157ff5d7f7ea76e8ab9f1fae79f8b44e3bba64c31e43920a46c262"
+  },
+  "tablesAfterTests": [],
+  "containerRemoved": true,
+  "liveProviderCalls": 0,
+  "freshWithdrawal": false,
+  "releaseStatus": "HOLD"
+}

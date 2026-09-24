@@ -1,3 +1,4 @@
+import { reconcileResearchPin } from "../scripts/yukon/pin_reconcile";
 import { submitResearchPin } from "../scripts/yukon/pin_submit";
 import { readFileSync } from "node:fs";
 import {
@@ -768,5 +769,94 @@ describe("release-fenced submission with real CPU preflight and mocked paid tran
       expect(calls).toBe(0);
       expect(await f.store.get(f.pk, "PIN#0")).toBeUndefined();
     }
+  });
+});
+
+async function uncertainResearchFixture() {
+  const f = await submissionFixture();
+  await expect(
+    submitResearchPin(f.store, f.submitBinding, f.request, {
+      preflight: async () => {},
+      send: async () => {
+        throw Error("lost acknowledgement");
+      },
+    }),
+  ).rejects.toThrow();
+  const raw = JSON.parse(
+    readFileSync(
+      "research/yukon-intake/20260924/runtime/remote-queue/result-0.json",
+      "utf8",
+    ),
+  );
+  return { ...f, raw };
+}
+describe("known-ID reconciliation after uncertain research submission", () => {
+  it("binds real saved queue evidence and CPU verification before attaching the ID without resubmission", async () => {
+    const f = await uncertainResearchFixture();
+    let reads = 0;
+    const receipt = await reconcileResearchPin(
+      f.store,
+      f.binding,
+      f.raw.id,
+      async (endpoint, id) => {
+        reads++;
+        expect(endpoint).toBe("synthetic-endpoint");
+        expect(id).toBe(f.raw.id);
+        return f.raw;
+      },
+    );
+    expect(reads).toBe(1);
+    expect(receipt.rangeCreditGranted).toBe(false);
+    const r = await f.store.get(f.pk, "PIN#0");
+    expect(r?.provider).toBe(f.raw.id);
+    expect(r?.researchReconciliation).toEqual(receipt);
+    expect((await f.store.get(f.pk, "SCOPE"))?.phase).toBe("pinning_searching");
+  });
+  it("preserves a late ID after pause and release revocation without resuming or publishing", async () => {
+    const f = await uncertainResearchFixture();
+    const s = (await f.store.get(f.pk, "SCOPE"))!;
+    await f.store.put(
+      { ...s, version: s.version + 1, revision: 2, phase: "paused" },
+      s.version,
+    );
+    await f.store.put({ ...f.enrollment, version: 1, enabled: false }, 0);
+    await reconcileResearchPin(f.store, f.binding, f.raw.id, async () => f.raw);
+    expect((await f.store.get(f.pk, "PIN#0"))?.state).toBe("attached");
+    expect((await f.store.get(f.pk, "SCOPE"))?.phase).toBe("paused");
+    await expect(
+      receiveResearchPin(f.store, f.binding, f.raw),
+    ).rejects.toThrow();
+  });
+  it("retains uncertainty for missing, nonterminal or substituted provider evidence", async () => {
+    for (const kind of ["missing", "pending", "foreign", "input"]) {
+      const f = await uncertainResearchFixture(),
+        before = await f.store.get(f.pk, "PIN#0");
+      await expect(
+        reconcileResearchPin(f.store, f.binding, f.raw.id, async () => {
+          if (kind === "missing") throw Error("404");
+          const raw = structuredClone(f.raw);
+          if (kind === "pending") raw.status = "IN_PROGRESS";
+          if (kind === "foreign") raw.id = "other";
+          if (kind === "input") raw.output.inputSha256 = "f".repeat(64);
+          return raw;
+        }),
+      ).rejects.toThrow();
+      expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
+    }
+  });
+  it("rejects an endpoint change during the provider read before identity journaling", async () => {
+    const f = await uncertainResearchFixture(),
+      before = await f.store.get(f.pk, "PIN#0");
+    await expect(
+      reconcileResearchPin(f.store, f.binding, f.raw.id, async () => {
+        const s = (await f.store.get(f.pk, "SCOPE"))!;
+        await f.store.put(
+          { ...s, version: s.version + 1, endpoint: "other" },
+          s.version,
+        );
+        return f.raw;
+      }),
+    ).rejects.toThrow("context changed");
+    expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
   });
 });

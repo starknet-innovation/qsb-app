@@ -881,3 +881,28 @@ All test tables and the container were removed; there were no live provider call
 This closes local submission/receive composition, not production launcher
 activation, live composed orchestration, strict provider startup concurrency,
 positive-hit publication or fresh end-to-end validation. The release stays HOLD.
+
+## Known-ID reconciliation without resubmission
+
+`reconcileResearchPin` recovers a known provider ID for a durably dispatch-fenced
+uncertain research intent. It reads the bound endpoint through a trusted adapter,
+requires a matching completed queue envelope, runs the exact-source CPU verifier,
+and attaches the ID through the existing indexed identity protocol. The durable
+intent retains hashes of the request/result and the CPU reconciliation receipt.
+Endpoint, public context, frozen request and release identity remain guarded
+through identity journaling. No paid submission or resume path exists here.
+
+Pause/release revocation does not discard returned IDs. Reconciliation can retain
+a late ID while leaving the scope paused and publication disabled. Missing,
+pending, failed or substituted evidence leaves uncertainty intact; it cannot
+prove non-execution or authorize a replacement job. This does not discover an
+unknown job ID, bypass ambiguous identity handling, or restore spent fixtures.
+
+Four new composed cases exercise saved actual remote output with real CPU
+verification: bound attachment, late ID after pause/revocation, missing/nonterminal/
+substituted evidence, and endpoint changes during read. All 31 focused TypeScript
+tests and typecheck pass. All 28 Store tests pass on actual loopback DynamoDB Local;
+tables and container were removed. Evidence is in `runtime/reconciliation/`.
+Transport reads are mocked; these are not new remote calls or a process-restart
+test. Live orchestration, positive GPU hit, independent review, capacity control
+and fresh final-build end-to-end proof remain open.
