@@ -417,7 +417,7 @@ describe("source-bound solver review", () => {
       "pinning",
       0,
       { kind: "range-complete", hitCount: 0 },
-      { ...holdSolver, enrolled: true } as typeof holdSolver,
+      { ...holdSolver, enrolled: true } as unknown as typeof holdSolver,
     );
     expect(unbound.credited).toBe(false);
     expect(unbound.reason).toBe("hold-solver-unbound");

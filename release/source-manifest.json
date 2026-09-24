@@ -81,15 +81,15 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "cbdc37b5993672801efa82519d88e3b36e806899d7051b90a99eee410d0e5782",
+      "api": "2dccfc8812cb9c7bce88a4d94d10c66dcf845b422b219f5ec33821ac20016ce4",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
-      "dispatcher": "c85928b9b0805133ce432feabfab28a2173dcf67402cd027feb418da4d7adbe6",
+      "dispatcher": "a166c35267dc7b1bda7d14ee024b6d467c63c5b653066eb4bb7fabaeb05e2cfd",
       "evidence-reader": "768e7c8098ff9d9b473f5c7a0a77ff272d679b1e9cab801dfd0145832ce88c58",
       "historical-pinning": "9e1aba0e8882ba85f46609774844a7a75283cf5358cccd9dcc49abedf80fad48",
       "historical-subset": "322de9dfdec86850b23fbc70e41c6eb29b6e2439235138d2fd61897e9438ed17",
       "optimized-subset": "db15b44ef5a8659e38c9592ba0b2a2f70d4ac0a8f301ea0f29e5823b445f4d14",
-      "runtime": "f70438409842bf57e82ef76ae5fb1150876dfbd7a1b0c80a6f79613278a6063f"
+      "runtime": "8e8774623a210c0eca59df6a7ac71d437dac865cd604444a1b89185dd18bc5ff"
     },
     "imageConfig": {
       "reason": "No OCI image config digest was produced from this checkout.",
@@ -127,6 +127,7 @@
     },
     "sourceFiles": {
       "README.md": "d476b0cfec3847dd8bcc165beeec2e45d2f3031084de6073d0426ea60c9abfb7",
+      "docs/source-build/20260924/solver-build-receipt.json": "1e243370561b16c7d2c1d9be68e756fe39fbea44167f0e70d8507d1a14dfc160",
       "package-lock.json": "633d302ec95b0e175ba1bf9d24ee827b93b27c33910b76ca434b99c783754e4b",
       "package.json": "002d368ac1d4b9baf091c7a7d88a5061858c0d1b3c52e0fca4e3204287ece577",
       "research/optimized-subset/LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
@@ -175,8 +176,8 @@
       "server/network.ts": "bf7163415b49087ba4341b59b6f9d1b736d6c37ebeb151883ab0146c61d0d66b",
       "server/providers.ts": "b891305e079ee8b48cf7f4b2fb209f9cd1d92f7fbebf7513bf929a7c4bbaab64",
       "server/runtime/capability.ts": "5695dc01ce72e1243022204014b7de5a8c662ac337aa73c52124628c8de2a797",
-      "server/runtime/closure.ts": "825667e28a7686fa66c1ad8794d02286e9d7b6f76ab59125960225c3907bd1e3",
-      "server/runtime/coverage-ledger.ts": "9516839c8fbd132b0a7fba97100e2d81aacf20a0921d018c31960b91682b2f83",
+      "server/runtime/closure.ts": "7dbe178e71c9155afa78854e94c4c2d388a32065b66b499aa3fc2645eccbfc8a",
+      "server/runtime/coverage-ledger.ts": "9f8e4cc94a79c638b7e402389980d6154107ed20172bb5261ba6a48499a7c8df",
       "server/runtime/cpu-verifier.ts": "a7c3e834696bc2ec2cab21c738ed740edd2dfe5c78666e044337b27fcd9405ee",
       "server/runtime/dispatcher.ts": "1c19d7a67e3e59073a7088c24909e882631f851ac83dbf07e2e0d69048d07a42",
       "server/runtime/evidence-reader.ts": "e4c56192be96d766d294d5077c0f2c82eee0823083247551725816506291d4e4",
@@ -186,14 +187,14 @@
       "server/runtime/identity.ts": "b42a637beb039e8d8e05b3d7ec45a339c7a9aaf6f4314af961984b09348bc4e8",
       "server/runtime/package-release.ts": "8ade44f4134a0d6f6df9f021b2c90ea092a43247545221b043bff211332c7291",
       "server/runtime/reservation-guard.ts": "dcb80cd1cdbbfdc5f8807c06eb1ac5216fee28313c5f480f83bf7a92b5bdbad3",
-      "server/runtime/solver-review.ts": "a329e49281a6fa93dabd572135538df5e23ea2b13462000fea821f9dc63147f2",
+      "server/runtime/solver-review.ts": "235c436f170633eb54d007b12265f6ee538b3dbeb324f5e91da6d3dee1ec8a45",
       "server/runtime/storage-authority.ts": "62cd4d200cd3dc2a8308e0834efb8166e123b89d127a95d0a73bb8c375a33b01",
       "server/runtime/supervised-routes.ts": "5918f7602158231a692ff7b6ee3d2815f0419be1c919b252eb8d7f19346c72e6",
       "server/runtime/types.ts": "347535de367f83f740cad527f939ab98d60922a68aaa54bd5d79ff8528f49121",
       "server/search-ranges.ts": "91ef5ec81fc82868cd9c695410bbc069732c4fc34109db5a9b44de36b59039d7",
       "server/store.ts": "94aa7d463c32e6ae3490cdb08f3fedddd5bc7769450acd2aef893b33320fc692",
       "server/transaction-checks.ts": "025902928390beb57f97c341c0473857844e60725931052897f009829b72bc30",
-      "server/validation-search.ts": "f2a3db1043cbe05ece1bb536179c0f1bf2097a86e258e4422722a2c77ea00b6e",
+      "server/validation-search.ts": "16f9fa6c4b4102ceb1c7b06fad94065455ff0ad5b89ab773f65102dfe9f3a2e6",
       "src/lib/api.ts": "b7d24b75c3305f5254ad7a9e9989bd390efd74a17b13862c39764d434854c22e",
       "src/lib/backup.ts": "329acf76fbeb806f8a07e4a5fbf4277beb1d5270d00dd37f67ca1ce3c5d03d1f",
       "src/lib/model.ts": "e4a05fc3dd1bd274fc643a5aa78805963afbe8bd1c1a6ad611b6405faa50bc4d",
@@ -264,6 +265,7 @@
       "worker/cpu/secp256k1.py": "d2cebd1410b75cad606806cf02d7bee3e24724d5fcb7a53a07f598fcbc8afece",
       "worker/cpu/verify_hit.py": "9f9e60952db15c054871403b60266d04c50d012e882bcd52a30f4bd3ba831fba",
       "worker/handler.py": "04746430c32a4970759c99a49e1ae499e1ba84b3ac9075ae1357c28714223850",
+      "worker/optimized/source-lock.json": "922e6a8574b9120660db5dafdb0dc97fa27106594605f9f1cf7a15173a0e1c93",
       "worker/prepare_kernels.py": "689c6cd2b0667ef396e5f42efb126405a529625920028125276dd99a1e870ad9",
       "worker/search_ranges.py": "07b0c2639e2a61b6a0306bed06a8f261f9f8c71ea1ee5d68806e3044a93c27df",
       "worker/validation/field_assumptions.py": "d9a749df8df374546124783b0679c04d78544d57cd980be411cbf9e0e92e307d"
