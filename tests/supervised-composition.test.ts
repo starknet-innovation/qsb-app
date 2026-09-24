@@ -10,7 +10,8 @@ import {
   CONTRACT,
 } from "../supervised/archive/entry";
 import { supervisedProfileId } from "../supervised/archive/work/yukon-app-routing-20260923/routing";
-import { AUTHORITY } from "../supervised/archive/work/yukon-canonical-reservations-20260923/reservations";
+import { enableInProcessWriterExclusion } from "../server/runtime/storage-authority";
+import { AUTHORITY_PK, AUTHORITY_SK } from "../server/runtime/reservation-guard";
 import { MANIFEST as PIN } from "../supervised/archive/work/yukon-pin-preflight-20260923/execution-gate";
 import { MANIFEST as SUBSET } from "../supervised/archive/work/yukon-indexed-controller-20260923/execution-gate";
 import {
@@ -91,18 +92,7 @@ async function setup() {
     wallet: { address, publicKey, type: "p2wpkh" },
     manifest,
   };
-  await store.put({
-    ...AUTHORITY,
-    version: 1,
-    format: "qsb-canonical-reservations-v1",
-    state: "active",
-    writerPolicy: "canonical-only",
-    legacyWritersStopped: true,
-    migrationComplete: true,
-    generation: 1,
-    legacyInventoryHash: "a".repeat(64),
-    canonicalInventoryHash: "b".repeat(64),
-  });
+  await enableInProcessWriterExclusion(store, "store-transaction-condition");
   await store.put({
     ...CAPABILITY,
     version: 1,
@@ -272,4 +262,45 @@ it("configuration mutation racing invocation transaction prevents launch", async
     }),
   ).rejects.toThrow();
   expect(calls).toBe(0);
+});
+it("enables writer exclusion, then creates, consumes, and claims under the generation authority", async () => {
+  const f = await setup();
+  const authority = await f.store.get(AUTHORITY_PK, AUTHORITY_SK);
+  expect(authority).toMatchObject({
+    legacyExcluded: true,
+    canonicalAccepting: true,
+  });
+  expect(await f.store.get("SYSTEM#QSB_RESERVATIONS", "SCHEMA")).toBeUndefined();
+  const stored = await f.store.get("OWNER#" + f.address, "JOB#" + f.jobId);
+  const job = stored?.job as {
+    reservationAuthorityGeneration: number;
+    manifest: {
+      funding: { txid: string; vout: number };
+      helper: { txid: string; vout: number };
+    };
+  };
+  expect(job.reservationAuthorityGeneration).toBe(authority?.generation);
+  for (const point of [job.manifest.funding, job.manifest.helper]) {
+    const reservation = await f.store.get(
+      `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`,
+      "RESERVATION",
+    );
+    expect(reservation?.authorityGeneration).toBe(authority?.generation);
+    expect(reservation?.pk).toBe(
+      `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`,
+    );
+  }
+  const consumed = await consumeTicket(f.store, f.ticket, async (request) => {
+    const claimed = await claimHost(f.store, request);
+    expect(claimed.requestHash).toBe(fingerprint(request));
+    return {
+      accepted: true as const,
+      invocationId: request.invocationId,
+      executionHash: request.executionHash,
+    };
+  });
+  expect(consumed.state).toBe("accepted");
+  expect(
+    await f.store.get("OWNER#" + f.address, "V5_HOST_LAUNCH#" + f.jobId),
+  ).toMatchObject({ status: "claimed" });
 });

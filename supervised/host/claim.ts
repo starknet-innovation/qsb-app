@@ -115,16 +115,20 @@ export async function claimHost(store: Store, input: LaunchRequest) {
     };
   await store.atomicPut([
     { row },
-    ...[
-      job,
-      inv,
-      admission,
-      vault,
-      registry,
-      enrolled.capability,
-      reserved.authority,
-      ...reserved.reservations,
-    ].map((row) => ({ row, expected: row.version })),
+    ...[job, inv, admission, vault, registry, enrolled.capability].map((row) => ({
+      row,
+      expected: row.version,
+    })),
+    {
+      row: reserved.authority,
+      expected: reserved.authority.version,
+      conditionOnly: true,
+    },
+    ...reserved.reservations.map((reservation) => ({
+      row: reservation,
+      expected: reservation.version,
+      conditionOnly: true,
+    })),
   ]);
   return structuredClone(row);
 }
