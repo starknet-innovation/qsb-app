@@ -1,0 +1,13 @@
+QSB Real Pinning Search (seq+lt) [GPU 0]
+  GPU: NVIDIA GeForce RTX 4090 (128 SMs)
+  Loaded: preimage=9976, suffix=56, seq@0, lt@48
+  GTable built on GPU in 0.22s (1048576 points, 64 MiB total, spot check passed)
+  Full suffix: 56 bytes, seq@0, lt@48
+  Mode: REAL
+  L2 persistence: 50 MiB pinned (max 50 MiB, window 128 MiB) ok
+  Pipeline checkpoints: 1024 MiB state + 0 MiB tree + 8 MiB roots + 4.02 MiB root tree
+  seq_start override: 0x80000000
+
+  === Search: lt=[500000000,1744600000] (134217728), seq=[0x80000000+], GPU 0 (global 0 of 1) ===
+
+  Done: 134M in 0s (690.4M/s), found=0

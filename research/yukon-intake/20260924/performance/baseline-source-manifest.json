@@ -1,0 +1,16 @@
+{
+  "label": "historical application DER pinning baseline; not a claim of current deployment",
+  "binarySha256": "186d68751649a81e41d16079c80bb3725b0470d7e4debe5dc88e66578d633f13",
+  "sourceFiles": {
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "GPUMath.h": "e35303a35f8a93ea93543396ebc9e571869494c41e3004eff0d1d0e0e2aebc13",
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "PackedRecovery.cuh": "dc884771614339f5c2ba9732824252a514344605bf099ce6f4c759dae7674240",
+    "RESEARCH.md": "e7a32a084d2f8eafb1cbe7774a9826b36506bf37059d5b2573a6fe38d61db2a8",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "SOURCE-MANIFEST.json": "9ad8ae159e6dd05c6c52c55bd1311f1346068176c41211f548e848afe8da6aac",
+    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "pinning.cu": "4b72618d7ec3692013aae1276e2069bc1a8216198f4197fe4c1a7c67b4d4692e"
+  }
+}

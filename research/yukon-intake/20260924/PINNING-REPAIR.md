@@ -438,3 +438,46 @@ full withdrawal or external-miner validation. Eligibility remains false/HOLD.
 The pod was deleted at 19:15:57 UTC, zero pods confirmed and its watchdog
 terminated. Approximate elapsed compute $0.0121 excludes disk/provider rounding.
 No funded fixture, signing material, proof endpoint or production release changed.
+
+## Matched pinning performance — measured 24 September
+
+One healthy secure RTX 4090 ran the frozen historical application DER baseline
+`186d6875…` and frozen repaired candidate `88cf46c4…`, with identical unfunded
+full-script parameters. Runner commits `f7b1653` and `8c48202` are pushed before
+execution. Baseline binary/source hashes, public requests, every stdout/stderr,
+raw timing and cleanup receipts are preserved in `performance/`. This identifies
+a historical reference build, not an assertion about the currently deployed image.
+
+The first 24 interleaved samples used 2^27 and 2^29 candidates with three paired
+slopes per solver/layout to separate startup from sustained work. Median slope
+estimates favored the candidate by 30.23% / 27.89%, but short timing differences
+were noisy and do not describe complete work-unit speedup.
+
+A second comparison used **complete production-sized pinning work units**:
+16 sequences × 1,244,600,000 locktimes = 19,913,600,000 candidates per run,
+three alternating baseline/candidate pairs per layout (12 runs). Process wall
+time includes initialization, sequence transitions, search, readback and exit.
+
+| Output layout | Baseline median | Candidate median | Wall time reduction | Throughput gain |
+| --- | ---: | ---: | ---: | ---: |
+| SegWit | 30.3250 s | 26.5813 s | 12.35% | 14.08% |
+| Taproot | 31.3468 s | 27.5561 s | 12.09% | 13.76% |
+
+The full-unit result is the practical measurement for these fixtures; do not
+substitute the larger short-range slope estimate. All runs exited successfully,
+with exact candidate drain markers and baseline reported counts matching the
+reviewed bounded-loop contract. No hit files were emitted. Timed execution is
+not exhaustive hash correctness, a positive-hit test or proof that baseline
+error handling meets candidate requirements. Both use actual DER predicates;
+no easy mode or lowered difficulty was enabled.
+
+This demonstrates a useful **pinning component** improvement on this GPU and
+these two parameter sets. It is not a total withdrawal cost reduction, provider
+bill, universal hardware gain or certified production price change. Broader
+arithmetic, positive-hit integration, durable release integration, independent
+review and fresh full withdrawal remain required; the candidate stays HOLD.
+
+The pod was deleted at 19:27:03 UTC before its 19:47:14 watchdog; zero pods were
+confirmed and the watchdog terminated. Approximate elapsed compute $0.1087
+excludes disk/provider rounding. No production deployment, spent-fixture search,
+private recovery material or broadcast was involved.

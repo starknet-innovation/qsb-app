@@ -1,0 +1,169 @@
+{
+  "binaryHashes": {
+    "baseline": "186d68751649a81e41d16079c80bb3725b0470d7e4debe5dc88e66578d633f13",
+    "candidate": "88cf46c45a63972e31af5f1c835a3b4088d6ea76af4b69e7bb0d7227d1562263"
+  },
+  "runs": [
+    {
+      "layout": 0,
+      "rep": 0,
+      "count": 1244600000,
+      "sequences": 16,
+      "solver": "baseline",
+      "wallSeconds": 30.064543150365353,
+      "parameterSha256": "41b8e6d2326a52cfdc7e67731695c36bfb5dc6592686a85bc6e05c04a3e5ace0",
+      "hitFiles": {}
+    },
+    {
+      "layout": 0,
+      "rep": 0,
+      "count": 1244600000,
+      "sequences": 16,
+      "solver": "candidate",
+      "wallSeconds": 26.45903372578323,
+      "parameterSha256": "41b8e6d2326a52cfdc7e67731695c36bfb5dc6592686a85bc6e05c04a3e5ace0",
+      "hitFiles": {}
+    },
+    {
+      "layout": 0,
+      "rep": 1,
+      "count": 1244600000,
+      "sequences": 16,
+      "solver": "candidate",
+      "wallSeconds": 26.702394304797053,
+      "parameterSha256": "41b8e6d2326a52cfdc7e67731695c36bfb5dc6592686a85bc6e05c04a3e5ace0",
+      "hitFiles": {}
+    },
+    {
+      "layout": 0,
+      "rep": 1,
+      "count": 1244600000,
+      "sequences": 16,
+      "solver": "baseline",
+      "wallSeconds": 30.325022330507636,
+      "parameterSha256": "41b8e6d2326a52cfdc7e67731695c36bfb5dc6592686a85bc6e05c04a3e5ace0",
+      "hitFiles": {}
+    },
+    {
+      "layout": 0,
+      "rep": 2,
+      "count": 1244600000,
+      "sequences": 16,
+      "solver": "baseline",
+      "wallSeconds": 30.37971068546176,
+      "parameterSha256": "41b8e6d2326a52cfdc7e67731695c36bfb5dc6592686a85bc6e05c04a3e5ace0",
+      "hitFiles": {}
+    },
+    {
+      "layout": 0,
+      "rep": 2,
+      "count": 1244600000,
+      "sequences": 16,
+      "solver": "candidate",
+      "wallSeconds": 26.581271136179566,
+      "parameterSha256": "41b8e6d2326a52cfdc7e67731695c36bfb5dc6592686a85bc6e05c04a3e5ace0",
+      "hitFiles": {}
+    },
+    {
+      "layout": 1,
+      "rep": 0,
+      "count": 1244600000,
+      "sequences": 16,
+      "solver": "baseline",
+      "wallSeconds": 31.419731315225363,
+      "parameterSha256": "5068afebfedca248e269207e8533c82802ad61a25f51073642d450d60af6f55f",
+      "hitFiles": {}
+    },
+    {
+      "layout": 1,
+      "rep": 0,
+      "count": 1244600000,
+      "sequences": 16,
+      "solver": "candidate",
+      "wallSeconds": 27.55606368370354,
+      "parameterSha256": "5068afebfedca248e269207e8533c82802ad61a25f51073642d450d60af6f55f",
+      "hitFiles": {}
+    },
+    {
+      "layout": 1,
+      "rep": 1,
+      "count": 1244600000,
+      "sequences": 16,
+      "solver": "candidate",
+      "wallSeconds": 27.59856953844428,
+      "parameterSha256": "5068afebfedca248e269207e8533c82802ad61a25f51073642d450d60af6f55f",
+      "hitFiles": {}
+    },
+    {
+      "layout": 1,
+      "rep": 1,
+      "count": 1244600000,
+      "sequences": 16,
+      "solver": "baseline",
+      "wallSeconds": 31.34683053009212,
+      "parameterSha256": "5068afebfedca248e269207e8533c82802ad61a25f51073642d450d60af6f55f",
+      "hitFiles": {}
+    },
+    {
+      "layout": 1,
+      "rep": 2,
+      "count": 1244600000,
+      "sequences": 16,
+      "solver": "baseline",
+      "wallSeconds": 31.28012092784047,
+      "parameterSha256": "5068afebfedca248e269207e8533c82802ad61a25f51073642d450d60af6f55f",
+      "hitFiles": {}
+    },
+    {
+      "layout": 1,
+      "rep": 2,
+      "count": 1244600000,
+      "sequences": 16,
+      "solver": "candidate",
+      "wallSeconds": 27.540544401854277,
+      "parameterSha256": "5068afebfedca248e269207e8533c82802ad61a25f51073642d450d60af6f55f",
+      "hitFiles": {}
+    }
+  ],
+  "summary": {
+    "0": {
+      "baseline": {
+        "wallSeconds": [
+          30.064543150365353,
+          30.325022330507636,
+          30.37971068546176
+        ],
+        "medianWallSeconds": 30.325022330507636
+      },
+      "candidate": {
+        "wallSeconds": [
+          26.45903372578323,
+          26.702394304797053,
+          26.581271136179566
+        ],
+        "medianWallSeconds": 26.581271136179566
+      }
+    },
+    "1": {
+      "baseline": {
+        "wallSeconds": [
+          31.419731315225363,
+          31.34683053009212,
+          31.28012092784047
+        ],
+        "medianWallSeconds": 31.34683053009212
+      },
+      "candidate": {
+        "wallSeconds": [
+          27.55606368370354,
+          27.59856953844428,
+          27.540544401854277
+        ],
+        "medianWallSeconds": 27.55606368370354
+      }
+    }
+  },
+  "productionUnits": true,
+  "freshWithdrawal": false,
+  "scope": "interleaved same-GPU unfunded public full-script contexts; process wall-time slopes"
+}
