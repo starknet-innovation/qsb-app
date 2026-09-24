@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1147,11 +1148,47 @@ export function coreBinaryEnrollmentPath(): string {
   return fileURLToPath(new URL("./core-binary.json", import.meta.url));
 }
 
-function assertCommittedCoreBinaryBytes(bytes: Buffer): void {
-  const manifest = readCommittedManifest(checkoutRoot());
+/**
+ * A checkout's expected enrollment digest is `HEAD:release/source-manifest.json`.
+ * The working-tree file can be edited with `core-binary.json` and is not the record.
+ * A packaged tree has no git commit; its record is `release-manifest.json` beside `tree/`.
+ */
+export function committedCoreBinarySha256(root: string): string {
+  const checkoutManifest = path.join(root, "release", "source-manifest.json");
+  const manifest = existsSync(checkoutManifest)
+    ? gitHeadSourceManifest(root)
+    : readCommittedManifest(root);
   const expected =
     manifest.identities.sourceFiles["server/runtime/core-binary.json"];
-  if (typeof expected !== "string" || sha256Hex(bytes) !== expected)
+  if (typeof expected !== "string")
+    throw new Error("CoreBinaryEnrollmentRejected");
+  return expected;
+}
+
+function gitHeadSourceManifest(root: string): ParsedReleaseManifest {
+  let text: string;
+  try {
+    text = execFileSync(
+      "git",
+      ["-C", root, "show", "HEAD:release/source-manifest.json"],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        maxBuffer: 8 * 1024 * 1024,
+      },
+    );
+  } catch {
+    throw new Error("CoreBinaryEnrollmentRejected");
+  }
+  try {
+    return sourceReleaseManifestSchema.parse(JSON.parse(text));
+  } catch {
+    throw new Error("CoreBinaryEnrollmentRejected");
+  }
+}
+
+function assertCommittedCoreBinaryBytes(bytes: Buffer): void {
+  if (sha256Hex(bytes) !== committedCoreBinarySha256(checkoutRoot()))
     throw new Error("CoreBinaryEnrollmentRejected");
 }
 

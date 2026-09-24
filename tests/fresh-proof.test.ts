@@ -22,6 +22,7 @@ import {
   assessBoundedCompute,
   assessProofFreshness,
   classifySearchEvidence,
+  committedCoreBinarySha256,
   committedManifestPath,
   enrolledReleaseIdentity,
   loadCoreBinaryEnrollment,
@@ -1075,7 +1076,8 @@ describe("core harness judgment", () => {
     expect(named.reason).toContain("not harness evidence");
     const script = readFileSync(path.join(root, "scripts/test-core.sh"), "utf8");
     expect(script).toContain('"${ROOT}/server/runtime/core-binary.json"');
-    expect(script).toContain('"${ROOT}/release/source-manifest.json"');
+    expect(script).toContain("HEAD:release/source-manifest.json");
+    expect(script).not.toContain('"${ROOT}/release/source-manifest.json"');
     expect(script).not.toContain("QSB_CORE_MANIFEST");
     expect(script).toContain('qsb-core-regtest.XXXXXX"');
     expect(script).not.toContain("qsb-core-regtest.XXXXXX.json");
@@ -1133,6 +1135,106 @@ describe("core harness judgment", () => {
     );
     expect(forged.harnessRan).toBe(false);
     expect(forged.reason).toContain("committed manifest");
+
+    const paired = mkdtempSync(path.join(tmpdir(), "qsb-core-head-"));
+    const gitEnv = {
+      ...process.env,
+      GIT_AUTHOR_NAME: "core",
+      GIT_AUTHOR_EMAIL: "core@example.com",
+      GIT_COMMITTER_NAME: "core",
+      GIT_COMMITTER_EMAIL: "core@example.com",
+    };
+    const git = (args: string[]) =>
+      execFileSync("git", ["-C", paired, ...args], {
+        env: gitEnv,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    git(["init"]);
+    mkdirSync(path.join(paired, "scripts"), { recursive: true });
+    mkdirSync(path.join(paired, "tests"), { recursive: true });
+    mkdirSync(path.join(paired, "server/runtime"), { recursive: true });
+    mkdirSync(path.join(paired, "release"), { recursive: true });
+    cpSync(
+      path.join(root, "scripts/test-core.sh"),
+      path.join(paired, "scripts/test-core.sh"),
+    );
+    cpSync(
+      path.join(root, "tests/core_regtest.py"),
+      path.join(paired, "tests/core_regtest.py"),
+    );
+    cpSync(
+      path.join(root, "server/runtime/core-binary.json"),
+      path.join(paired, "server/runtime/core-binary.json"),
+    );
+    cpSync(
+      path.join(root, "release/source-manifest.json"),
+      path.join(paired, "release/source-manifest.json"),
+    );
+    git(["add", "."]);
+    git(["commit", "-m", "enroll the committed core file"]);
+    const committedDigest = committedCoreBinarySha256(paired);
+    expect(committedDigest).toBe(
+      createHash("sha256")
+        .update(
+          readFileSync(path.join(paired, "server/runtime/core-binary.json")),
+        )
+        .digest("hex"),
+    );
+    const pairedBin = mkdtempSync(path.join(tmpdir(), "qsb-paired-core-"));
+    writeFileSync(path.join(pairedBin, "bitcoind"), "paired-bitcoind");
+    writeFileSync(path.join(pairedBin, "bitcoin-cli"), "paired-bitcoin-cli");
+    chmodSync(path.join(pairedBin, "bitcoind"), 0o755);
+    chmodSync(path.join(pairedBin, "bitcoin-cli"), 0o755);
+    const pairedEnrollment = {
+      format: "qsb-core-binary-enrollment-v1",
+      bitcoindSha256: createHash("sha256")
+        .update("paired-bitcoind")
+        .digest("hex"),
+      bitcoinCliSha256: createHash("sha256")
+        .update("paired-bitcoin-cli")
+        .digest("hex"),
+      enrolled: true,
+    };
+    const pairedEnrollmentPath = path.join(
+      paired,
+      "server/runtime/core-binary.json",
+    );
+    writeFileSync(pairedEnrollmentPath, `${JSON.stringify(pairedEnrollment)}\n`);
+    const pairedManifest = JSON.parse(
+      readFileSync(path.join(paired, "release/source-manifest.json"), "utf8"),
+    );
+    pairedManifest.identities.sourceFiles["server/runtime/core-binary.json"] =
+      createHash("sha256")
+        .update(readFileSync(pairedEnrollmentPath))
+        .digest("hex");
+    writeFileSync(
+      path.join(paired, "release/source-manifest.json"),
+      `${JSON.stringify(pairedManifest)}\n`,
+    );
+    expect(committedCoreBinarySha256(paired)).toBe(committedDigest);
+    const pairedReport = path.join(paired, "report.json");
+    let pairedStatus = 0;
+    try {
+      execFileSync("bash", ["scripts/test-core.sh"], {
+        cwd: paired,
+        env: {
+          ...process.env,
+          BITCOIN_BIN: pairedBin,
+          QSB_CORE_REPORT: pairedReport,
+        },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      pairedStatus = (error as { status?: number }).status ?? 1;
+    }
+    expect(pairedStatus).toBe(2);
+    const pairedJudgment = judgeCoreReport(
+      JSON.parse(readFileSync(pairedReport, "utf8")),
+    );
+    expect(pairedJudgment.harnessRan).toBe(false);
+    expect(pairedJudgment.reason).toContain("committed manifest");
+    expect(pairedJudgment.reason).toContain("working-tree");
 
     const stdout = execFileSync("python3", ["tests/core_regtest.py"], {
       cwd: root,
