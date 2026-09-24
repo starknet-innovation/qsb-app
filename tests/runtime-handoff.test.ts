@@ -1044,4 +1044,67 @@ describe("supervised runtime handoff", () => {
     expect(state).toBe("uncertain");
     await Promise.all(starter.exits);
   });
+
+  it("keeps a replacement when the superseded process writes more stdout", async () => {
+    const { store, admitted } = await claimedFixture();
+    const line = acknowledgementLine(admitted.job.mainnetRequestHash);
+    const starter = localAckStarter(
+      process.execPath,
+      [
+        "-e",
+        `process.stdout.write(${JSON.stringify(line)}, () => setTimeout(() => process.stdout.write("late\\n", () => process.exit(0)), 50))`,
+      ],
+      2000,
+      admitted.job.mainnetRequestHash,
+    );
+    const acknowledged = await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      starter.start,
+      new Date(),
+      2000,
+    );
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const replacing = replaceOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => {
+        await gate;
+        return { processId: "replacement-pid" };
+      },
+      new Date(),
+      2000,
+    );
+    const started = Date.now();
+    let state = "";
+    while (state !== "replacing" && Date.now() - started < 2000) {
+      state = (
+        (await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`))?.launch as {
+          state: string;
+        }
+      ).state;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(state).toBe("replacing");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const during = (await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`))
+      ?.launch as { state: string; processId?: string };
+    expect(during.state).toBe("replacing");
+    expect(during.processId).toBe(acknowledged.processId);
+    release();
+    const replaced = await replacing;
+    expect(replaced.processId).toBe("replacement-pid");
+    expect(replaced.state).toBe("acknowledged");
+    expect(replaced.previousProcessIds).toContain(acknowledged.processId);
+    await Promise.all(starter.exits);
+  });
 });

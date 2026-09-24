@@ -86,7 +86,9 @@ function watchExclusiveStdout(
       if (
         current.launch.processId !== started.processId ||
         current.launch.bindings.inputHash !== inputHash ||
-        current.launch.state === "terminal"
+        current.launch.state === "terminal" ||
+        current.launch.state === "replacing" ||
+        current.launch.replacement
       )
         return;
       await commit(store, current, { ...current.launch, state: "uncertain" });
