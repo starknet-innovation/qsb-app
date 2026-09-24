@@ -1,0 +1,18 @@
+QSB Real Pinning Search (seq+lt) [GPU 0]
+  GPU: NVIDIA GeForce RTX 4090 (128 SMs)
+  Isomorphic recovery coordinates: xR'=+1
+  GTable built on GPU in 0.74s (153175181 points, 9349 MiB total, spot check passed)
+  Full suffix: 12 bytes, seq@0, lt@4
+  Mode: REAL
+  X3 h*h correction cut: off
+  Host publication gate: on; C31 approx: off
+  L2 persistence: 50 MiB pinned (max 50 MiB, window 128 MiB) ok
+  Slot pipeline: 2 in-flight batches, own stream/state/hit buffers per slot
+  Pipeline checkpoints: 512 MiB state + 0 MiB tree + 4 MiB roots + 2.01 MiB root tree
+
+  === Search: lt=[500000512,500000513) (1), seq=[0x8000000C+], GPU 0 (global 0 of 1) ===
+QSB_TRACE seq=2147483660 lt=500000512 ri=0 hash=b0f36cad64e45e01ec64ae65f7b8f5909490fde7360f5c068c3628907cf4398d
+QSB_TRACE seq=2147483660 lt=500000512 ri=1 hash=infinity
+QSB_RANGE_DRAINED candidates=1
+
+  Done: 0M in 0s (0.0M/s), found=0

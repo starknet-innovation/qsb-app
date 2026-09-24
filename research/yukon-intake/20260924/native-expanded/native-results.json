@@ -1,0 +1,154 @@
+{
+  "scope": "synthetic-public-generic-specialized-exception-pinning",
+  "runs": [
+    {
+      "case": "sl12-seq2147483648",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1284190389851574
+    },
+    {
+      "case": "sl12-seq2147483648",
+      "binary": "pinning-trace",
+      "matchedHashes": 2,
+      "seconds": 1.146924301981926
+    },
+    {
+      "case": "sl12-seq2147483649",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1279739899910055
+    },
+    {
+      "case": "sl12-seq2147483649",
+      "binary": "pinning-trace",
+      "matchedHashes": 258,
+      "seconds": 1.1509532360068988
+    },
+    {
+      "case": "sl12-seq2147483650",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1472418720077258
+    },
+    {
+      "case": "sl12-seq2147483650",
+      "binary": "pinning-trace",
+      "matchedHashes": 1028,
+      "seconds": 1.1519042250001803
+    },
+    {
+      "case": "sl12-seq4294967295",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1358313179807737
+    },
+    {
+      "case": "sl12-seq4294967295",
+      "binary": "pinning-trace",
+      "matchedHashes": 512,
+      "seconds": 1.1528840530081652
+    },
+    {
+      "case": "sl75-seq2147483648",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1343173310160637
+    },
+    {
+      "case": "sl75-seq2147483648",
+      "binary": "pinning-trace",
+      "matchedHashes": 2,
+      "seconds": 1.1449480149894953
+    },
+    {
+      "case": "sl75-seq2147483649",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1320706940023229
+    },
+    {
+      "case": "sl75-seq2147483649",
+      "binary": "pinning-trace",
+      "matchedHashes": 258,
+      "seconds": 1.1484153890050948
+    },
+    {
+      "case": "sl75-seq2147483650",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1394256729981862
+    },
+    {
+      "case": "sl75-seq2147483650",
+      "binary": "pinning-trace",
+      "matchedHashes": 1028,
+      "seconds": 1.1586226339859422
+    },
+    {
+      "case": "sl75-seq4294967295",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1357917679997627
+    },
+    {
+      "case": "sl75-seq4294967295",
+      "binary": "pinning-trace",
+      "matchedHashes": 512,
+      "seconds": 1.1464931619993877
+    },
+    {
+      "case": "fast-tail-unit",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1378515549877193
+    },
+    {
+      "case": "fast-tail-unit",
+      "binary": "pinning-trace",
+      "matchedHashes": 516,
+      "seconds": 1.1597543329990003
+    },
+    {
+      "case": "fast-tail-order-edge",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1407762809831183
+    },
+    {
+      "case": "fast-tail-order-edge",
+      "binary": "pinning-trace",
+      "matchedHashes": 516,
+      "seconds": 1.151084324985277
+    },
+    {
+      "case": "exception-sign1",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1395404030045029
+    },
+    {
+      "case": "exception-sign1",
+      "binary": "pinning-trace",
+      "matchedHashes": 2,
+      "seconds": 1.1597923130029812
+    },
+    {
+      "case": "exception-sign-1",
+      "binary": "pinning",
+      "matchedHashes": null,
+      "seconds": 1.1500353169976734
+    },
+    {
+      "case": "exception-sign-1",
+      "binary": "pinning-trace",
+      "matchedHashes": 2,
+      "seconds": 1.1478927209973335
+    }
+  ],
+  "freshWithdrawal": false,
+  "binaries": {
+    "pinning": "88cf46c45a63972e31af5f1c835a3b4088d6ea76af4b69e7bb0d7227d1562263",
+    "pinning-trace": "35e5dddea0bd035c856dcaf285a0f012a9928bdb290d8f22341f9aa87578ae9d"
+  }
+}

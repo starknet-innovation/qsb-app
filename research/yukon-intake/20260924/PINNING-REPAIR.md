@@ -241,3 +241,31 @@ A checked host OpenSSL midstate exporter is independently checked by padding
 complete messages and comparing with hashlib; 26 host tests pass. The oracle
 hashes the entire prefix+suffix rather than trusting the exported midstate.
 These newly prepared specialized cases have not yet run on a GPU.
+
+## Expanded native gate — passed 24 September
+
+Commit `73f2493b5c145642d0b7b088ca46f1da00cffa5b` compiled and passed all twelve
+normal/trace cases on a secure RTX 4090, CUDA 12.8.93. This rechecks the prior
+generic cases on the changed binary and adds both exact FAST_TAIL layouts and
+both constructed exceptional denominator cases. **4,634 finite hashes and two
+infinity outcomes** match the independent CPU oracle, with exact trace records.
+The raw runner's `matchedHashes` field counts all outcomes, including infinity;
+the cleanup receipt separates them explicitly.
+
+The normal binary completed the 8,388,609-candidate two-batch smoke with the exact
+drain count. This checks scheduling/completion, not every hash in that large
+range. The normal exceptional case passed memcheck with zero errors.
+All 17 staged source/header hashes matched the source manifest after retrieval.
+Normal binary SHA256: `88cf46c45a63972e31af5f1c835a3b4088d6ea76af4b69e7bb0d7227d1562263`.
+Trace binary SHA256: `35e5dddea0bd035c856dcaf285a0f012a9928bdb290d8f22341f9aa87578ae9d`.
+Public receipts and transcripts are in `native-expanded/`; prior evidence remains
+unchanged. The test pod was deleted at 18:54:48 UTC, zero pods confirmed and the
+watchdog terminated before its deadline. Approximate compute $0.034 excluding
+disk/rounding. No fixture, wallet, broadcast or production deployment was used.
+
+These constructed public-point cases exercise the actual GPU denominator
+detector and CPU doubling/infinity handoff; they are not naturally discovered
+SHA-preimage solutions. Broader arithmetic, real hit/overflow and native fault
+injection, matched throughput, release integration and fresh withdrawal gates
+remain. The normal two-batch smoke is not exhaustive large-range differential
+coverage, and the trace binary is not the production binary.

@@ -1,0 +1,16 @@
+{
+  "sourceCommit": "73f2493b5c145642d0b7b088ca46f1da00cffa5b",
+  "podId": "7omusqh7c2mf5q",
+  "deletedAt": "2026-09-24T18:54:48Z",
+  "remainingPods": 0,
+  "watchdogCell": 156,
+  "watchdogTerminated": true,
+  "deadline": "2026-09-24T19:21:03Z",
+  "estimatedComputeUSD": 0.0337,
+  "estimateExcludes": "storage and provider rounding",
+  "finiteHashes": 4634,
+  "infinityOutcomes": 2,
+  "sourceSha256": "a9f4a8d9a76a23a92b4c1feaa788562ef5f9e098590ce4964a403fca51d8da87",
+  "traceSourceSha256": "29a1126ef0c11a9d9e723440b834f17ce372d6038f00c465448e84f856717275",
+  "evidenceArchiveSha256": "5b728f411619e81ce92297316cef1721dee156fd449d362c68b483abffcd9575"
+}
