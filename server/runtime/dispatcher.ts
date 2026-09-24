@@ -266,7 +266,8 @@ export async function admitSupervisedJob(
     if (error instanceof Conflict) {
       if (
         error.message === "LegacyWriterExcluded" ||
-        error.message === "ReservationAuthorityStopped"
+        error.message === "ReservationAuthorityStopped" ||
+        error.message === "ReservationAliasUnresolved"
       )
         throw new GateError(409, error.message);
       const raced = await store.get(pk, `JOB#${id}`);
@@ -360,6 +361,7 @@ export async function claimAdmittedLaunch(
     const guarded: Store = {
       get: (rowPk, sk) => store.get(rowPk, sk),
       list: (rowPk, prefix) => store.list(rowPk, prefix),
+      reservationRows: () => store.reservationRows(),
       put: (row, expected) => store.put(row, expected),
       delete: (rowPk, sk, expected) => store.delete(rowPk, sk, expected),
       atomicPut: (writes) =>

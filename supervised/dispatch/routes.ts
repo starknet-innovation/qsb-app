@@ -29,6 +29,7 @@ export function installSupervisedCreation(
       const guarded: Store = {
         get: store.get.bind(store),
         list: store.list.bind(store),
+        reservationRows: store.reservationRows.bind(store),
         put: async () => {
           throw Error("Unexpected single write");
         },

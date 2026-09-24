@@ -296,6 +296,44 @@ describe("durable storage authority rehearsal", () => {
       owner: "owner",
       jobId: "job-1",
     });
+    const mixed = txid("ab").toUpperCase();
+    const aliasStore = new MemoryStore();
+    await aliasStore.put({
+      pk: `OUTPOINT#${mixed}:0`,
+      sk: "RESERVATION",
+      version: 0,
+      owner: "owner",
+      jobId: "job-legacy",
+    });
+    await expect(
+      canonicalReservationWrites(aliasStore, [
+        { owner: "other", jobId: "job-new", txid: mixed.toLowerCase(), vout: 0 },
+      ]),
+    ).rejects.toThrow(/ReservationAliasUnresolved/);
+    await enableInProcessWriterExclusion(aliasStore, "store-transaction-condition");
+    expect(await aliasStore.get(`OUTPOINT#${mixed}:0`, "RESERVATION")).toBeUndefined();
+    expect(
+      await aliasStore.get(`OUTPOINT#${mixed.toLowerCase()}:0`, "RESERVATION"),
+    ).toMatchObject({ owner: "owner", jobId: "job-legacy" });
+    const conflictStore = new MemoryStore();
+    await conflictStore.put({
+      pk: `OUTPOINT#${mixed}:1`,
+      sk: "RESERVATION",
+      version: 0,
+      owner: "owner",
+      jobId: "job-a",
+    });
+    await conflictStore.put({
+      pk: `OUTPOINT#${mixed.toLowerCase()}:1`,
+      sk: "RESERVATION",
+      version: 0,
+      owner: "owner",
+      jobId: "job-b",
+    });
+    await expect(
+      enableInProcessWriterExclusion(conflictStore, "store-transaction-condition"),
+    ).rejects.toThrow(/ReservationAliasConflict/);
+    expect(await conflictStore.get(AUTHORITY_PK, AUTHORITY_SK)).toBeUndefined();
     expect(inferDrainFromAggregate({ running: 0, queued: 0 })).toEqual({
       drainProven: false,
       completionProven: false,

@@ -146,12 +146,61 @@ const exclusionControlSchema = z.enum([
 ]);
 export type ExclusionControl = z.infer<typeof exclusionControlSchema>;
 
+const outpointKey = /^OUTPOINT#([0-9a-fA-F]{64}):(\d+)$/;
+
+function canonicalOutpointPk(pk: string): string | undefined {
+  const match = outpointKey.exec(pk);
+  if (!match?.[1] || match[2] === undefined) return undefined;
+  return `OUTPOINT#${match[1].toLowerCase()}:${match[2]}`;
+}
+
+function sameCommitment(left: Row, right: Row): boolean {
+  return left.owner === right.owner && left.jobId === right.jobId;
+}
+
+async function loadReservationRows(store: Store): Promise<Row[]> {
+  return store.reservationRows();
+}
+
+/** Rewrite mixed-case outpoint keys before canonical acceptance can miss them. */
+async function canonicalizeReservationKeys(store: Store): Promise<void> {
+  const rows = (await loadReservationRows(store)).filter(isReservationRow);
+  const groups = new Map<string, Row[]>();
+  for (const row of rows) {
+    const canonical = canonicalOutpointPk(row.pk);
+    if (!canonical) throw new Error("ReservationAliasConflict");
+    const group = groups.get(canonical) ?? [];
+    group.push(row);
+    groups.set(canonical, group);
+  }
+  for (const [canonical, group] of groups) {
+    const [first, ...rest] = group;
+    if (!first) continue;
+    if (rest.some((row) => !sameCommitment(first, row)))
+      throw new Error("ReservationAliasConflict");
+    const aliases = group.filter((row) => row.pk !== canonical);
+    if (!aliases.length) continue;
+    if (!group.some((row) => row.pk === canonical)) {
+      const source = aliases[0];
+      if (!source) continue;
+      await store.put({
+        ...source,
+        pk: canonical,
+        sk: "RESERVATION",
+        version: 0,
+      });
+    }
+    for (const alias of aliases) await store.delete(alias.pk, alias.sk, alias.version);
+  }
+}
+
 export async function enableInProcessWriterExclusion(
   store: Store,
   control: ExclusionControl,
 ): Promise<Row> {
   if (control !== "store-transaction-condition")
     throw new Error("InsufficientWriterExclusion");
+  await canonicalizeReservationKeys(store);
   const existing = await store.get(AUTHORITY_PK, AUTHORITY_SK);
   if (existing?.legacyExcluded === true && existing.canonicalAccepting === true)
     return existing;
@@ -213,6 +262,17 @@ export async function canonicalReservationWrites(
   const authority = await store.get(AUTHORITY_PK, AUTHORITY_SK);
   if (authority?.legacyExcluded === true && authority.canonicalAccepting !== true)
     throw new Conflict("ReservationAuthorityStopped");
+  const existing = await loadReservationRows(store);
+  for (const point of reservations) {
+    const canonical = `OUTPOINT#${point.txid.toLowerCase()}:${point.vout}`;
+    if (
+      existing.some((row) => {
+        const key = canonicalOutpointPk(row.pk);
+        return key === canonical && row.pk !== canonical;
+      })
+    )
+      throw new Conflict("ReservationAliasUnresolved");
+  }
   const stamped = authority?.legacyExcluded === true;
   const writes: AtomicWrite[] = reservations.map((point) => ({
     row: {

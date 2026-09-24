@@ -5,6 +5,7 @@ import {
   PutCommand,
   DeleteCommand,
   QueryCommand,
+  ScanCommand,
   TransactWriteCommand,
 } from "@aws-sdk/lib-dynamodb";
 import {
@@ -29,6 +30,7 @@ export interface Store {
   put(row: Row, expected?: number): Promise<void>;
   delete(pk: string, sk: string, expected: number): Promise<void>;
   list(pk: string, prefix: string): Promise<Row[]>;
+  reservationRows(): Promise<Row[]>;
   atomicPut(writes: AtomicWrite[]): Promise<void>;
 }
 export type AtomicWrite = {
@@ -104,6 +106,11 @@ export class MemoryStore implements Store {
     return [...this.rows.values()]
       .filter((r) => r.pk === pk && r.sk.startsWith(prefix))
       .map((r) => structuredClone(r));
+  }
+  async reservationRows(): Promise<Row[]> {
+    return [...this.rows.values()]
+      .filter(isReservationRow)
+      .map((row) => structuredClone(row));
   }
 }
 export class DynamoStore implements Store {
@@ -291,6 +298,24 @@ export class DynamoStore implements Store {
       start = r.LastEvaluatedKey;
     } while (start);
     return rows;
+  }
+  async reservationRows(): Promise<Row[]> {
+    const rows: Row[] = [];
+    let start: Record<string, unknown> | undefined;
+    do {
+      const page = await this.client.send(
+        new ScanCommand({
+          TableName: this.table,
+          FilterExpression: "sk = :sk AND begins_with(pk, :prefix)",
+          ExpressionAttributeValues: { ":sk": "RESERVATION", ":prefix": "OUTPOINT#" },
+          ExclusiveStartKey: start,
+          ConsistentRead: true,
+        }),
+      );
+      rows.push(...((page.Items ?? []) as Row[]));
+      start = page.LastEvaluatedKey;
+    } while (start);
+    return rows.filter(isReservationRow);
   }
 }
 export const store: Store = process.env.TABLE_NAME

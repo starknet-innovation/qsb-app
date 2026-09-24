@@ -246,6 +246,7 @@ describe("supervised runtime handoff", () => {
     const racing = {
       get: store.get.bind(store),
       list: store.list.bind(store),
+      reservationRows: store.reservationRows.bind(store),
       put: store.put.bind(store),
       delete: store.delete.bind(store),
       atomicPut: async (writes: Parameters<Store["atomicPut"]>[0]) => {
@@ -286,6 +287,7 @@ describe("supervised runtime handoff", () => {
       put: (row, expected) => inner.put(row, expected),
       delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
       list: (pk, prefix) => inner.list(pk, prefix),
+      reservationRows: () => inner.reservationRows(),
       atomicPut: async (writes) => {
         const creating = writes.some((write) =>
           String(write.row.sk).startsWith("JOB#"),
@@ -2077,6 +2079,7 @@ describe("supervised runtime handoff", () => {
       put: (row, expected) => inner.put(row, expected),
       delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
       list: (pk, prefix) => inner.list(pk, prefix),
+      reservationRows: () => inner.reservationRows(),
       atomicPut: async (writes) => {
         const markingUncertain = writes.some((write) => {
           const launch = write.row.launch as { state?: string } | undefined;
@@ -2529,6 +2532,7 @@ describe("supervised runtime handoff", () => {
       put: (row, expected) => inner.put(row, expected),
       delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
       list: (pk, prefix) => inner.list(pk, prefix),
+      reservationRows: () => inner.reservationRows(),
       atomicPut: async (writes) => {
         const claiming = writes.some((write) =>
           String(write.row.sk).startsWith("LAUNCH#"),
@@ -2779,6 +2783,7 @@ describe("supervised runtime handoff", () => {
       put: (row, expected) => inner.put(row, expected),
       delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
       list: (pk, prefix) => inner.list(pk, prefix),
+      reservationRows: () => inner.reservationRows(),
       atomicPut: async (writes) => {
         const claiming = writes.some((write) =>
           String(write.row.sk).startsWith("LAUNCH#"),
