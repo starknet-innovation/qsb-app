@@ -19,11 +19,9 @@ import {
 } from "./host-bridge";
 import { coreSourceDigest } from "./package-release";
 import { canonicalReservationWrites } from "./storage-authority";
+import { AUTHORITY_PK, AUTHORITY_SK } from "./reservation-guard";
 import { RELEASE_MANIFEST_FORMAT, type LaunchBindings } from "./types";
-import {
-  canonicalOutpointKey,
-  reservationAuthority,
-} from "../../supervised/archive/work/yukon-canonical-reservations-20260923/reservations";
+import { canonicalOutpointKey } from "../../supervised/archive/work/yukon-canonical-reservations-20260923/reservations";
 
 export type FundingLedger = {
   assertNetwork: () => Promise<void>;
@@ -50,17 +48,38 @@ function reservations(job: SupervisedJob): LaunchBindings["reservations"] {
   }));
 }
 
-async function enrolledReservationAuthority(store: Store): Promise<Row> {
-  try {
-    return await reservationAuthority(store);
-  } catch (error) {
+const reservationGuardRejections = new Set([
+  "LegacyWriterExcluded",
+  "ReservationAuthorityStopped",
+  "ReservationAliasUnresolved",
+  "RollbackWouldReviveWriters",
+  "AuthorityGenerationImmutable",
+  "InsufficientWriterExclusion",
+  "ProductionEnforcementRefused",
+  "AuthorityMustNotExpire",
+]);
+
+function guardRejection(error: unknown): string | undefined {
+  if (error instanceof Conflict && reservationGuardRejections.has(error.message))
+    return error.message;
+  return undefined;
+}
+
+/** Legacy writers stopped and the migration finished map to exclusion plus acceptance. */
+async function enrolledGenerationAuthority(store: Store): Promise<Row> {
+  const row = await store.get(AUTHORITY_PK, AUTHORITY_SK);
+  if (
+    !row ||
+    row.legacyExcluded !== true ||
+    row.canonicalAccepting !== true ||
+    !Number.isSafeInteger(row.generation) ||
+    Number(row.generation) < 1
+  )
     throw new GateError(
       503,
-      error instanceof Error
-        ? error.message
-        : "Canonical reservation authority not enrolled; legacy migration/writer exclusion required",
+      "Canonical reservation authority not enrolled; legacy migration/writer exclusion required",
     );
-  }
+  return row;
 }
 
 async function assertCanonicalFree(
@@ -167,8 +186,8 @@ export async function admitSupervisedJob(
 ): Promise<{ job: SupervisedJob; created: boolean }> {
   assertServiceChain(serviceNetwork);
   const capability = await assertSearchCapability(store);
-  const authority = await enrolledReservationAuthority(store);
-  const authorityHash = fingerprint(authority);
+  const authority = await enrolledGenerationAuthority(store);
+  const authorityGeneration = Number(authority.generation);
   const parsed = bodySchema.parse(body);
   let request: ReturnType<typeof validateRequest>;
   try {
@@ -199,7 +218,7 @@ export async function admitSupervisedJob(
   const existing = await store.get(pk, `JOB#${id}`);
   if (existing) {
     const job = existing.job as SupervisedJob;
-    if (job.reservationAuthorityHash !== authorityHash)
+    if (job.reservationAuthorityGeneration !== authorityGeneration)
       throw new GateError(409, "Job belongs to a different reservation authority.");
     if (job.mainnetRequestHash !== requestHash)
       throw new GateError(
@@ -227,7 +246,7 @@ export async function admitSupervisedJob(
     manifest: request.manifest,
     manifestHash: fingerprint(request.manifest),
     mainnetRequestHash: requestHash,
-    reservationAuthorityHash: authorityHash,
+    reservationAuthorityGeneration: authorityGeneration,
     solver: pinSolver(vault),
     execution: {
       kind: "qsb-supervised-service-v1",
@@ -260,30 +279,25 @@ export async function admitSupervisedJob(
         })),
       )),
       { row: capability, expected: capability.version },
-      { row: authority, expected: authority.version },
     ]);
   } catch (error) {
+    const rejected = guardRejection(error);
+    if (rejected) throw new GateError(409, rejected);
     if (error instanceof Conflict) {
-      if (
-        error.message === "LegacyWriterExcluded" ||
-        error.message === "ReservationAuthorityStopped" ||
-        error.message === "ReservationAliasUnresolved"
-      )
-        throw new GateError(409, error.message);
       const raced = await store.get(pk, `JOB#${id}`);
       if (raced) {
         const racedJob = raced.job as SupervisedJob;
         if (
-          racedJob.reservationAuthorityHash === authorityHash &&
+          racedJob.reservationAuthorityGeneration === authorityGeneration &&
           racedJob.mainnetRequestHash === requestHash
         )
           return { job: racedJob, created: false };
       }
-      const currentAuthority = await store.get(authority.pk, authority.sk);
+      const currentAuthority = await store.get(AUTHORITY_PK, AUTHORITY_SK);
       if (
         !currentAuthority ||
         currentAuthority.version !== authority.version ||
-        fingerprint(currentAuthority) !== authorityHash
+        currentAuthority.generation !== authorityGeneration
       )
         throw new GateError(409, "Reservation authority changed.");
       const current = await store.get(capability.pk, capability.sk);
@@ -310,8 +324,8 @@ export async function claimAdmittedLaunch(
   if (release.mainnetEnabled || contract.broadcastAuthorized)
     throw new GateError(503, "Supervised search capability is not active.");
   const capability = await assertSearchCapability(store);
-  const authority = await enrolledReservationAuthority(store);
-  const authorityHash = fingerprint(authority);
+  const authority = await enrolledGenerationAuthority(store);
+  const authorityGeneration = Number(authority.generation);
   const coreDigest = authorizedCoreDigest();
   const pk = `OWNER#${owner}`;
   const jobRow = await store.get(pk, `JOB#${jobId}`);
@@ -319,7 +333,7 @@ export async function claimAdmittedLaunch(
   const job = jobRow.job as SupervisedJob;
   if (job.execution.coreSourceManifest !== coreDigest)
     throw new GateError(503, "Supervised search capability is not active.");
-  if (job.reservationAuthorityHash !== authorityHash)
+  if (job.reservationAuthorityGeneration !== authorityGeneration)
     throw new GateError(409, "Reservation authority changed.");
   for (;;) {
     const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
@@ -368,15 +382,25 @@ export async function claimAdmittedLaunch(
         store.atomicPut([
           ...writes,
           { row: capability, expected: capability.version },
-          { row: authority, expected: authority.version },
+          { row: authority, expected: authority.version, conditionOnly: true },
           { row: vaultRow, expected: vaultRow.version },
-          { row: fundingReservation, expected: fundingReservation.version },
-          { row: helperReservation, expected: helperReservation.version },
+          {
+            row: fundingReservation,
+            expected: fundingReservation.version,
+            conditionOnly: true,
+          },
+          {
+            row: helperReservation,
+            expected: helperReservation.version,
+            conditionOnly: true,
+          },
         ]),
     };
     try {
       return await claimLaunch(guarded, vault, bindings);
     } catch (error) {
+      const rejected = guardRejection(error);
+      if (rejected) throw new GateError(409, rejected);
       if (!(error instanceof Conflict)) throw error;
       const currentVault = await store.get(pk, `VAULT#${job.vaultId}`);
       if (
@@ -402,11 +426,11 @@ export async function claimAdmittedLaunch(
         !sameReservation(helperReservation, currentHelper)
       )
         throw new GateError(409, "Outpoint reservation is no longer current.");
-      const currentAuthority = await store.get(authority.pk, authority.sk);
+      const currentAuthority = await store.get(AUTHORITY_PK, AUTHORITY_SK);
       if (
         !currentAuthority ||
         currentAuthority.version !== authority.version ||
-        fingerprint(currentAuthority) !== authorityHash
+        currentAuthority.generation !== authorityGeneration
       )
         throw new GateError(409, "Reservation authority changed.");
       const current = await store.get(capability.pk, capability.sk);

@@ -7,6 +7,7 @@ import {
   QueryCommand,
   ScanCommand,
   TransactWriteCommand,
+  type TransactWriteCommandInput,
 } from "@aws-sdk/lib-dynamodb";
 import {
   AUTHORITY_PK,
@@ -45,7 +46,11 @@ export type AtomicWrite = {
   aliasMigration?: boolean;
 };
 
-function transactItem(table: string, step: DynamoTransactStep, writes: AtomicWrite[]) {
+function transactItem(
+  table: string,
+  step: DynamoTransactStep,
+  writes: AtomicWrite[],
+): NonNullable<TransactWriteCommandInput["TransactItems"]>[number] {
   switch (step.kind) {
     case "put":
       return {
@@ -127,6 +132,16 @@ function transactItem(table: string, step: DynamoTransactStep, writes: AtomicWri
           TableName: table,
           Key: { pk: step.pk, sk: step.sk },
           ConditionExpression: "attribute_not_exists(pk)",
+        },
+      };
+    case "version-condition":
+      return {
+        ConditionCheck: {
+          TableName: table,
+          Key: { pk: step.pk, sk: step.sk },
+          ConditionExpression: "#v = :v",
+          ExpressionAttributeNames: { "#v": "version" },
+          ExpressionAttributeValues: { ":v": step.expectedVersion },
         },
       };
     default: {

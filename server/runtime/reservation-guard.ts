@@ -68,6 +68,12 @@ export type DynamoTransactStep =
       condition: "reconciling";
       expectedVersion: number;
       generation: number;
+    }
+  | {
+      kind: "version-condition";
+      pk: string;
+      sk: string;
+      expectedVersion: number;
     };
 
 function acceptancePermanentlyStopped(existing: Row | undefined): boolean {
@@ -114,6 +120,13 @@ export function dynamoReservationTransaction(
         generation,
       };
     }
+    if (conditionOnly)
+      return {
+        kind: "version-condition" as const,
+        pk: row.pk,
+        sk: row.sk,
+        expectedVersion: expected ?? row.version,
+      };
     return {
       kind: "put" as const,
       pk: row.pk,

@@ -42,7 +42,7 @@ export type SupervisedJob = {
   manifest: Withdrawal;
   manifestHash: string;
   mainnetRequestHash: string;
-  reservationAuthorityHash: string;
+  reservationAuthorityGeneration: number;
   solver?: SolverPin;
   execution: {
     kind: "qsb-supervised-service-v1";
