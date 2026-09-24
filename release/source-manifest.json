@@ -81,7 +81,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "1615ac7ecf66e7d082ee1cf2829817c9b6eb1c55c2c700f9b4475d5c36518ccd",
+      "api": "e8ebae2f7576eb90819ecf68f2193d1efaaa20eda7b8eec8dfc773c2f3000ddb",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "726cd12bbbe992887d77a88a31a383d14826b6a4dbdd9cedd22547722d23914a",
@@ -177,7 +177,7 @@
       "server/mainnetConfig.ts": "e995c6a9385012217326c2490f188e8382eda40fb37858e9d4f0939d86181102",
       "server/network.ts": "bf7163415b49087ba4341b59b6f9d1b736d6c37ebeb151883ab0146c61d0d66b",
       "server/providers.ts": "05a1769390b06449b83240fab4cbd0ecc78b0cd49f5d36ab1daef9c1cd453fc1",
-      "server/runtime/activation.ts": "a8c882e98364d33b4dc6265b4d6801b73b2b933d98dd1b2abb2e0fdc58be3f1d",
+      "server/runtime/activation.ts": "aecb1c11432b3deb4f5b290bfafdbae0576cac37981d395b59a23cffe8b9f4d8",
       "server/runtime/capability.ts": "5695dc01ce72e1243022204014b7de5a8c662ac337aa73c52124628c8de2a797",
       "server/runtime/closure.ts": "61ed7a0b75388fb9a4200b8f9d5a56be807351f6ddfd06eb1ecbf6cf5761f9cf",
       "server/runtime/core-binary.json": "e801c46615cd3b9ad84af8736cfddd7707787a1e8f29ed8afb2f07fddb4b6b96",

@@ -489,6 +489,28 @@ describe("deployment verification", () => {
         },
       ]),
     ).toThrow("SecretCommitRefused:backup");
+    const syntheticVaultId = "11111111-1111-4111-8111-111111111111";
+    expect(() =>
+      assertProposedCommitHasNoSecrets([
+        {
+          path: "notes.json",
+          text: JSON.stringify({
+            format: "qsb-recovery-v1",
+            stateJson: "synthetic-state",
+          }),
+        },
+      ]),
+    ).toThrow("SecretCommitRefused:backup");
+    for (const suffix of ["", "-withdrawal", "-signing"]) {
+      expect(() =>
+        assertProposedCommitHasNoSecrets([
+          {
+            path: `qsb-recovery-${syntheticVaultId}${suffix}.json`,
+            text: "{}",
+          },
+        ]),
+      ).toThrow("SecretCommitRefused");
+    }
   });
 
   it("keeps the commit-before-deploy reminder aligned with AGENTS.md", () => {

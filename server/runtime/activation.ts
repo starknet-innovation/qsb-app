@@ -64,8 +64,12 @@ const hash64 = z.string().regex(/^[a-f0-9]{64}$/);
 const commit40 = z.string().regex(/^[0-9a-f]{40}$/);
 const ociDigest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const positiveUnits = z.string().regex(/^[1-9][0-9]{0,15}$/);
-const forbiddenCommitPath =
-  /(^|[\\/])\.env($|[\\/.])|\.pem$|\.key$|id_rsa|credentials\.json|wallet-backup|secret\./i;
+const recoveryBackupFilename =
+  /(^|[\\/])qsb-recovery-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:-withdrawal|-signing)?\.json$/i;
+const forbiddenCommitPath = new RegExp(
+  `(^|[\\\\/])\\.env($|[\\\\/.])|\\.pem$|\\.key$|id_rsa|credentials\\.json|wallet-backup|secret\\.|${recoveryBackupFilename.source}`,
+  "i",
+);
 
 const decisionSchema = z
   .object({
@@ -236,12 +240,13 @@ function fail(code: string): never {
   throw new ActivationError(code);
 }
 
-function containsEncryptedBackup(value: unknown): boolean {
+function containsForbiddenBackup(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
-  if (Array.isArray(value)) return value.some(containsEncryptedBackup);
+  if (Array.isArray(value)) return value.some(containsForbiddenBackup);
   const raw = value as Record<string, unknown>;
-  if (raw.format === "qsb-encrypted-v1") return true;
-  return Object.values(raw).some(containsEncryptedBackup);
+  if (raw.format === "qsb-encrypted-v1" || raw.format === "qsb-recovery-v1")
+    return true;
+  return Object.values(raw).some(containsForbiddenBackup);
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -478,7 +483,7 @@ function jsonStructurallyScanned(file: { path: string; text: string }): boolean 
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false;
   try {
     const parsed = JSON.parse(trimmed) as unknown;
-    if (containsEncryptedBackup(parsed)) fail("SecretCommitRefused:backup");
+    if (containsForbiddenBackup(parsed)) fail("SecretCommitRefused:backup");
     assertNoCredentialMaterial(parsed, file.path);
     return true;
   } catch (error) {
