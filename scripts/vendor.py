@@ -22,6 +22,9 @@ for name, (repo, commit) in SOURCES.items():
                 parts = pathlib.PurePosixPath(entry.name).parts[1:]
                 if not parts or '..' in parts or not entry.isfile():
                     continue
+                # Upstream archives may contain bytecode. It is not reviewed source.
+                if '__pycache__' in parts or parts[-1].endswith('.pyc'):
+                    continue
                 target = dest.joinpath(*parts)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(archive.extractfile(entry).read())
