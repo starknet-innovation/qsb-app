@@ -206,7 +206,7 @@ export function createApp(
       .strict()
       .parse(await c.req.json());
     const challenge = await store.get(`CHALLENGE#${id}`, "AUTH");
-    if (!challenge || (challenge.network ?? "mainnet") !== NETWORK_ID)
+    if (!challenge || challenge.network !== NETWORK_ID)
       return c.json({ error: "Sign-in request expired or already used." }, 401);
     let valid = false;
     try {
@@ -242,7 +242,7 @@ export function createApp(
     if (!/^Bearer [A-Za-z0-9_-]{43}$/.test(bearer))
       return c.json({ error: "Connect and sign in with Xverse." }, 401);
     const session = await store.get(`SESSION#${hash(bearer.slice(7))}`, "AUTH");
-    if (!session || (session.network ?? "mainnet") !== NETWORK_ID)
+    if (!session || session.network !== NETWORK_ID)
       return c.json({ error: "Session expired. Please reconnect." }, 401);
     c.set("owner", session.owner);
     await next();
@@ -321,7 +321,7 @@ export function createApp(
     const row = await store.get(pk, sk);
     if (!row) return c.json({ error: "Vault not found" }, 404);
     const vault = row.vault as PublicVault;
-    if ((vault.network ?? "mainnet") !== NETWORK_ID)
+    if (vault.network !== NETWORK_ID)
       return c.json(
         { error: "Vault belongs to a different Bitcoin network." },
         409,
@@ -442,7 +442,7 @@ export function createApp(
       row = await store.get(pk, sk);
     if (!row) return c.json({ error: "Vault not found" }, 404);
     const vault = row.vault as PublicVault;
-    if ((vault.network ?? "mainnet") !== NETWORK_ID)
+    if (vault.network !== NETWORK_ID)
       return c.json(
         { error: "Vault belongs to a different Bitcoin network." },
         409,
@@ -495,7 +495,7 @@ export function createApp(
     const vault = await store.get(pk, `VAULT#${manifest.vaultId}`);
     if (!vault) return c.json({ error: "Vault not found" }, 404);
     const v = vault.vault as PublicVault;
-    if ((v.network ?? "mainnet") !== NETWORK_ID)
+    if (v.network !== NETWORK_ID)
       return c.json(
         { error: "Vault belongs to a different Bitcoin network." },
         409,
@@ -574,7 +574,7 @@ export function createApp(
       return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
     const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
     if (!vaultRow) return c.json({ error: "Vault not found" }, 404);
-    if (((vaultRow.vault as PublicVault).network ?? "mainnet") !== NETWORK_ID)
+    if ((vaultRow.vault as PublicVault).network !== NETWORK_ID)
       return c.json(
         { error: "Vault belongs to a different Bitcoin network." },
         409,
