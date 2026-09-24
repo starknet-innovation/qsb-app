@@ -16,5 +16,5 @@ ENTRYPOINT ["python3", "/opt/qsb-validation/runtime.py"]
 FROM runtime AS queue
 RUN apt-get update && apt-get install -y --no-install-recommends python3-venv && rm -rf /var/lib/apt/lists/*
 COPY worker/optimized/requirements.lock /opt/qsb-validation/requirements.lock
-RUN python3 -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir -r /opt/qsb-validation/requirements.lock && /opt/venv/bin/pip check
+RUN python3 -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir --require-hashes --only-binary=:all: -r /opt/qsb-validation/requirements.lock && /opt/venv/bin/pip check
 ENTRYPOINT ["/opt/venv/bin/python", "-u", "/opt/qsb-validation/queue_handler.py"]
