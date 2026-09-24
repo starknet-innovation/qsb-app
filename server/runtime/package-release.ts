@@ -567,7 +567,7 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
       "The historical Xverse-signed withdrawal and its spent regtest fixture are not in this checkout.",
       "docs/gpu-validation native traces referenced by tests/test_reference.py are not in this checkout.",
       "Production AWS permissions, Runpod credentials, wallet backups, and operator runtime files are not included.",
-      "Native binary hashes and OCI config, index, and registry manifest digests remain unproduced.",
+      "This packaging checkout does not compile native binaries or publish an OCI index, image config, or registry manifest. The separate public-build enrollment records the 4763c70 identities and does not make them identities of this tree.",
       "Section 6 fresh optimized withdrawal was not run from this checkout. Proof-runner, freshness, bundle, drain, and Core-report gates do not close it.",
       "Section 7 external miner inclusion was not run from this checkout. Chain-agreement, spent-fixture, exact-spend, and preflight gates do not close it.",
       "Section 8 production activation is not approved. Decision, deployment, and runbook gates do not enable mainnet or authorize a spend.",

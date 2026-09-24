@@ -307,7 +307,7 @@ export function probeLocalHost(input: {
       id: "immutable-preloaded-image",
       ok: input.imagesEnrolled,
       detail:
-        "No OCI image config, index, or registry manifest is enrolled. The historical 000000000000 ECR reference is not deployable.",
+        "The public-build OCI layout is recorded separately and was not pushed. No production image is preloaded here. The historical 000000000000 ECR reference is not deployable.",
       operatorStep:
         "The experimental runtime is npm run build:optimized (worker/optimized/Dockerfile) and npm run build:runtime (supervised/runtime). The historical worker/Dockerfile is the baseline image and is not that profile. Record the image config digest, index digest, and registry manifest digest separately. The isolated host record is docs/runtime-installation/20260924-linux-validation.md; that host is stopped and is not a selected production host. Do not reuse the historical 000000000000 ECR reference.",
     },

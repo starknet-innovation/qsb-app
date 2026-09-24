@@ -18,7 +18,7 @@ The runtime target includes the newly compiled subset binary, guarded adapter an
 
 The apt package repositories are not snapshot-locked, so this is a source-complete build recipe, **not a claim of universal bit-for-bit container reproducibility**. Record the generated receipt and OCI digest for each release. Historical speed/correctness evidence does not automatically certify the new binary. OS snapshotting remains a further reproducibility improvement.
 
-The image remains HOLD and subset-only. The offline image checks verify description, wrong-identity rejection and real binary failure without a GPU. They do not certify successful GPU execution, complete range coverage, a withdrawal or mainnet readiness. New release identities must be reviewed and enrolled with the supervisor and public CPU verifier before any activation; the existing historical identity guards deliberately reject a different build.
+The image remains HOLD and subset-only. The offline image checks verify description, wrong-identity rejection and real binary failure without a GPU. They do not certify successful GPU execution, complete range coverage, a withdrawal or mainnet readiness. The public-build worker, CPU-reference, supervisor, and local OCI identities are enrolled in `server/runtime/public-build-enrollment.ts`. That enrollment is not a pushed registry manifest, and a later source edit cannot inherit the recorded binary. The historical identity guards still reject a different build.
 
 The reference code retains its MIT license in `reference/LICENSE`; the optimized source retains Apache-2.0 in `research/optimized-subset/LICENSE`.
 

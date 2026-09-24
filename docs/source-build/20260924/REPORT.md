@@ -42,7 +42,9 @@ See [worker instructions](../../../worker/optimized/README.md) and [supervisor i
 
 ## Remaining boundaries
 
-This validates public source packaging and CPU-host compilation, not a release rollout. No image was pushed, endpoint activated, GPU allocated or transaction spent in this build validation. The generated release remains HOLD and subset-only. New worker, CPU-reference, supervisor and immutable OCI identities still require reviewed enrollment and fresh execution validation; historical allowlists are not silently widened. Private Runpod credential provisioning remains separate.
+This validates public source packaging and CPU-host compilation, not a release rollout. No image was pushed, endpoint activated, GPU allocated or transaction spent in this build validation. The generated release remains HOLD and subset-only. Historical allowlists are not silently widened. Private Runpod credential provisioning remains separate.
+
+Reviewed enrollment of this build's worker, CPU-reference, supervisor, and local OCI layout identities is `server/runtime/public-build-enrollment.ts`. It binds the hashes in this report, the CPU-reference files in the runtime binding, and the unpushed OCI index, config, and platform manifests from the `848751c` image export. It does not enroll archive `18421ac0…` or the historical solver pin. Commits after this build changed solver and supervisor source, so those identities are not a rebuild of that later tree. No registry manifest was pushed. Enrollment does not enable execution or close a fresh search.
 
 The new binary is not the historically measured binary. Its successful compilation does not transfer earlier throughput, GPU correctness or full-withdrawal claims to it. Fresh GPU/integration and end-to-end gates remain on the [mainnet checklist](../../MAINNET-READINESS.md).
 

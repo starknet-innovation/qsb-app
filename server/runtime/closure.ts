@@ -34,6 +34,7 @@ export const requiredReleasePaths = [
   "server/runtime/host-requirements.ts",
   "server/runtime/identity.ts",
   "server/runtime/package-release.ts",
+  "server/runtime/public-build-enrollment.ts",
   "server/runtime/reservation-guard.ts",
   "server/runtime/storage-authority.ts",
   "server/runtime/supervised-routes.ts",

@@ -38,7 +38,7 @@ export const RUNBOOK_RULES = {
 
 export const OPEN_RELEASE_GATES = [
   "Sections 1 through 7 still have open technical gates.",
-  "No native binary, OCI image config, index, or registry manifest is enrolled.",
+  "Public-build worker, CPU-reference, supervisor, and local OCI layout identities are enrolled for the 4763c70 build. They are not this tree's executable, a pushed registry manifest, or an activation.",
   "No production host, regional inventory, or IAM review is recorded.",
   "No fresh optimized withdrawal or external miner inclusion is recorded.",
   RUNBOOK_RULES.publication,
