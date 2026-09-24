@@ -393,15 +393,20 @@ function inputOutpoints(tx: btc.Transaction): Outpoint[] {
   return points;
 }
 
-/** Amount is output 0. Fee is authorized input value minus every output. No chain read. */
+/** Amount is output 0. Fee is authorized input value minus every output. No chain read.
+ *  A stored withdrawal also passes output 0's script and then allows only that one output.
+ */
 function assertSpendMatchesTransaction(
   tx: btc.Transaction,
   amountSats: string,
   feeSats: string,
   inputs: readonly { txid: string; vout: number; valueSats: string }[],
+  outputScriptHex?: string,
 ): void {
   const points = inputOutpoints(tx);
   if (inputs.length !== points.length || tx.outputsLength < 1)
+    throw new MinerInclusionError("ExactSpendMismatch");
+  if (outputScriptHex !== undefined && tx.outputsLength !== 1)
     throw new MinerInclusionError("ExactSpendMismatch");
   let inputTotal = 0n;
   for (let index = 0; index < points.length; index += 1) {
@@ -418,10 +423,18 @@ function assertSpendMatchesTransaction(
   }
   let outputTotal = 0n;
   for (let index = 0; index < tx.outputsLength; index += 1) {
-    const amount = tx.getOutput(index).amount;
+    const output = tx.getOutput(index);
+    const amount = output.amount;
     if (amount === undefined) throw new MinerInclusionError("ExactSpendMismatch");
     if (index === 0 && amount !== BigInt(amountSats))
       throw new MinerInclusionError("ExactSpendMismatch");
+    if (index === 0 && outputScriptHex !== undefined) {
+      if (
+        !output.script ||
+        hex.encode(output.script) !== outputScriptHex.toLowerCase()
+      )
+        throw new MinerInclusionError("ExactSpendMismatch");
+    }
     outputTotal += amount;
   }
   const fee = inputTotal - outputTotal;
