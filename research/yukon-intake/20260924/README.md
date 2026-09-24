@@ -46,3 +46,7 @@ The [CI workflow](../../../.github/workflows/yukon-intake.yml) runs these gates 
 Review a separate exact-predicate, bounded-range adaptation with complete arithmetic and overflow handling; validate native differential/arithmetic/DER/coverage/memory behavior; compare production throughput on matched hardware; enroll a fresh release and run a fresh full proof. A compilation pass closes only compilation. These source blockers are enough to withhold adoption, so no GPU was allocated for a misleading leaderboard replay. No deployment, funding, signing or broadcast occurred.
 
 The first working-demo path remains the coordinator release work in issue #15. This research PR must not silently substitute a subset-only or speculative benchmark solver for that release. Upstream source licenses remain with the fetched candidates; this PR ships provenance and local validation tooling, not third-party binaries.
+
+## Native compilation result
+
+[CI run 36039392902](https://github.com/starknet-innovation/qsb-app/actions/runs/36039392902) passed on source commit `069506f` (native Linux x86_64). Both default upstream entrypoints compiled successfully with CUDA 12.8.93; all ten intake tests and the live immutable-tree/predicate checks passed. The [compiler receipt](compile-receipt.txt) records the two binary hashes and compiler/OpenSSL package versions. Subsequent report-only changes do not alter those tested compiler inputs. No GPU execution occurred; the adoption blockers above remain unresolved.
