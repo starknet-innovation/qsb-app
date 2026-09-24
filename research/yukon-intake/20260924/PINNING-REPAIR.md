@@ -383,3 +383,11 @@ test fixtures reused a nonce signature in all three stages and were correctly
 rejected by the reference; the fixtures now use distinct public signatures.
 Positive candidate/release/durable integration and successful GPU execution
 through the adapter remain pending. Production worker and CPU sources are unchanged.
+
+Actual-binary runtime CI subsequently passed at source `c675be1`, run
+[36046055724](https://github.com/starknet-innovation/qsb-app/actions/runs/36046055724).
+The compiled Linux solver ran through the new adapter with synthetic valid public
+parameters in a read-only, network-disabled container without a GPU. It returned
+`failed`, no candidates and no verification/credit eligibility as required.
+Receipt: `runtime/no-gpu-ci.json`. This closes the no-GPU failure boundary only;
+it does not replace a successful GPU runtime or CPU positive-hit test.

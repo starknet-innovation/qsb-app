@@ -1,0 +1,23 @@
+{
+  "actualBinary": true,
+  "gpuAvailable": false,
+  "result": {
+    "protocol": "qsb-yukon-pinning-research-v1",
+    "requestId": "ci-no-gpu",
+    "manifestHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "binarySha256": "38bc1ac79b19b7ed10a984cc88a8ae67583b16fabec387aa84ba2f1183d63ee6",
+    "parameterSha256": "20353935f01b6d93735ae8f4f4d63fd50efcd4c05a94a14d7c39aef505c711e2",
+    "range": {
+      "sequence": 2147483648,
+      "sequenceCount": 1,
+      "locktime": 500000000,
+      "locktimeCount": 1
+    },
+    "status": "failed",
+    "candidates": [],
+    "verified": false,
+    "rangeCreditEligible": false,
+    "releaseStatus": "HOLD"
+  },
+  "freshWithdrawal": false
+}
