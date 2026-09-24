@@ -156,3 +156,9 @@ export function createPinHandoff(repo = root, python = "python3") {
   return (context: unknown, candidate: unknown) =>
     run({ action: "handoff", context, candidate });
 }
+
+export function createPinPreflight(repo = root, python = "python3") {
+  const run = createRunner(repo, python);
+  return (request: unknown, context: unknown, expectedBinary: string) =>
+    run({ action: "prepare", request, context, expectedBinary });
+}

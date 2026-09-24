@@ -25,6 +25,8 @@ def main():
     reference=sys.modules['pin_reference']
     if set(event)=={'action','request','output','context','expectedBinary'} and event['action']=='verify':
         verdict=reference.verify(event['request'],event['output'],event['context'],event['expectedBinary'])
+    elif set(event)=={'action','request','context','expectedBinary'} and event['action']=='prepare':
+        verdict=reference.prepare(event['request'],event['context'],event['expectedBinary'])
     elif set(event)=={'action','context','candidate'} and event['action']=='handoff':
         verdict=reference.handoff(event['context'],event['candidate'])
     else:raise ValueError('Exact public verification envelope required')

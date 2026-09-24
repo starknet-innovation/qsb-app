@@ -1,3 +1,4 @@
+import { submitResearchPin } from "../scripts/yukon/pin_submit";
 import { readFileSync } from "node:fs";
 import {
   receiveResearchPin,
@@ -82,12 +83,15 @@ async function testStore() {
   return new DynamoStore(table);
 }
 
-async function fixture(real?: {
-  context: any;
-  request: any;
-  output: any;
-  providerId?: string;
-}) {
+async function fixture(
+  real?: {
+    context: any;
+    request: any;
+    output: any;
+    providerId?: string;
+  },
+  unsubmitted = false,
+) {
   const store = await testStore(),
     scope = "isolated-yukon-pr30-store",
     pk = "VALIDATION#" + scope;
@@ -136,12 +140,14 @@ async function fixture(real?: {
     },
   });
   const inventory = new PinInventoryV3(store, scope, binding.owner, 1);
-  await inventory.reserve(0, request, async () => {});
-  await inventory.submit(
-    "PIN#0",
-    async () => real?.providerId ?? "synthetic-provider",
-    async () => {},
-  );
+  if (!unsubmitted) {
+    await inventory.reserve(0, request, async () => {});
+    await inventory.submit(
+      "PIN#0",
+      async () => real?.providerId ?? "synthetic-provider",
+      async () => {},
+    );
+  }
   const { parameterBase64: _, ...fields } = request;
   const output = real?.output ?? {
     ...fields,
@@ -595,5 +601,172 @@ describe("explicit release receive route with saved actual remote output and rea
       receiveResearchPin(f.store, f.binding, f.raw),
     ).rejects.toThrow();
     expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
+  });
+});
+
+async function submissionFixture() {
+  const base = "research/yukon-intake/20260924/runtime/remote-queue/";
+  const read = (n: string) => JSON.parse(readFileSync(base + n, "utf8"));
+  const request = read("input-0.json").request;
+  const f = await fixture(
+    {
+      request,
+      context: read("context-0.json"),
+      output: read("result-0.json").output.output,
+    },
+    true,
+  );
+  const s = (await f.store.get(f.pk, "SCOPE"))!;
+  await f.store.put(
+    {
+      ...s,
+      version: s.version + 1,
+      researchReleaseId: PIN_RESEARCH_RELEASE_ID,
+    },
+    s.version,
+  );
+  const enrollment = {
+    pk: PIN_RESEARCH_RELEASE_PK,
+    sk: PIN_RESEARCH_RELEASE_ID,
+    version: 0,
+    enabled: true,
+    researchExecutionEnabled: true,
+    startupCapacityValidated: true,
+    descriptor: PIN_RESEARCH_RELEASE,
+    endpoint: "synthetic-endpoint",
+    scopes: [f.binding.scope],
+  };
+  await f.store.put(enrollment);
+  return {
+    ...f,
+    request,
+    enrollment,
+    submitBinding: {
+      scope: f.binding.scope,
+      owner: f.binding.owner,
+      revision: 1,
+      attempt: 0,
+    },
+  };
+}
+describe("release-fenced submission with real CPU preflight and mocked paid transport", () => {
+  it("allows one racing submission and freezes the exact queue envelope", async () => {
+    const f = await submissionFixture();
+    let sends = 0;
+    const adapters = {
+      preflight: async () => {},
+      send: async (endpoint: string, input: unknown) => {
+        sends++;
+        expect(endpoint).toBe("synthetic-endpoint");
+        expect(input).toEqual({
+          runtimeManifestSha256: PIN_RESEARCH_RELEASE.runtimeManifestSha256,
+          request: f.request,
+        });
+        return "new-research-job";
+      },
+    };
+    const results = await Promise.allSettled([
+      submitResearchPin(f.store, f.submitBinding, f.request, adapters),
+      submitResearchPin(f.store, f.submitBinding, f.request, adapters),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(sends).toBe(1);
+    expect((await f.store.get(f.pk, "PIN#0"))?.provider).toBe(
+      "new-research-job",
+    );
+  });
+  it("rejects release revocation in provider preflight before the paid call", async () => {
+    const f = await submissionFixture();
+    let sends = 0;
+    await expect(
+      submitResearchPin(f.store, f.submitBinding, f.request, {
+        preflight: async () => {
+          await f.store.put({ ...f.enrollment, version: 1, enabled: false }, 0);
+        },
+        send: async () => {
+          sends++;
+          return "must-not-submit";
+        },
+      }),
+    ).rejects.toThrow();
+    expect(sends).toBe(0);
+    expect((await f.store.get(f.pk, "PIN#0"))?.state).toBe("uncertain");
+  });
+  it("retains uncertainty and never repeats a transport call after an unknown outcome", async () => {
+    const f = await submissionFixture();
+    let sends = 0;
+    const adapters = {
+      preflight: async () => {},
+      send: async () => {
+        sends++;
+        throw Error("connection lost after POST");
+      },
+    };
+    await expect(
+      submitResearchPin(f.store, f.submitBinding, f.request, adapters),
+    ).rejects.toThrow();
+    await expect(
+      submitResearchPin(f.store, f.submitBinding, f.request, adapters),
+    ).rejects.toThrow();
+    expect(sends).toBe(1);
+    expect((await f.store.get(f.pk, "PIN#0"))?.state).toBe("uncertain");
+  });
+  it("preserves a returned provider ID after release revocation during the paid call", async () => {
+    const f = await submissionFixture();
+    await submitResearchPin(f.store, f.submitBinding, f.request, {
+      preflight: async () => {},
+      send: async () => {
+        await f.store.put({ ...f.enrollment, version: 1, enabled: false }, 0);
+        return "late-research-job";
+      },
+    });
+    expect((await f.store.get(f.pk, "PIN#0"))?.provider).toBe(
+      "late-research-job",
+    );
+  });
+  it("rejects invalid public parameters before reservation or provider access", async () => {
+    const f = await submissionFixture();
+    let calls = 0;
+    await expect(
+      submitResearchPin(
+        f.store,
+        f.submitBinding,
+        { ...f.request, parameterSha256: "f".repeat(64) },
+        {
+          preflight: async () => {
+            calls++;
+          },
+          send: async () => {
+            calls++;
+            return "bad";
+          },
+        },
+      ),
+    ).rejects.toThrow();
+    expect(calls).toBe(0);
+    expect(await f.store.get(f.pk, "PIN#0")).toBeUndefined();
+  });
+  it("does not treat receive enrollment as execution or startup-capacity authorization", async () => {
+    for (const patch of [
+      { researchExecutionEnabled: false },
+      { startupCapacityValidated: false },
+    ]) {
+      const f = await submissionFixture();
+      let calls = 0;
+      await f.store.put({ ...f.enrollment, ...patch, version: 1 }, 0);
+      await expect(
+        submitResearchPin(f.store, f.submitBinding, f.request, {
+          preflight: async () => {
+            calls++;
+          },
+          send: async () => {
+            calls++;
+            return "bad";
+          },
+        }),
+      ).rejects.toThrow("enrollment");
+      expect(calls).toBe(0);
+      expect(await f.store.get(f.pk, "PIN#0")).toBeUndefined();
+    }
   });
 });
