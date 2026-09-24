@@ -31,7 +31,7 @@ resource "aws_lambda_function" "dispatch" {
   timeout                        = 60
   memory_size                    = 256
   reserved_concurrent_executions = 1
-  environment { variables = { TABLE_NAME = aws_dynamodb_table.records.name, SUPERVISED_DISPATCH_QUEUE_URL = aws_sqs_queue.dispatch[0].url, SUPERVISED_EXECUTION_ENABLED = "false" } }
+  environment { variables = { TABLE_NAME = aws_dynamodb_table.records.name, QSB_NETWORK = var.network, SUPERVISED_DISPATCH_QUEUE_URL = aws_sqs_queue.dispatch[0].url, SUPERVISED_EXECUTION_ENABLED = "false" } }
   depends_on = [terraform_data.release, aws_iam_role_policy.dispatch]
 }
 resource "aws_cloudwatch_event_rule" "dispatch" {

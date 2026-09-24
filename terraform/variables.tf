@@ -27,11 +27,11 @@ variable "source_commit" {
   }
 }
 variable "network" {
-  type    = string
-  default = "mainnet"
+  description = "Required network identity baked into this stack. mainnet or testnet4. No default: an omitted value must not select mainnet. This does not enable transactions."
+  type        = string
   validation {
     condition     = contains(["mainnet", "testnet4"], var.network)
-    error_message = "Supported read-only build networks: mainnet or testnet4."
+    error_message = "Set network to mainnet or testnet4."
   }
 }
 variable "runpod_endpoint_id" {

@@ -49,7 +49,7 @@ terraform -chdir=terraform apply deployment.tfplan
 terraform -chdir=terraform output app_url
 ```
 
-`build.mjs` runs pinned upstream preparation, typecheck/frontend build, bundles both Node Lambda entrypoints (including SDK dependencies), creates deterministic Lambda ZIPs and records file SHA256s/network/commit. The build is done **before** Terraform parses `fileset`/file hashes. It does not deploy anything. The normal builder refuses a dirty tree; `--allow-dirty` permits local inspection only and records `clean:false`, which the Terraform deployment gate rejects.
+`build.mjs` runs pinned upstream preparation, typecheck/frontend build, bundles both Node Lambda entrypoints (including SDK dependencies), creates deterministic Lambda ZIPs and records file SHA256s/network/commit. The build is done **before** Terraform parses `fileset`/file hashes. It does not deploy anything. Pass `--network=mainnet` or `--network=testnet4`; an omitted network is refused. The Terraform `network` variable has no default, and `terraform.tfvars.example` sets `mainnet`. The normal builder refuses a dirty tree; `--allow-dirty` permits local inspection only and records `clean:false`, which the Terraform deployment gate rejects.
 
 Choose `--network=testnet4` and `network="testnet4"` together for a Testnet4-identity preview. Both mainnet operations and Testnet4 rehearsal remain disabled; this does not assert that the installed Xverse supports Testnet4. There is intentionally no `enable_mainnet` or rehearsal activation variable.
 
