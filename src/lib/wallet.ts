@@ -105,3 +105,27 @@ export async function signPsbt(
   await assertWalletNetwork(address);
   return r.result.psbt;
 }
+export async function fundFromXverse(
+  address: string,
+  psbt: string,
+  indices: number[],
+) {
+  await assertWalletNetwork(address);
+  const r = await request(
+    "signPsbt",
+    { psbt, signInputs: { [address]: indices }, broadcast: true },
+    providerId,
+  );
+  if (r.status !== "success")
+    throw new Error(r.error.message || "Transaction signature declined.");
+  await assertWalletNetwork(address);
+  const signed = r.result.psbt;
+  const txid = "txid" in r.result ? r.result.txid : undefined;
+  if (
+    typeof signed !== "string" ||
+    typeof txid !== "string" ||
+    !/^[a-f0-9]{64}$/i.test(txid)
+  )
+    throw new Error("Xverse did not broadcast the funding transaction.");
+  return { psbt: signed, txid };
+}

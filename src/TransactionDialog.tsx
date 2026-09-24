@@ -9,7 +9,7 @@ import "./styles.css";
 import { CostDisclosure } from "./Costs";
 import { base64, hex } from "@scure/base";
 import { api } from "./lib/api";
-import { signPsbt, type Wallet } from "./lib/wallet";
+import { fundFromXverse, signPsbt, type Wallet } from "./lib/wallet";
 import {
   fundingPsbt,
   helperPsbt,
@@ -79,11 +79,37 @@ export default function TransactionDialog({
     [error, setError] = useState(""),
     [result, setResult] = useState(""),
     [intentBackup, setIntentBackup] = useState(""),
-    [assemblyVerified, setAssemblyVerified] = useState(false);
+    [assemblyVerified, setAssemblyVerified] = useState(false),
+    [pendingFunding, setPendingFunding] = useState<{
+      txid: string;
+      amount: string;
+    }>();
   const deposit = vault.status === "unfunded";
+  const fundingKey = `qsb-funding:${vault.id}`;
+  function rememberFunding(next?: { txid: string; amount: string }) {
+    setPendingFunding(next);
+    if (next) localStorage.setItem(fundingKey, JSON.stringify(next));
+    else localStorage.removeItem(fundingKey);
+  }
   useEffect(() => {
     generation.current++;
     dialog.current?.showModal();
+    const saved = localStorage.getItem(fundingKey);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as { txid?: unknown; amount?: unknown };
+        if (
+          typeof parsed.txid === "string" &&
+          /^[a-f0-9]{64}$/i.test(parsed.txid) &&
+          typeof parsed.amount === "string" &&
+          /^(0|[1-9][0-9]*)$/.test(parsed.amount)
+        )
+          setPendingFunding({ txid: parsed.txid, amount: parsed.amount });
+        else localStorage.removeItem(fundingKey);
+      } catch {
+        localStorage.removeItem(fundingKey);
+      }
+    }
     if (!job)
       api<{ utxos: Point[] }>("/payment-utxos")
         .then((x) => setPoints(x.utxos))
@@ -92,7 +118,7 @@ export default function TransactionDialog({
       generation.current++;
       lockQsb();
     };
-  }, []);
+  }, [fundingKey]);
   const key = (p: Point) => `${p.txid}:${p.vout}`;
   async function act(label: string, fn: (check: () => void) => Promise<void>) {
     const active = generation.current;
@@ -138,49 +164,64 @@ export default function TransactionDialog({
     if (!operationsAllowed(await api("/config")))
       throw Error("Transactions are disabled or the server network changed. Reopen the rehearsal after it is enabled.");
   }
+  async function recordFunding(txid: string, amountSats: string) {
+    const recorded = await api<{ vault: PublicVault }>(
+      `/vaults/${vault.id}/fund`,
+      { txid, amount: amountSats, costAccepted: true },
+    );
+    rememberFunding(undefined);
+    setResult(
+      `confirmed: ${recorded.vault.funding?.txid}. Wait for confirmation before withdrawing.`,
+    );
+    onUpdated();
+  }
   async function depositFunds() {
     if(supervisedSearch){setError("Supervised search cannot deposit or broadcast.");return;}
-    await act("Review and sign the deposit in Xverse", async (check) => {
-      if (!unlocked || !accepted)
-        throw Error("Verify your backup and accept the costs first.");
-      const selected = points.filter((p) => selection.includes(key(p)));
-      if (!selected.length || selected.length > 8)
-        throw Error("Select between one and eight payment outputs.");
-      const inputs = await Promise.all(selected.map(input));
-      const amountSats = parseBtc(amount),
-        feeSats = parseBtc(fee);
-      const expected = fundingPsbt(
-        inputs,
-        vault.scriptHex,
-        amountSats,
-        feeSats,
-        wallet.address,
-      );
-      check();
-      await assertOperations();
-      check();
-      const returned = await signPsbt(
-        wallet.address,
-        base64.encode(expected.toPSBT()),
-        inputs.map((_, i) => i),
-      );
-      check();
-      const signed = verifySignedPsbt(expected, base64.decode(returned));
-      signed.finalize();
-      const r = await api<{ submission: { txid: string; status: string } }>(
-        `/vaults/${vault.id}/fund`,
-        {
-          rawTxHex: hex.encode(signed.extract()),
+    await act(
+      pendingFunding
+        ? "Recording the confirmed deposit"
+        : "Review and sign the deposit in Xverse",
+      async (check) => {
+        if (!unlocked || !accepted)
+          throw Error("Verify your backup and accept the costs first.");
+        await assertOperations();
+        check();
+        if (pendingFunding) {
+          await recordFunding(pendingFunding.txid, pendingFunding.amount);
+          return;
+        }
+        const selected = points.filter((p) => selection.includes(key(p)));
+        if (!selected.length || selected.length > 8)
+          throw Error("Select between one and eight payment outputs.");
+        const inputs = await Promise.all(selected.map(input));
+        const amountSats = parseBtc(amount),
+          feeSats = parseBtc(fee);
+        const expected = fundingPsbt(
+          inputs,
+          vault.scriptHex,
+          amountSats,
+          feeSats,
+          wallet.address,
+        );
+        check();
+        const funded = await fundFromXverse(
+          wallet.address,
+          base64.encode(expected.toPSBT()),
+          inputs.map((_, i) => i),
+        );
+        check();
+        const signed = verifySignedPsbt(expected, base64.decode(funded.psbt));
+        signed.finalize();
+        if (signed.id !== funded.txid.toLowerCase())
+          throw Error("Xverse reported a different funding transaction.");
+        const broadcast = {
+          txid: signed.id,
           amount: amountSats.toString(),
-          fee: feeSats.toString(),
-          costAccepted: true,
-        },
-      );
-      setResult(
-        `${r.submission.status}: ${r.submission.txid}. Wait for confirmation before withdrawing.`,
-      );
-      onUpdated();
-    });
+        };
+        rememberFunding(broadcast);
+        await recordFunding(broadcast.txid, broadcast.amount);
+      },
+    );
   }
   async function beginWithdrawal() {
     await act("Saving the withdrawal intent", async (check) => {
@@ -535,6 +576,12 @@ export default function TransactionDialog({
                 </label>
               </>
             )}
+            {deposit && pendingFunding && (
+              <p role="status">
+                Xverse broadcast {pendingFunding.txid.slice(0, 12)}…. Record
+                the deposit after that transaction confirms.
+              </p>
+            )}
             <CostDisclosure feeBtc={job ? formatBtc(job.manifest.fee) : fee || undefined} job={job} />
             {payoutPreview && (
               <p role="status">
@@ -600,7 +647,9 @@ export default function TransactionDialog({
                     ? "Authorize and sign"
                     : "Save signing backup"
                   : deposit
-                    ? "Review deposit in Xverse"
+                    ? pendingFunding
+                      ? "Record confirmed deposit"
+                      : "Review deposit in Xverse"
                     : "Save intent and start search")}
             </button>
           </>

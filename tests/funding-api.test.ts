@@ -184,15 +184,15 @@ it("rejects a requester-supplied exact spend and does not fund", async () => {
   expect(release.mainnetEnabled).toBe(false);
   expect("broadcastAuthorized" in release).toBe(false);
 });
-it("does not preflight or broadcast without an exact spend record", async () => {
+it("does not preflight or broadcast a raw funding transaction", async () => {
   const f = await setup();
   const body = { ...f.body, exactSpend: undefined };
   const response = await f.app.request(
     req("/vaults/" + f.vault.id + "/fund", body, f.token),
   );
-  expect(response.status).toBe(409);
+  expect(response.status).toBe(400);
   expect(await response.json()).toMatchObject({
-    error: "SpendAuthorizationRequired",
+    error: "Invalid request",
   });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();
@@ -294,9 +294,9 @@ it("does not consult a rejecting mainnet miner while transport stays closed", as
   const response = await f.app.request(
     req("/vaults/" + f.vault.id + "/fund", f.body, f.token),
   );
-  expect(response.status).toBe(409);
+  expect(response.status).toBe(400);
   expect(await response.json()).toMatchObject({
-    error: "SpendAuthorizationRequired",
+    error: "Invalid request",
   });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();
