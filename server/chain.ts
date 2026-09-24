@@ -72,6 +72,7 @@ export class Esplora {
       confirmed: true,
       confirmations: tip - s.block_height + 1,
       blockHash: s.block_hash,
+      blockHeight: s.block_height,
     };
   }
   async unspent(point: z.infer<typeof outpoint>, script: string) {

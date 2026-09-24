@@ -26,6 +26,7 @@ export const requiredReleasePaths = [
   "server/runtime/dispatcher.ts",
   "server/runtime/evidence-reader.ts",
   "server/runtime/fresh-proof.ts",
+  "server/runtime/miner-inclusion.ts",
   "server/runtime/host-bridge.ts",
   "server/runtime/host-lifecycle.ts",
   "server/runtime/host-requirements.ts",
@@ -43,6 +44,7 @@ export const requiredReleasePaths = [
   "src/lib/releases/qsb-config-a-ranked-v2.json",
   "src/mainnet/admissionClient.ts",
   "src/mainnet/consumer.ts",
+  "src/mainnet/chain.ts",
   "src/mainnet/flow.ts",
   "src/mainnet/intent.ts",
   "src/mainnet/publicResult.ts",
@@ -146,6 +148,7 @@ export const componentForPath = (relativePath: string): string => {
     relativePath === "server/runtime/core-binary.json"
   )
     return "fresh-proof";
+  if (relativePath === "server/runtime/miner-inclusion.ts") return "api";
   if (
     relativePath.startsWith("server/runtime/") ||
     relativePath === "server/coordinator.ts" ||

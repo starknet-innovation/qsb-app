@@ -26,11 +26,15 @@ import { Conflict, store as defaultStore, type Store } from "./store";
 import { slipstream, MinerAuthenticationError } from "./providers";
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { chain, ChainError, type Esplora } from "./chain";
-import { checkFunding, checkWithdrawal } from "./transaction-checks";
 import { outputScript } from "../src/lib/transactions";
 import { hex } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
-import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
+import {
+  transactionsEnabled,
+  rehearsalAddressAllowed,
+  chainBase,
+  minerBase,
+} from "./network";
 import type { FundingLedger } from "./runtime/dispatcher";
 import { canonicalReservationWrites } from "./runtime/storage-authority";
 import {
@@ -38,6 +42,15 @@ import {
   coverageLedgerSchema,
 } from "./runtime/coverage-ledger";
 import { installSupervisedRoutes } from "./runtime/supervised-routes";
+import {
+  MinerInclusionError,
+  assertMainnetTransportClosed,
+  authorizeConfiguredSpend,
+  callMinerSubmit,
+  judgeInclusionEvidence,
+  reportEsploraInclusion,
+  transactionId,
+} from "./runtime/miner-inclusion";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -111,6 +124,8 @@ export function createApp(
   app.onError((e, c) => {
     if (e instanceof MinerAuthenticationError)
       return c.json({ error: e.message }, 503);
+    if (e instanceof MinerInclusionError)
+      return c.json({ error: e.message }, 409);
     if (e instanceof ChainError) return c.json({ error: e.message }, 409);
     if (e instanceof z.ZodError)
       return c.json(
@@ -297,6 +312,7 @@ export function createApp(
         amount: sats,
         fee: sats,
         costAccepted: z.literal(true),
+        spentFixtureRefs: z.array(z.unknown()).max(32).optional(),
       })
       .strict()
       .parse(await c.req.json());
@@ -319,72 +335,31 @@ export function createApp(
         409,
       );
     assertVaultConfiguration(vault);
-    const funding = await checkFunding(
-      body.rawTxHex,
-      vault,
-      BigInt(body.amount),
-      BigInt(body.fee),
-      ledger,
-    );
-    await testMiner(body.rawTxHex, funding.txid);
-    vault.funding = funding;
-    vault.status = "submitted";
-    // Save the exact intent before the external side effect. An HTTP timeout is
-    // ambiguous; keep this txid reserved rather than creating a second deposit.
-    await store.atomicPut([
-      {
-        row: { ...row, version: row.version + 1, vault },
-        expected: row.version,
-      },
-      {
-        row: {
-          pk,
-          sk: `TX#${funding.txid}`,
-          version: 0,
-          vaultId: vault.id,
-          kind: "funding",
-          status: "submitting",
-          rawTxHex: body.rawTxHex,
-        },
-      },
-    ]);
-    const submission = await submitMiner(body.rawTxHex, funding.txid, pk);
-    return c.json({ vault, submission }, 202);
+    // The requester cannot supply exactSpend, so this route cannot satisfy 7.3.
+    const permit = authorizeConfiguredSpend({
+      chain: NETWORK_ID,
+      chainBaseUrl: chainBase,
+      minerEndpoint: minerBase,
+      rawTxHex: body.rawTxHex,
+      txid: transactionId(body.rawTxHex),
+      amountSats: body.amount,
+      feeSats: body.fee,
+      exactSpend: undefined,
+      spentFixtureRefs: body.spentFixtureRefs ?? [],
+      release,
+      walletApp: "xverse",
+    });
+    // Refuse the live miner before any chain read, miner preflight, or saved
+    // intent. callMinerSubmit rejects this endpoint without HTTP. A refusal
+    // must not leave the vault looking funded.
+    assertMainnetTransportClosed(permit, minerBase);
+    await callMinerSubmit({
+      permit,
+      rawTxHex: body.rawTxHex,
+      transport: { endpoint: minerBase },
+    });
+    throw new MinerInclusionError("LiveMinerTransportRefused");
   });
-  async function testMiner(raw: string, id: string) {
-    const result = z
-      .array(
-        z.object({
-          txid: z.string(),
-          allowed: z.boolean().optional(),
-          "reject-reason": z.string().optional(),
-        }),
-      )
-      .length(1)
-      .parse(await miner.test(raw));
-    if (result[0].txid !== id || result[0].allowed !== true)
-      throw new ChainError(
-        `Miner preflight rejected transaction: ${result[0]["reject-reason"] || "not accepted"}`,
-      );
-  }
-  async function submitMiner(raw: string, id: string, pk: string) {
-    let status = "uncertain";
-    try {
-      const r = z
-        .object({ status: z.string(), message: z.string() })
-        .parse(await miner.submit(raw));
-      if (r.status === "success" && r.message === id) status = "submitted";
-    } catch {
-      /* The intent remains available for explicit reconciliation. */
-    }
-    const row = await store.get(pk, `TX#${id}`);
-    if (row)
-      await store.put(
-        { ...row, status, version: row.version + 1 },
-        row.version,
-      );
-    return { txid: id, status };
-  }
   // Reconcile the durable intent without submitting it again. Private miner
   // visibility is distinct from independent canonical-chain confirmation.
   app.get("/api/transactions/:id/status", async (c) => {
@@ -415,6 +390,37 @@ export function createApp(
       { ...row, status, checkedAt, version: row.version + 1 },
       row.version,
     );
+    const judgment = judgeInclusionEvidence({
+      ...(inMiner
+        ? {
+            httpStatus: 200,
+            minerReportedConfirmed: inMiner.transaction.status.confirmed,
+          }
+        : {}),
+      ...(onChain
+        ? {
+            chain: {
+              confirmed: onChain.confirmed,
+              confirmations: onChain.confirmations,
+              ...("blockHash" in onChain && onChain.blockHash
+                ? { blockHash: onChain.blockHash }
+                : {}),
+              ...("blockHeight" in onChain &&
+              onChain.blockHeight !== undefined
+                ? { blockHeight: onChain.blockHeight }
+                : {}),
+              txid: id,
+            },
+          }
+        : {}),
+      expectedTxid: id,
+    });
+    // A fulfilled ledger.status call is this route's Esplora query. The
+    // report uses its own reason and limits when that query confirms.
+    const section7Inclusion = reportEsploraInclusion(
+      judgment,
+      chainResult.status === "fulfilled",
+    );
     return c.json({
       txid: id,
       status,
@@ -427,6 +433,7 @@ export function createApp(
           }
         : { visible: null },
       retrySafe: false,
+      section7Inclusion,
     });
   });
   app.get("/api/vaults/:id/funding", async (c) => {
@@ -550,10 +557,14 @@ export function createApp(
   app.post("/api/jobs/:id/submit", async (c) => {
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
       return c.json({ error: `${NETWORK_ID} withdrawals are disabled.` }, 503);
-    const { rawTxHex } = z
-      .object({ rawTxHex: z.string().max(150000) })
+    const body = z
+      .object({
+        rawTxHex: z.string().max(150000),
+        spentFixtureRefs: z.array(z.unknown()).max(32).optional(),
+      })
       .strict()
       .parse(await c.req.json());
+    const { rawTxHex } = body;
     const pk = `OWNER#${c.get("owner")}`,
       sk = `JOB#${c.req.param("id")}`,
       row = await store.get(pk, sk);
@@ -568,34 +579,33 @@ export function createApp(
         { error: "Vault belongs to a different Bitcoin network." },
         409,
       );
-    const checked = await checkWithdrawal(
+    const amountSats = job.manifest?.outputValue;
+    const feeSats = job.manifest?.fee;
+    if (typeof amountSats !== "string" || typeof feeSats !== "string")
+      throw new MinerInclusionError("ExactSpendMismatch");
+    // The requester cannot supply exactSpend, so this route cannot satisfy 7.3.
+    const permit = authorizeConfiguredSpend({
+      chain: NETWORK_ID,
+      chainBaseUrl: chainBase,
+      minerEndpoint: minerBase,
       rawTxHex,
-      vaultRow.vault as PublicVault,
-      job,
-      ledger,
-    );
-    await testMiner(rawTxHex, checked.txid);
-    job.status = "submitted";
-    job.txid = checked.txid;
-    job.updatedAt = new Date().toISOString();
-    await store.atomicPut([
-      { row: { ...row, version: row.version + 1, job }, expected: row.version },
-      {
-        row: {
-          pk,
-          sk: `TX#${checked.txid}`,
-          version: 0,
-          jobId: job.id,
-          kind: "withdrawal",
-          status: "submitting",
-          rawTxHex,
-        },
-      },
-    ]);
-    return c.json(
-      { job, submission: await submitMiner(rawTxHex, checked.txid, pk) },
-      202,
-    );
+      txid: transactionId(rawTxHex),
+      amountSats,
+      feeSats,
+      exactSpend: undefined,
+      spentFixtureRefs: body.spentFixtureRefs ?? [],
+      release,
+      walletApp: "xverse",
+    });
+    // Same refusal as funding: no chain read, no miner preflight, and no
+    // submitted job or transaction intent.
+    assertMainnetTransportClosed(permit, minerBase);
+    await callMinerSubmit({
+      permit,
+      rawTxHex,
+      transport: { endpoint: minerBase },
+    });
+    throw new MinerInclusionError("LiveMinerTransportRefused");
   });
   app.post("/api/jobs/:id/pause", async (c) => {
     const pk = `OWNER#${c.get("owner")}`,
