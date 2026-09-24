@@ -1,0 +1,13 @@
+{
+  "scope": "isolated PR30 test only",
+  "imageIndex": "sha256:851855ef0d2d1e70f9b27dc60097d3ab44c15bd0f9bdd5b624b8d4da46b9f41e",
+  "registryTag": "yukon-pr30-pin-queue-851855ef",
+  "endpoint": "mxrcrnwn8f03o6",
+  "originalJob": "1fe61800-d018-4981-8d7d-0591075a5673-u2",
+  "action": "pause max0, confirm no initializing/running worker, restrict EU-RO-1, restore max1/min0 preserving queued job",
+  "reason": "worker pull stalled while registry layer locally downloaded and hash-verified",
+  "deleteBefore": "2026-09-24T20:29:00Z",
+  "maxGpuCount": 1,
+  "priceUsdPerGpuHour": 1.1,
+  "productionChange": false
+}
