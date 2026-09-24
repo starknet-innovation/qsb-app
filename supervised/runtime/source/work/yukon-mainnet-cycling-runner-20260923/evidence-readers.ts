@@ -2,7 +2,7 @@ import {validateLineage} from './lineage';
 import {fingerprint} from '../../outputs/qsb-vault/src/lib/provenance';
 /** Files are public evidence; expected source hashes come from reviewed application enrollment, never the uploaded request. */
 import {isDeepStrictEqual} from 'node:util';
-import {readFileSync,lstatSync} from 'node:fs';import {join,resolve} from 'node:path';import {createHash} from 'node:crypto';
+import {join,resolve} from 'node:path';import {createHash} from 'node:crypto';import {readNoFollow} from '../read-nofollow';
 import {createFinalDrain} from './drain';import {validateConfig,type Config} from '../yukon-common-operational-transport-20260923/transport';
 import type {CensusStore} from '../yukon-signing-export-20260923/census-store';import type {EvidenceReaders,ReapedEvidence} from '../yukon-signing-export-20260923/publication';
 const hash=(x:string|Buffer)=>createHash('sha256').update(x).digest('hex');const same=(a:any,b:any)=>isDeepStrictEqual(a,b);function need(x:any,m:string):asserts x{if(!x)throw Error(m);}
@@ -10,7 +10,7 @@ export type Enrollment={controllerHash:string;wrapperHash:string;sourceFiles:Rec
 export function createEvidenceReaders(store:CensusStore,config:Config,key:string,directory:string,enrollment:Enrollment,predecessors:Record<string,()=>Promise<ReapedEvidence>>={}):EvidenceReaders{
  const c=validateConfig(config),e=structuredClone(enrollment),root=resolve(directory),drain=createFinalDrain(c,key),configHash=hash(JSON.stringify(c.blueprint)),runPk='SUPERVISION#'+c.blueprint.runId;
  need(/^[a-f0-9]{64}$/.test(e.controllerHash)&&/^[a-f0-9]{64}$/.test(e.wrapperHash)&&e.sourceFiles['controller.cjs']===e.controllerHash&&e.sourceFiles['supervisor.py']===e.wrapperHash,'No trusted process source enrollment');
- function file(name:string){need(!name.includes('/')&&!lstatSync(join(root,name)).isSymbolicLink(),'Unsafe evidence path');const b=readFileSync(join(root,name));need(b.length<64*1024*1024,'Oversized evidence');return b;}
+ function file(name:string){need(!name.includes('/'),'Unsafe evidence path');const b=readNoFollow(join(root,name),'Unsafe evidence path');need(b.length<64*1024*1024,'Oversized evidence');return b;}
  function shutdown(){const value=JSON.parse(file('shutdown-result.json').toString());need(value.snapshot?.runPk===runPk&&value.snapshot.configHash===configHash&&hash(JSON.stringify(value.snapshot))===value.snapshotHash,'Shutdown snapshot differs');return value;}
  async function lineageEvidence(){const owner=await store.get(runPk,'OWNER');need(owner,'Missing live owner');const first=await validateLineage(store,owner,runPk);let current:any=owner;while(current.adoption||current.contextCycle){const a=current.adoption??current.contextCycle,reader=predecessors[a.predecessor];need(typeof reader==='function','Missing trusted predecessor OS reader');const proof=await reader();need(proof.runPk===a.predecessor&&proof.configHash===a.predecessorConfigHash&&proof.snapshotHash===a.snapshotHash&&proof.processesReaped&&proof.cpuContainersAbsent&&proof.registeredRecoveryReaped&&fingerprint(proof)===a.quiescenceHash,'Predecessor OS provenance changed');current=await store.get(a.predecessor,'OWNER');need(current,'Missing predecessor');}need(same(first,await validateLineage(store,owner,runPk))&&same(owner,await store.get(runPk,'OWNER')),'Lineage changed during OS evidence');return first;}
  async function readQuiescence():Promise<ReapedEvidence>{
