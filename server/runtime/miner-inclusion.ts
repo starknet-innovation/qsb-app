@@ -969,3 +969,51 @@ export function judgeInclusionEvidence(input: unknown): InclusionJudgment {
     limits: INCLUSION_LIMITS,
   };
 }
+
+const ESPLORA_OBSERVED_LIMITS = [
+  "This status route queried Esplora for this transaction id.",
+  "HTTP success, a mempool preflight, and a miner-reported confirmation are not inclusion.",
+  "An Esplora status does not close section 7 in this checkout.",
+] as const;
+
+export type EsploraInclusionReport = {
+  format: "qsb-inclusion-judgment-v1";
+  structurallyComplete: boolean;
+  independentlyConfirmed: boolean;
+  preflightIsInclusion: false;
+  httpSuccessIsInclusion: false;
+  section7Closed: false;
+  observedByThisCheckout: boolean;
+  overclaim: boolean;
+  reason: string;
+  limits: readonly string[];
+};
+
+/** The status route's judgment. Confirmation text is used only after its Esplora query. */
+export function reportEsploraInclusion(
+  judgment: InclusionJudgment,
+  queriedThisRoute: boolean,
+): EsploraInclusionReport {
+  const observed =
+    queriedThisRoute && judgment.structurallyComplete && !judgment.overclaim;
+  if (!observed) {
+    return {
+      ...judgment,
+      independentlyConfirmed: false,
+      observedByThisCheckout: false,
+    };
+  }
+  return {
+    format: "qsb-inclusion-judgment-v1",
+    structurallyComplete: true,
+    independentlyConfirmed: true,
+    preflightIsInclusion: false,
+    httpSuccessIsInclusion: false,
+    section7Closed: false,
+    observedByThisCheckout: true,
+    overclaim: false,
+    reason:
+      "This status route queried Esplora and received a confirmed block hash, block height, and the same transaction id. That observation does not close section 7.",
+    limits: ESPLORA_OBSERVED_LIMITS,
+  };
+}

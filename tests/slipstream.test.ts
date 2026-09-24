@@ -113,6 +113,12 @@ it("requires chain confirmation and owner authentication", async () => {
       observedByThisCheckout: true,
     },
   });
+  const body = await (await f.query()).json();
+  expect(body.section7Inclusion.reason).toContain("queried Esplora");
+  expect(body.section7Inclusion.reason).not.toContain("did not query");
+  expect(body.section7Inclusion.limits.join(" ")).not.toContain(
+    "caller-supplied",
+  );
   expect(f.submit).not.toHaveBeenCalled();
 });
 it("reports provider authorization failures without retrying the request", async () => {

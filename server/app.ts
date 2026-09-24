@@ -48,6 +48,7 @@ import {
   authorizeConfiguredSpend,
   callMinerSubmit,
   judgeInclusionEvidence,
+  reportEsploraInclusion,
   transactionId,
 } from "./runtime/miner-inclusion";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
@@ -414,16 +415,12 @@ export function createApp(
         : {}),
       expectedTxid: id,
     });
-    // Only this route queried Esplora. A caller-supplied record stays unconfirmed.
-    const observedByThisCheckout =
-      chainResult.status === "fulfilled" &&
-      judgment.structurallyComplete &&
-      !judgment.overclaim;
-    const section7Inclusion = {
-      ...judgment,
-      independentlyConfirmed: observedByThisCheckout,
-      observedByThisCheckout,
-    };
+    // A fulfilled ledger.status call is this route's Esplora query. The
+    // report uses its own reason and limits when that query confirms.
+    const section7Inclusion = reportEsploraInclusion(
+      judgment,
+      chainResult.status === "fulfilled",
+    );
     return c.json({
       txid: id,
       status,

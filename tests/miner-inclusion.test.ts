@@ -19,6 +19,7 @@ import {
   localMinerTransport,
   localTransportInvocations,
   judgeInclusionEvidence,
+  reportEsploraInclusion,
   rawTransactionSha256,
   type ExternalChainId,
 } from "../server/runtime/miner-inclusion";
@@ -561,6 +562,17 @@ describe("preflight is not inclusion", () => {
     });
     expect(judgment.structurallyComplete).toBe(true);
     expect(judgment.independentlyConfirmed).toBe(false);
+    expect(judgment.reason).toContain("did not query");
+    const observed = reportEsploraInclusion(judgment, true);
+    expect(observed.independentlyConfirmed).toBe(true);
+    expect(observed.observedByThisCheckout).toBe(true);
+    expect(observed.section7Closed).toBe(false);
+    expect(observed.reason).toContain("queried Esplora");
+    expect(observed.reason).not.toContain("did not query");
+    expect(observed.limits.join(" ")).not.toContain("caller-supplied");
+    expect(reportEsploraInclusion(judgment, false).independentlyConfirmed).toBe(
+      false,
+    );
     expect(judgment.preflightIsInclusion).toBe(false);
     expect(judgment.section7Closed).toBe(false);
     expect(judgment.observedByThisCheckout).toBe(false);
