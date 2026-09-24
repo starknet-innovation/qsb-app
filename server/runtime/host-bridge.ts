@@ -67,6 +67,15 @@ export type SupervisedJob = {
   };
 };
 
+export class OwnedProcessError extends Error {
+  readonly processId?: string;
+  constructor(message: string, processId?: string) {
+    super(message);
+    this.name = "OwnedProcessError";
+    this.processId = processId;
+  }
+}
+
 export type OwnedProcessStart = () => Promise<{
   processId: string;
   /** Rejects if stdout is not exactly the acknowledgement for the process lifetime. */
@@ -357,7 +366,9 @@ export async function launchOwnedProcess(
     watchExclusiveStdout(store, owner, requestId, slot, inputHash, started);
     return acknowledged;
   } catch (error) {
-    const processId = started?.processId;
+    const processId =
+      started?.processId ??
+      (error instanceof OwnedProcessError ? error.processId : undefined);
     for (;;) {
       const current = await loadPair(store, owner, requestId, slot);
       if (processId && current.launch.processId === processId) break;
@@ -605,9 +616,11 @@ export async function replaceOwnedProcess(
     watchExclusiveStdout(store, owner, requestId, slot, inputHash, started);
     return replaced;
   } catch (error) {
-    if (startedId && startedId !== launch.processId) {
+    const carried = error instanceof OwnedProcessError ? error.processId : undefined;
+    const orphan = startedId ?? carried;
+    if (orphan && orphan !== launch.processId) {
       try {
-        await stop(startedId);
+        await stop(orphan);
       } catch {
         // The new process is not current. The launch stays uncertain below.
       }
@@ -883,14 +896,19 @@ export function localAckStarter(
         if (settled) return;
         settled = true;
         child.kill("SIGKILL");
-        reject(new Error("AcknowledgementTimeout"));
+        reject(new OwnedProcessError("AcknowledgementTimeout", processId));
       }, boundMs);
       const finish = (error?: Error) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        if (error) reject(error);
-        else {
+        if (error) {
+          reject(
+            error instanceof OwnedProcessError
+              ? error
+              : new OwnedProcessError(error.message, processId),
+          );
+        } else {
           acked = true;
           resolve({ processId, stdoutExclusive });
         }
@@ -898,7 +916,7 @@ export function localAckStarter(
       const violate = () => {
         rejectExclusive(new Error("AcknowledgementRejected"));
         child.kill("SIGKILL");
-        if (!acked) finish(new Error("AcknowledgementRejected"));
+        if (!acked) finish(new OwnedProcessError("AcknowledgementRejected", processId));
       };
       const consider = () => {
         if (text.endsWith("\r")) return;
@@ -925,7 +943,7 @@ export function localAckStarter(
         const normalized = text.replace(/\r\n/g, "\n");
         if (normalized === expected) resolveExclusive();
         else if (acked) violate();
-        else finish(new Error("ProcessExitedBeforeAck"));
+        else finish(new OwnedProcessError("ProcessExitedBeforeAck", processId));
       });
     });
   return { start, exits };

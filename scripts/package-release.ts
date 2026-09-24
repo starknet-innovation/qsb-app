@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   createSourceManifest,
+  recordedManifestPath,
   serializeManifest,
   writePackageTree,
 } from "../server/runtime/package-release";
@@ -12,7 +13,7 @@ const manifestPath = path.join(root, "release/source-manifest.json");
 const manifest = createSourceManifest(root);
 const text = serializeManifest(manifest);
 if (check) {
-  const current = readFileSync(manifestPath, "utf8");
+  const current = readFileSync(recordedManifestPath(root), "utf8");
   if (current !== text) {
     console.error("release/source-manifest.json does not match this checkout");
     process.exit(1);

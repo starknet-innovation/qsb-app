@@ -64,8 +64,14 @@ export const buildMetadataPaths = [
   "README.md",
 ] as const;
 
-/** Scripts whose entrypoints are outside this source package. */
+/** Scripts whose entrypoints or toolchains are outside this source package. */
 export const unpackagedReleaseScripts = [
+  "dev",
+  "build",
+  "test",
+  "test:e2e",
+  "typecheck",
+  "vendor",
   "build:runtime",
   "build:optimized",
   "build:optimized:queue",

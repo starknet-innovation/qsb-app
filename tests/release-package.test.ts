@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -18,6 +19,7 @@ import {
   createSourceManifest,
   enrollHistoricalPair,
   nodeRequirementFromReadme,
+  recordedManifestPath,
   serializeManifest,
   verifyPackageTree,
   writePackageTree,
@@ -80,10 +82,46 @@ describe("source release package", () => {
     ) as { scripts: Record<string, string> };
     expect(packaged.scripts["build:runtime"]).toBeUndefined();
     expect(packaged.scripts["build:optimized"]).toBeUndefined();
+    expect(packaged.scripts.dev).toBeUndefined();
+    expect(packaged.scripts.build).toBeUndefined();
+    expect(packaged.scripts.test).toBeUndefined();
+    expect(packaged.scripts["test:e2e"]).toBeUndefined();
+    expect(packaged.scripts.typecheck).toBeUndefined();
+    expect(packaged.scripts.vendor).toBeUndefined();
+    expect(Object.keys(packaged.scripts)).toEqual(["package:release"]);
     expect(packaged.scripts["package:release"]).toContain("package-release");
-    expect(readFileSync(path.join(directoryForScripts, "tree/README.md"), "utf8")).toContain(
-      "Requires Node.js 22 or newer",
+    const packagedReadme = readFileSync(
+      path.join(directoryForScripts, "tree/README.md"),
+      "utf8",
     );
+    expect(packagedReadme).toContain("Requires Node.js 22 or newer");
+    expect(packagedReadme).toContain("npm run package:release -- --check");
+    expect(packagedReadme).toContain("../release-manifest.json");
+    expect(packagedReadme).not.toContain("npm run dev");
+    expect(packagedReadme).not.toContain("npm run vendor");
+    expect(packagedReadme).not.toContain("npm run build:runtime");
+    expect(existsSync(path.join(directoryForScripts, "tree/release/source-manifest.json"))).toBe(
+      false,
+    );
+    expect(recordedManifestPath(path.join(directoryForScripts, "tree"))).toBe(
+      path.join(directoryForScripts, "release-manifest.json"),
+    );
+    symlinkSync(
+      path.join(root, "node_modules"),
+      path.join(directoryForScripts, "tree/node_modules"),
+      "dir",
+    );
+    expect(
+      execFileSync(
+        process.execPath,
+        [
+          path.join(root, "node_modules/tsx/dist/cli.mjs"),
+          "scripts/package-release.ts",
+          "--check",
+        ],
+        { cwd: path.join(directoryForScripts, "tree"), encoding: "utf8" },
+      ),
+    ).toContain("matches this checkout");
     expect(manifest.buildInputs.dockerfileFlags.pinning).toEqual([
       "-O3",
       "-arch=sm_${CUDA_ARCH}",

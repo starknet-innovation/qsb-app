@@ -178,7 +178,41 @@ export function nodeRequirementFromReadme(text: string): {
   return { node: ">=22", nodeSource: "README.md" };
 }
 
-/** Drop build scripts whose files are not part of this source package. */
+const PACKAGED_README = `# QSB source release
+
+**Research snapshot — not a production release. Mainnet operations are disabled by default.** Do not use this package to hold real funds.
+
+This tree is the enrolled source closure. It does not include the Vite application, Playwright or unit-test harnesses, \`scripts/vendor.py\`, or the experimental runtime and optimized-image build entrypoints. Those commands remain in the full checkout.
+
+Requires Node.js 22 or newer, npm, and Python 3.
+
+From this directory, check the sibling manifest:
+
+\`\`\`sh
+npm ci
+npm run package:release -- --check
+\`\`\`
+
+\`package:release --check\` rebuilds the source manifest from this tree and compares it to \`../release-manifest.json\`. It does not build a CUDA image, and \`research/optimized-subset\` is not selected by \`worker/Dockerfile\`. \`broadcastAuthorized\` and mainnet stay disabled.
+`;
+
+/** Instructions for the packaged tree. The full checkout README is left unchanged. */
+export function packagedReadme(text: string): string {
+  nodeRequirementFromReadme(text);
+  if (text === PACKAGED_README) return text;
+  return PACKAGED_README;
+}
+
+/** A checkout records release/source-manifest.json. A packaged tree compares the sibling manifest. */
+export function recordedManifestPath(root: string): string {
+  const checkout = path.join(root, "release", "source-manifest.json");
+  if (existsSync(checkout)) return checkout;
+  const sibling = path.resolve(root, "..", "release-manifest.json");
+  if (existsSync(sibling)) return sibling;
+  throw new Error("Release manifest is not enrolled");
+}
+
+/** Drop scripts whose files or toolchains are not part of this source package. */
 export function packagedPackageJson(checkoutText: string): string {
   const parsed = JSON.parse(checkoutText) as {
     scripts?: Record<string, string>;
@@ -276,9 +310,10 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
-  const nodeRequirement = nodeRequirementFromReadme(
+  const packagedReadmeText = packagedReadme(
     readFileSync(assertInsideRepo(root, "README.md"), "utf8"),
   );
+  const nodeRequirement = nodeRequirementFromReadme(packagedReadmeText);
   const required = enrolledSourcePaths(root);
   for (const relativePath of required) {
     if (!existsSync(assertInsideRepo(root, relativePath)))
@@ -297,7 +332,9 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
     sourceFiles[relativePath] =
       relativePath === "package.json"
         ? sha256Hex(packagedPackage)
-        : hashFile(root, relativePath);
+        : relativePath === "README.md"
+          ? sha256Hex(packagedReadmeText)
+          : hashFile(root, relativePath);
   }
   const components = componentIdentities(sourceFiles);
   const manifest: SourceReleaseManifest = {
@@ -429,6 +466,8 @@ export function writePackageTree(
         destination,
         packagedPackageJson(readFileSync(source, "utf8")),
       );
+    } else if (relativePath === "README.md") {
+      writeFileSync(destination, packagedReadme(readFileSync(source, "utf8")));
     } else {
       copyFileSync(source, destination);
     }
@@ -572,9 +611,12 @@ function assertSourceDerivedFields(
     if (packageJson.scripts && name in packageJson.scripts)
       throw new Error("Packaged release advertises an unusable build script");
   }
-  const nodeRequirement = nodeRequirementFromReadme(
-    readPackagedFile(treeRoot, "README.md").toString("utf8"),
-  );
+  const readme = readPackagedFile(treeRoot, "README.md").toString("utf8");
+  const nodeRequirement = nodeRequirementFromReadme(readme);
+  for (const name of unpackagedReleaseScripts) {
+    if (new RegExp(`npm run ${name}(?:\\s|$)`).test(readme))
+      throw new Error("Packaged release advertises an unusable command");
+  }
   const packageJsonSha256 = sha256Hex(packageJsonText);
   const packageLockSha256 = sha256Hex(readPackagedFile(treeRoot, "package-lock.json"));
   const archivedRelease = JSON.parse(

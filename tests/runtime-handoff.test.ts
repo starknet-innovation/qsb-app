@@ -427,6 +427,11 @@ describe("supervised runtime handoff", () => {
     expect(paused.status).toBe("paused");
     expect(paused.runtime.searchRunning).toBe(false);
     expect(paused.error).toContain("Submission outcome unknown");
+    const uncertain = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+    )?.launch as { state: string; processId?: string };
+    expect(uncertain.state).toBe("uncertain");
+    expect(uncertain.processId).toMatch(/^\d+$/);
     await Promise.all(hanging.exits);
   });
 
