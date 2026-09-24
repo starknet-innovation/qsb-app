@@ -15,7 +15,11 @@ import {
   subsetAccounted,
   type CoverageScope,
 } from "../server/runtime/coverage-ledger";
-import { judgeEvidence, reviewGenericPath } from "../server/runtime/solver-review";
+import {
+  judgeEvidence,
+  reviewGenericPath,
+  sourceIdentity,
+} from "../server/runtime/solver-review";
 
 const root = process.cwd();
 const pinA = "2147483648:500000000";
@@ -254,6 +258,34 @@ describe("source-bound solver review", () => {
         nativeBinarySha256: "ab".repeat(32),
       }),
     ).toEqual({ accepted: false, reason: "native-not-run" });
+    const included = [
+      "research/optimized-subset/subset/GPUHash.h",
+      "research/optimized-subset/subset/chain_replay_field.cuh",
+      "research/optimized-subset/subset/hit_filter_field.cuh",
+      "research/optimized-subset/subset/hit_filter_field_sc.cuh",
+      "research/optimized-subset/subset/square32.cuh",
+      "research/optimized-subset/subset/tests/gpu_epochs/prefix_cache.cuh",
+      "research/optimized-subset/subset/tests/gpu_epochs/window_schedule_shared.cuh",
+      "research/optimized-subset/subset/tests/gpu_epochs/exact_recovery.h",
+      "research/optimized-subset/subset/tests/gpu_epochs/hm39_divstep.cuh",
+    ];
+    for (const relativePath of included) {
+      expect(review.files[relativePath]).toMatch(/^[a-f0-9]{64}$/);
+    }
+    const gpuHash = included[0];
+    if (gpuHash === undefined) throw new Error("missing include");
+    const previous = review.files[gpuHash];
+    const altered = { ...review.files, [gpuHash]: "ab".repeat(32) };
+    expect(sourceIdentity(altered)).not.toBe(review.sourceSha256);
+    expect(sourceIdentity(review.files)).toBe(review.sourceSha256);
+    expect(previous).not.toBe(altered[gpuHash]);
+    expect(
+      judgeEvidence(review, {
+        kind: "source-review",
+        sourceSha256: sourceIdentity(altered),
+        nativeBinarySha256: null,
+      }),
+    ).toEqual({ accepted: false, reason: "source-mismatch" });
   });
 
   it("checks the admitted field rule and strict DER predicate on the CPU", () => {

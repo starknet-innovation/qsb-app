@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { sha256Hex } from "./identity";
 
@@ -8,18 +8,14 @@ export const SELECTED_GENERIC_FLAGS = {
   QSB_PAIR_SHARED: 0,
 } as const;
 
-const REVIEWED_FILES = [
-  "research/optimized-subset/subset/GPUMath.h",
+/** Compile unit for the ranked generic path. Its quoted includes are the review closure. */
+const REVIEW_ENTRYPOINTS = [
   "research/optimized-subset/subset/tests/gpu_epochs/tree.cu",
-  "research/optimized-subset/subset/tests/gpu_epochs/tree_inverse.cuh",
-  "research/optimized-subset/subset/tests/gpu_epochs/zinv32.cuh",
-  "research/optimized-subset/subset/tests/gpu_epochs/exact_resolve.cuh",
-  "research/optimized-subset/subset/tests/gpu_epochs/pair_shared.cuh",
-  "research/optimized-subset/subset/tests/gpu_epochs/cuda_checked.h",
-  "research/optimized-subset/subset/tests/gpu_epochs/openssl_checked.h",
 ] as const;
 
-const REQUIRED_MARKERS: Record<(typeof REVIEWED_FILES)[number], readonly string[]> = {
+const OPTIMIZED_ROOT = "research/optimized-subset/";
+
+const REQUIRED_MARKERS: Record<string, readonly string[]> = {
   "research/optimized-subset/subset/GPUMath.h": [
     "The input contract permits all four-limb values <2^256.",
   ],
@@ -139,25 +135,63 @@ export type EvidenceJudgment = {
     | "binary-mismatch";
 };
 
+const LOCAL_INCLUDE = /^\s*#\s*include\s+"([^"]+)"/gm;
+
+/** Quoted includes, resolved from the including file and walked until the local set closes. */
+export function reviewedSourceClosure(root: string): string[] {
+  const seen = new Set<string>();
+  const pending: string[] = [...REVIEW_ENTRYPOINTS];
+  while (pending.length > 0) {
+    const relativePath = pending.pop();
+    if (relativePath === undefined || seen.has(relativePath)) continue;
+    if (!relativePath.startsWith(OPTIMIZED_ROOT) || relativePath.includes(".."))
+      throw new Error(`Solver include escapes the optimized tree: ${relativePath}`);
+    const absolute = path.join(root, relativePath);
+    if (!existsSync(absolute))
+      throw new Error(`Missing solver include ${relativePath}`);
+    seen.add(relativePath);
+    const text = readFileSync(absolute, "utf8");
+    const directory = path.posix.dirname(relativePath);
+    for (const match of text.matchAll(LOCAL_INCLUDE)) {
+      const spec = match[1];
+      if (spec === undefined) continue;
+      const resolved = path.posix.normalize(path.posix.join(directory, spec));
+      pending.push(resolved);
+    }
+  }
+  for (const relativePath of Object.keys(REQUIRED_MARKERS)) {
+    if (!seen.has(relativePath))
+      throw new Error(`Marker file is outside the include closure: ${relativePath}`);
+  }
+  return [...seen].sort();
+}
+
+/** Stable digest of every file in the closure. An omitted header cannot keep this hash. */
+export function sourceIdentity(files: Readonly<Record<string, string>>): string {
+  const joined = Object.keys(files)
+    .sort()
+    .map((relativePath) => `${relativePath}:${files[relativePath]}`)
+    .join("\n");
+  return sha256Hex(joined);
+}
+
 export function reviewGenericPath(root: string): SolverReview {
   const files: Record<string, string> = {};
-  for (const relativePath of REVIEWED_FILES) {
+  for (const relativePath of reviewedSourceClosure(root)) {
     const text = readFileSync(path.join(root, relativePath), "utf8");
-    for (const marker of REQUIRED_MARKERS[relativePath]) {
+    for (const marker of REQUIRED_MARKERS[relativePath] ?? []) {
       if (!text.includes(marker))
         throw new Error(`Missing solver marker ${marker} in ${relativePath}`);
     }
     files[relativePath] = sha256Hex(text);
   }
-  const tree = readFileSync(
+  const tree = files["research/optimized-subset/subset/tests/gpu_epochs/tree.cu"];
+  const treeText = readFileSync(
     path.join(root, "research/optimized-subset/subset/tests/gpu_epochs/tree.cu"),
     "utf8",
   );
-  if (tree.includes("? 64 :"))
+  if (tree === undefined || treeText.includes("? 64 :"))
     throw new Error("Ranked hit output still truncates at 64");
-  const joined = REVIEWED_FILES.map((relativePath) => `${relativePath}:${files[relativePath]}`).join(
-    "\n",
-  );
   return {
     kind: "source-review",
     selectedFlags: SELECTED_GENERIC_FLAGS,
@@ -167,7 +201,7 @@ export function reviewGenericPath(root: string): SolverReview {
     predecessorEvidenceEnrolled: false,
     mainnetEnabled: false,
     broadcastAuthorized: false,
-    sourceSha256: sha256Hex(joined),
+    sourceSha256: sourceIdentity(files),
     files,
     assumptions: algorithmAssumptions,
   };
