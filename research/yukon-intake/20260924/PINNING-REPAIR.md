@@ -925,3 +925,16 @@ publication is rejected. The test table, container and volume were removed;
 This closes the composed process/database restart case. Provider transport and
 status reads remain mocked saved-response replay; it is not a new GPU execution,
 AWS regional durability certification, positive-hit proof or fresh withdrawal.
+
+## Startup capacity assessment
+
+[STARTUP-CAPACITY.md](STARTUP-CAPACITY.md) separates observed worker records from
+physical GPU allocation and billing. Official documentation describes extra
+startup workers; inspected CLI create/update interfaces expose no confirmed
+standby-disable control. This explains a plausible source of the records without
+certifying the strict one-GPU bound. Live execution enrollment remains blocked.
+No additional paid work or provider mutation was performed.
+
+All GitHub checks for `ee9da5f95c1386d1d520f0ce73dfea03e448d4d2` passed, including
+CUDA validation, application tests/typecheck and CodeQL. This does not close
+independent review, positive GPU hit publication or fresh end-to-end proof.
