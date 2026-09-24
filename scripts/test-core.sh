@@ -29,7 +29,15 @@ set +e
 python3 - "${ROOT}/server/runtime/core-binary.json" "${BIN}/bitcoind" "${BIN}/bitcoin-cli" <<'PY'
 import hashlib, json, sys
 identity = json.load(open(sys.argv[1]))
-if identity.get("enrolled") is not True or not identity.get("bitcoindSha256") or not identity.get("bitcoinCliSha256"):
+if identity.get("format") != "qsb-core-binary-enrollment-v1":
+    sys.exit(5)
+def sha(value):
+    return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+both = sha(identity.get("bitcoindSha256")) and sha(identity.get("bitcoinCliSha256"))
+neither = identity.get("bitcoindSha256") is None and identity.get("bitcoinCliSha256") is None
+if not isinstance(identity.get("enrolled"), bool) or not (both or neither) or identity["enrolled"] != both:
+    sys.exit(5)
+if identity["enrolled"] is not True:
     sys.exit(3)
 def digest(path):
     return hashlib.sha256(open(path, "rb").read()).hexdigest()
@@ -40,6 +48,9 @@ status=$?
 set -e
 if [[ "${status}" -eq 3 ]]; then
   not_run "No reviewed Bitcoin Core binary is enrolled. An executable named bitcoind is not harness evidence and does not close section 6."
+fi
+if [[ "${status}" -eq 5 ]]; then
+  not_run "server/runtime/core-binary.json is not a valid Core enrollment record. This is not harness evidence and does not close section 6."
 fi
 if [[ "${status}" -ne 0 ]]; then
   not_run "The Bitcoin Core binaries do not match the enrolled hashes. This is not harness evidence and does not close section 6."

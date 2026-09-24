@@ -1,8 +1,16 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { fingerprint } from "../../src/lib/provenance";
 import type { Row } from "../store";
 import { assertNoCredentialMaterial } from "./host-requirements";
-import { sourceReleaseManifestSchema } from "./package-release";
+import {
+  createSourceManifest,
+  serializeManifest,
+  sourceReleaseManifestSchema,
+  type SourceReleaseManifest,
+} from "./package-release";
 import { inventoryRows } from "./storage-authority";
 import { SUPERVISED_PROFILE_ID } from "./types";
 
@@ -54,6 +62,48 @@ export type EnrolledRelease = {
   broadcastAuthorized: false;
 };
 
+function checkoutRoot(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+}
+
+type ParsedReleaseManifest = z.infer<typeof sourceReleaseManifestSchema>;
+
+function readCommittedManifest(root: string): ParsedReleaseManifest {
+  try {
+    return sourceReleaseManifestSchema.parse(
+      JSON.parse(
+        readFileSync(path.join(root, "release/source-manifest.json"), "utf8"),
+      ),
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message === "ReleaseManifestRejected")
+      throw error;
+    throw new Error("ReleaseManifestRejected");
+  }
+}
+
+let verifiedCheckout: { root: string; serialized: string } | undefined;
+
+/** The presented manifest must be the committed file and the hashed checkout. */
+function assertBoundReleaseManifest(
+  manifest: ParsedReleaseManifest,
+  root: string,
+): void {
+  const serialized = serializeManifest(manifest as SourceReleaseManifest);
+  if (
+    serializeManifest(readCommittedManifest(root) as SourceReleaseManifest) !==
+    serialized
+  )
+    throw new Error("ReleaseEnrollmentMismatch");
+  if (!verifiedCheckout || verifiedCheckout.root !== root)
+    verifiedCheckout = {
+      root,
+      serialized: serializeManifest(createSourceManifest(root)),
+    };
+  if (verifiedCheckout.serialized !== serialized)
+    throw new Error("ReleaseEnrollmentMismatch");
+}
+
 export function enrolledReleaseIdentity(manifest: unknown): EnrolledRelease {
   assertNoCredentialMaterial(manifest);
   const parsed = sourceReleaseManifestSchema.safeParse(manifest);
@@ -80,6 +130,7 @@ export function enrolledReleaseIdentity(manifest: unknown): EnrolledRelease {
       throw new Error("NativeBinaryEnrollmentNotInThisCheckout");
     throw new Error("ReleaseManifestRejected");
   }
+  assertBoundReleaseManifest(parsed.data, checkoutRoot());
   return {
     profileId: SUPERVISED_PROFILE_ID,
     sourceManifestSha256: fingerprint(parsed.data),
@@ -157,6 +208,12 @@ export function selectProofRunner(input: {
     throw new Error("ChainLabelMismatch");
   if (input.requestedChain !== service.configuredChain)
     throw new Error("ProofChainMismatch");
+  const bound = enrolledReleaseIdentity(readCommittedManifest(checkoutRoot()));
+  if (
+    input.enrolled.sourceManifestSha256 !== bound.sourceManifestSha256 ||
+    input.enrolled.profileId !== bound.profileId
+  )
+    throw new Error("ReleaseEnrollmentMismatch");
   switch (service.configuredChain) {
     case "regtest":
       break;
@@ -170,8 +227,8 @@ export function selectProofRunner(input: {
     }
   }
   if (
-    service.sourceManifestSha256 !== input.enrolled.sourceManifestSha256 ||
-    service.releaseProfileId !== input.enrolled.profileId
+    service.sourceManifestSha256 !== bound.sourceManifestSha256 ||
+    service.releaseProfileId !== bound.profileId
   )
     throw new Error("ReleaseEnrollmentMismatch");
   return {
@@ -315,6 +372,7 @@ export function spentRefsFromInventory(rows: Row[]): SpentFixtureRef[] {
     if (requestId || vaultId || publicCommitmentHash || label)
       refs.push({ requestId, vaultId, publicCommitmentHash, label });
     const manifest = record(job?.manifest);
+    pushOutpoint(refs, vault?.funding);
     pushOutpoint(refs, manifest?.funding);
     pushOutpoint(refs, manifest?.helper);
     if (text(row.txid) && typeof row.vout === "number")
@@ -432,6 +490,7 @@ export function scaffoldDisposableProofRequest(input: {
     ...(input.outpoints ? { outpoints: input.outpoints } : {}),
     ...(input.fixtureLabel ? { fixtureLabel: input.fixtureLabel } : {}),
   });
+  assertUniqueOutpoints(parsed.outpoints);
   const freshness = assessProofFreshness({
     requestId: parsed.requestId,
     vaultId: parsed.vaultId,
@@ -936,30 +995,66 @@ export function judgeCoreReport(value: unknown): CoreJudgment {
   };
 }
 
-/** No reviewed Bitcoin Core binary is enrolled in this checkout. */
-export const enrolledCoreBinaries = {
-  format: "qsb-core-binary-enrollment-v1",
-  bitcoindSha256: null,
-  bitcoinCliSha256: null,
-  enrolled: false,
-} as const;
+const coreBinaryEnrollmentSchema = z
+  .object({
+    format: z.literal("qsb-core-binary-enrollment-v1"),
+    bitcoindSha256: hash64.nullable(),
+    bitcoinCliSha256: hash64.nullable(),
+    enrolled: z.boolean(),
+  })
+  .strict()
+  .refine(
+    (value) => {
+      const both =
+        value.bitcoindSha256 !== null && value.bitcoinCliSha256 !== null;
+      const neither =
+        value.bitcoindSha256 === null && value.bitcoinCliSha256 === null;
+      return (both || neither) && value.enrolled === both;
+    },
+    { message: "Core binary enrollment is inconsistent" },
+  );
 
-export function admitCoreHarnessResult(value: unknown): CoreJudgment {
+export type CoreBinaryEnrollment = z.infer<typeof coreBinaryEnrollmentSchema>;
+
+/** Checkout enrollment file shared with scripts/test-core.sh. */
+export function coreBinaryEnrollmentPath(): string {
+  return fileURLToPath(new URL("./core-binary.json", import.meta.url));
+}
+
+export function loadCoreBinaryEnrollment(
+  filePath: string = coreBinaryEnrollmentPath(),
+): CoreBinaryEnrollment {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(filePath, "utf8"));
+  } catch {
+    throw new Error("CoreBinaryEnrollmentRejected");
+  }
+  const parsed = coreBinaryEnrollmentSchema.safeParse(raw);
+  if (!parsed.success) throw new Error("CoreBinaryEnrollmentRejected");
+  return parsed.data;
+}
+
+export function admitCoreHarnessResult(
+  value: unknown,
+  enrollmentPath?: string,
+): CoreJudgment {
   const judgment = judgeCoreReport(value);
   if (judgment.overclaim) throw new Error("CoreReportOverclaimsSection6");
   if (!judgment.harnessRan) return judgment;
   if (judgment.chain !== "regtest")
     throw new Error("ControlledProofChainMustBeRegtest");
+  const enrollment = loadCoreBinaryEnrollment(enrollmentPath);
   if (
-    !enrolledCoreBinaries.enrolled ||
-    enrolledCoreBinaries.bitcoindSha256 === null ||
-    enrolledCoreBinaries.bitcoinCliSha256 === null
+    !enrollment.enrolled ||
+    enrollment.bitcoindSha256 === null ||
+    enrollment.bitcoinCliSha256 === null
   )
     throw new Error("CoreBinaryNotEnrolled");
   const binaries = record(record(value)?.coreBinaries);
   if (
-    binaries?.bitcoindSha256 !== enrolledCoreBinaries.bitcoindSha256 ||
-    binaries?.bitcoinCliSha256 !== enrolledCoreBinaries.bitcoinCliSha256
+    binaries?.bitcoindSha256 !== enrollment.bitcoindSha256 ||
+    binaries?.bitcoinCliSha256 !== enrollment.bitcoinCliSha256
   )
     throw new Error("CoreBinaryMismatch");
   return judgment;

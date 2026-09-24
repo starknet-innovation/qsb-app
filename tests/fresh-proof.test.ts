@@ -1,5 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -13,6 +18,7 @@ import {
   assessProofFreshness,
   classifySearchEvidence,
   enrolledReleaseIdentity,
+  loadCoreBinaryEnrollment,
   exportDisposableSigningBundle,
   judgeCoreReport,
   parseDisposableSigningBundle,
@@ -217,6 +223,21 @@ describe("proof runner selection", () => {
         broadcastAuthorized: false,
       }),
     ).toThrow(/ReleaseManifestRejected/);
+    const forged = structuredClone(manifest);
+    forged.identities.sourceFiles["server/runtime/fresh-proof.ts"] =
+      "ab".repeat(32);
+    expect(() => enrolledReleaseIdentity(forged)).toThrow(
+      /ReleaseEnrollmentMismatch/,
+    );
+    const forgedHash = "cd".repeat(32);
+    expect(() =>
+      selectProofRunner({
+        requestedChain: "regtest",
+        advertisedChain: "regtest",
+        service: service({ sourceManifestSha256: forgedHash }),
+        enrolled: { ...enrolled(), sourceManifestSha256: forgedHash },
+      }),
+    ).toThrow(/ReleaseEnrollmentMismatch/);
   });
 
   it("records a regtest selection without contacting a runner or certifying a fresh search", () => {
@@ -309,6 +330,37 @@ describe("freshness and disposable requests", () => {
       }),
     );
     expect(sameVaultDifferentRequest.restartsHistoricalFixture).toBe(false);
+    const fundingTxid = "44".repeat(32);
+    expect(() =>
+      scaffoldDisposableProofRequest(
+        requestInput({
+          outpoints: [{ txid: fundingTxid, vout: 0 }],
+          rows: [
+            unrelatedRow(),
+            {
+              pk: "OWNER#spent-vault",
+              sk: "VAULT#spent",
+              version: 1,
+              vault: {
+                id: "66666666-6666-4666-8666-666666666666",
+                status: "spent",
+                funding: { txid: fundingTxid, vout: 0, value: "100000" },
+              },
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/HistoricalFixtureRestartRefused:outpoint:/);
+    expect(() =>
+      scaffoldDisposableProofRequest(
+        requestInput({
+          outpoints: [
+            { txid: otherTxid, vout: 1 },
+            { txid: otherTxid, vout: 1 },
+          ],
+        }),
+      ),
+    ).toThrow(/DuplicateOutpoint/);
   });
 });
 
@@ -614,6 +666,57 @@ describe("core harness judgment", () => {
         section6Closed: false,
       }),
     ).toThrow(/ControlledProofChainMustBeRegtest/);
+    const checkoutEnrollment = loadCoreBinaryEnrollment();
+    expect(checkoutEnrollment.enrolled).toBe(false);
+    expect(checkoutEnrollment.bitcoindSha256).toBeNull();
+    expect(checkoutEnrollment.bitcoinCliSha256).toBeNull();
+    const enrolledFile = path.join(
+      mkdtempSync(path.join(tmpdir(), "qsb-core-enrollment-")),
+      "core-binary.json",
+    );
+    const bitcoindSha256 = "ab".repeat(32);
+    const bitcoinCliSha256 = "cd".repeat(32);
+    writeFileSync(
+      enrolledFile,
+      JSON.stringify({
+        format: "qsb-core-binary-enrollment-v1",
+        bitcoindSha256,
+        bitcoinCliSha256,
+        enrolled: true,
+      }),
+    );
+    const admitted = admitCoreHarnessResult(
+      {
+        harnessRan: true,
+        network: "regtest",
+        fullProductionWithdrawalVerified: false,
+        freshOptimizedWithdrawal: false,
+        section6Closed: false,
+        tests: [{ name: "regtest-report", passed: true }],
+        coreBinaries: { bitcoindSha256, bitcoinCliSha256 },
+      },
+      enrolledFile,
+    );
+    expect(admitted.harnessRan).toBe(true);
+    expect(admitted.section6Closed).toBe(false);
+    expect(admitted.freshOptimizedWithdrawal).toBe(false);
+    expect(() =>
+      admitCoreHarnessResult(
+        {
+          harnessRan: true,
+          network: "regtest",
+          section6Closed: false,
+          coreBinaries: {
+            bitcoindSha256: "ef".repeat(32),
+            bitcoinCliSha256,
+          },
+        },
+        enrolledFile,
+      ),
+    ).toThrow(/CoreBinaryMismatch/);
+    expect(() => loadCoreBinaryEnrollment(enrolledFile + ".missing")).toThrow(
+      /CoreBinaryEnrollmentRejected/,
+    );
   });
 
   it("wires a missing bitcoind to a not-run report", () => {

@@ -17,11 +17,6 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'vendor/qsb/config_a/pipeline'))
-sys.path.insert(0, str(ROOT / 'vendor/qsb/config_a/verify'))
-from bitcoin_tx import Transaction, TxIn, TxOut, QSBScriptBuilder, find_and_delete, push_data, push_number, _valid_small_r_values
-from secp256k1 import encode_der_sig
-from test_consensus_core import relax, parse_der, recover_key
 
 BIN = Path(os.environ.get('BITCOIN_BIN', '/bitcoin/bin'))
 REPORT = Path(os.environ.get('QSB_CORE_REPORT', '/results/results.json'))
@@ -58,6 +53,14 @@ def main():
 
 
 def run_regtest():
+    # Vendor modules exist only after npm run vendor. The classification-only
+    # path must still write a not-run report without them.
+    sys.path.insert(0, str(ROOT / 'vendor/qsb/config_a/pipeline'))
+    sys.path.insert(0, str(ROOT / 'vendor/qsb/config_a/verify'))
+    from bitcoin_tx import Transaction, TxIn, TxOut, QSBScriptBuilder, find_and_delete, push_data, push_number, _valid_small_r_values
+    from secp256k1 import encode_der_sig
+    from test_consensus_core import relax, parse_der, recover_key
+
     with tempfile.TemporaryDirectory(prefix='qsb-core-') as data:
         node = subprocess.Popen([str(BIN / 'bitcoind'), f'-datadir={data}',
             '-regtest', '-server', '-listen=0', '-connect=0', '-dnsseed=0',
