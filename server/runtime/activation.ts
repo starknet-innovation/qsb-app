@@ -61,7 +61,7 @@ const commit40 = z.string().regex(/^[0-9a-f]{40}$/);
 const ociDigest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const positiveUnits = z.string().regex(/^[1-9][0-9]{0,15}$/);
 const forbiddenCommitPath =
-  /(^|\/)\.env($|\.)|\.pem$|\.key$|id_rsa|credentials\.json|wallet-backup|secret\./i;
+  /(^|[\\/])\.env($|[\\/.])|\.pem$|\.key$|id_rsa|credentials\.json|wallet-backup|secret\./i;
 
 const decisionSchema = z
   .object({

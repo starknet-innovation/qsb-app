@@ -331,6 +331,21 @@ describe("deployment verification", () => {
     expect(() =>
       assertProposedCommitHasNoSecrets([{ path: ".env", text: "X=1" }]),
     ).toThrow("SecretCommitRefused");
+    for (const secretPath of [
+      ".env/config.json",
+      ".env\\config.json",
+      "runtime/.env/config.json",
+      "runtime/.env.local",
+    ]) {
+      expect(() =>
+        assertProposedCommitHasNoSecrets([{ path: secretPath, text: "{}" }]),
+      ).toThrow("SecretCommitRefused");
+    }
+    expect(
+      assertProposedCommitHasNoSecrets([
+        { path: "environment.json", text: JSON.stringify({ enabled: false }) },
+      ]).verdict,
+    ).toBe("clean");
     expect(() =>
       assertProposedCommitHasNoSecrets([
         {
