@@ -583,9 +583,21 @@ export function verifyPackageTree(outDir: string): SourceReleaseManifest {
   )
     throw new Error("Release manifest claims an identity this checkout did not produce");
   const treeRoot = path.resolve(outDir, "tree");
+  const required = enrolledSourcePaths(treeRoot);
+  for (const relativePath of required) {
+    if (!existsSync(path.join(treeRoot, relativePath)))
+      throw new Error(`Missing release input ${relativePath}`);
+  }
+  const pinningFiles = walkFiles(treeRoot, historicalCandidateRoots[0], true);
+  const subsetFiles = walkFiles(treeRoot, historicalCandidateRoots[1], true);
+  enrollHistoricalPair(pinningFiles, subsetFiles);
+  const optimized = walkFiles(treeRoot, optimizedSubsetRoot, true);
+  if (!optimized.length)
+    throw new Error("Optimized subset source is not in this checkout");
+  const closure = [...new Set([...required, ...pinningFiles, ...subsetFiles, ...optimized])].sort();
   const walked = walkFiles(treeRoot, ".", false);
   const enrolledPaths = Object.keys(manifest.identities.sourceFiles).sort();
-  if (walked.join("\n") !== enrolledPaths.join("\n"))
+  if (closure.join("\n") !== enrolledPaths.join("\n") || walked.join("\n") !== enrolledPaths.join("\n"))
     throw new Error("Packaged tree does not match the manifest path set");
   for (const [relativePath, digest] of Object.entries(
     manifest.identities.sourceFiles,

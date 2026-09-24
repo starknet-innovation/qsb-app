@@ -1349,4 +1349,72 @@ describe("supervised runtime handoff", () => {
     expect(conflicts).toBe(0);
     expect(state).toBe("uncertain");
   });
+
+  it("does not drain a sibling that is still launching without a pid", async () => {
+    const { store, admitted } = await claimedFixture();
+    await openSiblingSlot(store, address, admitted.job.id, admitted.job.mainnetRequestHash);
+    const row = await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#1`);
+    const launch = row?.launch as { state: string; processId?: string };
+    launch.state = "launching";
+    delete launch.processId;
+    await store.put({ ...row!, launch, version: row!.version + 1 }, row!.version);
+    await expect(
+      drainSibling(store, address, admitted.job.id, admitted.job.mainnetRequestHash),
+    ).rejects.toThrow(/SiblingProcessStillLive/);
+    expect(
+      (
+        (await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#1`))?.launch as {
+          state: string;
+        }
+      ).state,
+    ).toBe("launching");
+  });
+
+  it("does not drain a sibling whose replacement starts while it is stopping", async () => {
+    const { store, admitted } = await claimedFixture();
+    await openSiblingSlot(store, address, admitted.job.id, admitted.job.mainnetRequestHash);
+    const line = acknowledgementLine(admitted.job.mainnetRequestHash);
+    const starter = localAckStarter(
+      process.execPath,
+      [
+        "-e",
+        `process.stdout.write(${JSON.stringify(line)}, () => setTimeout(() => {}, 10000))`,
+      ],
+      2000,
+      admitted.job.mainnetRequestHash,
+    );
+    const acknowledged = await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      1,
+      admitted.job.mainnetRequestHash,
+      starter.start,
+      new Date(),
+      2000,
+    );
+    await expect(
+      drainSibling(
+        store,
+        address,
+        admitted.job.id,
+        admitted.job.mainnetRequestHash,
+        async () => {
+          const row = await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#1`);
+          const launch = row?.launch as { state: string; replacement?: string };
+          launch.state = "replacing";
+          launch.replacement = "starting";
+          await store.put({ ...row!, launch, version: row!.version + 1 }, row!.version);
+        },
+      ),
+    ).rejects.toThrow(/ReplaceInProgress/);
+    const launch = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#1`)
+    )?.launch as { state: string; processId?: string; evidence?: { outcome?: string } };
+    expect(launch.state).toBe("replacing");
+    expect(launch.processId).toBe(acknowledged.processId);
+    expect(launch.evidence?.outcome).toBeUndefined();
+    process.kill(Number(acknowledged.processId), "SIGKILL");
+    await Promise.all(starter.exits);
+  });
 });

@@ -628,15 +628,17 @@ export async function drainSibling(
     throw new Error("ReplaceInProgress");
   if (launch.state === "terminal") return launch;
   const live =
-    launch.processId !== undefined &&
-    (launch.state === "acknowledged" ||
-      launch.state === "running" ||
-      launch.state === "launching" ||
-      launch.state === "uncertain");
+    launch.state === "launching" ||
+    (launch.processId !== undefined &&
+      (launch.state === "acknowledged" ||
+        launch.state === "running" ||
+        launch.state === "uncertain"));
   if (live) {
     if (!stop || !launch.processId) throw new Error("SiblingProcessStillLive");
     await stop(launch.processId);
     const current = await loadPair(store, owner, requestId, 1);
+    if (current.launch.replacement || current.launch.state === "replacing")
+      throw new Error("ReplaceInProgress");
     if (
       current.launch.processId !== launch.processId ||
       current.launch.providerSubmissions !== 0 ||

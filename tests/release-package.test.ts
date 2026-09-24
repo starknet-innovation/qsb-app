@@ -14,6 +14,7 @@ import { enrolledSourcePaths } from "../server/runtime/closure";
 import { assertInsideRepo, certifyWrapper, sha256Hex } from "../server/runtime/identity";
 import {
   assertCompatibleStages,
+  componentIdentities,
   createSourceManifest,
   enrollHistoricalPair,
   serializeManifest,
@@ -224,6 +225,16 @@ describe("source release package", () => {
     images.buildInputs.images.build = "forged.example/image:latest";
     writeFileSync(manifestPathAgain, JSON.stringify(images));
     expect(() => verifyPackageTree(directory)).toThrow(/build inputs/);
+    writePackageTree(root, directory, manifest);
+    const incompletePath = path.join(directory, "release-manifest.json");
+    const incomplete = JSON.parse(readFileSync(incompletePath, "utf8")) as {
+      identities: { sourceFiles: Record<string, string>; components: Record<string, string> };
+    };
+    delete incomplete.identities.sourceFiles["server/runtime/dispatcher.ts"];
+    incomplete.identities.components = componentIdentities(incomplete.identities.sourceFiles);
+    rmSync(path.join(directory, "tree/server/runtime/dispatcher.ts"));
+    writeFileSync(incompletePath, JSON.stringify(incomplete));
+    expect(() => verifyPackageTree(directory)).toThrow(/Missing release input/);
   });
 
   it("refuses release paths outside this checkout", () => {
