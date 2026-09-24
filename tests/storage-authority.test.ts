@@ -764,6 +764,71 @@ describe("durable storage authority rehearsal", () => {
     );
   });
 
+  it("keeps validation retry history and credited coverage through a restore", () => {
+    const withLedger = {
+      pk: "OWNER#owner",
+      sk: "JOB#coverage-ledger",
+      version: 1,
+      job: { status: "failed" },
+      validation: {
+        active: [] as unknown[],
+        cancel: [] as unknown[],
+        interrupted: [] as unknown[],
+        retry: [4, 5],
+        completed: 1,
+        coverageLedger: {
+          accounts: [
+            {
+              sessionId: "owner/job",
+              solverPin: "solver-a",
+              pinning: [{ start: 0, end: 2 }],
+              subsets: {
+                "pin-a": {
+                  round1: [{ start: 0, end: 1 }],
+                  round2: [] as { start: number; end: number }[],
+                },
+              },
+              stopped: true,
+              stopReason: "capacity",
+            },
+          ],
+          holdSolverBinarySha256: "ab".repeat(32),
+          measuresHoldSolverBinary: false as const,
+        },
+      },
+    };
+    expect(preservationFailures([withLedger], [structuredClone(withLedger)])).toEqual([]);
+    const droppedLedger = structuredClone(withLedger);
+    delete (droppedLedger.validation as { coverageLedger?: unknown }).coverageLedger;
+    expect(preservationFailures([withLedger], [droppedLedger])).toContain(
+      "CompletedCoverageDropped",
+    );
+    const clearedStop = structuredClone(withLedger);
+    clearedStop.validation.coverageLedger.accounts[0]!.stopped = false;
+    expect(preservationFailures([withLedger], [clearedStop])).toContain(
+      "CompletedCoverageDropped",
+    );
+    const removedInterval = structuredClone(withLedger);
+    removedInterval.validation.coverageLedger.accounts[0]!.pinning = [{ start: 0, end: 1 }];
+    expect(preservationFailures([withLedger], [removedInterval])).toContain(
+      "CompletedCoverageDropped",
+    );
+    const widened = structuredClone(withLedger);
+    widened.validation.coverageLedger.accounts[0]!.pinning = [{ start: 0, end: 3 }];
+    expect(preservationFailures([withLedger], [widened])).toContain("CoverageWidened");
+    expect(preservationFailures([withLedger], [widened])).not.toContain(
+      "CompletedCoverageDropped",
+    );
+    const droppedRetry = structuredClone(withLedger);
+    droppedRetry.validation.retry = [4];
+    expect(preservationFailures([withLedger], [droppedRetry])).toContain(
+      "CleanupHistoryShrunk",
+    );
+    const appendedRetry = structuredClone(withLedger);
+    appendedRetry.validation.retry = [4, 5, 6];
+    expect(preservationFailures([withLedger], [appendedRetry])).toEqual([]);
+  });
+
   it("runs the inventory command on a snapshot file", () => {
     const root = mkdtempSync(path.join(tmpdir(), "qsb-inventory-"));
     try {

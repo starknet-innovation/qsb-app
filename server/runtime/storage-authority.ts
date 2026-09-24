@@ -548,6 +548,144 @@ function isPrefix(before: unknown[], after: unknown[]): boolean {
   return before.every((entry, index) => stableJson(entry) === stableJson(after[index]));
 }
 
+type CreditedInterval = { start: number; end: number };
+
+function creditedIntervals(value: unknown): CreditedInterval[] {
+  if (!Array.isArray(value)) return [];
+  const intervals: CreditedInterval[] = [];
+  for (const entry of value) {
+    const interval = record(entry);
+    if (
+      !interval ||
+      typeof interval.start !== "number" ||
+      !Number.isInteger(interval.start) ||
+      interval.start < 0 ||
+      typeof interval.end !== "number" ||
+      !Number.isInteger(interval.end) ||
+      interval.end <= interval.start
+    )
+      continue;
+    intervals.push({ start: interval.start, end: interval.end });
+  }
+  return intervals;
+}
+
+function intervalCovered(covering: readonly CreditedInterval[], required: CreditedInterval): boolean {
+  let cursor = required.start;
+  const ordered = [...covering].sort((left, right) => left.start - right.start || left.end - right.end);
+  for (const piece of ordered) {
+    if (piece.end <= cursor) continue;
+    if (piece.start > cursor) return false;
+    cursor = piece.end;
+    if (cursor >= required.end) return true;
+  }
+  return cursor >= required.end;
+}
+
+function coversCreditedIntervals(
+  covering: readonly CreditedInterval[],
+  required: readonly CreditedInterval[],
+): boolean {
+  return required.every((interval) => intervalCovered(covering, interval));
+}
+
+type PreservedAccount = {
+  sessionId: string;
+  solverPin: string;
+  stopped: boolean;
+  pinning: CreditedInterval[];
+  subsets: Map<string, { round1: CreditedInterval[]; round2: CreditedInterval[] }>;
+};
+
+function preservedAccounts(value: unknown): { binary: string | null; accounts: PreservedAccount[] } | undefined {
+  const ledger = record(value);
+  if (!ledger || !Array.isArray(ledger.accounts)) return undefined;
+  const binary =
+    typeof ledger.holdSolverBinarySha256 === "string" ? ledger.holdSolverBinarySha256 : null;
+  const accounts: PreservedAccount[] = [];
+  for (const entry of ledger.accounts) {
+    const account = record(entry);
+    if (!account || typeof account.sessionId !== "string" || typeof account.solverPin !== "string")
+      continue;
+    const subsets = new Map<string, { round1: CreditedInterval[]; round2: CreditedInterval[] }>();
+    const subsetRecord = record(account.subsets);
+    if (subsetRecord) {
+      for (const pin of Object.keys(subsetRecord)) {
+        const rounds = record(subsetRecord[pin]);
+        subsets.set(pin, {
+          round1: creditedIntervals(rounds?.round1),
+          round2: creditedIntervals(rounds?.round2),
+        });
+      }
+    }
+    accounts.push({
+      sessionId: account.sessionId,
+      solverPin: account.solverPin,
+      stopped: account.stopped === true,
+      pinning: creditedIntervals(account.pinning),
+      subsets,
+    });
+  }
+  return { binary, accounts };
+}
+
+function accountHasCredit(account: PreservedAccount): boolean {
+  if (account.pinning.length > 0) return true;
+  for (const rounds of account.subsets.values()) {
+    if (rounds.round1.length > 0 || rounds.round2.length > 0) return true;
+  }
+  return false;
+}
+
+/** A restored row must keep credited ranges and a stopped account. New credit is a widened claim. */
+function coverageLedgerPreservationFailures(beforeValue: unknown, afterValue: unknown): string[] {
+  const before = preservedAccounts(beforeValue);
+  if (!before) return [];
+  const failures: string[] = [];
+  const after = preservedAccounts(afterValue);
+  const afterAccounts = after?.binary === before.binary ? (after?.accounts ?? []) : [];
+  const used = new Set<number>();
+  for (const account of before.accounts) {
+    const matchIndex = afterAccounts.findIndex(
+      (candidate, index) =>
+        !used.has(index) &&
+        candidate.sessionId === account.sessionId &&
+        candidate.solverPin === account.solverPin,
+    );
+    if (matchIndex < 0) {
+      failures.push("CompletedCoverageDropped");
+      continue;
+    }
+    used.add(matchIndex);
+    const next = afterAccounts[matchIndex]!;
+    if (account.stopped && !next.stopped) failures.push("CompletedCoverageDropped");
+    if (!coversCreditedIntervals(next.pinning, account.pinning))
+      failures.push("CompletedCoverageDropped");
+    if (!coversCreditedIntervals(account.pinning, next.pinning))
+      failures.push("CoverageWidened");
+    const pins = new Set([...account.subsets.keys(), ...next.subsets.keys()]);
+    for (const pin of pins) {
+      const beforeRounds = account.subsets.get(pin) ?? { round1: [], round2: [] };
+      const afterRounds = next.subsets.get(pin) ?? { round1: [], round2: [] };
+      for (const stage of ["round1", "round2"] as const) {
+        if (!coversCreditedIntervals(afterRounds[stage], beforeRounds[stage]))
+          failures.push("CompletedCoverageDropped");
+        if (!coversCreditedIntervals(beforeRounds[stage], afterRounds[stage]))
+          failures.push("CoverageWidened");
+      }
+    }
+  }
+  for (const [index, account] of afterAccounts.entries()) {
+    if (!used.has(index) && accountHasCredit(account)) failures.push("CoverageWidened");
+  }
+  if (after?.binary !== before.binary) {
+    for (const account of after?.accounts ?? []) {
+      if (accountHasCredit(account)) failures.push("CoverageWidened");
+    }
+  }
+  return failures;
+}
+
 export function preservationFailures(before: Row[], after: Row[]): string[] {
   const failures: string[] = [];
   const restored = byKey(after);
@@ -648,10 +786,14 @@ export function preservationFailures(before: Row[], after: Row[]): string[] {
     const beforeCleanup = validationPlacement(row);
     const nextCleanup = validationPlacement(next);
     if (beforeCleanup) {
-      if (!nextCleanup || (beforeCleanup.where === "top" && nextCleanup.where !== "top"))
+      if (!nextCleanup || (beforeCleanup.where === "top" && nextCleanup.where !== "top")) {
         failures.push("CleanupHistoryShrunk");
-      else {
-        for (const field of ["active", "cancel", "interrupted"] as const) {
+        if (!nextCleanup)
+          failures.push(
+            ...coverageLedgerPreservationFailures(beforeCleanup.value.coverageLedger, undefined),
+          );
+      } else {
+        for (const field of ["active", "cancel", "interrupted", "retry"] as const) {
           const previous = Array.isArray(beforeCleanup.value[field])
             ? beforeCleanup.value[field]
             : [];
@@ -668,6 +810,12 @@ export function preservationFailures(before: Row[], after: Row[]): string[] {
           (typeof nextCompleted !== "number" || nextCompleted < beforeCompleted)
         )
           failures.push("CompletedCoverageDropped");
+        failures.push(
+          ...coverageLedgerPreservationFailures(
+            beforeCleanup.value.coverageLedger,
+            nextCleanup.value.coverageLedger,
+          ),
+        );
       }
     }
     const evidence = record(launch?.evidence);
