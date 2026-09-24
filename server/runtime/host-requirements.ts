@@ -134,9 +134,34 @@ const forbiddenKeys = new Set([
 ]);
 const privateKeyPattern = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 const awsAccessKeyPattern = /A(?:K|S)IA[0-9A-Z]{16}/;
+const sensitiveStems = [
+  "secret",
+  "password",
+  "passphrase",
+  "token",
+  "credential",
+  "mnemonic",
+  "privatekey",
+  "apikey",
+  "accesskey",
+  "authorization",
+];
+/** Public identifiers whose names end in "key" and are not secret material. */
+const nonSecretKeyNames = new Set([
+  "idempotencykey",
+  "publickey",
+  "helperpublickey",
+]);
 
 function credentialKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function sensitiveFieldName(key: string): boolean {
+  const normalized = credentialKey(key);
+  if (forbiddenKeys.has(normalized)) return true;
+  if (sensitiveStems.some((stem) => normalized.includes(stem))) return true;
+  return normalized.endsWith("key") && !nonSecretKeyNames.has(normalized);
 }
 
 export function assertNoCredentialMaterial(value: unknown, label = "value"): void {
@@ -147,7 +172,7 @@ export function assertNoCredentialMaterial(value: unknown, label = "value"): voi
   }
   if (!value || typeof value !== "object") return;
   for (const [key, child] of Object.entries(value)) {
-    if (forbiddenKeys.has(credentialKey(key)))
+    if (sensitiveFieldName(key))
       throw new Error(`CredentialMaterialRejected:${label}.${key}`);
     assertNoCredentialMaterial(child, `${label}.${key}`);
   }

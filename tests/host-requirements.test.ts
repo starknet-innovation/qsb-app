@@ -158,6 +158,14 @@ describe("local execution host rehearsal", () => {
     expect(() =>
       assertNoCredentialMaterial({ session: "ASIAIOSFODNN7EXAMPLE" }),
     ).toThrow(/CredentialMaterialRejected/);
+    expect(() =>
+      assertNoCredentialMaterial({ runpodKey: "synthetic-secret-value" }),
+    ).toThrow(/CredentialMaterialRejected/);
+    expect(() =>
+      assertNoCredentialMaterial({
+        manifest: { idempotencyKey: "00000000-0000-4000-8000-000000000000" },
+      }),
+    ).not.toThrow();
     expect(() => assertLogOmitsSecret("log apiKey=synthetic", "synthetic")).toThrow(
       /CredentialMaterialRejected:log/,
     );
@@ -273,6 +281,45 @@ describe("local execution host rehearsal", () => {
     expect(replaced.providerSubmissions).toBe(1);
     expect(replaced.evidenceDirectory).toEqual(launch.evidenceDirectory);
     expect(remoteWorkStopProven(replaced)).toBe(false);
+    const acknowledged = launchRecordSchema.parse({
+      ...launch,
+      state: "acknowledged",
+      providerOutcome: "not-submitted",
+      providerSubmissions: 0,
+    });
+    delete acknowledged.providerId;
+    const directoryLost = applyLocalLoss(
+      acknowledged,
+      "evidence-directory-replaced",
+    );
+    expect(directoryLost.state).toBe("uncertain");
+    expect(directoryLost.replacement).toBeUndefined();
+    expect(directoryLost.providerSubmissions).toBe(0);
+    const fencedId = crypto.randomUUID();
+    await store.put({
+      pk: "OWNER#owner",
+      sk: `JOB#${fencedId}`,
+      version: 0,
+      job: {
+        id: fencedId,
+        owner: "owner",
+        mainnetRequestHash: inputHash,
+        stage: "pinning",
+        status: "searching",
+        coverage: "none",
+      },
+    });
+    await store.put({
+      pk: "OWNER#owner",
+      sk: `LAUNCH#${fencedId}#0`,
+      version: 0,
+      launch: { ...directoryLost, bindings: { ...directoryLost.bindings, requestId: fencedId } },
+    });
+    await expect(
+      submitProviderOnce(store, "owner", fencedId, 0, inputHash, async () => {
+        return { providerId: "provider-2" };
+      }),
+    ).rejects.toThrow(/DuplicatePaidSubmission/);
   });
 
   it("keeps stored terminal evidence when the directory binding no longer matches", async () => {

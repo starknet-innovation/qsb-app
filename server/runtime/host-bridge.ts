@@ -992,6 +992,13 @@ export function applyLocalLoss(
   if (providerTouched(launch)) {
     if (next.state !== "terminal") next.state = "uncertain";
     if (next.replacement === "starting") next.replacement = "uncertain";
+  } else if (
+    (kind === "evidence-directory-replaced" ||
+      kind === "evidence-directory-missing") &&
+    next.state !== "terminal"
+  ) {
+    next.state = "uncertain";
+    delete next.replacement;
   } else if (launch.state === "replacing" || launch.replacement === "starting") {
     next.state = "uncertain";
     delete next.replacement;

@@ -613,6 +613,26 @@ export function memoryRows(store: MemoryStore): Row[] {
   return [...store.rows.values()].map((row) => structuredClone(row));
 }
 
+async function stageSnapshot(staged: MemoryStore, rows: Row[]): Promise<void> {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = `${row.pk}|${row.sk}`;
+    if (seen.has(key)) throw new Error("SnapshotDuplicateKey");
+    seen.add(key);
+  }
+  const authority = rows.filter(isAuthorityRow);
+  const rest = rows.filter((row) => !isAuthorityRow(row));
+  for (const row of rest) await staged.put(structuredClone(row));
+  for (const row of authority) await staged.atomicPut([{ row: structuredClone(row) }]);
+}
+
+function publishStagedRows(store: MemoryStore, rows: Row[]): void {
+  if (store.rows.size !== 0) throw new Error("MigrationTargetNotEmpty");
+  const next = new Map<string, Row>();
+  for (const row of rows) next.set(`${row.pk}|${row.sk}`, structuredClone(row));
+  for (const [key, row] of next) store.rows.set(key, row);
+}
+
 export async function importSnapshot(
   store: MemoryStore,
   snapshotInput: MigrationSnapshot,
@@ -632,12 +652,12 @@ export async function importSnapshot(
   if (snapshot.backend !== "memory-store") throw new Error(assessment.reason);
   if (store.rows.size !== 0) throw new Error("MigrationTargetNotEmpty");
   const rows = snapshot.rows.map((row) => structuredClone(row) as Row);
-  const authority = rows.filter(isAuthorityRow);
-  const rest = rows.filter((row) => !isAuthorityRow(row));
-  for (const row of rest) await store.put(structuredClone(row));
-  for (const row of authority) await store.atomicPut([{ row: structuredClone(row) }]);
-  const failures = preservationFailures(rows, memoryRows(store));
+  const staged = new MemoryStore();
+  await stageSnapshot(staged, rows);
+  const failures = preservationFailures(rows, memoryRows(staged));
   if (failures.length) throw new Error(failures.join(","));
+  if (store.rows.size !== 0) throw new Error("MigrationTargetNotEmpty");
+  publishStagedRows(store, memoryRows(staged));
   return {
     format: "qsb-storage-migration-report-v1",
     backend: "memory-store",

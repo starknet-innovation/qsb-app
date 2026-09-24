@@ -340,6 +340,21 @@ describe("durable storage authority rehearsal", () => {
       /CredentialMaterialRejected/,
     );
     expect(rejected.rows.size).toBe(0);
+    const duplicated = structuredClone(snapshot);
+    duplicated.rows.push(structuredClone(duplicated.rows[0]!));
+    const duplicateTarget = new MemoryStore();
+    await expect(importSnapshot(duplicateTarget, duplicated)).rejects.toThrow(
+      /SnapshotDuplicateKey/,
+    );
+    expect(duplicateTarget.rows.size).toBe(0);
+    const invalidAuthority = structuredClone(snapshot);
+    const authorityRow = invalidAuthority.rows.find((row) => row.pk === AUTHORITY_PK);
+    authorityRow!.productionEnforcement = true;
+    const authorityTarget = new MemoryStore();
+    await expect(importSnapshot(authorityTarget, invalidAuthority)).rejects.toThrow(
+      /ProductionEnforcementRefused/,
+    );
+    expect(authorityTarget.rows.size).toBe(0);
     expect(snapshot.globalFreshness).toBe(false);
     expect(snapshot.productionCutover).toBe(false);
     expect(snapshot.dynamodbLocalCertifiesIam).toBe(false);
