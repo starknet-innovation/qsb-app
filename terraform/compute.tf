@@ -25,7 +25,7 @@ resource "aws_iam_role_policy" "records" {
     Version = "2012-10-17"
     Statement = [
       for statement in jsondecode(file("${path.module}/policies/app-records.json")) : merge(statement, {
-        Resource = aws_dynamodb_table.records.arn
+        Resource = "arn:${data.aws_partition.current.partition}:dynamodb:${var.region}:${var.aws_account_id}:table/${aws_dynamodb_table.records.name}"
       })
     ]
   })
