@@ -548,3 +548,27 @@ immutability or full runtime enrollment. The trusted launcher, adapter/lock
 identity, immutable installation, queue/durable fencing and independent review
 remain release requirements. No claim is made that source hashes alone establish
 an attested host or provider image.
+
+## Public-state reconstruction before parameter export
+
+The research CPU adapter previously relied on the legacy handler's field/config
+checks. Those checks did not reconstruct the vault script or enforce consistency
+between public signature scalars, encoded signatures and commitments. Integration
+now applies the existing owned runtime's `validate_public_state` invariants before
+export/verification, using the already exact-source-loaded CPU modules. The
+validation function was carried from the committed
+`supervised/runtime/layout/owned-runtime/cpu/registry.py` validator, with explicit
+integer geometry checks added; no production runtime source or lock was changed.
+
+Checks cover exact public fields, supported geometry, commitment dimensions and
+lengths, unique recoverable dummy signatures, scalar/DER signature consistency,
+round signature shape, exact script reconstruction and script/opcode bounds.
+Extra recovery-secret fields reject; no private material is read. This is public
+structural/reference validation, not a consensus certificate or authorization.
+
+All **46 local tests passed**, including eight malformed-state cases (script,
+commitment, pin scalar, round scalar, duplicate dummy, boolean geometry, extra
+private-field name with an empty value, and short commitment row). They reject
+before the compute callback. Positive CPU historical replay still passes; its
+separate regression receipt is in `runtime/state-reconstruction/`. No GPU work,
+fixture spend or deployment occurred. Durable release integration remains open.

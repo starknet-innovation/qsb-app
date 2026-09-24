@@ -77,3 +77,23 @@ class ReferenceBinding(unittest.TestCase):
             receipt=execute(self.req,self.ctx,'unused','a'*64)
         self.assertTrue(receipt['reference']['referenceChecked'])
         self.assertFalse(receipt['rangeCreditEligible'])
+
+    def test_public_state_reconstruction_rejects_inconsistent_inputs(self):
+        original=json.loads(self.ctx['publicStateJson'])
+        mutations=[]
+        def changed(edit):
+            state=copy.deepcopy(original);edit(state);mutations.append(state)
+        changed(lambda s:s.update(full_script_hex='51'))
+        changed(lambda s:s['hors_commitments'][0].__setitem__(0,'00'*20))
+        changed(lambda s:s.update(pin_s=s['pin_s']+1))
+        changed(lambda s:s['round_sigs'][0].update(s=9))
+        changed(lambda s:s['dummy_sigs'][0].__setitem__(1,s['dummy_sigs'][0][0]))
+        changed(lambda s:s.update(t1b=True))
+        changed(lambda s:s.update(hors_secrets=[]))
+        changed(lambda s:s['hors_commitments'][0].pop())
+        for state in mutations:
+            with self.subTest(state_keys=list(state)),patch('pin_runtime.run') as compute:
+                ctx={**self.ctx,'publicStateJson':json.dumps(state)}
+                with self.assertRaisesRegex(ValueError,'CPU reference rejected'):
+                    execute(self.req,ctx,'unused','a'*64)
+                compute.assert_not_called()
