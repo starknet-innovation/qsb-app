@@ -191,9 +191,9 @@ export function enrollHistoricalPair(
 ): { pinning: boolean; historicalSubset: boolean } {
   const pinning = pinningFiles.length > 0;
   const historicalSubset = subsetFiles.length > 0;
-  if (pinning !== historicalSubset)
+  if (!pinning || !historicalSubset)
     throw new Error("HistoricalCandidatePairIncomplete");
-  return { pinning, historicalSubset };
+  return { pinning: true, historicalSubset: true };
 }
 
 export function assertCompatibleStages(manifest: SourceReleaseManifest): void {

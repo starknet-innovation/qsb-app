@@ -1720,6 +1720,52 @@ describe("supervised runtime handoff", () => {
     expect(job.runtime.searchRunning).toBe(false);
   });
 
+  it("does not publish a paid result after stdout violates during submit", async () => {
+    const { store, admitted } = await claimedFixture();
+    let rejectStdout: (error: Error) => void = () => undefined;
+    const stdoutExclusive = new Promise<void>((_resolve, reject) => {
+      rejectStdout = reject;
+    });
+    stdoutExclusive.catch(() => undefined);
+    await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      async () => ({ processId: "acked-process", stdoutExclusive }),
+      new Date(),
+      2000,
+    );
+    await expect(
+      submitProviderOnce(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => {
+          rejectStdout(new Error("AcknowledgementRejected"));
+          const started = Date.now();
+          while (Date.now() - started < 2000) {
+            const launch = (
+              await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+            )?.launch as { stdoutProtocol?: string };
+            if (launch.stdoutProtocol === "violated") break;
+            await new Promise((resolve) => setTimeout(resolve, 5));
+          }
+          return { providerId: "should-not-publish" };
+        },
+      ),
+    ).rejects.toThrow(/AcknowledgementRejected/);
+    const launch = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+    )?.launch as { state: string; providerId?: string; stdoutProtocol?: string };
+    expect(launch.stdoutProtocol).toBe("violated");
+    expect(launch.providerId).toBeUndefined();
+    expect(launch.state).not.toBe("running");
+  });
+
   it("refuses a sibling after the primary launch is terminal", async () => {
     const { store, admitted } = await claimedFixture();
     const row = await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`);

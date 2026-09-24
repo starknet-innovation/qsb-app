@@ -148,10 +148,9 @@ describe("source release package", () => {
       pinning: true,
       historicalSubset: true,
     });
-    expect(enrollHistoricalPair([], [])).toEqual({
-      pinning: false,
-      historicalSubset: false,
-    });
+    expect(() => enrollHistoricalPair([], [])).toThrow(
+      /HistoricalCandidatePairIncomplete/,
+    );
     expect(() => enrollHistoricalPair(["a"], [])).toThrow(
       /HistoricalCandidatePairIncomplete/,
     );

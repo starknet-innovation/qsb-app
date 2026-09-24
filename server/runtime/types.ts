@@ -111,6 +111,8 @@ export const launchRecordSchema = z
     acknowledgement: acknowledgementSchema.optional(),
     evidence: terminalEvidenceSchema.optional(),
     replacement: z.enum(["starting", "uncertain"]).optional(),
+    submission: z.literal("in-progress").optional(),
+    stdoutProtocol: z.literal("violated").optional(),
   })
   .strict();
 export type LaunchRecord = z.infer<typeof launchRecordSchema>;

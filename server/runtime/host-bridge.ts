@@ -90,12 +90,21 @@ function watchExclusiveStdout(
           current.launch.processId !== started.processId ||
           current.launch.bindings.inputHash !== inputHash ||
           current.launch.state === "terminal" ||
-          current.launch.state === "uncertain" ||
           current.launch.state === "replacing" ||
-          current.launch.replacement
+          current.launch.replacement ||
+          current.launch.stdoutProtocol === "violated"
         )
           return;
-        await commit(store, current, { ...current.launch, state: "uncertain" });
+        const submissionInProgress =
+          current.launch.state === "uncertain" &&
+          current.launch.submission === "in-progress" &&
+          current.launch.providerOutcome === "uncertain";
+        if (current.launch.state === "uncertain" && !submissionInProgress) return;
+        await commit(store, current, {
+          ...current.launch,
+          state: "uncertain",
+          stdoutProtocol: "violated",
+        });
         return;
       } catch (error) {
         if (error instanceof Conflict) continue;
@@ -424,6 +433,7 @@ export async function submitProviderOnce(
         state: "uncertain",
         providerOutcome: "uncertain",
         providerSubmissions: 1,
+        submission: "in-progress",
       });
       break;
     } catch (error) {
@@ -434,20 +444,34 @@ export async function submitProviderOnce(
   try {
     const submitted = await submit();
     if (!submitted.providerId) throw new Error("ProviderIdentityMissing");
-    const current = await loadPair(store, owner, requestId, slot);
-    if (
-      current.launch.providerId ||
-      current.launch.providerSubmissions !== 1 ||
-      current.launch.replacement ||
-      current.launch.state === "replacing"
-    )
-      throw new Error("DuplicatePaidSubmission");
-    return await commit(store, current, {
-      ...current.launch,
-      state: "running",
-      providerId: submitted.providerId,
-      providerOutcome: "submitted",
-    });
+    for (;;) {
+      const current = await loadPair(store, owner, requestId, slot);
+      if (current.launch.stdoutProtocol === "violated")
+        throw new Error("AcknowledgementRejected");
+      if (
+        current.launch.providerId ||
+        current.launch.providerSubmissions !== 1 ||
+        current.launch.replacement ||
+        current.launch.state === "replacing" ||
+        current.launch.state !== "uncertain" ||
+        current.launch.providerOutcome !== "uncertain" ||
+        current.launch.submission !== "in-progress"
+      )
+        throw new Error("DuplicatePaidSubmission");
+      const next = {
+        ...current.launch,
+        state: "running" as const,
+        providerId: submitted.providerId,
+        providerOutcome: "submitted" as const,
+      };
+      delete next.submission;
+      try {
+        return await commit(store, current, next);
+      } catch (error) {
+        if (error instanceof Conflict) continue;
+        throw error;
+      }
+    }
   } catch (error) {
     const current = await loadPair(store, owner, requestId, slot);
     if (current.launch.providerOutcome !== "uncertain")
@@ -470,20 +494,25 @@ export async function recordLateProviderId(
   if (launch.bindings.inputHash !== inputHash)
     throw new Error("ImmutableInputMismatch");
   if (!providerId) throw new Error("ProviderIdentityMissing");
+  if (launch.stdoutProtocol === "violated")
+    throw new Error("AcknowledgementRejected");
   if (
     launch.state !== "uncertain" ||
     launch.replacement ||
     launch.providerOutcome !== "uncertain" ||
     launch.providerSubmissions !== 1 ||
-    launch.providerId
+    launch.providerId ||
+    launch.submission !== "in-progress"
   )
     throw new Error("DuplicatePaidSubmission");
-  return commit(store, loaded, {
+  const next = {
     ...launch,
-    state: "running",
+    state: "running" as const,
     providerId,
-    providerOutcome: "submitted",
-  });
+    providerOutcome: "submitted" as const,
+  };
+  delete next.submission;
+  return commit(store, loaded, next);
 }
 
 export async function replaceOwnedProcess(
