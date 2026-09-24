@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  cpSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   symlinkSync,
@@ -91,19 +93,6 @@ function spentRow(): Row {
   };
 }
 
-function requestInput(overrides: Record<string, unknown> = {}) {
-  return {
-    requestId,
-    vaultId,
-    publicCommitmentHash: commitment,
-    amountSats: "90000",
-    feeSats: "10000",
-    outpoints: [{ txid: otherTxid, vout: 1 }],
-    rows: [unrelatedRow()],
-    ...overrides,
-  };
-}
-
 const inputs = [{ txid: otherTxid, vout: 1, valueSats: "100000" }];
 const outputs = [
   {
@@ -112,6 +101,71 @@ const outputs = [
     valueSats: "90000",
   },
 ];
+const expectedSibling = [{ jobId: "sibling", slot: 1 }];
+
+function requestInput(overrides: Record<string, unknown> = {}) {
+  return {
+    requestId,
+    vaultId,
+    publicCommitmentHash: commitment,
+    amountSats: "90000",
+    feeSats: "10000",
+    outpoints: [{ txid: otherTxid, vout: 1 }],
+    outputs,
+    rows: [unrelatedRow()],
+    ...overrides,
+  };
+}
+
+function passingHarnessReport(coreBinaries: {
+  bitcoindSha256: string;
+  bitcoinCliSha256: string;
+}) {
+  return {
+    harnessRan: true,
+    core: "/Satoshi:28.0.0/",
+    network: "regtest",
+    coreBinaries,
+    tests: [
+      {
+        name: "unmodified-production-lock-funding",
+        passed: true,
+        scriptBytes: 400,
+        scriptSha256: "12".repeat(32),
+        txid: "aa".repeat(32),
+      },
+      {
+        name: "unsolved-production-withdrawal-rejected",
+        passed: true,
+        reason: "mandatory-script-verify-flag-failed",
+      },
+      {
+        name: "zero-output-transaction-rejected",
+        passed: true,
+        reason: "bad-txns-vout-empty",
+      },
+      {
+        name: "structural-destination-amount-tamper-rejected",
+        passed: true,
+        reason: "mandatory-script-verify-flag-failed",
+      },
+      {
+        name: "PUZZLE-RELAXED-structural-spend",
+        passed: true,
+        puzzleChecksBypassed: 3,
+        txid: "bb".repeat(32),
+      },
+    ],
+    puzzleChecksBypassed: 3,
+    fullProductionWithdrawalVerified: false,
+    freshOptimizedWithdrawal: false,
+    section6Closed: false,
+    puzzleRelaxedIsNotFreshSearch: true,
+    knownSolutionReplayIsNotFreshSearch: true,
+    syntheticNoHitIsNotFreshSearch: true,
+    mockedSuccessIsNotFreshSearch: true,
+  };
+}
 
 function drainedSibling(overrides: Partial<SiblingJob> = {}): SiblingJob {
   return {
@@ -396,7 +450,13 @@ describe("freshness and disposable requests", () => {
     expect(sameVaultDifferentRequest.restartsHistoricalFixture).toBe(false);
     const supply = "2100000000000000";
     const atSupply = scaffoldDisposableProofRequest(
-      requestInput({ amountSats: supply, feeSats: "1" }),
+      requestInput({
+        amountSats: supply,
+        feeSats: "1",
+        outputs: [
+          { role: "withdrawal", scriptHex: "0014", valueSats: supply },
+        ],
+      }),
     );
     expect(atSupply.amountSats).toBe(supply);
     expect(() =>
@@ -466,6 +526,13 @@ describe("signing bundle binding", () => {
       searchEvidence: "not-run",
     });
     expect(bundle.requestHash).toBe(fingerprint(request));
+    expect(request.outputs).toEqual(outputs);
+    expect(
+      fingerprint({
+        ...request,
+        outputs: [{ role: "withdrawal", scriptHex: "001411", valueSats: "90000" }],
+      }),
+    ).not.toBe(bundle.requestHash);
     expect(bundle.vaultId).toBe(vaultId);
     expect(bundle.amountSats).toBe("90000");
     expect(bundle.feeSats).toBe("10000");
@@ -488,6 +555,36 @@ describe("signing bundle binding", () => {
           outputs: [{ ...bundle.outputs[0]!, scriptHex: "001411" }],
         },
         request,
+      ),
+    ).toThrow(/BindingMismatch/);
+    const swapped = {
+      ...bundle,
+      outputs: [{ ...bundle.outputs[0]!, scriptHex: "001411" }],
+    };
+    const { bundleHash: _ignored, ...swappedBody } = swapped;
+    expect(() =>
+      parseDisposableSigningBundle(
+        { ...swappedBody, bundleHash: fingerprint(swappedBody) },
+        request,
+      ),
+    ).toThrow(/BindingMismatch/);
+    expect(() =>
+      exportDisposableSigningBundle({
+        request,
+        inputs,
+        outputs: [
+          { role: "withdrawal", scriptHex: "001411", valueSats: "90000" },
+        ],
+        searchEvidence: "not-run",
+      }),
+    ).toThrow(/BindingMismatch/);
+    expect(() =>
+      scaffoldDisposableProofRequest(
+        requestInput({
+          outputs: [
+            { role: "withdrawal", scriptHex: "0014", valueSats: "80000" },
+          ],
+        }),
       ),
     ).toThrow(/BindingMismatch/);
     expect(() =>
@@ -581,7 +678,7 @@ describe("sibling drain and bounded compute", () => {
           state: "running",
         }),
       ],
-      { active: 0, completed: 4 },
+      { active: 0, completed: 4, expected: expectedSibling },
     );
     expect(open.queueDrained).toBe(false);
     expect(open.aggregateIgnored).toBe(true);
@@ -592,7 +689,7 @@ describe("sibling drain and bounded compute", () => {
 
     const reconciled = reconcileSiblingDrain(
       [drainedSibling({ cpuVerification: "simulated" })],
-      { active: 0, completed: 1 },
+      { active: 0, completed: 1, expected: expectedSibling },
     );
     expect(reconciled.queueDrained).toBe(true);
     expect(reconciled.independentCpuVerificationOfFreshSearch).toBe(false);
@@ -601,14 +698,32 @@ describe("sibling drain and bounded compute", () => {
       "Simulated CPU verification",
     );
 
-    const enrolledOnly = reconcileSiblingDrain([
-      drainedSibling({ cpuVerification: "enrolled-cpu-verifier" }),
-    ]);
+    const enrolledOnly = reconcileSiblingDrain(
+      [drainedSibling({ cpuVerification: "enrolled-cpu-verifier" })],
+      { expected: expectedSibling },
+    );
     expect(enrolledOnly.queueDrained).toBe(true);
     expect(enrolledOnly.independentCpuVerificationOfFreshSearch).toBe(false);
     expect(reconcileSiblingDrain([]).queueDrained).toBe(false);
+    expect(reconcileSiblingDrain([drainedSibling()]).queueDrained).toBe(false);
     expect(
-      reconcileSiblingDrain([drainedSibling({ slot: 0 })]).queueDrained,
+      reconcileSiblingDrain([drainedSibling({ slot: 0 })], {
+        expected: [{ jobId: "sibling", slot: 0 }],
+      }).queueDrained,
+    ).toBe(false);
+    expect(
+      reconcileSiblingDrain([drainedSibling()], {
+        expected: [
+          { jobId: "sibling", slot: 1 },
+          { jobId: "other", slot: 2 },
+        ],
+      }).queueDrained,
+    ).toBe(false);
+    expect(
+      reconcileSiblingDrain(
+        [drainedSibling(), drainedSibling({ jobId: "other", slot: 2 })],
+        { expected: expectedSibling },
+      ).queueDrained,
     ).toBe(false);
   });
 
@@ -777,15 +892,10 @@ describe("core harness judgment", () => {
         enrolled: true,
       }),
     );
-    const matchingReport = {
-      harnessRan: true,
-      network: "regtest",
-      fullProductionWithdrawalVerified: false,
-      freshOptimizedWithdrawal: false,
-      section6Closed: false,
-      tests: [{ name: "regtest-report", passed: true }],
-      coreBinaries: { bitcoindSha256, bitcoinCliSha256 },
-    };
+    const matchingReport = passingHarnessReport({
+      bitcoindSha256,
+      bitcoinCliSha256,
+    });
     expect(() => admitCoreHarnessResult(matchingReport)).toThrow(
       /CoreBinaryNotEnrolled/,
     );
@@ -796,6 +906,59 @@ describe("core harness judgment", () => {
     expect(admitted.harnessRan).toBe(true);
     expect(admitted.section6Closed).toBe(false);
     expect(admitted.freshOptimizedWithdrawal).toBe(false);
+    expect(admitted.puzzleRelaxedSpend).toBe(true);
+    expect(() =>
+      assessCoreReportEnrollment(
+        { ...matchingReport, tests: [] },
+        loadCoreBinaryEnrollment(enrolledFile),
+      ),
+    ).toThrow(/CoreHarnessChecksRejected/);
+    expect(() =>
+      assessCoreReportEnrollment(
+        {
+          harnessRan: true,
+          network: "regtest",
+          coreBinaries: { bitcoindSha256, bitcoinCliSha256 },
+          tests: [{ name: "regtest-report", passed: true }],
+        },
+        loadCoreBinaryEnrollment(enrolledFile),
+      ),
+    ).toThrow(/CoreHarnessChecksRejected/);
+    const failedReport = passingHarnessReport({
+      bitcoindSha256,
+      bitcoinCliSha256,
+    });
+    failedReport.tests[1] = { ...failedReport.tests[1]!, passed: false };
+    expect(() =>
+      assessCoreReportEnrollment(
+        failedReport,
+        loadCoreBinaryEnrollment(enrolledFile),
+      ),
+    ).toThrow(/CoreHarnessChecksRejected/);
+    const reboundReport = passingHarnessReport({
+      bitcoindSha256,
+      bitcoinCliSha256,
+    });
+    const fundingTxid = "aa".repeat(32);
+    reboundReport.tests[0] = {
+      name: "unmodified-production-lock-funding",
+      passed: true,
+      scriptBytes: 400,
+      scriptSha256: "12".repeat(32),
+      txid: fundingTxid,
+    };
+    reboundReport.tests[4] = {
+      name: "PUZZLE-RELAXED-structural-spend",
+      passed: true,
+      puzzleChecksBypassed: 3,
+      txid: fundingTxid,
+    };
+    expect(() =>
+      assessCoreReportEnrollment(
+        reboundReport,
+        loadCoreBinaryEnrollment(enrolledFile),
+      ),
+    ).toThrow(/CoreHarnessChecksRejected/);
     expect(() =>
       assessCoreReportEnrollment(
         {
@@ -866,6 +1029,64 @@ describe("core harness judgment", () => {
     );
     expect(named.harnessRan).toBe(false);
     expect(named.reason).toContain("not harness evidence");
+    const script = readFileSync(path.join(root, "scripts/test-core.sh"), "utf8");
+    expect(script).toContain('"${ROOT}/server/runtime/core-binary.json"');
+    expect(script).toContain('"${ROOT}/release/source-manifest.json"');
+    expect(script).not.toContain("QSB_CORE_MANIFEST");
+    const forgedRoot = mkdtempSync(path.join(tmpdir(), "qsb-core-manifest-"));
+    mkdirSync(path.join(forgedRoot, "scripts"), { recursive: true });
+    mkdirSync(path.join(forgedRoot, "tests"), { recursive: true });
+    mkdirSync(path.join(forgedRoot, "server/runtime"), { recursive: true });
+    mkdirSync(path.join(forgedRoot, "release"), { recursive: true });
+    cpSync(
+      path.join(root, "scripts/test-core.sh"),
+      path.join(forgedRoot, "scripts/test-core.sh"),
+    );
+    cpSync(
+      path.join(root, "tests/core_regtest.py"),
+      path.join(forgedRoot, "tests/core_regtest.py"),
+    );
+    cpSync(
+      path.join(root, "release/source-manifest.json"),
+      path.join(forgedRoot, "release/source-manifest.json"),
+    );
+    writeFileSync(
+      path.join(forgedRoot, "server/runtime/core-binary.json"),
+      `${JSON.stringify({
+        format: "qsb-core-binary-enrollment-v1",
+        bitcoindSha256: null,
+        bitcoinCliSha256: null,
+        enrolled: false,
+      })}
+`,
+    );
+    const forgedBin = mkdtempSync(path.join(tmpdir(), "qsb-forged-core-"));
+    writeFileSync(path.join(forgedBin, "bitcoind"), "#!/bin/sh\nexit 0\n");
+    writeFileSync(path.join(forgedBin, "bitcoin-cli"), "#!/bin/sh\nexit 0\n");
+    chmodSync(path.join(forgedBin, "bitcoind"), 0o755);
+    chmodSync(path.join(forgedBin, "bitcoin-cli"), 0o755);
+    const forgedReport = path.join(forgedRoot, "report.json");
+    let forgedStatus = 0;
+    try {
+      execFileSync("bash", ["scripts/test-core.sh"], {
+        cwd: forgedRoot,
+        env: {
+          ...process.env,
+          BITCOIN_BIN: forgedBin,
+          QSB_CORE_REPORT: forgedReport,
+        },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      forgedStatus = (error as { status?: number }).status ?? 1;
+    }
+    expect(forgedStatus).toBe(2);
+    const forged = judgeCoreReport(
+      JSON.parse(readFileSync(forgedReport, "utf8")),
+    );
+    expect(forged.harnessRan).toBe(false);
+    expect(forged.reason).toContain("committed manifest");
 
     const stdout = execFileSync("python3", ["tests/core_regtest.py"], {
       cwd: root,

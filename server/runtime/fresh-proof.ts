@@ -300,6 +300,21 @@ export type SpentFixtureRef = {
   outpoint?: Outpoint;
 };
 
+const scriptHexSchema = z
+  .string()
+  .regex(/^(?:[0-9a-f]{2})+$/i)
+  .transform((value) => value.toLowerCase());
+
+const proofOutputSchema = z
+  .object({
+    role: z.enum(["withdrawal", "change"]),
+    scriptHex: scriptHexSchema,
+    valueSats: sats,
+  })
+  .strict();
+
+export type ProofOutput = z.infer<typeof proofOutputSchema>;
+
 const disposableRequestSchema = z
   .object({
     format: z.literal("qsb-disposable-proof-request-v1"),
@@ -310,6 +325,7 @@ const disposableRequestSchema = z
     amountSats: sats,
     feeSats: sats,
     outpoints: z.array(outpointSchema).max(8),
+    outputs: z.array(proofOutputSchema).min(1).max(8),
     historicalFixture: z.literal(false),
     restartsHistoricalFixture: z.literal(false),
     freshSearchPerformed: z.literal(false),
@@ -331,6 +347,7 @@ const scaffoldInputSchema = z
     amountSats: sats,
     feeSats: sats,
     outpoints: z.array(outpointSchema).max(8).default([]),
+    outputs: z.array(proofOutputSchema).min(1).max(8),
     fixtureLabel: z.string().min(1).max(128).optional(),
   })
   .strict();
@@ -510,6 +527,7 @@ export function scaffoldDisposableProofRequest(input: {
   amountSats: string;
   feeSats: string;
   outpoints?: Outpoint[];
+  outputs: ProofOutput[];
   fixtureLabel?: string;
   rows?: Row[];
   spentFixtures?: SpentFixtureRef[];
@@ -520,6 +538,7 @@ export function scaffoldDisposableProofRequest(input: {
     publicCommitmentHash: input.publicCommitmentHash,
     amountSats: input.amountSats,
     feeSats: input.feeSats,
+    outputs: input.outputs,
     ...(input.outpoints ? { outpoints: input.outpoints } : {}),
     ...(input.fixtureLabel ? { fixtureLabel: input.fixtureLabel } : {}),
   });
@@ -539,6 +558,7 @@ export function scaffoldDisposableProofRequest(input: {
     );
   if (!freshness.inventoryHasExclusionPower)
     throw new Error("InventoryHasNoExclusionPower");
+  assertWithdrawalAmount(parsed.amountSats, parsed.outputs);
   return disposableRequestSchema.parse({
     format: "qsb-disposable-proof-request-v1",
     chain: "regtest",
@@ -548,6 +568,7 @@ export function scaffoldDisposableProofRequest(input: {
     amountSats: parsed.amountSats,
     feeSats: parsed.feeSats,
     outpoints: parsed.outpoints.map(normalizeOutpoint),
+    outputs: parsed.outputs,
     historicalFixture: false,
     restartsHistoricalFixture: false,
     freshSearchPerformed: false,
@@ -613,13 +634,7 @@ function assertSearchEvidence(kind: string): SearchEvidenceKind {
   }
 }
 
-const bundleOutputSchema = z
-  .object({
-    role: z.enum(["withdrawal", "change"]),
-    scriptHex: z.string().regex(/^(?:[0-9a-f]{2})+$/i),
-    valueSats: sats,
-  })
-  .strict();
+const bundleOutputSchema = proofOutputSchema;
 
 const bundleInputSchema = outpointSchema.extend({ valueSats: sats }).strict();
 
@@ -657,15 +672,39 @@ function sumSats(values: string[]): bigint {
   return values.reduce((total, value) => total + BigInt(value), 0n);
 }
 
+function assertWithdrawalAmount(
+  amountSats: string,
+  outputs: { role: "withdrawal" | "change"; valueSats: string }[],
+): void {
+  const withdrawals = outputs.filter((output) => output.role === "withdrawal");
+  if (withdrawals.length !== 1 || withdrawals[0]?.valueSats !== amountSats)
+    throw new Error("BindingMismatch");
+}
+
+function assertSameOutputs(
+  committed: readonly ProofOutput[],
+  presented: readonly ProofOutput[],
+): void {
+  if (committed.length !== presented.length) throw new Error("BindingMismatch");
+  for (const [index, output] of presented.entries()) {
+    const expected = committed[index];
+    if (
+      !expected ||
+      output.role !== expected.role ||
+      output.scriptHex !== expected.scriptHex ||
+      output.valueSats !== expected.valueSats
+    )
+      throw new Error("BindingMismatch");
+  }
+}
+
 function assertAmountFeeBinding(
   amountSats: string,
   feeSats: string,
   inputs: { valueSats: string }[],
   outputs: { role: "withdrawal" | "change"; valueSats: string }[],
 ): void {
-  const withdrawals = outputs.filter((output) => output.role === "withdrawal");
-  if (withdrawals.length !== 1 || withdrawals[0]?.valueSats !== amountSats)
-    throw new Error("BindingMismatch");
+  assertWithdrawalAmount(amountSats, outputs);
   const fee =
     sumSats(inputs.map((input) => input.valueSats)) -
     sumSats(outputs.map((output) => output.valueSats));
@@ -702,6 +741,7 @@ export function exportDisposableSigningBundle(input: {
     ...output,
     scriptHex: output.scriptHex.toLowerCase(),
   }));
+  assertSameOutputs(request.outputs, outputs);
   assertAmountFeeBinding(request.amountSats, request.feeSats, inputs, outputs);
   const body = {
     format: "qsb-disposable-proof-signing-bundle-v1" as const,
@@ -743,6 +783,7 @@ export function parseDisposableSigningBundle(
   )
     throw new Error("BindingMismatch");
   assertSameOutpointMultiset(bound.outpoints, bundle.inputs);
+  assertSameOutputs(bound.outputs, bundle.outputs);
   assertAmountFeeBinding(
     bundle.amountSats,
     bundle.feeSats,
@@ -818,10 +859,21 @@ export type SiblingDrainReport = {
   limits: readonly string[];
 };
 
+const expectedSiblingSchema = z
+  .object({
+    jobId: z.string().min(1).max(128),
+    slot: z.number().int().min(0).max(31),
+  })
+  .strict();
+
 /** Per-job sibling reconciliation. Aggregate counters are recorded and ignored. */
 export function reconcileSiblingDrain(
   jobs: SiblingJob[],
-  aggregate?: { active?: number; completed?: number },
+  aggregate?: {
+    active?: number;
+    completed?: number;
+    expected?: { jobId: string; slot: number }[];
+  },
 ): SiblingDrainReport {
   assertNoCredentialMaterial({ jobs, aggregate });
   const parsed = z.array(siblingSchema).min(0).max(32).parse(jobs);
@@ -858,9 +910,39 @@ export function reconcileSiblingDrain(
     reasons.push(
       "Simulated CPU verification is not independent verification of a fresh search.",
     );
+  let expectedSetMatches = false;
+  if (!aggregate?.expected) {
+    reasons.push("No authoritative expected sibling set was supplied.");
+  } else {
+    const expected = z
+      .array(expectedSiblingSchema)
+      .min(1)
+      .max(32)
+      .parse(aggregate.expected);
+    const expectedKeys = new Set<string>();
+    for (const item of expected) {
+      const key = `${item.jobId}:${item.slot}`;
+      if (expectedKeys.has(key)) throw new Error("SiblingSetInvalid");
+      expectedKeys.add(key);
+    }
+    const suppliedKeys = new Set(
+      parsed.map((job) => `${job.jobId}:${job.slot}`),
+    );
+    if (
+      expectedKeys.size !== suppliedKeys.size ||
+      [...expectedKeys].some((key) => !suppliedKeys.has(key))
+    )
+      reasons.push(
+        "The supplied sibling records do not match the expected job and slot set.",
+      );
+    else expectedSetMatches = true;
+  }
   const blocking = reasons.filter((reason) => !reason.startsWith("Simulated"));
   const queueDrained =
-    queueClear && parsed.some((job) => job.slot > 0) && blocking.length === 0;
+    expectedSetMatches &&
+    queueClear &&
+    parsed.some((job) => job.slot > 0) &&
+    blocking.length === 0;
   if (aggregate)
     reasons.push(
       "Aggregate provider counters are not per-job drain or completion evidence.",
@@ -1100,7 +1182,87 @@ export function assessCoreReportEnrollment(
   if (judgment.chain !== "regtest")
     throw new Error("ControlledProofChainMustBeRegtest");
   requireEnrolledCoreBinaries(value, enrollment);
+  requireAdmittedHarnessChecks(value);
   return judgment;
+}
+
+const coreTxidSchema = z.string().regex(/^[a-f0-9]{64}$/i);
+
+/** The five checks `tests/core_regtest.py` records, in that order. */
+const admittedHarnessReportSchema = z
+  .object({
+    harnessRan: z.literal(true),
+    core: z.string().min(1),
+    network: z.literal("regtest"),
+    coreBinaries: z
+      .object({
+        bitcoindSha256: hash64,
+        bitcoinCliSha256: hash64,
+      })
+      .strict(),
+    tests: z.tuple([
+      z
+        .object({
+          name: z.literal("unmodified-production-lock-funding"),
+          passed: z.literal(true),
+          scriptBytes: z.number().int().positive(),
+          scriptSha256: hash64,
+          txid: coreTxidSchema,
+        })
+        .strict(),
+      z
+        .object({
+          name: z.literal("unsolved-production-withdrawal-rejected"),
+          passed: z.literal(true),
+          reason: z.string().min(1),
+        })
+        .strict(),
+      z
+        .object({
+          name: z.literal("zero-output-transaction-rejected"),
+          passed: z.literal(true),
+          reason: z.string().min(1),
+        })
+        .strict(),
+      z
+        .object({
+          name: z.literal("structural-destination-amount-tamper-rejected"),
+          passed: z.literal(true),
+          reason: z.string().min(1),
+        })
+        .strict(),
+      z
+        .object({
+          name: z.literal("PUZZLE-RELAXED-structural-spend"),
+          passed: z.literal(true),
+          puzzleChecksBypassed: z.literal(3),
+          txid: coreTxidSchema,
+        })
+        .strict(),
+    ]),
+    puzzleChecksBypassed: z.literal(3),
+    fullProductionWithdrawalVerified: z.literal(false),
+    freshOptimizedWithdrawal: z.literal(false),
+    section6Closed: z.literal(false),
+    puzzleRelaxedIsNotFreshSearch: z.literal(true),
+    knownSolutionReplayIsNotFreshSearch: z.literal(true),
+    syntheticNoHitIsNotFreshSearch: z.literal(true),
+    mockedSuccessIsNotFreshSearch: z.literal(true),
+  })
+  .strict();
+
+function requireAdmittedHarnessChecks(value: unknown): void {
+  const parsed = admittedHarnessReportSchema.safeParse(value);
+  if (!parsed.success) throw new Error("CoreHarnessChecksRejected");
+  const [funding, unsolved, zeroOutput, tamper, spend] = parsed.data.tests;
+  if (funding.txid.toLowerCase() === spend.txid.toLowerCase())
+    throw new Error("CoreHarnessChecksRejected");
+  if (!unsolved.reason.toLowerCase().includes("script"))
+    throw new Error("CoreHarnessChecksRejected");
+  if (!zeroOutput.reason.includes("vout-empty"))
+    throw new Error("CoreHarnessChecksRejected");
+  if (!tamper.reason.toLowerCase().includes("script"))
+    throw new Error("CoreHarnessChecksRejected");
 }
 
 /** Always loads the committed `server/runtime/core-binary.json` shared with the shell harness. */

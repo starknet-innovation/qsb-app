@@ -24,11 +24,21 @@ if [[ ! -x "${BIN}/bitcoind" || ! -x "${BIN}/bitcoin-cli" ]]; then
   not_run "Bitcoin Core binaries are not available at ${BIN}. This is not a Core validation and does not close section 6."
 fi
 
-# Executable names are not a reviewed Core identity. This checkout enrolls no binary hash.
+# Executable names are not a reviewed Core identity. The enrollment file is
+# trusted only when its raw bytes match the committed source manifest.
 set +e
-python3 - "${ROOT}/server/runtime/core-binary.json" "${BIN}/bitcoind" "${BIN}/bitcoin-cli" <<'PY'
+python3 - "${ROOT}/server/runtime/core-binary.json" "${BIN}/bitcoind" "${BIN}/bitcoin-cli" "${ROOT}/release/source-manifest.json" <<'PY'
 import hashlib, json, sys
-identity = json.load(open(sys.argv[1]))
+enrollment_path, _bitcoind, _cli, manifest_path = sys.argv[1:5]
+try:
+    enrollment_bytes = open(enrollment_path, "rb").read()
+    manifest = json.load(open(manifest_path))
+    expected = manifest["identities"]["sourceFiles"]["server/runtime/core-binary.json"]
+    if not isinstance(expected, str) or hashlib.sha256(enrollment_bytes).hexdigest() != expected:
+        sys.exit(6)
+except Exception:
+    sys.exit(6)
+identity = json.loads(enrollment_bytes)
 if identity.get("format") != "qsb-core-binary-enrollment-v1":
     sys.exit(5)
 def sha(value):
@@ -46,6 +56,9 @@ if digest(sys.argv[2]) != identity["bitcoindSha256"] or digest(sys.argv[3]) != i
 PY
 status=$?
 set -e
+if [[ "${status}" -eq 6 ]]; then
+  not_run "server/runtime/core-binary.json does not match release/source-manifest.json. An enrollment file that does not match the committed manifest is not harness evidence and does not close section 6."
+fi
 if [[ "${status}" -eq 3 ]]; then
   not_run "No reviewed Bitcoin Core binary is enrolled. An executable named bitcoind is not harness evidence and does not close section 6."
 fi
