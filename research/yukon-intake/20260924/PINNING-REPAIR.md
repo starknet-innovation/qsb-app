@@ -42,3 +42,22 @@ The initial native build rejected enabling negative-Y MAC and parity-window opti
 ## Native compile gate passed
 
 [CI run 36040760736](https://github.com/starknet-innovation/qsb-app/actions/runs/36040760736), tested source commit `44018c1d78164797e8e47213e523aa262279ce33`, passed on native Linux x86_64. The repaired pinning binary SHA256 is `a1d882c5cf6ad4d97759462c3bf02166f34756eb727b8b03a8d9da12c7dbc08b` with CUDA 12.8.93. The explicit `-DQSB_C31=1` override was rejected. The same CI ran all twelve tests and 31,014 host predicate comparisons successfully. See [compiler receipt](pin-repair-compile.txt), [source receipt](pin-repair-source.json), and [host results](pin-repair-host.json). Report-only commits do not change the tested compiler inputs. This closes native compilation only; no GPU execution was performed.
+
+## Bounded scheduling follow-up
+
+The isolated adapter now requires exactly six arguments after the executable:
+`params gpu sequence_start sequence_count locktime_start locktime_count`.
+Numeric arguments are decimal-only. It rejects zero counts, sequence counts over
+16, unsigned overflow, sequences without BIP68's disable bit, locktimes below
+500000000 and starts not aligned to 256 (the selected SHA path's requirement).
+The single selected device owns the whole range; benchmark interleaving and
+optional easy/debug overrides are unavailable. Both scheduler branches use
+64-bit offsets and clamp the final batch. The slotted branch drains every slot
+before returning, including with sequence overlap enabled.
+
+Local validation: 13 unit tests pass, including exact host enumeration of nine
+boundary ranges and 13 invalid-input cases. The 31,014 host predicate comparisons
+still pass. This is not native GPU coverage evidence. `QSB_RANGE_DRAINED` is a
+scheduling receipt only, deliberately not eligibility for completed-range credit:
+unchecked CUDA/OpenSSL/output errors and native boundary testing remain blockers.
+The previous compile receipt applies to the previous source, not this change.

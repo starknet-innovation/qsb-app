@@ -49,6 +49,38 @@ class RepairTests(unittest.TestCase):
     def test_changed_patch_context_rejected(self):
         with self.assertRaises(ValueError):adapt('int main(){}')
 
+    def test_range_contract_and_exact_enumeration(self):
+        code = r'''#include "pin_contract.h"
+int main(int argc, char **argv) {
+    if (argc != 5) return 9;
+    qsb_pin_range r = {};
+    uint64_t *fields[] = {&r.sequence_start,&r.sequence_count,&r.locktime_start,&r.locktime_count};
+    for(int i=0;i<4;i++) if(!qsb_parse_decimal(argv[i+1],fields[i])) return 2;
+    if(!qsb_valid_range(&r)) return 2;
+    for(uint64_t s=0;s<r.sequence_count;s++)
+        for(uint64_t off=0;off<r.locktime_count;off+=256) {
+            uint32_t n=qsb_batch_size(r.locktime_count-off,256);
+            for(uint32_t j=0;j<n;j++) printf("%u %u\n",(uint32_t)(r.sequence_start+s),(uint32_t)(r.locktime_start+off+j));
+        }
+}
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp);(p/'range.cpp').write_text(code)
+            subprocess.run(['c++','-I',str(Path(__file__).parent),str(p/'range.cpp'),'-o',str(p/'range')],check=True,capture_output=True)
+            valid=[(2147483648,1,500000000,n) for n in (1,255,256,257,511,512,513)]
+            valid += [(4294967295,1,4294967040,256),(4294967280,16,4294967040,1)]
+            for args in valid:
+                out=subprocess.run([str(p/'range'),*map(str,args)],capture_output=True,text=True,check=True)
+                actual=[tuple(map(int,row.split())) for row in out.stdout.splitlines()]
+                seq,count,lt,n=args
+                self.assertEqual(actual,[(s,t) for s in range(seq,seq+count) for t in range(lt,lt+n)])
+            invalid=[('2147483648', '1', '500000000', n) for n in ('0','-1','+1','1x','0x10','18446744073709551616',' 1','')]
+            invalid += [('4294967295','2','500000000','1'),('2147483647','1','500000000','1'),('2147483648','17','500000000','1'),('2147483648','1','500000001','1'),('2147483648','1','4294967040','257')]
+            for args in invalid:
+                out=subprocess.run([str(p/'range'),*args],capture_output=True)
+                self.assertEqual(out.returncode,2,args)
+                self.assertEqual(out.stdout,b'')
+
     def test_capacity_fail_closed(self):
         code='#include "pin_contract.h"\nint main(int argc,char**argv){uint32_t v[]={0,1,63,64,65,1024,0xffffffff};for(int i=0;i<7;i++)printf("%d\\n",qsb_require_hit_capacity(v[i]));}'
         with tempfile.TemporaryDirectory() as tmp:
@@ -63,6 +95,10 @@ if __name__=='__main__':
     import sys
     if len(sys.argv)==2:
         source=Path(sys.argv[1]).read_text()
+        assert 'seq += effective_total' not in source
+        assert source.count('seq_offset < range.sequence_count') == 2
+        assert source.count('qsb_batch_size(lt_range - lt_off') == 2
+        assert 'for (int s = 0; s < QSB_SLOTS; ++s) if (drain_slot(s)) return 2;' in source
         assert 'ok = qsb_der32(hh);' in source
         assert 'qsb_host_zeros(hh) >=' not in source
         assert 'if (count > 64) count = 64;' not in source

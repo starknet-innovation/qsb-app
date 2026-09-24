@@ -28,3 +28,33 @@ static inline int qsb_require_hit_capacity(uint32_t count) {
     return 1;
 }
 #undef QSB_HD
+
+// Decimal-only public range contract. Bounds are exclusive and widened before
+// addition; even the final uint32 sequence/locktime cannot wrap the scheduler.
+struct qsb_pin_range {
+    uint64_t sequence_start, sequence_count, locktime_start, locktime_count;
+};
+static inline int qsb_parse_decimal(const char *s, uint64_t *out) {
+    if (!s || !*s) return 0;
+    uint64_t n = 0;
+    for (; *s; ++s) {
+        if (*s < '0' || *s > '9') return 0;
+        unsigned d = (unsigned)(*s - '0');
+        if (n > (UINT64_MAX - d) / 10) return 0;
+        n = n * 10 + d;
+    }
+    *out = n;
+    return 1;
+}
+static inline int qsb_valid_range(const qsb_pin_range *r) {
+    const uint64_t end = UINT64_C(4294967296);
+    return r->sequence_start >= UINT64_C(2147483648) &&
+        r->sequence_start < end && r->sequence_count > 0 &&
+        r->sequence_count <= 16 && r->sequence_count <= end-r->sequence_start &&
+        r->locktime_start >= 500000000 && r->locktime_start < end &&
+        r->locktime_start % 256 == 0 && r->locktime_count > 0 &&
+        r->locktime_count <= end-r->locktime_start;
+}
+static inline uint32_t qsb_batch_size(uint64_t remaining, uint32_t batch) {
+    return remaining < batch ? (uint32_t)remaining : batch;
+}
