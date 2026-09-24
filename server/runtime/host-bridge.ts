@@ -349,7 +349,12 @@ export async function claimLaunch(
 }
 
 function canStartOwnedProcess(launch: LaunchRecord): boolean {
-  if (launch.replacement || launch.providerId || launch.providerSubmissions !== 0)
+  if (
+    launch.replacement ||
+    launch.localLoss ||
+    launch.providerId ||
+    launch.providerSubmissions !== 0
+  )
     return false;
   if (launch.providerOutcome !== "not-submitted") return false;
   if (launch.state === "claimed" && launch.processStarts === 0) return true;
@@ -497,6 +502,7 @@ export async function submitProviderOnce(
     if (
       launch.state !== "acknowledged" ||
       launch.replacement ||
+      launch.localLoss ||
       launch.providerSubmissions !== 0 ||
       launch.providerOutcome !== "not-submitted" ||
       launch.providerId
@@ -989,6 +995,7 @@ export function applyLocalLoss(
       providerIdentityPreserved: true,
     },
   };
+  delete next.spawn;
   if (providerTouched(launch)) {
     if (next.state !== "terminal") next.state = "uncertain";
     if (next.replacement === "starting") next.replacement = "uncertain";

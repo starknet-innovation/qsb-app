@@ -28,12 +28,14 @@ import { admitSupervisedJob, claimAdmittedLaunch } from "../server/runtime/dispa
 import {
   acknowledgementExpired,
   acknowledgementLine,
+  bindEvidenceDirectory,
   drainSibling,
   launchOwnedProcess,
   localAckStarter,
   openSiblingSlot,
   publishSimulatedVerifiedHit,
   recordLateProviderId,
+  recordLocalLoss,
   replaceOwnedProcess,
   submitProviderOnce,
   type OwnedProcessStart,
@@ -556,6 +558,140 @@ describe("supervised runtime handoff", () => {
     expect(retried.state).toBe("acknowledged");
     expect(retried.processId).toBe("retried-after-missing-child");
     expect(retried.spawn).toBeUndefined();
+  });
+
+  it("does not relaunch or pay after a directory loss on a spawn that never started", async () => {
+    const { store, admitted } = await claimedFixture();
+    const starter = localAckStarter(
+      "qsb-missing-binary",
+      [],
+      1000,
+      admitted.job.mainnetRequestHash,
+    );
+    await expect(
+      launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        starter.start,
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/ProcessIdentityMissing/);
+    const identity = {
+      device: 1,
+      inode: 2,
+      mode: 0o40700,
+      uid: 0,
+      gid: 0,
+    };
+    const bound = await bindEvidenceDirectory(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      identity,
+    );
+    expect(bound.spawn).toBe("not-started");
+    expect(bound.localLoss).toBeUndefined();
+    const replaced = await bindEvidenceDirectory(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      { ...identity, inode: identity.inode + 1 },
+    );
+    expect(replaced.state).toBe("uncertain");
+    expect(replaced.spawn).toBeUndefined();
+    expect(replaced.localLoss?.kind).toBe("evidence-directory-replaced");
+    let starts = 0;
+    await expect(
+      launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => {
+          starts += 1;
+          return { processId: "should-not-start" };
+        },
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/LaunchRefused/);
+    expect(starts).toBe(0);
+    let submits = 0;
+    await expect(
+      submitProviderOnce(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        async () => {
+          submits += 1;
+          return { providerId: "paid-after-directory-loss" };
+        },
+      ),
+    ).rejects.toThrow(/DuplicatePaidSubmission/);
+    expect(submits).toBe(0);
+
+    const missingFixture = await claimedFixture();
+    const missingStarter = localAckStarter(
+      "qsb-missing-binary",
+      [],
+      1000,
+      missingFixture.admitted.job.mainnetRequestHash,
+    );
+    await expect(
+      launchOwnedProcess(
+        missingFixture.store,
+        address,
+        missingFixture.admitted.job.id,
+        0,
+        missingFixture.admitted.job.mainnetRequestHash,
+        missingStarter.start,
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/ProcessIdentityMissing/);
+    const missing = await recordLocalLoss(
+      missingFixture.store,
+      address,
+      missingFixture.admitted.job.id,
+      0,
+      missingFixture.admitted.job.mainnetRequestHash,
+      "evidence-directory-missing",
+    );
+    expect(missing.spawn).toBeUndefined();
+    expect(missing.localLoss?.kind).toBe("evidence-directory-missing");
+    await expect(
+      launchOwnedProcess(
+        missingFixture.store,
+        address,
+        missingFixture.admitted.job.id,
+        0,
+        missingFixture.admitted.job.mainnetRequestHash,
+        async () => ({ processId: "should-not-start" }),
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/LaunchRefused/);
+    await expect(
+      submitProviderOnce(
+        missingFixture.store,
+        address,
+        missingFixture.admitted.job.id,
+        0,
+        missingFixture.admitted.job.mainnetRequestHash,
+        async () => ({ providerId: "paid-after-missing-directory" }),
+      ),
+    ).rejects.toThrow(/DuplicatePaidSubmission/);
   });
 
   it("does not start a second process when start returns no pid", async () => {
@@ -2582,6 +2718,7 @@ describe("supervised runtime handoff", () => {
       put: (row, expected) => inner.put(row, expected),
       delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
       list: (pk, prefix) => inner.list(pk, prefix),
+      reservationRows: () => inner.reservationRows(),
       atomicPut: async (writes) => {
         const claiming = writes.some((write) =>
           String(write.row.sk).startsWith("LAUNCH#"),

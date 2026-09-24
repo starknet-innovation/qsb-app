@@ -81,7 +81,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "1cc097faadd7a335f2311a7c66abce377042c467ca2c92b88efba892af0771b5",
+      "api": "c5c1fd825c5fd495331cb9e11d89fde3702e66ce8590d8eaf1e9065f256b40bc",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "92798bab83d710ee679751c4ba54d1bf3753cfdfc6ce3028f9d841aac201566d",
@@ -89,7 +89,7 @@
       "historical-pinning": "9e1aba0e8882ba85f46609774844a7a75283cf5358cccd9dcc49abedf80fad48",
       "historical-subset": "322de9dfdec86850b23fbc70e41c6eb29b6e2439235138d2fd61897e9438ed17",
       "optimized-subset": "d5e1105324a421b8965e953c01eb37d1316aab2989b2bc8ae6e3e93cef1edbe3",
-      "runtime": "d16cff758e8d8805abbbaf7a3c22bfa2b08e794a7c59a8feae4bfd8a2c4f0a82"
+      "runtime": "c8654616839b1b7caa6a2ddfd470311e0bc0a36f975778f522a4f7664930e644"
     },
     "imageConfig": {
       "reason": "No OCI image config digest was produced from this checkout.",
@@ -170,7 +170,7 @@
       "server/coordinator.ts": "2271cf97b06a1a94d1901bf3bb39253e4732f56a9eae7c388f413b69cdd895df",
       "server/lambda.ts": "2ec8b51b90988b49e09c9300a198c119edb4711f1441208dbfec92df64747e09",
       "server/local.ts": "7a3c1f8a57928f77e51418b92c025622bbe71a3b291cc2094e24e37eadc378bd",
-      "server/mainnet-capability.json": "d81eac12512bfbb129d842f22f3cf7c50d7af1bb9ee8e732d3f103bdb5cf2c8a",
+      "server/mainnet-capability.json": "9db4f62f178c20d8bbbbce261b43403691aa4f73db536ec9bb273a539fbb1bd4",
       "server/mainnetConfig.ts": "e995c6a9385012217326c2490f188e8382eda40fb37858e9d4f0939d86181102",
       "server/network.ts": "bf7163415b49087ba4341b59b6f9d1b736d6c37ebeb151883ab0146c61d0d66b",
       "server/providers.ts": "b891305e079ee8b48cf7f4b2fb209f9cd1d92f7fbebf7513bf929a7c4bbaab64",
@@ -179,7 +179,7 @@
       "server/runtime/cpu-verifier.ts": "a7c3e834696bc2ec2cab21c738ed740edd2dfe5c78666e044337b27fcd9405ee",
       "server/runtime/dispatcher.ts": "4fa7b465873fe0437842e85501c0ae23b667fbd1bceb7f4338fe27d8adacddda",
       "server/runtime/evidence-reader.ts": "e4c56192be96d766d294d5077c0f2c82eee0823083247551725816506291d4e4",
-      "server/runtime/host-bridge.ts": "dbbc01c750bc4629d2125117cdb0e00007c23858d6de1bd3131c366e9ea3fa43",
+      "server/runtime/host-bridge.ts": "135597b6a111352f01fe3b1f5608982c30b30acb97d148fb0a43f3e23eacc050",
       "server/runtime/host-lifecycle.ts": "e10225f9cbf9abcfd0ad07dcda3ae3603704a36eb3f034c53e2dddfc02f8dd45",
       "server/runtime/host-requirements.ts": "dbfdc41524f043d7a8933039f4d1bdb52c034a5f9754f1d3843ec137d55a7eef",
       "server/runtime/identity.ts": "b42a637beb039e8d8e05b3d7ec45a339c7a9aaf6f4314af961984b09348bc4e8",
@@ -222,7 +222,7 @@
       "supervised/archive/work/yukon-mainnet-cycling-runner-20260923/contract.ts": "7b67c5148b712bdacfebb509627f548a282877370c38d02ebfc1d6f40fddc0a5",
       "supervised/archive/work/yukon-mainnet-cycling-runner-20260923/transport.ts": "ca70755776551bca6505bbe8e953fbfd23fabd8f5ada1525308ac7be7df29f4f",
       "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/admission.ts": "4c49808f7e53a69dd40de35a8ef862c46c2935ae22301d801116743dbcf0611c",
-      "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/capability.ts": "aae5d93136a6032d7a5e6ab400e2542797afd204bff231b09edb3de5548c9ea7",
+      "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/capability.ts": "085519d82ba468bf12e9ff84076ebe1224e33f0bf4b015599acc66ce01b42e5d",
       "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/dispatch.ts": "5f91018b87e75c66d89c9ecce801ae8bf0cc673b4b4bf21b3801d2d479ad8160",
       "supervised/archive/work/yukon-owned-pin-handoff-20260923/runtime-api.ts": "6f68076c31a58af12ab0897c7a4b1fc439e55e96e2eeff12665838f45a9ffdf6",
       "supervised/archive/work/yukon-pin-preflight-20260923/execution-gate.ts": "8fb2c3b1f030c33caec61a2dd91ad5735c6e98bce1f9827ed1dae47133d4bd06",

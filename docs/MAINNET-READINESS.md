@@ -16,7 +16,7 @@ The repository is a curated research snapshot. Some integration work and evidenc
 | Queue/runtime | Bounded actual GPU/OCI queue execution and cancellation/drain tests; immutable package identities recorded locally. | A complete fresh pinning-to-both-subsets search through the final application and runtime. |
 | Durable coordination | Local database transactions, concurrent claims, uncertain submissions, restart recovery, publication and session/replacement handoff tests. Some tests use actual Linux processes and CPU verification. | Production AWS permissions, complete production migration, or live-provider facts where tests supplied simulated responses. |
 | Browser/API | Backup encryption, one-time intent handling, wallet-lifetime guards, existing-job selection, authenticated route and configuration tests. | Successful final deployed UI/API/runtime composition; browser tests mock wallet, chain or QSB operations where stated. |
-| Public checkout | `vitest run` in this checkout reported 28 files and 227 tests, and `tsc --noEmit` passed, after pinned dependency preparation. The parent checkout `90ccb9b` reported 26 files and 216 tests. The initial public export recorded 134. | Browser/GPU tests, deployment, or a fresh withdrawal reproduced from this public checkout. |
+| Public checkout | `vitest run` in this checkout reported 28 files and 228 tests, and `tsc --noEmit` passed, after pinned dependency preparation. The parent checkout `90ccb9b` reported 26 files and 216 tests. The initial public export recorded 134. | Browser/GPU tests, deployment, or a fresh withdrawal reproduced from this public checkout. |
 
 ## 1. Complete and freeze the distributable release
 
