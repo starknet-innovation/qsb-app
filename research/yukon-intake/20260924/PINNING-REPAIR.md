@@ -598,3 +598,27 @@ certify DynamoDB service behavior. Next gates are the composed real CPU runner,
 real isolated backend, sibling drain/owned handoff and release-aware queue routing.
 Existing production controller/runtime artifacts and release selection are
 unchanged. No claim is made that the durable integration blocker is fully closed.
+
+## Real CPU runner composed with Store publication
+
+`pin_verifier.ts` provides a fixed fresh-process verifier callback for the research
+Store bridge. Its checked-in lock pins the Python CLI, runtime contract, reference
+adapter and CPU source lock. The child compiles checked runtime/reference bytes;
+the reference child independently compiles its six checked CPU sources. Public
+input cannot select a command, path or interpreter. Launcher configuration is
+trusted operator configuration. The runner limits input/output size, strips the
+environment to PATH, uses isolated Python and kills its process group on timeout
+or excessive output. This does not establish an immutable or attested host.
+
+**11 TypeScript tests pass**, including the prior Store races plus real-process
+CPU composition: a generated unfunded public context exports/rebinds successfully,
+a false candidate is rejected without a durable mutation, and pause fencing
+survives successful CPU verification. Each of four adapter artifacts rejects both
+changed bytes and same-byte symlinks before launch. All **46 Python tests** and
+TypeScript typecheck pass. Provider transport remains mocked; this is MemoryStore,
+not DynamoDB service certification, positive GPU-hit evidence or a fresh proof.
+
+The runner and publisher are research-only and unselected by application routing.
+No live release/image registry, cloud resources, completed proofs or production
+runtime source was changed. Remaining composed gates include a real isolated
+backend and drain/handoff integration under an explicitly enrolled release.

@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { createPinVerifier } from "../scripts/yukon/pin_verifier";
 import { describe, it, expect } from "vitest";
 import { MemoryStore } from "../server/store";
 import { fingerprint } from "../src/lib/provenance";
@@ -5,7 +7,7 @@ import { PinInventoryV3 } from "../supervised/runtime/source/work/yukon-indexed-
 import { SCHEMA } from "../supervised/runtime/source/work/yukon-indexed-controller-20260923/identity-index";
 import { publishResearchPin } from "../scripts/yukon/pin_store";
 
-async function fixture() {
+async function fixture(real?: { context: any; request: any; output: any }) {
   const store = new MemoryStore(),
     scope = "isolated-yukon-pr30-store",
     pk = "VALIDATION#" + scope;
@@ -16,11 +18,11 @@ async function fixture() {
     intent: "PIN#0",
     binarySha256: "a".repeat(64),
   };
-  const context = {
+  const context = real?.context ?? {
     publicStateJson: "synthetic-test-context",
     manifest: { synthetic: true },
   };
-  const request = {
+  const request = real?.request ?? {
     protocol: "qsb-yukon-pinning-research-v1",
     requestId: "test",
     manifestHash: fingerprint(context.manifest),
@@ -60,7 +62,7 @@ async function fixture() {
     async () => {},
   );
   const { parameterBase64: _, ...fields } = request;
-  const output = {
+  const output = real?.output ?? {
     ...fields,
     status: "range-drained",
     candidates: [{ sequence: 2147483648, locktime: 500000000, recid: 0 }],
@@ -202,6 +204,69 @@ describe("research pin publication through real Store and indexed submission", (
           claim.version,
         );
         return f.verdict;
+      }),
+    ).rejects.toThrow();
+    expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
+  });
+});
+
+function realPublicCase() {
+  const script =
+    "import sys,json;sys.path.insert(0,'scripts/yukon');from test_pin_reference import ReferenceBinding as R;R.setUpClass();print(json.dumps({'context':R.ctx,'request':R.req,'output':R.out}))";
+  return JSON.parse(
+    execFileSync("python3", ["-I", "-c", script], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH },
+      timeout: 10000,
+    }),
+  );
+}
+
+describe("real CPU process composed with Store publication", () => {
+  it("binds a real public export and records an empty result without credit", async () => {
+    const f = await fixture(realPublicCase());
+    const receipt = await publishResearchPin(
+      f.store,
+      f.binding,
+      f.provider,
+      createPinVerifier(),
+    );
+    expect(receipt.reference.referenceChecked).toBe(true);
+    expect(receipt.rangeCreditEligible).toBe(false);
+    expect((await f.store.get(f.pk, "PIN#0"))?.state).toBe(
+      "research_result_verified",
+    );
+  });
+  it("rejects a false candidate from actual full-transaction CPU verification", async () => {
+    const c = realPublicCase();
+    c.output.candidates = [
+      { sequence: 2147483648, locktime: 500000000, recid: 0 },
+    ];
+    const f = await fixture(c),
+      before = await f.store.get(f.pk, "PIN#0");
+    await expect(
+      publishResearchPin(f.store, f.binding, f.provider, createPinVerifier()),
+    ).rejects.toThrow("CPU verifier rejected");
+    expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
+  });
+  it("retains pause fencing around a successful real CPU process", async () => {
+    const f = await fixture(realPublicCase()),
+      cpu = createPinVerifier(),
+      before = await f.store.get(f.pk, "PIN#0");
+    await expect(
+      publishResearchPin(f.store, f.binding, f.provider, async (...args) => {
+        const result = await cpu(...args);
+        const scope = (await f.store.get(f.pk, "SCOPE"))!;
+        await f.store.put(
+          {
+            ...scope,
+            version: scope.version + 1,
+            phase: "paused",
+            revision: 2,
+          },
+          scope.version,
+        );
+        return result;
       }),
     ).rejects.toThrow();
     expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
