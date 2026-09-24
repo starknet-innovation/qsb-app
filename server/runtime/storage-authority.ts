@@ -304,6 +304,14 @@ export async function canonicalReservationWrites(
   const authority = await store.get(AUTHORITY_PK, AUTHORITY_SK);
   if (authority?.legacyExcluded === true && authority.canonicalAccepting !== true)
     throw new Conflict("ReservationAuthorityStopped");
+  for (const point of reservations) {
+    if (point.txid === point.txid.toLowerCase()) continue;
+    const legacy = await store.get(
+      `OUTPOINT#${point.txid}:${point.vout}`,
+      "RESERVATION",
+    );
+    if (legacy) throw new Conflict("ReservationAliasUnresolved");
+  }
   const stamped = authority?.legacyExcluded === true;
   const writes: AtomicWrite[] = reservations.map((point) => ({
     row: {
@@ -545,7 +553,7 @@ export function preservationFailures(before: Row[], after: Row[]): string[] {
   const restored = byKey(after);
   const beforeAuthority = before.find(isAuthorityRow);
   const afterAuthority = after.find(isAuthorityRow);
-  if (beforeAuthority?.legacyExcluded === true && afterAuthority?.legacyExcluded !== true)
+  if (stableJson(beforeAuthority) !== stableJson(afterAuthority))
     failures.push("RollbackWouldReviveWriters");
   for (const row of before) {
     const next = restored.get(rowKey(row));

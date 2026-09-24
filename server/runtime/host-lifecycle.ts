@@ -1,23 +1,20 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import contract from "../mainnet-capability.json";
 import { release } from "../../src/lib/model";
+import { MemoryStore } from "../store";
 import {
   acknowledgementExpired,
   acknowledgementLine,
-  applyLocalLoss,
+  bindEvidenceDirectory,
+  launchOwnedProcess,
   localAckStarter,
+  recordLocalLoss,
+  submitProviderOnce,
 } from "./host-bridge";
 import { sha256Hex } from "./identity";
-import {
-  compareDirectoryIdentity,
-  directoryIdentity,
-} from "./host-requirements";
-import {
-  launchRecordSchema,
-  remoteWorkStopProven,
-  type LaunchRecord,
-} from "./types";
+import { directoryIdentity } from "./host-requirements";
+import { remoteWorkStopProven, type LaunchRecord } from "./types";
 
 export type LocalLifecycleReport = {
   format: "qsb-local-lifecycle-rehearsal-v1";
@@ -40,11 +37,14 @@ export type LocalLifecycleReport = {
   operatorStep: string;
 };
 
-function rehearsalLaunch(processId: string, inputHash: string): LaunchRecord {
-  return launchRecordSchema.parse({
+const rehearsalOwner = "local-rehearsal";
+const evidenceText = "local-lifecycle-evidence\n";
+
+function claimedLaunch(requestId: string, inputHash: string): LaunchRecord {
+  return {
     bindings: {
-      owner: "local-rehearsal",
-      requestId: crypto.randomUUID(),
+      owner: rehearsalOwner,
+      requestId,
       revision: 0,
       phase: "pinning",
       slot: 0,
@@ -60,22 +60,12 @@ function rehearsalLaunch(processId: string, inputHash: string): LaunchRecord {
       },
       inputHash,
     },
-    state: "running",
-    processId,
-    previousProcessIds: ["earlier-local-pid"],
-    providerId: "local-rehearsal-provider",
-    providerOutcome: "submitted",
-    providerSubmissions: 1,
-    processStarts: 1,
-    acknowledgement: {
-      kind: "process-started",
-      processId,
-      deadline: new Date(Date.now() - 1000).toISOString(),
-      inputHash,
-      searchSuccess: false,
-      wholeRangeCovered: false,
-    },
-  });
+    state: "claimed",
+    previousProcessIds: [],
+    providerOutcome: "not-submitted",
+    providerSubmissions: 0,
+    processStarts: 0,
+  };
 }
 
 function processAlive(pid: number): boolean {
@@ -91,49 +81,139 @@ export async function rehearseLocalLifecycle(
   directory: string,
 ): Promise<LocalLifecycleReport> {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const bound = directoryIdentity(statSync(directory));
   const marker = path.join(directory, "evidence.txt");
-  writeFileSync(marker, "local-lifecycle-evidence\n", { mode: 0o600 });
-  const before = sha256Hex(readFileSync(marker));
   const inputHash = "cd".repeat(32);
+  const requestId = crypto.randomUUID();
+  const store = new MemoryStore();
+  const launch = claimedLaunch(requestId, inputHash);
+  await store.put({
+    pk: `OWNER#${rehearsalOwner}`,
+    sk: `LAUNCH#${requestId}#0`,
+    version: 0,
+    launch,
+  });
+  await store.put({
+    pk: `OWNER#${rehearsalOwner}`,
+    sk: `JOB#${requestId}`,
+    version: 0,
+    job: {
+      id: requestId,
+      owner: rehearsalOwner,
+      mainnetRequestHash: inputHash,
+      stage: "pinning",
+      status: "queued",
+    },
+  });
   const starter = localAckStarter(
     process.execPath,
     [
       "-e",
-      `process.stdout.write(${JSON.stringify(acknowledgementLine(inputHash))}); setInterval(() => {}, 1000);`,
+      `require("node:fs").writeFileSync(process.argv[1], ${JSON.stringify(evidenceText)}, {mode:0o600}); process.stdout.write(${JSON.stringify(acknowledgementLine(inputHash))}); setInterval(() => {}, 1000);`,
+      marker,
     ],
     5000,
     inputHash,
   );
   let pid: number | undefined;
+  let parked: string | undefined;
   let processExited = false;
-  let sibling: string | undefined;
   try {
-    const started = await starter.start();
-    pid = Number(started.processId);
+    const now = new Date();
+    const boundMs = 5000;
+    const acknowledged = await launchOwnedProcess(
+      store,
+      rehearsalOwner,
+      requestId,
+      0,
+      inputHash,
+      starter.start,
+      now,
+      boundMs,
+    );
+    const deadline = acknowledged.acknowledgement?.deadline;
+    const recordedDeadline = deadline === undefined ? Number.NaN : Date.parse(deadline);
+    if (
+      !Number.isFinite(recordedDeadline) ||
+      acknowledgementExpired(acknowledged, new Date(recordedDeadline - 1))
+    )
+      throw new Error("DeadlineNotRecorded");
+    const deadlineExpired = acknowledgementExpired(
+      acknowledged,
+      new Date(recordedDeadline + 1),
+    );
+    const submitted = await submitProviderOnce(
+      store,
+      rehearsalOwner,
+      requestId,
+      0,
+      inputHash,
+      async () => ({ providerId: "local-rehearsal-provider" }),
+    );
+    if (submitted.providerId !== "local-rehearsal-provider" || submitted.providerSubmissions !== 1)
+      throw new Error("ProviderSubmissionNotRecorded");
+    pid = Number(acknowledged.processId);
     if (!Number.isInteger(pid) || pid <= 0) throw new Error("ProcessIdentityMissing");
     process.kill(pid, "SIGKILL");
     await starter.exits[0];
     processExited = true;
     const alive = processAlive(pid);
-    const after = sha256Hex(readFileSync(marker));
-    sibling = mkdtempSync(`${directory}-sibling-`);
-    const replaced = compareDirectoryIdentity(
-      bound,
-      directoryIdentity(statSync(sibling)),
+    const evidenceReadableAfterShutdown =
+      sha256Hex(readFileSync(marker)) === sha256Hex(evidenceText);
+    const bound = await bindEvidenceDirectory(
+      store,
+      rehearsalOwner,
+      requestId,
+      0,
+      inputHash,
+      directoryIdentity(statSync(directory)),
     );
-    const recovered = applyLocalLoss(
-      rehearsalLaunch(started.processId, inputHash),
-      "process-not-alive",
-      started.processId,
+    if (bound.evidenceDirectory?.inode !== directoryIdentity(statSync(directory)).inode)
+      throw new Error("EvidenceDirectoryNotBound");
+    parked = `${directory}-replaced`;
+    renameSync(directory, parked);
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const replaced = await bindEvidenceDirectory(
+      store,
+      rehearsalOwner,
+      requestId,
+      0,
+      inputHash,
+      directoryIdentity(statSync(directory)),
     );
-    const remoteStopProven = remoteWorkStopProven(recovered);
+    const directoryReplacementDetected =
+      replaced.localLoss?.kind === "evidence-directory-replaced";
+    if (
+      !directoryReplacementDetected ||
+      replaced.providerId !== "local-rehearsal-provider" ||
+      replaced.providerSubmissions !== 1
+    )
+      throw new Error("DirectoryReplacementNotObserved");
+    const remoteStopProven = remoteWorkStopProven(replaced);
     if (
       remoteStopProven !== false ||
       release.mainnetEnabled !== false ||
       contract.broadcastAuthorized !== false
     )
       throw new Error("LocalLossMustNotProveRemoteStop");
+    rmSync(directory, { recursive: true, force: true });
+    let removed = false;
+    try {
+      statSync(directory);
+    } catch (error) {
+      removed = (error as NodeJS.ErrnoException).code === "ENOENT";
+    }
+    const missing = removed
+      ? await recordLocalLoss(
+          store,
+          rehearsalOwner,
+          requestId,
+          0,
+          inputHash,
+          "evidence-directory-missing",
+        )
+      : undefined;
+    const missingDirectoryDetected =
+      removed && missing?.localLoss?.kind === "evidence-directory-missing";
     return {
       format: "qsb-local-lifecycle-rehearsal-v1",
       scope: "local-rehearsal",
@@ -143,13 +223,15 @@ export async function rehearseLocalLifecycle(
       processExited,
       processAliveAfterInterrupt: alive,
       remoteStopProven,
-      providerIdPreserved: recovered.providerId === "local-rehearsal-provider",
-      providerSubmissionsPreserved: recovered.providerSubmissions === 1,
-      evidenceReadableAfterShutdown: before === after,
-      directoryReplacementDetected: replaced === "replaced",
-      missingDirectoryDetected:
-        compareDirectoryIdentity(bound, undefined) === "missing",
-      deadlineExpired: acknowledgementExpired(recovered, new Date()),
+      providerIdPreserved:
+        replaced.providerId === "local-rehearsal-provider" &&
+        missing?.providerId === "local-rehearsal-provider",
+      providerSubmissionsPreserved:
+        replaced.providerSubmissions === 1 && missing?.providerSubmissions === 1,
+      evidenceReadableAfterShutdown,
+      directoryReplacementDetected,
+      missingDirectoryDetected,
+      deadlineExpired,
       searchSuccess: false,
       mainnetEnabled: false,
       broadcastAuthorized: false,
@@ -157,7 +239,7 @@ export async function rehearseLocalLifecycle(
         "Repeat forced interruption, recovery, deadline handling, and post-shutdown evidence checks on the selected host and retain that record. This local rehearsal does not.",
     };
   } finally {
-    if (sibling !== undefined) rmSync(sibling, { recursive: true, force: true });
+    if (parked !== undefined) rmSync(parked, { recursive: true, force: true });
     if (pid !== undefined) {
       try {
         process.kill(pid, "SIGKILL");

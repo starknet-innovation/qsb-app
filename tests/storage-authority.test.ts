@@ -350,6 +350,11 @@ describe("durable storage authority rehearsal", () => {
       owner: "owner",
       jobId: "job-legacy",
     });
+    await expect(
+      canonicalReservationWrites(aliasStore, [
+        { owner: "other", jobId: "job-new", txid: mixed, vout: 0 },
+      ]),
+    ).rejects.toThrow(/ReservationAliasUnresolved/);
     const pendingAdmission = await canonicalReservationWrites(aliasStore, [
       { owner: "other", jobId: "job-new", txid: mixed.toLowerCase(), vout: 0 },
     ]);
@@ -725,6 +730,37 @@ describe("durable storage authority rehearsal", () => {
     };
     expect(preservationFailures([withCleanup], [hiddenTopLevel])).toContain(
       "CleanupHistoryShrunk",
+    );
+    const rolledBack: Row = {
+      pk: AUTHORITY_PK,
+      sk: AUTHORITY_SK,
+      version: 1,
+      legacyExcluded: true,
+      canonicalAccepting: false,
+      acceptanceStopped: true,
+      rollbackScope: "local-dry-run",
+      generation: 1,
+    };
+    const revivedAcceptance = { ...rolledBack, canonicalAccepting: true };
+    expect(preservationFailures([rolledBack], [revivedAcceptance])).toContain(
+      "RollbackWouldReviveWriters",
+    );
+    const droppedStop: Row = {
+      pk: rolledBack.pk,
+      sk: rolledBack.sk,
+      version: rolledBack.version,
+      legacyExcluded: true,
+      canonicalAccepting: false,
+      generation: 1,
+    };
+    expect(preservationFailures([rolledBack], [droppedStop])).toContain(
+      "RollbackWouldReviveWriters",
+    );
+    expect(preservationFailures([rolledBack], [structuredClone(rolledBack)])).toEqual([]);
+    const changedGeneration = structuredClone(rolledBack);
+    changedGeneration.generation = 2;
+    expect(preservationFailures([rolledBack], [changedGeneration])).toContain(
+      "RollbackWouldReviveWriters",
     );
   });
 
