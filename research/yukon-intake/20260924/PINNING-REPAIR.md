@@ -356,3 +356,30 @@ missing marker, binary mismatch and process-group timeout. The stub is not GPU
 solver evidence. CI now additionally prepares a valid synthetic public parameter
 record and runs the actual compiled solver through this adapter without a GPU;
 that new CI result is pending. Successful GPU runtime integration still remains.
+
+## Independent public reference binding prepared
+
+`pin_reference.py` now binds runtime output back to the full public transaction
+context. The manifest fingerprint, request/result identities, exact parameter
+re-export and every candidate's range/shape must agree before verification. Each
+candidate is converted to the existing CPU handler's newline-delimited format;
+that handler reconstructs the transaction sighash and checks recoverability, not
+only DER syntax. Unreproduced candidates reject; reproduced DER-only unusable
+candidates remain explicitly distinct from verified hits. No durable credit or
+signing authority is granted by this layer.
+
+The six existing CPU reference Python files are hash-pinned in
+`pin_reference_lock.json`. Each export/verification runs in a fresh isolated
+interpreter, with no inherited provider credentials, avoiding the handler's
+process-global cwd mutation. Hash checks are local integrity checks, not remote
+execution attestation. The caller must still enroll trusted binary identity.
+
+Thirty-seven local tests pass. New tests use synthetic nonexistent outpoints,
+public commitments with no recovery preimages, and a full generated public
+script: real parameter export binds correctly; a changed destination, altered
+result identity and an actual negative CPU candidate reject. These are fresh
+public synthetic contexts, not funded withdrawals or positive-hit proof. Initial
+test fixtures reused a nonce signature in all three stages and were correctly
+rejected by the reference; the fixtures now use distinct public signatures.
+Positive candidate/release/durable integration and successful GPU execution
+through the adapter remain pending. Production worker and CPU sources are unchanged.
