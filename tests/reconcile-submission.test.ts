@@ -147,53 +147,127 @@ it("records a matching provider id and does not submit", async () => {
   expect(release.mainnetEnabled).toBe(false);
 });
 
-it("records not submitted and allows exactly one later submission", async () => {
+it("does not authorize another submission when the request list misses this job", async () => {
   const store = new MemoryStore();
-  await seed(store);
+  await seed(store, pausedJob({ oneSubmissionAllowed: true }));
   const resumePolling = vi.fn(async () => ({ started: true }));
-  const lookup = guarded({
-    async requests() {
-      return [{ id: "unrelated" }];
-    },
-    async status(id) {
-      return { id, input: identity({ stage: "round1", attempt: 4 }) };
-    },
-  });
-  const first = await reconcileUnknownSubmission({
+  const seen: string[] = [];
+  const logs: unknown[] = [];
+  const result = await reconcileUnknownSubmission({
     store,
     owner,
     jobId,
-    lookup,
-    log: () => {},
+    lookup: guarded({
+      async requests() {
+        return [{ id: "unrelated" }, { id: "extra-key" }];
+      },
+      async status(id) {
+        seen.push(id);
+        if (id === "extra-key") return { id, input: { ...identity(), note: "extra" } };
+        return { id, input: identity({ stage: "round1", attempt: 4 }) };
+      },
+    }),
+    log: (entry) => logs.push(entry),
     resumePolling,
     now: "2026-09-24T01:00:00.000Z",
   });
-  expect(first).toEqual({
-    outcome: "not-submitted",
-    submissionsAllowed: 1,
-    resubmitted: false,
-  });
+  expect(result).toEqual({ outcome: "unresolved", resubmitted: false });
+  expect(seen).toEqual(["unrelated", "extra-key"]);
   expect(resumePolling).not.toHaveBeenCalled();
   expect(await stored(store)).toMatchObject({
     status: "paused",
     revision: 3,
-    oneSubmissionAllowed: true,
     error: expect.stringContaining("outcome unknown"),
   });
+  expect((await stored(store)).oneSubmissionAllowed).toBeUndefined();
   expect((await stored(store)).runpodId).toBeUndefined();
-  const second = await reconcileUnknownSubmission({
+  expect(logs).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        action: "check-runpod",
+        inspected: ["unrelated", "extra-key"],
+        unreadable: ["extra-key"],
+      }),
+      expect.objectContaining({
+        action: "refuse",
+        providerId: "extra-key",
+        inspected: ["unrelated", "extra-key"],
+      }),
+    ]),
+  );
+  expect(JSON.stringify(logs)).not.toContain("submissionsAllowed");
+});
+
+it("does not authorize another submission when every listed request is a different job", async () => {
+  const store = new MemoryStore();
+  await seed(store, pausedJob({ oneSubmissionAllowed: true }));
+  const resumePolling = vi.fn(async () => ({ started: true }));
+  const logs: unknown[] = [];
+  const result = await reconcileUnknownSubmission({
     store,
     owner,
     jobId,
-    lookup,
+    lookup: guarded({
+      async requests() {
+        return [{ id: "unrelated" }];
+      },
+      async status(id) {
+        return { id, input: identity({ stage: "round1", attempt: 4 }) };
+      },
+    }),
+    log: (entry) => logs.push(entry),
+    resumePolling,
+    now: "2026-09-24T01:00:00.000Z",
+  });
+  expect(result).toEqual({ outcome: "unresolved", resubmitted: false });
+  expect(resumePolling).not.toHaveBeenCalled();
+  expect(await stored(store)).toMatchObject({
+    status: "paused",
+    revision: 3,
+    error: expect.stringContaining("outcome unknown"),
+  });
+  expect((await stored(store)).oneSubmissionAllowed).toBeUndefined();
+  expect((await stored(store)).runpodId).toBeUndefined();
+  expect((await store.get(pk, sk))?.version).toBe(1);
+  expect(logs).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        action: "check-runpod",
+        inspected: ["unrelated"],
+      }),
+      expect.objectContaining({
+        action: "refuse",
+        reason: "list-is-not-submission-history",
+      }),
+    ]),
+  );
+  expect(JSON.stringify(logs)).not.toContain("unreadable");
+});
+
+it("leaves an empty request list unresolved and does not grant a submission", async () => {
+  const store = new MemoryStore();
+  await seed(store);
+  const resumePolling = vi.fn(async () => ({ started: true }));
+  const result = await reconcileUnknownSubmission({
+    store,
+    owner,
+    jobId,
+    lookup: guarded({
+      async requests() {
+        return [];
+      },
+      async status() {
+        throw new Error("status");
+      },
+    }),
     log: () => {},
     resumePolling,
-    now: "2026-09-24T02:00:00.000Z",
   });
-  expect(second).toEqual(first);
+  expect(result).toEqual({ outcome: "unresolved", resubmitted: false });
   expect(resumePolling).not.toHaveBeenCalled();
-  expect((await stored(store)).oneSubmissionAllowed).toBe(true);
-  expect((await stored(store)).revision).toBe(3);
+  expect((await store.get(pk, sk))?.version).toBe(0);
+  expect((await stored(store)).oneSubmissionAllowed).toBeUndefined();
+  expect((await stored(store)).status).toBe("paused");
 });
 
 it("replaces a not-submitted allowance when a provider id appears later", async () => {
@@ -291,23 +365,37 @@ it("records neither outcome when the provider check is ambiguous or incomplete",
   ).rejects.toThrow("AmbiguousProviderMatch");
   expect((await store.get(pk, sk))?.version).toBe(0);
   expect(resumePolling).not.toHaveBeenCalled();
-  await expect(
-    reconcileUnknownSubmission({
-      store,
-      owner,
-      jobId,
-      lookup: guarded({
-        async requests() {
-          return [{ id: "provider-a" }];
-        },
-        async status() {
-          return { id: "provider-a" };
-        },
-      }),
-      log: () => {},
-      resumePolling,
+  const seen: string[] = [];
+  const logs: unknown[] = [];
+  const unresolved = await reconcileUnknownSubmission({
+    store,
+    owner,
+    jobId,
+    lookup: guarded({
+      async requests() {
+        return [{ id: "provider-a" }, { id: "provider-1" }];
+      },
+      async status(id) {
+        seen.push(id);
+        if (id === "provider-a") return { id, status: "COMPLETED" };
+        return { id, input: identity() };
+      },
     }),
-  ).rejects.toThrow("ProviderCheckIncomplete");
+    log: (entry) => logs.push(entry),
+    resumePolling,
+  });
+  expect(unresolved).toEqual({ outcome: "unresolved", resubmitted: false });
+  expect(seen).toEqual(["provider-a", "provider-1"]);
+  expect(resumePolling).not.toHaveBeenCalled();
+  expect(logs).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        action: "check-runpod",
+        inspected: ["provider-a", "provider-1"],
+        unreadable: ["provider-a"],
+      }),
+    ]),
+  );
   expect(await stored(store)).toMatchObject({
     status: "paused",
     revision: 3,
@@ -391,6 +479,7 @@ it("keeps the operator step from submitting", () => {
     const source = readFileSync(path, "utf8");
     expect(source).not.toContain(".run(");
     expect(source).not.toContain("cancel(");
+    expect(source).not.toContain("oneSubmissionAllowed = true");
   }
   expect(release.mainnetEnabled).toBe(false);
   expect("broadcastAuthorized" in release).toBe(false);

@@ -26,15 +26,14 @@ export type ReconciliationLog = {
     | "load"
     | "check-runpod"
     | "record-provider-id"
-    | "record-not-submitted"
     | "resume-polling"
     | "refuse";
   jobId: string;
   owner: string;
   providerId?: string;
   inspected?: string[];
+  unreadable?: string[];
   reason?: string;
-  submissionsAllowed?: 1;
   started?: boolean;
 };
 
@@ -53,8 +52,7 @@ export type ReconciliationResult =
       pollingStarted: boolean;
     }
   | {
-      outcome: "not-submitted";
-      submissionsAllowed: 1;
+      outcome: "unresolved";
       resubmitted: false;
     };
 
@@ -116,13 +114,21 @@ function expectedIdentity(job: Job, protocol: string, kernelCommit: string) {
   };
 }
 
-function inputMatches(
-  input: Record<string, unknown>,
-  expected: Record<string, unknown>,
-): boolean {
-  const allowed = new Set([...Object.keys(expected), "parameterBase64"]);
-  if (Object.keys(input).some((key) => !allowed.has(key))) return false;
-  return Object.entries(expected).every(([key, value]) => input[key] === value);
+type InputClass = "match" | "different" | "unreadable";
+
+/** A list entry is "different" only when an identity field disagrees. An extra key does not prove that. */
+function classifyInput(input: unknown, expected: object): InputClass {
+  if (!isPlainObject(input)) return "unreadable";
+  const fields = expected as Record<string, unknown>;
+  let differs = false;
+  for (const [key, value] of Object.entries(fields)) {
+    if (!Object.prototype.hasOwnProperty.call(input, key)) return "unreadable";
+    if (input[key] !== value) differs = true;
+  }
+  if (differs) return "different";
+  const allowed = new Set([...Object.keys(fields), "parameterBase64"]);
+  if (Object.keys(input).some((key) => !allowed.has(key))) return "unreadable";
+  return "match";
 }
 
 export function pollingStartAllowed(owner: string): boolean {
@@ -180,73 +186,108 @@ export async function reconcileUnknownSubmission(input: {
     });
     return refuse("SubmissionIdentityUnavailable");
   }
+  const now = input.now ?? new Date().toISOString();
+  const dropAllowance = async () => {
+    if (job.oneSubmissionAllowed !== true) return;
+    delete job.oneSubmissionAllowed;
+    if (!recorded) {
+      job.status = "paused";
+      job.error = unknownSubmission;
+      delete job.retryRequested;
+    }
+    job.updatedAt = now;
+    await store.put({ ...row, version: row.version + 1, job }, row.version);
+  };
   let listed: Array<{ id: string }>;
   try {
     listed = await lookup.requests();
   } catch {
     log({ action: "refuse", jobId, owner, reason: "provider-check-failed" });
+    await dropAllowance();
     return refuse("ProviderCheckIncomplete");
   }
   if (listed.length >= 1000) {
     log({ action: "refuse", jobId, owner, reason: "provider-list-truncated" });
+    await dropAllowance();
     return refuse("ProviderCheckIncomplete");
   }
-  const matches: string[] = [];
-  const consider = async (providerId: string) => {
+  const providerIds = listed.map((request) => request.id);
+  if (job.runpodId && !providerIds.includes(job.runpodId))
+    providerIds.push(job.runpodId);
+  const readings: Array<{
+    providerId: string;
+    kind: InputClass;
+    reason?: string;
+  }> = [];
+  for (const providerId of providerIds) {
+    if (readings.some((reading) => reading.providerId === providerId)) continue;
     let status: { id?: string; input?: unknown };
     try {
       status = await lookup.status(providerId);
     } catch {
-      log({
-        action: "refuse",
-        jobId,
-        owner,
+      readings.push({
         providerId,
+        kind: "unreadable",
         reason: "provider-status-failed",
       });
-      return refuse("ProviderCheckIncomplete");
+      continue;
     }
     if (status.id && status.id !== providerId) {
-      log({
-        action: "refuse",
-        jobId,
-        owner,
+      readings.push({
         providerId,
+        kind: "unreadable",
         reason: "provider-id-mismatch",
       });
-      return refuse("ProviderCheckIncomplete");
+      continue;
     }
-    if (!isPlainObject(status.input)) {
-      log({
-        action: "refuse",
-        jobId,
-        owner,
-        providerId,
-        reason: "provider-input-unreadable",
-      });
-      return refuse("ProviderCheckIncomplete");
-    }
-    if (inputMatches(status.input, identity)) matches.push(providerId);
-  };
-  for (const request of listed) await consider(request.id);
-  if (job.runpodId && !listed.some((request) => request.id === job.runpodId))
-    await consider(job.runpodId);
-  const found = [...new Set(matches)];
+    const kind = classifyInput(status.input, identity);
+    readings.push({
+      providerId,
+      kind,
+      ...(kind === "unreadable"
+        ? { reason: "provider-input-unreadable" }
+        : {}),
+    });
+  }
+  const inspected = readings.map((reading) => reading.providerId);
+  const unreadable = readings
+    .filter((reading) => reading.kind === "unreadable")
+    .map((reading) => reading.providerId);
+  const found = readings
+    .filter((reading) => reading.kind === "match")
+    .map((reading) => reading.providerId);
   log({
     action: "check-runpod",
     jobId,
     owner,
-    inspected: listed.map((request) => request.id),
+    inspected,
+    ...(unreadable.length ? { unreadable } : {}),
   });
+  if (unreadable.length > 0) {
+    for (const reading of readings) {
+      if (reading.kind !== "unreadable") continue;
+      log({
+        action: "refuse",
+        jobId,
+        owner,
+        providerId: reading.providerId,
+        inspected,
+        reason: reading.reason,
+      });
+    }
+    await dropAllowance();
+    return { outcome: "unresolved", resubmitted: false };
+  }
   if (found.length > 1) {
     log({ action: "refuse", jobId, owner, reason: "ambiguous-provider-match" });
+    await dropAllowance();
     return refuse("AmbiguousProviderMatch");
   }
-  const now = input.now ?? new Date().toISOString();
   if (found.length === 1) {
     const providerId = found[0];
     if (!providerId) {
       log({ action: "refuse", jobId, owner, reason: "ambiguous-provider-match" });
+      await dropAllowance();
       return refuse("AmbiguousProviderMatch");
     }
     if (recorded && job.runpodId !== providerId) {
@@ -257,6 +298,7 @@ export async function reconcileUnknownSubmission(input: {
         providerId,
         reason: "provider-id-differs",
       });
+      await dropAllowance();
       return refuse("ProviderIdDiffers");
     }
     if (!recorded) {
@@ -292,34 +334,17 @@ export async function reconcileUnknownSubmission(input: {
       pollingStarted: polling.started,
     };
   }
-  if (recorded) {
-    log({
-      action: "refuse",
-      jobId,
-      owner,
-      providerId: job.runpodId,
-      reason: "recorded-provider-missing",
-    });
-    return refuse("ProviderCheckIncomplete");
-  }
-  job.oneSubmissionAllowed = true;
-  job.status = "paused";
-  job.error = unknownSubmission;
-  delete job.runpodId;
-  delete job.retryRequested;
-  job.updatedAt = now;
-  await store.put({ ...row, version: row.version + 1, job }, row.version);
   log({
-    action: "record-not-submitted",
+    action: "refuse",
     jobId,
     owner,
-    submissionsAllowed: 1,
+    ...(recorded ? { providerId: job.runpodId } : {}),
+    reason: recorded
+      ? "recorded-provider-missing"
+      : "list-is-not-submission-history",
   });
-  return {
-    outcome: "not-submitted",
-    submissionsAllowed: 1,
-    resubmitted: false,
-  };
+  await dropAllowance();
+  return { outcome: "unresolved", resubmitted: false };
 }
 
 function assertIdentifier(value: string | undefined, label: string): string {
@@ -401,8 +426,11 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
     });
     switch (result.outcome) {
       case "provider-id":
-      case "not-submitted":
         process.stdout.write(`${JSON.stringify(result)}\n`);
+        return;
+      case "unresolved":
+        process.stdout.write(`${JSON.stringify(result)}\n`);
+        process.exitCode = 1;
         return;
       default: {
         const neverOutcome: never = result;

@@ -184,7 +184,7 @@ it("resumes a paused job when only another coverage account is stopped", async (
   });
 });
 
-it("resumes an unknown submission once after reconciliation and not before", async () => {
+it("refuses to resume an unknown submission even when a list miss set an allowance", async () => {
   vi.stubEnv("QSB_REHEARSAL_ADDRESSES", address);
   const store = new MemoryStore();
   const app = createApp(store, { enabled: true });
@@ -233,13 +233,14 @@ it("resumes an unknown submission once after reconciliation and not before", asy
     0,
   );
   const resumed = await app.request(post(`/jobs/${jobId}/resume`, {}, token));
-  expect(resumed.status).toBe(202);
-  const body = await resumed.json();
-  expect(body.job.status).toBe("queued");
-  expect(body.job.oneSubmissionAllowed).toBeUndefined();
-  expect(body.job.error).toBeUndefined();
-  const again = await app.request(post(`/jobs/${jobId}/resume`, {}, token));
-  expect(again.status).toBe(409);
+  expect(resumed.status).toBe(409);
+  expect(await resumed.json()).toEqual({
+    error: "Reconcile the unknown Runpod submission before retrying.",
+  });
+  const kept = (await store.get(`OWNER#${address}`, `JOB#${jobId}`))?.job as Job;
+  expect(kept.status).toBe("paused");
+  expect(kept.oneSubmissionAllowed).toBe(true);
+  expect(kept.runpodId).toBeUndefined();
 });
 it("blocks Teststream preflight when the miner reports a different chain and does not submit without a permit", async () => {
   const request = vi

@@ -654,10 +654,7 @@ export function createApp(
         { error: "Stopped coverage cannot be resumed on this account." },
         409,
       );
-    if (
-      job.error?.includes("Submission outcome unknown") &&
-      job.oneSubmissionAllowed !== true
-    )
+    if (job.error?.includes("Submission outcome unknown"))
       return c.json(
         { error: "Reconcile the unknown Runpod submission before retrying." },
         409,

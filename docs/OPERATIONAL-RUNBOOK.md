@@ -56,12 +56,13 @@ npx tsx scripts/reconcile-submission.ts <owner> <job-id>
 
 The command loads that job, lists the endpoint's current Runpod requests with GET `/requests`, and reads each request with GET `/status`. It logs every action to stderr as one JSON object per line. A log line contains the job id, owner, and provider ids only. It does not contain credentials, parameter payloads, or wallet material.
 
-The command records one of two outcomes. It never calls Runpod `/run`, never resumes the job by itself, and never broadcasts:
+The command never calls Runpod `/run`, never resumes the job by itself, and never broadcasts.
 
-- One listed request matches this job's manifest hash, stage, attempt, solver identity, and parameter hash. The command stores that provider id and returns the job to `searching` so polling can read that id. Polling uses `/status`. While `release.mainnetEnabled` is false, the command does not start the coordinator, because that pass would fail the job. Re-run the command after transactions are enabled for the owner to start polling. A re-run reads the stored provider id even when the request list no longer includes it, and it does not submit.
-- No listed request matches. The command records not submitted and sets `oneSubmissionAllowed`. That flag allows exactly one later `POST /api/jobs/:id/resume` to queue this range. The command does not call resume and does not start a workflow. Running it again, while Runpod still has no match, leaves the same single allowance. It does not grant a second submission.
+GET `/requests` is the endpoint's current request list. It is not a history of this job. Completed requests leave the list, and the client does not page it. A miss, an empty list, or a request that cannot be shown to be a different submission does not mean this job was never accepted. The command leaves the job paused, does not set `oneSubmissionAllowed`, and does not authorize another submission. Resume stays refused. If that flag was already set, this check removes it.
 
-If more than one request matches, or a listed request cannot be read, the command records neither outcome and does not submit. Resume stays refused until a later successful reconciliation. The request list omits jobs Runpod has already dropped. A not-submitted record means none of the requests still listed matched.
+The command stores a provider id only when every listed request was read, exactly one status input matches this job's manifest hash, stage, attempt, solver identity, and parameter hash, and every other request is a different submission. It then returns the job to `searching` so polling can read that id. Polling uses `/status`. While `release.mainnetEnabled` is false, the command does not start the coordinator, because that pass would fail the job. Re-run the command after transactions are enabled for the owner to start polling. A re-run reads a stored provider id even when the request list no longer includes it, and it does not submit.
+
+If more than one request matches, or any listed request cannot be read, the command records neither outcome and does not submit. It logs the full id list, including each unreadable id, before it returns.
 
 This command does not set `release.mainnetEnabled` or `broadcastAuthorized`.
 
