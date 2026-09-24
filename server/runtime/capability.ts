@@ -1,6 +1,6 @@
 import { fingerprint } from "../../src/lib/provenance";
 import contract from "../mainnet-capability.json";
-import type { Store } from "../store";
+import type { Row, Store } from "../store";
 
 export class GateError extends Error {
   readonly status: 400 | 404 | 409 | 503;
@@ -16,7 +16,7 @@ export function assertServiceChain(network: string): void {
     throw new GateError(409, "This service chain is not Bitcoin mainnet.");
 }
 
-export async function assertSearchCapability(store: Store): Promise<void> {
+export async function assertSearchCapability(store: Store): Promise<Row> {
   const row = await store.get("SYSTEM#QSB_MAINNET_SERVICE", "CAPABILITY");
   if (
     !row ||
@@ -27,4 +27,5 @@ export async function assertSearchCapability(store: Store): Promise<void> {
     contract.broadcastAuthorized !== false
   )
     throw new GateError(503, "Supervised search capability is not active.");
+  return row;
 }

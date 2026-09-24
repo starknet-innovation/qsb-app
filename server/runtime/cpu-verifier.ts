@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
 import path from "node:path";
 import { componentForPath } from "./closure";
 import { assertInsideRepo, sha256Hex } from "./identity";
@@ -67,27 +67,40 @@ export function assertEnrolledCpuSources(root: string): void {
   assertNoUnenrolledPython(root, enrolled);
 }
 
-/** An extra interpreter hook or module beside the enrolled sources is not enrolled. */
+const importableFile = /\.(?:py|pyc|pyo|pyd|so)$/i;
+
+/** An extra package, extension, or module beside the enrolled sources is not enrolled. */
 function assertNoUnenrolledPython(
   root: string,
   enrolled: Record<string, string>,
 ): void {
-  const cpuDir = assertInsideRepo(root, "worker/cpu");
-  let names: string[];
-  try {
-    names = readdirSync(cpuDir);
-  } catch {
-    throw new Error("CpuVerifierNotEnrolled");
-  }
-  for (const name of names) {
-    if (
-      !name.endsWith(".py") &&
-      name !== "sitecustomize.py" &&
-      name !== "usercustomize.py"
-    )
-      continue;
-    if (!enrolled[`worker/cpu/${name}`]) throw new Error("CpuVerifierNotEnrolled");
-  }
+  const allowed = new Set(
+    Object.keys(enrolled).filter((relativePath) =>
+      relativePath.startsWith("worker/cpu/"),
+    ),
+  );
+  const visit = (directory: string, relativeDir: string) => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      throw new Error("CpuVerifierNotEnrolled");
+    }
+    for (const entry of entries) {
+      if (entry.name === "__pycache__" && entry.isDirectory()) continue;
+      const relativePath = `${relativeDir}/${entry.name}`;
+      const absolute = assertInsideRepo(root, relativePath);
+      if (entry.isSymbolicLink()) throw new Error("CpuVerifierNotEnrolled");
+      if (entry.isDirectory()) {
+        visit(absolute, relativePath);
+        continue;
+      }
+      if (!entry.isFile()) throw new Error("CpuVerifierNotEnrolled");
+      if (!importableFile.test(entry.name)) continue;
+      if (!allowed.has(relativePath)) throw new Error("CpuVerifierNotEnrolled");
+    }
+  };
+  visit(assertInsideRepo(root, "worker/cpu"), "worker/cpu");
 }
 
 const pythonImport = /^(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)/gm;

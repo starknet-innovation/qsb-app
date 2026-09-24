@@ -142,7 +142,18 @@ export async function claimAdmittedLaunch(
   owner: string,
   jobId: string,
 ) {
-  await assertSearchCapability(store);
+  const capability = await assertSearchCapability(store);
+  const guarded: Store = {
+    get: (pk, sk) => store.get(pk, sk),
+    list: (pk, prefix) => store.list(pk, prefix),
+    put: (row, expected) => store.put(row, expected),
+    delete: (pk, sk, expected) => store.delete(pk, sk, expected),
+    atomicPut: (writes) =>
+      store.atomicPut([
+        ...writes,
+        { row: capability, expected: capability.version },
+      ]),
+  };
   const pk = `OWNER#${owner}`;
   const jobRow = await store.get(pk, `JOB#${jobId}`);
   if (!jobRow) throw new GateError(404, "Job not found");
@@ -151,7 +162,7 @@ export async function claimAdmittedLaunch(
   if (!vaultRow) throw new GateError(404, "Vault not found");
   const vault = vaultRow.vault as PublicVault;
   const configuration = vault.configuration ?? vaultConfiguration(vault);
-  return claimLaunch(store, vault, {
+  const bindings: LaunchBindings = {
     owner,
     requestId: job.id,
     revision: job.revision,
@@ -167,5 +178,20 @@ export async function claimAdmittedLaunch(
       broadcastAuthorized: false,
     },
     inputHash: job.mainnetRequestHash,
-  });
+  };
+  for (;;) {
+    try {
+      return await claimLaunch(guarded, vault, bindings);
+    } catch (error) {
+      if (!(error instanceof Conflict)) throw error;
+      const current = await store.get(capability.pk, capability.sk);
+      if (
+        !current ||
+        current.version !== capability.version ||
+        current.enabled !== true ||
+        fingerprint(current.contract) !== fingerprint(capability.contract)
+      )
+        throw new GateError(503, "Supervised search capability is not active.");
+    }
+  }
 }

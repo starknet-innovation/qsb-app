@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Signer } from "bip322-js";
@@ -1454,6 +1454,26 @@ describe("supervised runtime handoff", () => {
     ).rejects.toThrow(/CpuVerifierNotEnrolled/);
   });
 
+  it("refuses a package directory that would shadow an enrolled CPU module", async () => {
+    const directory = mkdtempSync(`${tmpdir()}/qsb-pkg-`);
+    writePackageTree(process.cwd(), directory);
+    const tree = path.join(directory, "tree");
+    const shadow = path.join(tree, "worker/cpu/qsb_pipeline");
+    mkdirSync(shadow);
+    writeFileSync(path.join(shadow, "__init__.py"), "VALUE = 'shadow'\n");
+    await expect(
+      runEnrolledCpuVerifier(tree, { action: "verify", stage: "pinning" }),
+    ).rejects.toThrow(/CpuVerifierNotEnrolled/);
+    rmSync(shadow, { recursive: true });
+    writeFileSync(
+      path.join(tree, "worker/cpu/qsb_pipeline.cpython-312-x86_64-linux-gnu.so"),
+      "",
+    );
+    await expect(
+      runEnrolledCpuVerifier(tree, { action: "verify", stage: "pinning" }),
+    ).rejects.toThrow(/CpuVerifierNotEnrolled/);
+  });
+
   it("retains both process ids when primary and sibling acknowledge together", async () => {
     const { store, admitted } = await claimedFixture();
     await openSiblingSlot(store, address, admitted.job.id, admitted.job.mainnetRequestHash);
@@ -1597,6 +1617,73 @@ describe("supervised runtime handoff", () => {
     expect(job.status).toBe("queued");
     expect(job.paidProviderSlot).toBeUndefined();
     expect(job.runtime.searchRunning).toBe(false);
+  });
+
+  it("refuses a sibling after the primary launch is terminal", async () => {
+    const { store, admitted } = await claimedFixture();
+    const row = await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`);
+    const launch = row?.launch as { state: string };
+    launch.state = "terminal";
+    await store.put({ ...row!, launch, version: row!.version + 1 }, row!.version);
+    await expect(
+      openSiblingSlot(
+        store,
+        address,
+        admitted.job.id,
+        admitted.job.mainnetRequestHash,
+      ),
+    ).rejects.toThrow(/PrimaryTerminal/);
+    expect(
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#1`),
+    ).toBeUndefined();
+  });
+
+  it("does not claim a launch after the capability row is revoked", async () => {
+    const inner = new MemoryStore();
+    await seedCapability(inner);
+    const fixture = simulatedMainnetRequest();
+    await inner.put({
+      pk: `OWNER#${address}`,
+      sk: `VAULT#${fixture.vault.id}`,
+      version: 0,
+      vault: fixture.vault,
+    });
+    const admitted = await admitSupervisedJob(
+      inner,
+      address,
+      "mainnet",
+      fixture.prepared.body,
+    );
+    let revoked = false;
+    const store: Store = {
+      get: (pk, sk) => inner.get(pk, sk),
+      put: (row, expected) => inner.put(row, expected),
+      delete: (pk, sk, expected) => inner.delete(pk, sk, expected),
+      list: (pk, prefix) => inner.list(pk, prefix),
+      atomicPut: async (writes) => {
+        const claiming = writes.some((write) =>
+          String(write.row.sk).startsWith("LAUNCH#"),
+        );
+        if (claiming && !revoked) {
+          revoked = true;
+          const capability = await inner.get(
+            "SYSTEM#QSB_MAINNET_SERVICE",
+            "CAPABILITY",
+          );
+          await inner.put(
+            { ...capability!, version: capability!.version + 1, enabled: false },
+            capability!.version,
+          );
+        }
+        await inner.atomicPut(writes);
+      },
+    };
+    await expect(
+      claimAdmittedLaunch(store, address, admitted.job.id),
+    ).rejects.toThrow(/Supervised search capability is not active/);
+    expect(
+      await inner.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`),
+    ).toBeUndefined();
   });
 
   it("does not drain a sibling that is still launching without a pid", async () => {

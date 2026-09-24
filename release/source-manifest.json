@@ -83,13 +83,13 @@
     "components": {
       "api": "89add909f5bdfc29f3f7e33e4bf0e8e51f2697072d612b5a1944d16bdbcbdfd8",
       "build-metadata": "90383b21c646d631276ed13b7f2a900c6674d91d72a0bd64fe312e5be3da8c5c",
-      "cpu-verifier": "bc5af57daae87d78672008d11b0a25480aecb5efe4118f54a3eb9a2790deed43",
-      "dispatcher": "43295bd7059863eb447f51c2068ce11ee6c3c7c14b0b1da93d78e0a723a6baf0",
+      "cpu-verifier": "319788ae71e724c55acca9ee908b6a7b1cf54164e725ae60f7114055b051d3b1",
+      "dispatcher": "71c08180b8a85f314d0fe415d4d02c68d89f74b37a734192bfa269c016dbb794",
       "evidence-reader": "02ca0a58e80bbf392fc00b7325876d23c5f7d490bf6f30bdaf1a322574273743",
       "historical-pinning": "9e1aba0e8882ba85f46609774844a7a75283cf5358cccd9dcc49abedf80fad48",
       "historical-subset": "322de9dfdec86850b23fbc70e41c6eb29b6e2439235138d2fd61897e9438ed17",
       "optimized-subset": "d5e1105324a421b8965e953c01eb37d1316aab2989b2bc8ae6e3e93cef1edbe3",
-      "runtime": "0ee26b4f399123bcc90844a6ab480c1ae225210d960e7b48eb0a0e879347046c"
+      "runtime": "fd7cd01526ae08fb2385c74df943e143a56b73823bf6dfc0d463d19c05e39a30"
     },
     "imageConfig": {
       "reason": "No OCI image config digest was produced from this checkout.",
@@ -172,12 +172,12 @@
       "server/mainnetConfig.ts": "e995c6a9385012217326c2490f188e8382eda40fb37858e9d4f0939d86181102",
       "server/network.ts": "bf7163415b49087ba4341b59b6f9d1b736d6c37ebeb151883ab0146c61d0d66b",
       "server/providers.ts": "b891305e079ee8b48cf7f4b2fb209f9cd1d92f7fbebf7513bf929a7c4bbaab64",
-      "server/runtime/capability.ts": "af7fbba36d5c9c6c4208c7b9da9e1fadee58fd627e57a1bad24a18a1d84ff6a8",
+      "server/runtime/capability.ts": "5695dc01ce72e1243022204014b7de5a8c662ac337aa73c52124628c8de2a797",
       "server/runtime/closure.ts": "e901cbcb92793d371e420ad36248657cf5537e8b24a83e41cae4d8886b558f27",
-      "server/runtime/cpu-verifier.ts": "3000c692bfbab5b6cbe668411e8e3503f890868d8cf74acddf3111ee3ddc6c7d",
-      "server/runtime/dispatcher.ts": "4de68577714d191e73584fa4e61b0f66cf786cb1d120ecf5db642c8e07b8ead5",
+      "server/runtime/cpu-verifier.ts": "7b6e047f613f122619f2c0361cde006070f3e443ed70d5614a708853f209da1a",
+      "server/runtime/dispatcher.ts": "cf306b0bf7039a96e1a52db7b7e7bd8d4d9b573e812236f21f090d683bb7ea75",
       "server/runtime/evidence-reader.ts": "e8ea401ab1fce90519e3a7f0276f6c7f11e43ae457afd5e9a31cf945ed11f10e",
-      "server/runtime/host-bridge.ts": "1605ca5d1986f77f1b263a670d1503c46c15ad262b1b45f08bf76ff74aad73c4",
+      "server/runtime/host-bridge.ts": "cf22580680b1ace4b5fc4a5c66eec4a8e4fe401b48f11d584b9739eb4b3ba65f",
       "server/runtime/identity.ts": "b42a637beb039e8d8e05b3d7ec45a339c7a9aaf6f4314af961984b09348bc4e8",
       "server/runtime/package-release.ts": "3916204e74b14ee5d04e450cd8bec5b25124d03da35aaa2a0f8d53d7b077016e",
       "server/runtime/supervised-routes.ts": "6bd45ea629ede37129486dc392d313708a6ad4d663c24789f46bb4943a1afb90",

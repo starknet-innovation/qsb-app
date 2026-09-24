@@ -668,26 +668,45 @@ export async function openSiblingSlot(
   requestId: string,
   inputHash: string,
 ): Promise<LaunchRecord> {
-  const primary = await loadPair(store, owner, requestId, 0);
-  if (primary.launch.bindings.inputHash !== inputHash)
-    throw new Error("ImmutableInputMismatch");
-  if (await store.get(pkOf(owner), launchSk(requestId, 1)))
-    throw new Error("LaunchExists");
-  const launch: LaunchRecord = {
-    bindings: { ...primary.launch.bindings, slot: 1 },
-    state: "claimed",
-    previousProcessIds: [],
-    providerOutcome: "not-submitted",
-    providerSubmissions: 0,
-    processStarts: 0,
-  };
-  await store.put({
-    pk: pkOf(owner),
-    sk: launchSk(requestId, 1),
-    version: 0,
-    launch,
-  });
-  return launch;
+  for (;;) {
+    const primary = await loadPair(store, owner, requestId, 0);
+    if (primary.launch.bindings.inputHash !== inputHash)
+      throw new Error("ImmutableInputMismatch");
+    if (primary.launch.state === "terminal") throw new Error("PrimaryTerminal");
+    if (await store.get(pkOf(owner), launchSk(requestId, 1)))
+      throw new Error("LaunchExists");
+    const launch: LaunchRecord = {
+      bindings: { ...primary.launch.bindings, slot: 1 },
+      state: "claimed",
+      previousProcessIds: [],
+      providerOutcome: "not-submitted",
+      providerSubmissions: 0,
+      processStarts: 0,
+    };
+    try {
+      await store.atomicPut([
+        {
+          row: {
+            pk: pkOf(owner),
+            sk: launchSk(requestId, 1),
+            version: 0,
+            launch,
+          },
+        },
+        {
+          row: {
+            ...primary.launchRow,
+            version: primary.launchRow.version + 1,
+          },
+          expected: primary.launchRow.version,
+        },
+      ]);
+      return launch;
+    } catch (error) {
+      if (error instanceof Conflict) continue;
+      throw error;
+    }
+  }
 }
 
 export async function drainSibling(
