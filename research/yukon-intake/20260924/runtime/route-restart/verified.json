@@ -1,0 +1,39 @@
+{
+  "scope": "New Node coordinator process after externally performed DynamoDB Local restart; actual CPU verification; mocked provider transport/status read",
+  "freshProcess": true,
+  "persistedIntentScopeEnrollmentUnchanged": true,
+  "duplicateSubmitRejected": true,
+  "paidCallsAfterRestart": 0,
+  "savedProviderReads": 1,
+  "lateIdentityAttached": true,
+  "pausePreserved": true,
+  "revokedPublicationRejected": true,
+  "reconciliationReceipt": {
+    "providerId": "1fe61800-d018-4981-8d7d-0591075a5673-u2",
+    "providerResultHash": "40c3c784f84fc5bdf1492f085365fe32b6f62bf3bd080d1c13b45c32f70df58b",
+    "contextHash": "cd9b2ac02f897672d3bd275b13e9e860e35cc26fccb9498066ab9a6b87382608",
+    "requestHash": "68bdf5e7353ad39111ee957ca788349ca30c3cc83b3ac75456006a0f1b742a07",
+    "reference": {
+      "referenceChecked": true,
+      "contextHash": "cd9b2ac02f897672d3bd275b13e9e860e35cc26fccb9498066ab9a6b87382608",
+      "verdicts": [],
+      "decision": "range-drained-reference-bound",
+      "rangeCreditEligible": false,
+      "releaseStatus": "HOLD",
+      "freshWithdrawal": false
+    },
+    "releaseStatus": "HOLD",
+    "rangeCreditGranted": false
+  },
+  "testTableDeleted": true,
+  "gpuExecuted": false,
+  "awsRegionalCertification": false,
+  "freshWithdrawal": false,
+  "releaseStatus": "HOLD",
+  "databaseRestartSignal": "SIGKILL",
+  "databaseImageDigest": "ff89bd48ff32cd8d9be5fee8873b65b8854dc408f1afe881be6eb00247bc0dab",
+  "testTablesAfter": [],
+  "containerRemoved": true,
+  "volumeRemoved": true,
+  "scriptSha256": "7291c1dbc846a87bfeec11024b8936c0895d6e686d0d3a9317a06d82731cd23a"
+}

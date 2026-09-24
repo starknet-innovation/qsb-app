@@ -906,3 +906,22 @@ tables and container were removed. Evidence is in `runtime/reconciliation/`.
 Transport reads are mocked; these are not new remote calls or a process-restart
 test. Live orchestration, positive GPU hit, independent review, capacity control
 and fresh final-build end-to-end proof remain open.
+
+## Composed route recovery across process and database restart
+
+`check_pin_route_restart.ts` exercises the release-fenced submission and known-ID
+reconciliation paths in separate Node processes against persistent DynamoDB Local.
+The seed process performs real CPU preflight, durably authorizes an intent, then
+simulates a lost provider acknowledgement. After that process exits, the database
+is killed with SIGKILL and restarted on its disposable persistent volume.
+
+The fresh verification process finds the exact same intent, scope and enrollment
+hashes. It rejects a replacement submission with zero transport calls, then pauses
+the scope and revokes enrollment. The saved actual remote result is verified by
+the real CPU process before its late ID is attached. Pause remains in effect and
+publication is rejected. The test table, container and volume were removed;
+`runtime/route-restart/verified.json` records the outcome and script hash.
+
+This closes the composed process/database restart case. Provider transport and
+status reads remain mocked saved-response replay; it is not a new GPU execution,
+AWS regional durability certification, positive-hit proof or fresh withdrawal.
