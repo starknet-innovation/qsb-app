@@ -149,3 +149,20 @@ selection or table construction. Nine additional cases cover generator/negative
 generator, order boundaries and malformed coordinates; twenty tests pass locally.
 This establishes input validity only. It does not certify table arithmetic or
 remove the need to check allocations/operations inside upstream table builders.
+
+## Table-builder OpenSSL checks
+
+The locked host source now checks 162 calls to explicitly enumerated APIs with
+zero/null failure returns. Return types and values are preserved and expressions
+evaluate once; failures terminate before subsequent operations. Comparisons,
+length-returning APIs, frees and already-checked modular inversions are not
+rewritten. Five table-coordinate encodings use checked 32-byte padded writes
+instead of unchecked variable-length output. This includes allocation checks
+before dependent point/scalar operations in ladder/fallback/spot-check setup.
+
+Twenty-two local tests pass. Transformation tests preserve comments/literals and
+non-boolean API semantics; mocked allocation/arithmetic failures verify no later
+operation or completion after failure and pointer identity on success. These are
+not 162-site native fault-injection results. GPU table correctness, exceptional
+coverage and final-build validation remain pending. The public-input version
+b69629d passed native CI run 36042539454; this later change needs a new build.

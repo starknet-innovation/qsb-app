@@ -85,3 +85,10 @@ static inline void qsb_close_hits(FILE *f) {
     if (fclose(f) != 0) failed = 1;
     qsb_require_host(!failed, "write/flush/close hit output");
 }
+
+// Preserve the exact return value/type and evaluate the operation once.
+// Only zero/null-failure APIs may use this wrapper; comparisons/length APIs do not.
+template<typename T> static inline T qsb_ssl_checked(T value, const char *operation) {
+    qsb_require_host(value != 0, operation);
+    return value;
+}

@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 from validate import LOCK, check_source_lock, function
 from check_cuda import checked_cuda
+from check_openssl import checked_openssl
 
 FLAGS = {name: 0 for name in (
     'QSB_C31', 'QSB_SHORT_CARRY', 'QSB_CARRY62', 'QSB_FIELD_SC',
@@ -141,6 +142,17 @@ def adapt(text):
     text, cuda_sites = checked_cuda(text)
     if len(cuda_sites) != 41:
         raise ValueError(f'CUDA standalone call inventory changed: {len(cuda_sites)}')
+    for old, value, dest in (
+        ('BN_bn2bin(x, xb + (32 - BN_num_bytes(x)));', 'x', 'xb'),
+        ('BN_bn2bin(y, yb + (32 - BN_num_bytes(y)));', 'y', 'yb'),
+        ('BN_bn2bin(bk,kb+(32-BN_num_bytes(bk)));', 'bk', 'kb'),
+        ('BN_bn2bin(dx,dxb+(32-BN_num_bytes(dx)));', 'dx', 'dxb'),
+        ('BN_bn2bin(dy,dyb+(32-BN_num_bytes(dy)));', 'dy', 'dyb')):
+        text = replace(text, old,
+            f'qsb_require_host(BN_bn2binpad({value}, {dest}, 32) == 32, "table coordinate serialization");')
+    text, ssl_sites = checked_openssl(text)
+    if len(ssl_sites) != 162:
+        raise ValueError(f'OpenSSL call inventory changed: {len(ssl_sites)}')
     # Compile-time lock: command-line flags cannot silently re-enable shortcuts.
     prefix = '#define QSB_CUDA(call) qsb_require_host((call) == cudaSuccess, #call)\n#include "qsb_pin_contract.h"\n#include "qsb_pin_recovery.h"\n'
     for name, value in FLAGS.items():
