@@ -32,10 +32,13 @@ type VaultInput = {
 };
 export function vaultConfiguration(v: VaultInput) {
   if (v.config !== "A") throw new Error("UnsupportedVaultProtocol");
+  if (typeof v.network !== "string" || v.network === "")
+    throw new Error("Unsupported QSB network configuration");
+  const network = v.network;
   return {
     protocol: "qsb-config-a-v1" as const,
     generatorCommit: "2c9172051d5c150ef0a994ca6b988a08a3ef9e85" as const,
-    network: v.network ?? "mainnet",
+    network,
     config: "A" as const,
     scriptHash: v.scriptHash,
     scriptBytesHash: bytesToHex(

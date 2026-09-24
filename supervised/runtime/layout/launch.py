@@ -34,7 +34,8 @@ def run():
  fcntl.fcntl(sealed,fcntl.F_ADD_SEALS,fcntl.F_SEAL_WRITE|fcntl.F_SEAL_GROW|fcntl.F_SEAL_SHRINK|fcntl.F_SEAL_SEAL)
  os.set_inheritable(sealed,True);sealed_path='/proc/self/fd/'+str(sealed)
  if not re.fullmatch('/evidence/[a-z0-9-]+',str(out)) or Path('/evidence').resolve()!=Path('/evidence') or out.is_symlink():fail()
- if subprocess.run(['/usr/local/bin/node',str(P/'validate.cjs'),sealed_path,sys.argv[1]],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,pass_fds=(sealed,)).returncode:fail()
+ env=os.environ.copy();env['QSB_NETWORK']='mainnet'
+ if subprocess.run(['/usr/local/bin/node',str(P/'validate.cjs'),sealed_path,sys.argv[1]],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,pass_fds=(sealed,),env=env).returncode:fail()
  if sys.argv[1]=='start':
   if out.exists():fail()
   argv=['/usr/local/bin/python',str(P/'common-linux/supervisor.py'),sealed_path,str(out)]

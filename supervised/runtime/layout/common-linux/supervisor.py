@@ -90,6 +90,7 @@ def run(cfgfile,out):
  expected=h(json.dumps(cfg['transport']['blueprint'],separators=(',',':'),ensure_ascii=False).encode());runpk='SUPERVISION#'+cfg['transport']['blueprint']['runId']
  try:
   env={k:v for k,v in os.environ.items() if k in ('PATH','LD_LIBRARY_PATH','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','AWS_SESSION_TOKEN','AWS_REGION','AWS_ENDPOINT_URL_DYNAMODB','AWS_EC2_METADATA_DISABLED','PYTHONDONTWRITEBYTECODE')}
+  env['QSB_NETWORK']='mainnet'
   child=subprocess.Popen([sys.executable,str(R/'owned_exec.py'),str(os.getpid()),'--',sys.executable,str(R/'leader.py'),cfgfile,str(out)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=open(out/'child-stderr.log','wb'),start_new_session=True,env=env,pass_fds=(3,configfd))
   os.close(3)
   exclusive(out/'leader.json',{'pid':child.pid,'startTicks':Path('/proc',str(child.pid),'stat').read_text().split()[21]})

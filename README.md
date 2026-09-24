@@ -26,14 +26,14 @@ npm ci
 npm run vendor
 npm test
 npm run typecheck
-npm run build
+QSB_NETWORK=mainnet VITE_QSB_NETWORK=mainnet npm run build
 npm run package:release -- --check
 ```
 
-The preparation step supplies the pinned sources required by provenance tests and the browser Python transaction builder. Then start development:
+The preparation step supplies the pinned sources required by provenance tests and the browser Python transaction builder. Then start development. `mainnet` here is the network identity; it does not enable mainnet operations:
 
 ```sh
-npm run dev
+QSB_NETWORK=mainnet VITE_QSB_NETWORK=mainnet npm run dev
 ```
 
 `vendor` downloads two pinned upstream source archives and applies the checked-in patch; review `scripts/vendor.py` and `scripts/patch_upstream.py` before running it. It does not require wallet secrets. The local API uses an in-memory store. Do not put a real backup, recovery phrase, or passphrase into an issue or pull request.
