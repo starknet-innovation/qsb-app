@@ -978,3 +978,21 @@ not attest that the new GPU binary discovered this hit: the provider response an
 queue observations are synthetic. No GPU computation, paid provider request,
 fixture spend, broadcast or new withdrawal occurred. Positive GPU discovery,
 live composed orchestration, independent review and fresh end-to-end gates remain.
+
+## Attached sibling terminal reconciliation
+
+`recordResearchPinTerminal` reads only an already attached provider ID through a
+trusted status adapter. It records terminal evidence in a transaction conditioned
+on scope, intent, identity index and global provider claim. It works during drain
+or pause, including after release revocation, without changing phase/revision,
+publishing candidates, granting coverage, submitting or cancelling jobs. Searching
+results must use CPU publication; unknown IDs must use identity reconciliation.
+404/errors, pending states and mismatched IDs leave the intent unresolved.
+
+Five new test cases cover all four terminal statuses, duplicate publication,
+revocation, preserved pause, absent/pending/substituted evidence, concurrent scope
+and global-identity changes, and exclusion of searching/uncertain intents. All
+39 focused tests and typecheck pass; all 36 Store tests pass against actual
+loopback DynamoDB Local using mocked provider reads. The empty table list and
+disposable container removal were verified. Evidence: `runtime/terminal-reconciliation/`.
+This is cleanup integration, not new GPU discovery or live provider certification.

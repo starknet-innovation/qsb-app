@@ -1,0 +1,20 @@
+{
+  "scope": "Attached sibling terminal reconciliation; actual DynamoDB Local; mocked provider status GET",
+  "focusedTests": 39,
+  "dynamoLocalStoreTests": 36,
+  "typecheck": "passed",
+  "cases": [
+    "four terminal states after release revocation, exactly once",
+    "paused revision preserved",
+    "missing/pending/substituted evidence leaves state unchanged",
+    "scope/global-identity race rejects atomic publication",
+    "searching results and uncertain identities excluded"
+  ],
+  "sourceSha256": {
+    "scripts/yukon/pin_terminal.ts": "3b1ad840ee11e70daad98a5540709100be2a5e075f88032378623562c8e65db1",
+    "tests/yukon-pin-store.test.ts": "faa283ba6725e1a2548cb04341e2466dff8b15607fc64bd1a5bcd20b6351c289"
+  },
+  "providerCalls": 0,
+  "gpuExecuted": false,
+  "releaseStatus": "HOLD"
+}

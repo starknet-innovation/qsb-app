@@ -1,3 +1,4 @@
+import { recordResearchPinTerminal } from "../scripts/yukon/pin_terminal";
 import * as pinVerifier from "../scripts/yukon/pin_verifier";
 import { reconcileResearchPin } from "../scripts/yukon/pin_reconcile";
 import { submitResearchPin } from "../scripts/yukon/pin_submit";
@@ -947,5 +948,155 @@ describe("release-fenced subset handoff", () => {
     } finally {
       mock.mockRestore();
     }
+  });
+});
+
+describe("attached research sibling terminal reconciliation", () => {
+  async function drainingAttached() {
+    const f = await enrolledRemoteReplay();
+    const s = (await f.store.get(f.pk, "SCOPE"))!;
+    await f.store.put(
+      { ...s, version: s.version + 1, phase: "pinning_draining" },
+      s.version,
+    );
+    return f;
+  }
+  it("records terminal status once after revocation without credit or phase advancement", async () => {
+    for (const status of ["COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"]) {
+      const f = await drainingAttached();
+      await f.store.put({ ...f.enrollment, version: 1, enabled: false }, 0);
+      await recordResearchPinTerminal(
+        f.store,
+        f.binding,
+        async (endpoint, id) => {
+          expect(endpoint).toBe("synthetic-endpoint");
+          expect(id).toBe(f.raw.id);
+          return { id, status };
+        },
+      );
+      expect((await f.store.get(f.pk, "SCOPE"))?.phase).toBe(
+        "pinning_draining",
+      );
+      expect((await f.store.get(f.pk, "PIN#0"))?.terminal).toMatchObject({
+        id: f.raw.id,
+        status,
+      });
+      expect(
+        (await f.store.get(f.pk, "PIN#0"))?.researchTerminalReceipt,
+      ).toMatchObject({ rangeCreditGranted: false, candidateVerified: false });
+      let reads = 0;
+      await expect(
+        recordResearchPinTerminal(f.store, f.binding, async () => {
+          reads++;
+          return {};
+        }),
+      ).rejects.toThrow();
+      expect(reads).toBe(0);
+    }
+  });
+  it("keeps pause revision intact while retaining old intent terminal evidence", async () => {
+    const f = await drainingAttached();
+    const s = (await f.store.get(f.pk, "SCOPE"))!;
+    await f.store.put(
+      { ...s, version: s.version + 1, phase: "paused", revision: 2 },
+      s.version,
+    );
+    await recordResearchPinTerminal(f.store, f.binding, async () => ({
+      id: f.raw.id,
+      status: "CANCELLED",
+    }));
+    expect(await f.store.get(f.pk, "SCOPE")).toMatchObject({
+      phase: "paused",
+      revision: 2,
+    });
+  });
+  it("rejects missing, pending and substituted status without changing either row", async () => {
+    for (const response of [
+      null,
+      { id: "wrong", status: "COMPLETED" },
+      { status: "COMPLETED" },
+      { id: "placeholder", status: "IN_PROGRESS" },
+    ]) {
+      const f = await drainingAttached();
+      const before = fingerprint([
+        await f.store.get(f.pk, "SCOPE"),
+        await f.store.get(f.pk, "PIN#0"),
+      ]);
+      await expect(
+        recordResearchPinTerminal(f.store, f.binding, async () => response),
+      ).rejects.toThrow();
+      expect(
+        fingerprint([
+          await f.store.get(f.pk, "SCOPE"),
+          await f.store.get(f.pk, "PIN#0"),
+        ]),
+      ).toBe(before);
+      await expect(
+        recordResearchPinTerminal(f.store, f.binding, async () => {
+          throw Error("HTTP404");
+        }),
+      ).rejects.toThrow("HTTP404");
+      expect(
+        fingerprint([
+          await f.store.get(f.pk, "SCOPE"),
+          await f.store.get(f.pk, "PIN#0"),
+        ]),
+      ).toBe(before);
+    }
+  });
+  it("rejects scope or global identity changes while reading the provider", async () => {
+    for (const change of ["scope", "claim"]) {
+      const f = await drainingAttached();
+      const before = await f.store.get(f.pk, "PIN#0");
+      await expect(
+        recordResearchPinTerminal(f.store, f.binding, async () => {
+          if (change === "scope") {
+            const s = (await f.store.get(f.pk, "SCOPE"))!;
+            await f.store.put(
+              { ...s, version: s.version + 1, endpoint: "changed" },
+              s.version,
+            );
+          } else {
+            const claim = (await f.store.get(
+              "VALIDATION#YUKON_PROVIDER_IDS",
+              createHash("sha256").update(f.raw.id).digest("hex"),
+            ))!;
+            await f.store.put(
+              { ...claim, version: claim.version + 1, scope: "other" },
+              claim.version,
+            );
+          }
+          return { id: f.raw.id, status: "CANCELLED" };
+        }),
+      ).rejects.toThrow();
+      expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
+    }
+  });
+  it("never consumes searching results as cleanup or resolves uncertain IDs", async () => {
+    const f = await enrolledRemoteReplay();
+    let reads = 0;
+    await expect(
+      recordResearchPinTerminal(f.store, f.binding, async () => {
+        reads++;
+        return f.raw;
+      }),
+    ).rejects.toThrow();
+    const s = (await f.store.get(f.pk, "SCOPE"))!,
+      r = (await f.store.get(f.pk, "PIN#0"))!;
+    await f.store.put(
+      { ...s, version: s.version + 1, phase: "pinning_draining" },
+      s.version,
+    );
+    await f.store.put(
+      { ...r, version: r.version + 1, state: "uncertain" },
+      r.version,
+    );
+    await expect(
+      recordResearchPinTerminal(f.store, f.binding, async () => {
+        reads++;
+        return f.raw;
+      }),
+    ).rejects.toThrow();
+    expect(reads).toBe(0);
   });
 });
