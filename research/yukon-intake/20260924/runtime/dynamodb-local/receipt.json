@@ -1,0 +1,70 @@
+{
+  "scope": "Actual application DynamoStore against disposable loopback DynamoDB Local; synthetic provider transport",
+  "dynamoLocalVersion": "3.3.1",
+  "numPassedTests": 10,
+  "numFailedTests": 0,
+  "tests": [
+    {
+      "name": "research pin publication through real Store and indexed submission publishes a candidate once and requests drain without range credit",
+      "status": "passed",
+      "durationMs": 442.68487500000003
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission allows only one racing publication",
+      "status": "passed",
+      "durationMs": 113.64466600000003
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission rejects pause or provider identity changes during CPU verification atomically",
+      "status": "passed",
+      "durationMs": 177.34337500000004
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission rejects mismatched provider, range and CPU context without writes",
+      "status": "passed",
+      "durationMs": 170.934083
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission records empty drained results without granting coverage",
+      "status": "passed",
+      "durationMs": 59.38808400000016
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission preserves attached work when verification fails or ownership is stale",
+      "status": "passed",
+      "durationMs": 230.8677909999999
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission rejects a global provider claim changed during verification",
+      "status": "passed",
+      "durationMs": 54.087332999999944
+    },
+    {
+      "name": "real CPU process composed with Store publication binds a real public export and records an empty result without credit",
+      "status": "passed",
+      "durationMs": 732.1347920000001
+    },
+    {
+      "name": "real CPU process composed with Store publication rejects a false candidate from actual full-transaction CPU verification",
+      "status": "passed",
+      "durationMs": 871.9199999999996
+    },
+    {
+      "name": "real CPU process composed with Store publication retains pause fencing around a successful real CPU process",
+      "status": "passed",
+      "durationMs": 657.117667
+    }
+  ],
+  "testSourceSha256": "84168937ad754854382db278db319bf1bbce983fb359b1b41cfa278beca341c3",
+  "cleanup": {
+    "tableNamesAfterTests": [],
+    "containerRemoved": true
+  },
+  "initialSetupFailure": "Hyphenated dummy access key rejected by DynamoDB Local; corrected to alphanumeric dummy key; no test reached publication in that attempt",
+  "awsRegionalCertification": false,
+  "gpuExecuted": false,
+  "freshWithdrawal": false,
+  "releaseStatus": "HOLD",
+  "dockerImageId": "sha256:ff89bd48ff32cd8d9be5fee8873b65b8854dc408f1afe881be6eb00247bc0dab",
+  "repoDigest": "amazon/dynamodb-local@sha256:ff89bd48ff32cd8d9be5fee8873b65b8854dc408f1afe881be6eb00247bc0dab"
+}

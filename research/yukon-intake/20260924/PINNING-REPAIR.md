@@ -622,3 +622,30 @@ The runner and publisher are research-only and unselected by application routing
 No live release/image registry, cloud resources, completed proofs or production
 runtime source was changed. Remaining composed gates include a real isolated
 backend and drain/handoff integration under an explicitly enrolled release.
+
+## Actual DynamoDB Local publication gate
+
+The same ten Store-publication tests now pass through the unchanged application
+`DynamoStore` against official DynamoDB Local 3.3.1 over loopback HTTP. This
+exercises actual conditional puts, queries and multi-row transactions, including
+scope/intent CAS and condition-only provider-index/global-ID checks. Three cases
+compose the real fresh-process CPU runner. Transport remains synthetic; positive
+candidate publication in the transaction-race cases uses mocked CPU verdicts.
+
+Evidence: `runtime/dynamodb-local/receipt.json`, containing per-test results and
+test-source hash. The cached official image is pinned by recorded digest. Tests
+opt in only with `QSB_PIN_TEST_DYNAMODB=http://127.0.0.1:<port>` matching
+`AWS_ENDPOINT_URL_DYNAMODB`, region `us-east-1`, both credential fields set to the
+public dummy value `qsbLocalDummy`, and no session token. They create isolated
+random tables and delete them afterward. Ordinary test runs remain MemoryStore.
+The first setup used a hyphenated dummy access-key name, which DynamoDB Local
+rejected; no publication test progressed. The corrected alphanumeric dummy key
+passed all ten cases. This was not an AWS regional credential or service failure.
+
+Post-test ListTables returned an empty array; the disposable container was
+removed and its absence checked. The existing unrelated local container was
+untouched. MemoryStore/runner tests were rerun (11 pass), and typecheck passes.
+No AWS regional resource, GPU, deployed release or fixture was touched. This
+closes the local database API gate, not regional IAM/availability, crash/restart
+durability or full enrolled lifecycle validation. Drain/handoff, release routing
+and fresh GPU/end-to-end gates remain required.

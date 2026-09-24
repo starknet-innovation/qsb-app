@@ -1,14 +1,79 @@
 import { execFileSync } from "node:child_process";
 import { createPinVerifier } from "../scripts/yukon/pin_verifier";
-import { describe, it, expect } from "vitest";
-import { MemoryStore } from "../server/store";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  DynamoDBClient,
+  CreateTableCommand,
+  DeleteTableCommand,
+} from "@aws-sdk/client-dynamodb";
+import { describe, it, expect, afterAll } from "vitest";
+import { MemoryStore, DynamoStore } from "../server/store";
 import { fingerprint } from "../src/lib/provenance";
 import { PinInventoryV3 } from "../supervised/runtime/source/work/yukon-indexed-pin-20260923/pin-inventory-v3";
 import { SCHEMA } from "../supervised/runtime/source/work/yukon-indexed-controller-20260923/identity-index";
 import { publishResearchPin } from "../scripts/yukon/pin_store";
 
+// Explicit opt-in is restricted to a dummy-credential loopback service.
+const localEndpoint = process.env.QSB_PIN_TEST_DYNAMODB;
+const tables: string[] = [];
+function localClient() {
+  if (
+    !localEndpoint ||
+    !/^http:\/\/127\.0\.0\.1:[0-9]+$/.test(localEndpoint) ||
+    process.env.AWS_ENDPOINT_URL_DYNAMODB !== localEndpoint ||
+    process.env.AWS_ACCESS_KEY_ID !== "qsbLocalDummy" ||
+    process.env.AWS_SECRET_ACCESS_KEY !== "qsbLocalDummy" ||
+    process.env.AWS_SESSION_TOKEN ||
+    process.env.AWS_REGION !== "us-east-1"
+  )
+    throw Error("Dummy-credential loopback DynamoDB required");
+  return new DynamoDBClient({
+    endpoint: localEndpoint,
+    region: "us-east-1",
+    credentials: {
+      accessKeyId: "qsbLocalDummy",
+      secretAccessKey: "qsbLocalDummy",
+    },
+  });
+}
+afterAll(async () => {
+  if (!tables.length) return;
+  const client = localClient();
+  try {
+    for (const TableName of tables)
+      await client.send(new DeleteTableCommand({ TableName }));
+  } finally {
+    client.destroy();
+  }
+});
+async function testStore() {
+  if (!localEndpoint) return new MemoryStore();
+  const client = localClient(),
+    table = "qsb-pin-" + randomUUID();
+  try {
+    await client.send(
+      new CreateTableCommand({
+        TableName: table,
+        BillingMode: "PAY_PER_REQUEST",
+        KeySchema: [
+          { AttributeName: "pk", KeyType: "HASH" },
+          { AttributeName: "sk", KeyType: "RANGE" },
+        ],
+        AttributeDefinitions: [
+          { AttributeName: "pk", AttributeType: "S" },
+          { AttributeName: "sk", AttributeType: "S" },
+        ],
+      }),
+    );
+    tables.push(table);
+  } finally {
+    client.destroy();
+  }
+  return new DynamoStore(table);
+}
+
 async function fixture(real?: { context: any; request: any; output: any }) {
-  const store = new MemoryStore(),
+  const store = await testStore(),
     scope = "isolated-yukon-pr30-store",
     pk = "VALIDATION#" + scope;
   const binding = {
@@ -197,7 +262,10 @@ describe("research pin publication through real Store and indexed submission", (
     const before = await f.store.get(f.pk, "PIN#0");
     await expect(
       publishResearchPin(f.store, f.binding, f.provider, async () => {
-        const rows = await f.store.list("VALIDATION#YUKON_PROVIDER_IDS", "");
+        const rows = await f.store.list(
+          "VALIDATION#YUKON_PROVIDER_IDS",
+          createHash("sha256").update(f.provider.id).digest("hex"),
+        );
         const claim = rows[0];
         await f.store.put(
           { ...claim, version: claim.version + 1, scope: "other" },
