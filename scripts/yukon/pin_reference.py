@@ -19,6 +19,20 @@ def reference(event):
     if r.returncode:raise ValueError('Public CPU reference rejected request')
     return json.loads(r.stdout)
 
+def handoff(context,candidate):
+    """Reverify the pin and derive both round parameters; no launch authorization."""
+    if not isinstance(context,dict) or set(context)!={'publicStateJson','manifest'}:raise ValueError('Unexpected context')
+    if not isinstance(candidate,dict) or set(candidate)!={'sequence','locktime'} or any(type(v) is not int for v in candidate.values()):raise ValueError('Invalid pin')
+    if not 2**31<=candidate['sequence']<2**32 or not 500000000<=candidate['locktime']<=REFERENCE_LOCKTIME_MAX:raise ValueError('Unsupported pin')
+    fields=f"sequence={candidate['sequence']}\nlocktime={candidate['locktime']}\n"
+    event={**context,**candidate}
+    verdict=reference({**event,'action':'verify','stage':'pinning','candidates':[fields]})
+    if verdict!={'valid':True,**candidate}:raise ValueError('Pin not reproduced')
+    parameters={stage:reference({**event,'action':'export','stage':stage}) for stage in ('round1','round2')}
+    return {'format':'qsb-research-pin-handoff-v1','contextHash':fingerprint(context),
+      'pin':candidate,'parameters':parameters,'referenceChecked':True,
+      'dispatchAuthorized':False,'consensusVerified':False,'releaseStatus':'HOLD'}
+
 # Inclusive bound in the hash-pinned application's verify_hit dispatch.
 REFERENCE_LOCKTIME_MAX=1744600000
 

@@ -11,7 +11,10 @@ import { MemoryStore, DynamoStore } from "../server/store";
 import { fingerprint } from "../src/lib/provenance";
 import { PinInventoryV3 } from "../supervised/runtime/source/work/yukon-indexed-pin-20260923/pin-inventory-v3";
 import { SCHEMA } from "../supervised/runtime/source/work/yukon-indexed-controller-20260923/identity-index";
-import { publishResearchPin } from "../scripts/yukon/pin_store";
+import {
+  publishResearchPin,
+  prepareResearchSubset,
+} from "../scripts/yukon/pin_store";
 
 // Explicit opt-in is restricted to a dummy-credential loopback service.
 const localEndpoint = process.env.QSB_PIN_TEST_DYNAMODB;
@@ -108,6 +111,7 @@ async function fixture(real?: { context: any; request: any; output: any }) {
     owner: binding.owner,
     revision: 1,
     identitySchema: SCHEMA,
+    endpoint: "synthetic-endpoint",
     stage: "pinning",
     phase: "pinning_searching",
     publicContext: JSON.stringify(context),
@@ -338,5 +342,139 @@ describe("real CPU process composed with Store publication", () => {
       }),
     ).rejects.toThrow();
     expect(await f.store.get(f.pk, "PIN#0")).toEqual(before);
+  });
+});
+
+async function drainingFixture() {
+  const f = await fixture();
+  await publishResearchPin(
+    f.store,
+    f.binding,
+    f.provider,
+    async () => f.verdict,
+  );
+  const parameter = {
+    parameterBase64: "cHVibGlj",
+    parameterSha256: createHash("sha256").update("public").digest("hex"),
+  };
+  const handoff = {
+    format: "qsb-research-pin-handoff-v1",
+    contextHash: f.verdict.contextHash,
+    pin: { sequence: 2147483648, locktime: 500000000 },
+    parameters: { round1: parameter, round2: parameter },
+    referenceChecked: true,
+    dispatchAuthorized: false,
+    consensusVerified: false,
+    releaseStatus: "HOLD",
+  };
+  const observe = async () => ({
+    endpoint: "synthetic-endpoint",
+    workersMin: 0,
+    workersMax: 0,
+    queued: 0,
+    inProgress: 0,
+    observedAtMs: Date.now(),
+  });
+  return { ...f, handoff, observe };
+}
+describe("research pin drain and subset preparation", () => {
+  it("prepares both round parameters only once and never authorizes dispatch", async () => {
+    const f = await drainingFixture();
+    const receipt = await prepareResearchSubset(
+      f.store,
+      f.binding,
+      async () => f.handoff,
+      f.observe,
+    );
+    expect(receipt.dispatchAuthorized).toBe(false);
+    expect((await f.store.get(f.pk, "SCOPE"))?.phase).toBe(
+      "research_subset_prepared",
+    );
+    await expect(
+      prepareResearchSubset(
+        f.store,
+        f.binding,
+        async () => f.handoff,
+        f.observe,
+      ),
+    ).rejects.toThrow();
+  });
+  it("refuses reserved or uncertain sibling work", async () => {
+    for (const state of ["reserved", "uncertain"]) {
+      const f = await drainingFixture(),
+        s = (await f.store.get(f.pk, "SCOPE"))!,
+        winner = (await f.store.get(f.pk, "PIN#0"))!;
+      await f.store.atomicPut([
+        { row: { ...s, version: s.version + 1 }, expected: s.version },
+        {
+          row: {
+            pk: f.pk,
+            sk: "PIN#1",
+            version: 1,
+            owner: f.binding.owner,
+            revision: 1,
+            state,
+            frozen: winner.frozen,
+          },
+        },
+      ]);
+      await expect(
+        prepareResearchSubset(
+          f.store,
+          f.binding,
+          async () => f.handoff,
+          f.observe,
+        ),
+      ).rejects.toThrow("Unresolved sibling");
+      expect((await f.store.get(f.pk, "SCOPE"))?.phase).toBe(
+        "pinning_draining",
+      );
+    }
+  });
+  it("rejects busy, stale or wrong endpoint observations without advancing", async () => {
+    for (const changed of [
+      { queued: 1 },
+      { workersMax: 1 },
+      { endpoint: "other" },
+      { observedAtMs: Date.now() - 60000 },
+    ]) {
+      const f = await drainingFixture();
+      await expect(
+        prepareResearchSubset(
+          f.store,
+          f.binding,
+          async () => f.handoff,
+          async () => ({ ...(await f.observe()), ...changed }),
+        ),
+      ).rejects.toThrow();
+      expect((await f.store.get(f.pk, "SCOPE"))?.phase).toBe(
+        "pinning_draining",
+      );
+    }
+  });
+  it("rejects a pause during handoff and a corrupted parameter digest", async () => {
+    for (const mode of ["pause", "digest"]) {
+      const f = await drainingFixture();
+      await expect(
+        prepareResearchSubset(
+          f.store,
+          f.binding,
+          async () => {
+            if (mode === "pause") {
+              const s = (await f.store.get(f.pk, "SCOPE"))!;
+              await f.store.put(
+                { ...s, version: s.version + 1, phase: "paused", revision: 2 },
+                s.version,
+              );
+            } else f.handoff.parameters.round1.parameterSha256 = "d".repeat(64);
+            return f.handoff;
+          },
+          f.observe,
+        ),
+      ).rejects.toThrow();
+      expect((await f.store.get(f.pk, "PIN#0"))?.state).toBe(
+        "research_result_verified",
+      );
+    }
   });
 });

@@ -8,13 +8,8 @@ import lock from "./pin_verifier_lock.json";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 
 // Paths are trusted launcher configuration, not fields in any public request.
-export function createPinVerifier(repo = root, python = "python3") {
-  return async (
-    request: unknown,
-    output: unknown,
-    context: unknown,
-    expectedBinary: string,
-  ): Promise<unknown> => {
+function createRunner(repo = root, python = "python3") {
+  return async (event: unknown): Promise<unknown> => {
     const directory = path.join(repo, "scripts/yukon");
     for (const [name, want] of Object.entries(lock)) {
       const filename = path.join(directory, name);
@@ -31,7 +26,7 @@ export function createPinVerifier(repo = root, python = "python3") {
       )
     )
       throw Error("CPU verifier lock differs");
-    const input = JSON.stringify({ request, output, context, expectedBinary });
+    const input = JSON.stringify(event);
     if (Buffer.byteLength(input) > 2000000)
       throw Error("Oversized public verification");
     const script = path.join(directory, "pin_verify_cli.py");
@@ -90,4 +85,19 @@ export function createPinVerifier(repo = root, python = "python3") {
       child.stdin.end(input);
     });
   };
+}
+
+export function createPinVerifier(repo = root, python = "python3") {
+  const run = createRunner(repo, python);
+  return (
+    request: unknown,
+    output: unknown,
+    context: unknown,
+    expectedBinary: string,
+  ) => run({ action: "verify", request, output, context, expectedBinary });
+}
+export function createPinHandoff(repo = root, python = "python3") {
+  const run = createRunner(repo, python);
+  return (context: unknown, candidate: unknown) =>
+    run({ action: "handoff", context, candidate });
 }

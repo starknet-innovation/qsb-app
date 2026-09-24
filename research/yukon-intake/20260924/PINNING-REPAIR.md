@@ -674,3 +674,37 @@ credentials. CPU verdict and transport in this specific restart test are mocked;
 the preceding real CPU/DynamoDB composition remains separate evidence. This closes
 the tested local abrupt-restart case, not regional AWS guarantees, all crash points,
 provider drain, enrolled release routing or fresh GPU/full-withdrawal proof.
+
+## Drained pin to subset-parameter handoff
+
+The fixed CPU runner now supports a separate handoff operation. It re-verifies
+the exact public pin against the reconstructed full transaction, then independently
+exports round1 and round2 parameters for that pin. The Store handoff requires
+current owner/revision, a bound winning receipt, terminal evidence for every
+submitted sibling, no uncertain/reserved work, and a fresh trusted endpoint
+observation with zero queued/in-progress jobs and min/max workers zero. Exported
+parameters must have canonical base64 and matching SHA256. A scope CAS fences
+pause/new inventory mutations while the CPU and provider adapters run.
+
+All inventory writers must follow the existing indexed protocol and increment
+SCOPE.version; arbitrary raw database writes are outside that ownership contract.
+The resulting state is `research_subset_prepared`, with dispatch authorization
+false and release HOLD. It is not accepted by the production launcher and does
+not select a new solver or start subset work.
+
+Validation: **15 TypeScript tests and typecheck pass**, and all **46 Python tests
+pass**. Four new state-machine tests cover single-use preparation, unresolved
+siblings, busy/stale/wrong-endpoint drain, a pause during handoff and corrupt
+parameter hashes. The same **14 Store cases pass against actual DynamoDB Local**;
+provider observations and handoff CPU replies in those four cases are mocked.
+Tables were deleted, then the disposable database container was removed and its
+absence checked. Existing containers were untouched.
+
+Separately, the real fixed Node/Python runner re-verified the historical public
+pin and exported both real parameter sets, while an invalid pin rejected.
+`runtime/drain-handoff/positive-cpu-replay.json` records hashes/sizes only; this
+was CPU-only replay, with no GPU search or fixture spend. The Python adapter
+closure lock was refreshed for the new operation; the frozen GPU binary and CPU
+reference sources remain unchanged. Live provider drain, complete composed
+positive-GPU handoff, immutable release enrollment/routing and fresh end-to-end
+proof are still pending. The tests do not certify those broader gates.

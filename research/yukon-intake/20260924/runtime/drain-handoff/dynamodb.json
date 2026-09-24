@@ -1,0 +1,71 @@
+{
+  "scope": "DynamoStore HTTP transactions with real CPU verification in three publication cases; handoff CPU/drain callbacks mocked in four state-machine tests",
+  "passed": 14,
+  "failed": 0,
+  "tests": [
+    {
+      "name": "research pin publication through real Store and indexed submission publishes a candidate once and requests drain without range credit",
+      "status": "passed"
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission allows only one racing publication",
+      "status": "passed"
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission rejects pause or provider identity changes during CPU verification atomically",
+      "status": "passed"
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission rejects mismatched provider, range and CPU context without writes",
+      "status": "passed"
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission records empty drained results without granting coverage",
+      "status": "passed"
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission preserves attached work when verification fails or ownership is stale",
+      "status": "passed"
+    },
+    {
+      "name": "research pin publication through real Store and indexed submission rejects a global provider claim changed during verification",
+      "status": "passed"
+    },
+    {
+      "name": "real CPU process composed with Store publication binds a real public export and records an empty result without credit",
+      "status": "passed"
+    },
+    {
+      "name": "real CPU process composed with Store publication rejects a false candidate from actual full-transaction CPU verification",
+      "status": "passed"
+    },
+    {
+      "name": "real CPU process composed with Store publication retains pause fencing around a successful real CPU process",
+      "status": "passed"
+    },
+    {
+      "name": "research pin drain and subset preparation prepares both round parameters only once and never authorizes dispatch",
+      "status": "passed"
+    },
+    {
+      "name": "research pin drain and subset preparation refuses reserved or uncertain sibling work",
+      "status": "passed"
+    },
+    {
+      "name": "research pin drain and subset preparation rejects busy, stale or wrong endpoint observations without advancing",
+      "status": "passed"
+    },
+    {
+      "name": "research pin drain and subset preparation rejects a pause during handoff and a corrupted parameter digest",
+      "status": "passed"
+    }
+  ],
+  "testSha256": "32725aa6ce0b448849be090519a695eb863571bd5033f10aa0b5e4d04f73c71d",
+  "cleanup": {
+    "tables": [],
+    "containerRemoved": true
+  },
+  "awsRegionalCertification": false,
+  "gpuExecuted": false,
+  "releaseStatus": "HOLD"
+}

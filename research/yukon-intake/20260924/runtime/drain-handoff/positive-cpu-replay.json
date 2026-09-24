@@ -1,0 +1,27 @@
+{
+  "format": "qsb-research-pin-handoff-v1",
+  "contextHash": "8181d95d4a75b1a927c922b41e2729cd3c2bd0d845c561ee3654db4a834ab36a",
+  "pin": {
+    "sequence": 2147507142,
+    "locktime": 687354201
+  },
+  "parameters": {
+    "round1": {
+      "parameterSha256": "eb0c9275bed41802078f5f2f4c12b0b2116e5668ff24e498e15a98a9093019f5",
+      "parameterBytes": 6883
+    },
+    "round2": {
+      "parameterSha256": "ceb4e80ef6b6a9c10560db9bc11e767b4f2e513c1fecc4ba839d7e42180d2eea",
+      "parameterBytes": 1956
+    }
+  },
+  "referenceChecked": true,
+  "dispatchAuthorized": false,
+  "consensusVerified": false,
+  "releaseStatus": "HOLD",
+  "invalidPinRejected": true,
+  "scope": "Historical public pin CPU replay through fixed Node/Python runner; no GPU search or fixture spend",
+  "gpuExecuted": false,
+  "fixtureSpentThisRun": false,
+  "freshWithdrawal": false
+}

@@ -21,8 +21,13 @@ def main():
     raw=sys.stdin.buffer.read(2000001)
     if len(raw)>2000000:raise ValueError('Oversized public verification')
     event=json.loads(raw)
-    if not isinstance(event,dict) or set(event)!={'request','output','context','expectedBinary'}:raise ValueError('Exact public verification envelope required')
-    verdict=sys.modules['pin_reference'].verify(event['request'],event['output'],event['context'],event['expectedBinary'])
+    if not isinstance(event,dict):raise ValueError('Public verification envelope required')
+    reference=sys.modules['pin_reference']
+    if set(event)=={'action','request','output','context','expectedBinary'} and event['action']=='verify':
+        verdict=reference.verify(event['request'],event['output'],event['context'],event['expectedBinary'])
+    elif set(event)=={'action','context','candidate'} and event['action']=='handoff':
+        verdict=reference.handoff(event['context'],event['candidate'])
+    else:raise ValueError('Exact public verification envelope required')
     print(json.dumps(verdict,separators=(',',':')))
 
 if __name__=='__main__':

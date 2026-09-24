@@ -225,3 +225,188 @@ export async function publishResearchPin(
   ]);
   return receipt;
 }
+
+/** Every inventory writer must contend on SCOPE.version (the indexed inventory contract). */
+export async function prepareResearchSubset(
+  store: Store,
+  binding: {
+    scope: string;
+    owner: string;
+    revision: number;
+    intent: string;
+    binarySha256: string;
+  },
+  handoff: (context: unknown, pin: unknown) => Promise<unknown>,
+  observe: () => Promise<unknown>,
+) {
+  const b = structuredClone(binding);
+  if (
+    !/^isolated-yukon-[a-z0-9-]+$/.test(b.scope) ||
+    !b.owner ||
+    !Number.isSafeInteger(b.revision) ||
+    b.revision < 1 ||
+    !/^PIN#(0|[1-9][0-9]*)$/.test(b.intent)
+  )
+    throw Error("Invalid research handoff binding");
+  hash.parse(b.binarySha256);
+  const pk = "VALIDATION#" + b.scope,
+    s = await store.get(pk, "SCOPE");
+  if (
+    !s ||
+    s.identitySchema !== SCHEMA ||
+    s.identityConflict ||
+    s.owner !== b.owner ||
+    s.revision !== b.revision ||
+    s.stage !== "pinning" ||
+    s.phase !== "pinning_draining" ||
+    s.expiresAt !== undefined ||
+    typeof s.endpoint !== "string" ||
+    !s.endpoint ||
+    typeof s.publicContext !== "string"
+  )
+    throw Error("Not current draining scope");
+  const context = JSON.parse(s.publicContext);
+  if (fingerprint(context) !== s.publicContextHash)
+    throw Error("Context changed");
+  const rows = await store.list(pk, "PIN#"),
+    winner = rows.find((row) => row.sk === b.intent);
+  if (
+    !winner ||
+    winner.state !== "research_result_verified" ||
+    !winner.candidate
+  )
+    throw Error("Missing research winner");
+  for (const row of rows) {
+    if (
+      row.owner !== b.owner ||
+      row.revision !== b.revision ||
+      row.expiresAt !== undefined ||
+      typeof row.frozen !== "string"
+    )
+      throw Error("Wrong sibling binding");
+    const request = JSON.parse(row.frozen);
+    if (
+      request.protocol !== "qsb-yukon-pinning-research-v1" ||
+      request.binarySha256 !== b.binarySha256 ||
+      request.manifestHash !== fingerprint(context.manifest)
+    )
+      throw Error("Mixed sibling release/context");
+    if (row.state === "unsubmitted_retired" && !row.provider && !row.terminal)
+      continue;
+    if (
+      !["attached", "research_result_verified"].includes(String(row.state)) ||
+      typeof row.provider !== "string" ||
+      !row.provider
+    )
+      throw Error("Unresolved sibling submission");
+    await assertIdentity(store, row);
+    const t = row.terminal as
+      { id?: unknown; status?: unknown; observedAt?: unknown } | undefined;
+    if (
+      !t ||
+      t.id !== row.provider ||
+      !["COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(
+        String(t.status),
+      ) ||
+      typeof t.observedAt !== "string" ||
+      !Number.isFinite(Date.parse(t.observedAt)) ||
+      Date.parse(t.observedAt) > Date.now()
+    )
+      throw Error("Missing sibling terminal evidence");
+    if (row.state === "research_result_verified" && t.status !== "COMPLETED")
+      throw Error("Contradictory verified result");
+  }
+  const identity = await assertIdentity(store, winner);
+  const bound = winner.researchReceipt as { reference?: unknown } | undefined;
+  const checked = verdict.parse(bound?.reference);
+  const candidate = z
+    .object({ sequence: z.number().int(), locktime: z.number().int() })
+    .strict()
+    .parse(winner.candidate);
+  if (
+    checked.contextHash !== s.publicContextHash ||
+    checked.decision !== "candidate-verified" ||
+    !checked.verdicts.some(
+      (v) =>
+        v.valid &&
+        v.sequence === candidate.sequence &&
+        v.locktime === candidate.locktime,
+    )
+  )
+    throw Error("Unbound winning pin");
+  const parameter = z
+    .object({
+      parameterBase64: z.string().min(1).max(1000000),
+      parameterSha256: hash,
+    })
+    .strict();
+  const exported = z
+    .object({
+      format: z.literal("qsb-research-pin-handoff-v1"),
+      contextHash: hash,
+      pin: z
+        .object({ sequence: z.number().int(), locktime: z.number().int() })
+        .strict(),
+      parameters: z.object({ round1: parameter, round2: parameter }).strict(),
+      referenceChecked: z.literal(true),
+      dispatchAuthorized: z.literal(false),
+      consensusVerified: z.literal(false),
+      releaseStatus: z.literal("HOLD"),
+    })
+    .strict()
+    .parse(await handoff(structuredClone(context), structuredClone(candidate)));
+  if (
+    exported.contextHash !== s.publicContextHash ||
+    !isDeepStrictEqual(exported.pin, candidate)
+  )
+    throw Error("CPU handoff mismatch");
+  for (const p of Object.values(exported.parameters)) {
+    const bytes = Buffer.from(p.parameterBase64, "base64");
+    if (
+      bytes.toString("base64") !== p.parameterBase64 ||
+      createHash("sha256").update(bytes).digest("hex") !== p.parameterSha256
+    )
+      throw Error("Subset parameter digest mismatch");
+  }
+  // Observe after CPU work so an old health snapshot cannot authorize transition.
+  const drain = z
+    .object({
+      endpoint: z.string(),
+      workersMin: z.literal(0),
+      workersMax: z.literal(0),
+      queued: z.literal(0),
+      inProgress: z.literal(0),
+      observedAtMs: z.number().int(),
+    })
+    .strict()
+    .parse(await observe());
+  if (
+    drain.endpoint !== s.endpoint ||
+    Date.now() - drain.observedAtMs > 30000 ||
+    drain.observedAtMs > Date.now()
+  )
+    throw Error("Stale or wrong endpoint drain");
+  await store.atomicPut([
+    {
+      row: {
+        ...s,
+        version: s.version + 1,
+        stage: "round1",
+        phase: "research_subset_prepared",
+        researchHandoff: exported,
+        drain,
+      },
+      expected: s.version,
+    },
+    {
+      row: {
+        ...winner,
+        version: winner.version + 1,
+        state: "research_pin_handed_off",
+      },
+      expected: winner.version,
+    },
+    { row: identity, expected: identity.version, conditionOnly: true },
+  ]);
+  return exported;
+}
