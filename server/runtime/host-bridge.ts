@@ -134,6 +134,8 @@ async function loadPair(store: Store, owner: string, requestId: string, slot: nu
 }
 
 function jobForLaunch(job: SupervisedJob, launch: LaunchRecord): SupervisedJob {
+  if (launch.bindings.slot !== 0 && launch.providerSubmissions > 0)
+    throw new Error("DuplicatePaidSubmission");
   if (
     launch.providerSubmissions > 0 &&
     job.paidProviderSlot !== undefined &&
@@ -400,6 +402,7 @@ export async function submitProviderOnce(
   inputHash: string,
   submit: ProviderSubmit,
 ): Promise<LaunchRecord> {
+  if (slot !== 0) throw new Error("DuplicatePaidSubmission");
   for (;;) {
     const loaded = await loadPair(store, owner, requestId, slot);
     const { launch, job } = loaded;
@@ -461,6 +464,7 @@ export async function recordLateProviderId(
   inputHash: string,
   providerId: string,
 ): Promise<LaunchRecord> {
+  if (slot !== 0) throw new Error("DuplicatePaidSubmission");
   const loaded = await loadPair(store, owner, requestId, slot);
   const { launch } = loaded;
   if (launch.bindings.inputHash !== inputHash)
@@ -620,6 +624,7 @@ export async function publishSimulatedVerifiedHit(
   factsInput: SimulatedHitFacts,
   bundle: unknown,
 ): Promise<LaunchRecord> {
+  if (slot !== 0) throw new Error("DuplicatePaidSubmission");
   const facts = simulatedHitFactsSchema.parse(factsInput);
   const solved = validateSolvedState(bundle);
   if (fingerprint(solved.request) !== inputHash)

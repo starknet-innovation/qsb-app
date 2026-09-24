@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import path from "node:path";
 import { Signer } from "bip322-js";
 import * as btc from "@scure/btc-signer";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -35,6 +36,7 @@ import {
   submitProviderOnce,
   type OwnedProcessStart,
 } from "../server/runtime/host-bridge";
+import { writePackageTree } from "../server/runtime/package-release";
 import { isSearchRunning } from "../server/runtime/types";
 import {
   address,
@@ -1424,6 +1426,34 @@ describe("supervised runtime handoff", () => {
     ).rejects.toThrow(/CpuVerifierNotEnrolled/);
   });
 
+  it("enrolls the CPU verifier from the packaged tree manifest", async () => {
+    const directory = mkdtempSync(`${tmpdir()}/qsb-pkg-`);
+    writePackageTree(process.cwd(), directory);
+    const tree = path.join(directory, "tree");
+    const rejected = await runEnrolledCpuVerifier(tree, {
+      action: "verify",
+      stage: "pinning",
+    });
+    expect(rejected).toMatchObject({
+      ok: false,
+      source: "worker/cpu/handler.py",
+    });
+    rmSync(path.join(directory, "release-manifest.json"));
+    await expect(
+      runEnrolledCpuVerifier(tree, { action: "verify", stage: "pinning" }),
+    ).rejects.toThrow(/CpuVerifierNotEnrolled/);
+  });
+
+  it("refuses an unenrolled Python module beside the CPU verifier", async () => {
+    const directory = mkdtempSync(`${tmpdir()}/qsb-pkg-`);
+    writePackageTree(process.cwd(), directory);
+    const tree = path.join(directory, "tree");
+    writeFileSync(path.join(tree, "worker/cpu/sitecustomize.py"), "import os\n");
+    await expect(
+      runEnrolledCpuVerifier(tree, { action: "verify", stage: "pinning" }),
+    ).rejects.toThrow(/CpuVerifierNotEnrolled/);
+  });
+
   it("retains both process ids when primary and sibling acknowledge together", async () => {
     const { store, admitted } = await claimedFixture();
     await openSiblingSlot(store, address, admitted.job.id, admitted.job.mainnetRequestHash);
@@ -1513,8 +1543,60 @@ describe("supervised runtime handoff", () => {
       ),
     ]);
     expect(calls).toBe(1);
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(results[0]?.status).toBe("fulfilled");
+    expect(results[1]?.status).toBe("rejected");
+    if (results[1]?.status === "rejected")
+      expect(String(results[1].reason)).toMatch(/DuplicatePaidSubmission/);
+  });
+
+  it("does not let a sibling slot submit or publish a paid hit", async () => {
+    const { store, admitted, fixture } = await claimedFixture();
+    await openSiblingSlot(store, address, admitted.job.id, admitted.job.mainnetRequestHash);
+    await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      1,
+      admitted.job.mainnetRequestHash,
+      async () => ({ processId: "sibling-pid" }),
+      new Date(),
+      1000,
+    );
+    let calls = 0;
+    await expect(
+      submitProviderOnce(
+        store,
+        address,
+        admitted.job.id,
+        1,
+        admitted.job.mainnetRequestHash,
+        async () => {
+          calls += 1;
+          return { providerId: "sibling-provider" };
+        },
+      ),
+    ).rejects.toThrow(/DuplicatePaidSubmission/);
+    expect(calls).toBe(0);
+    await expect(
+      publishSimulatedVerifiedHit(
+        store,
+        address,
+        admitted.job.id,
+        1,
+        admitted.job.mainnetRequestHash,
+        "sibling-pid",
+        simulatedFacts,
+        fixture.bundle,
+      ),
+    ).rejects.toThrow(/DuplicatePaidSubmission/);
+    const job = (await store.get(`OWNER#${address}`, `JOB#${admitted.job.id}`))?.job as {
+      status: string;
+      paidProviderSlot?: number;
+      runtime: { searchRunning: boolean };
+    };
+    expect(job.status).toBe("queued");
+    expect(job.paidProviderSlot).toBeUndefined();
+    expect(job.runtime.searchRunning).toBe(false);
   });
 
   it("does not drain a sibling that is still launching without a pid", async () => {

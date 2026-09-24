@@ -83,13 +83,13 @@
     "components": {
       "api": "89add909f5bdfc29f3f7e33e4bf0e8e51f2697072d612b5a1944d16bdbcbdfd8",
       "build-metadata": "90383b21c646d631276ed13b7f2a900c6674d91d72a0bd64fe312e5be3da8c5c",
-      "cpu-verifier": "8c21bcdfb63078a40e6361185bd4e26800c0560a76bf55e35bd4e27f3d2eb375",
-      "dispatcher": "ed46c2e4d661b9cca3720ef8edb658e16de96c7720a2da01a63b3ddeed1b191d",
+      "cpu-verifier": "bc5af57daae87d78672008d11b0a25480aecb5efe4118f54a3eb9a2790deed43",
+      "dispatcher": "43295bd7059863eb447f51c2068ce11ee6c3c7c14b0b1da93d78e0a723a6baf0",
       "evidence-reader": "02ca0a58e80bbf392fc00b7325876d23c5f7d490bf6f30bdaf1a322574273743",
       "historical-pinning": "9e1aba0e8882ba85f46609774844a7a75283cf5358cccd9dcc49abedf80fad48",
       "historical-subset": "322de9dfdec86850b23fbc70e41c6eb29b6e2439235138d2fd61897e9438ed17",
       "optimized-subset": "d5e1105324a421b8965e953c01eb37d1316aab2989b2bc8ae6e3e93cef1edbe3",
-      "runtime": "931f09acd81cf38099e99b9097e983241575722d989523b0a566ed88fc254d61"
+      "runtime": "0ee26b4f399123bcc90844a6ab480c1ae225210d960e7b48eb0a0e879347046c"
     },
     "imageConfig": {
       "reason": "No OCI image config digest was produced from this checkout.",
@@ -174,13 +174,13 @@
       "server/providers.ts": "b891305e079ee8b48cf7f4b2fb209f9cd1d92f7fbebf7513bf929a7c4bbaab64",
       "server/runtime/capability.ts": "af7fbba36d5c9c6c4208c7b9da9e1fadee58fd627e57a1bad24a18a1d84ff6a8",
       "server/runtime/closure.ts": "e901cbcb92793d371e420ad36248657cf5537e8b24a83e41cae4d8886b558f27",
-      "server/runtime/cpu-verifier.ts": "b49c5b2dc4e1fb9fcd4c506961a1bd330ad398834e4b18b55b9505ead43f5d8e",
+      "server/runtime/cpu-verifier.ts": "3000c692bfbab5b6cbe668411e8e3503f890868d8cf74acddf3111ee3ddc6c7d",
       "server/runtime/dispatcher.ts": "4de68577714d191e73584fa4e61b0f66cf786cb1d120ecf5db642c8e07b8ead5",
       "server/runtime/evidence-reader.ts": "e8ea401ab1fce90519e3a7f0276f6c7f11e43ae457afd5e9a31cf945ed11f10e",
-      "server/runtime/host-bridge.ts": "bc5543f8bf4f83fbe4921959aa0278c59cf1b2db4d3e275c82303b07e6679f64",
+      "server/runtime/host-bridge.ts": "1605ca5d1986f77f1b263a670d1503c46c15ad262b1b45f08bf76ff74aad73c4",
       "server/runtime/identity.ts": "b42a637beb039e8d8e05b3d7ec45a339c7a9aaf6f4314af961984b09348bc4e8",
       "server/runtime/package-release.ts": "3916204e74b14ee5d04e450cd8bec5b25124d03da35aaa2a0f8d53d7b077016e",
-      "server/runtime/supervised-routes.ts": "348d3954d6ae8f1641262b91d287fca75d84ab405a669a5ad6f561f8a1a2f82f",
+      "server/runtime/supervised-routes.ts": "6bd45ea629ede37129486dc392d313708a6ad4d663c24789f46bb4943a1afb90",
       "server/runtime/types.ts": "321902c44211a9f790851ddda4bb88442c76f4512f9c468232cb435dbcdcc0ea",
       "server/search-ranges.ts": "91ef5ec81fc82868cd9c695410bbc069732c4fc34109db5a9b44de36b59039d7",
       "server/store.ts": "50e94043277d9e156fe817b99fee384654cbf0ef9888d849998cc4cf031c1be7",

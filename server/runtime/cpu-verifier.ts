@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { componentForPath } from "./closure";
 import { assertInsideRepo, sha256Hex } from "./identity";
 import { componentIdentities } from "./package-release";
@@ -22,14 +21,22 @@ except Exception as error:
     json.dump({"ok": False, "error": type(error).__name__ + ": " + str(error)}, sys.stdout)
 `;
 
-const trustedManifestPath = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../release/source-manifest.json",
-);
+/** Manifest locations for a checkout and for a packaged tree. Never the module URL. */
+function trustedManifestPath(root: string): string {
+  const candidates = [
+    path.join(root, "release", "source-manifest.json"),
+    path.join(root, "release-manifest.json"),
+    path.resolve(root, "..", "release-manifest.json"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  throw new Error("CpuVerifierNotEnrolled");
+}
 
 /** Refuse to label a run as enrolled unless the CPU sources match the trusted manifest. */
 export function assertEnrolledCpuSources(root: string): void {
-  const manifest = JSON.parse(readFileSync(trustedManifestPath, "utf8")) as {
+  const manifest = JSON.parse(readFileSync(trustedManifestPath(root), "utf8")) as {
     format: string;
     identities: {
       sourceFiles: Record<string, string>;
@@ -57,6 +64,30 @@ export function assertEnrolledCpuSources(root: string): void {
   )
     throw new Error("CpuVerifierNotEnrolled");
   assertPythonImportClosure(root, enrolled);
+  assertNoUnenrolledPython(root, enrolled);
+}
+
+/** An extra interpreter hook or module beside the enrolled sources is not enrolled. */
+function assertNoUnenrolledPython(
+  root: string,
+  enrolled: Record<string, string>,
+): void {
+  const cpuDir = assertInsideRepo(root, "worker/cpu");
+  let names: string[];
+  try {
+    names = readdirSync(cpuDir);
+  } catch {
+    throw new Error("CpuVerifierNotEnrolled");
+  }
+  for (const name of names) {
+    if (
+      !name.endsWith(".py") &&
+      name !== "sitecustomize.py" &&
+      name !== "usercustomize.py"
+    )
+      continue;
+    if (!enrolled[`worker/cpu/${name}`]) throw new Error("CpuVerifierNotEnrolled");
+  }
 }
 
 const pythonImport = /^(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)/gm;
@@ -103,15 +134,34 @@ export async function runEnrolledCpuVerifier(
   timeoutMs = 20000,
 ): Promise<CpuVerifierResult> {
   assertEnrolledCpuSources(root);
+  const cpuDir = path.join(root, "worker/cpu");
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      "python3",
-      ["-c", script, path.join(root, "worker/cpu")],
-      { cwd: root, stdio: ["pipe", "pipe", "pipe"] },
-    );
-    const timer = setTimeout(() => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settle = (
+      outcome:
+        | { ok: true; value: CpuVerifierResult }
+        | { ok: false; error: Error },
+    ) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (outcome.ok) resolve(outcome.value);
+      else reject(outcome.error);
+    };
+    const child = spawn("python3", ["-I", "-c", script, cpuDir], {
+      cwd: cpuDir,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        PATH: process.env.PATH ?? "",
+        PYTHONDONTWRITEBYTECODE: "1",
+        PYTHONNOUSERSITE: "1",
+        PYTHONSAFEPATH: "1",
+      },
+    });
+    timer = setTimeout(() => {
       child.kill("SIGKILL");
-      reject(new Error("CpuVerifierTimeout"));
+      settle({ ok: false, error: new Error("CpuVerifierTimeout") });
     }, timeoutMs);
     let stdout = "";
     let stderr = "";
@@ -122,35 +172,37 @@ export async function runEnrolledCpuVerifier(
       stderr += chunk.toString("utf8");
     });
     child.on("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
+      settle({ ok: false, error });
     });
-    child.on("exit", (code) => {
-      clearTimeout(timer);
-      if (code !== 0)
-        reject(new Error(stderr.trim() || `CpuVerifierExit:${code ?? "null"}`));
-      else {
-        let parsed: { ok?: boolean; result?: unknown; error?: string };
-        try {
-          parsed = JSON.parse(stdout) as {
-            ok?: boolean;
-            result?: unknown;
-            error?: string;
-          };
-        } catch {
-          reject(new Error("CpuVerifierOutputRejected"));
-          return;
-        }
-        resolve(
-          parsed.ok
-            ? { ok: true, result: parsed.result, source: "worker/cpu/handler.py" }
-            : {
-                ok: false,
-                error: parsed.error ?? "CpuVerifierRejected",
-                source: "worker/cpu/handler.py",
-              },
-        );
+    child.on("close", (code) => {
+      if (code !== 0) {
+        settle({
+          ok: false,
+          error: new Error(stderr.trim() || `CpuVerifierExit:${code ?? "null"}`),
+        });
+        return;
       }
+      let parsed: { ok?: boolean; result?: unknown; error?: string };
+      try {
+        parsed = JSON.parse(stdout) as {
+          ok?: boolean;
+          result?: unknown;
+          error?: string;
+        };
+      } catch {
+        settle({ ok: false, error: new Error("CpuVerifierOutputRejected") });
+        return;
+      }
+      settle({
+        ok: true,
+        value: parsed.ok
+          ? { ok: true, result: parsed.result, source: "worker/cpu/handler.py" }
+          : {
+              ok: false,
+              error: parsed.error ?? "CpuVerifierRejected",
+              source: "worker/cpu/handler.py",
+            },
+      });
     });
     child.stdin.end(JSON.stringify(event));
   });
