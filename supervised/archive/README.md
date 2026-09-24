@@ -1,0 +1,11 @@
+# Public service boundary source archive
+
+This successor exports the reviewed create/dispatch/admission/authority contracts for use by the public dispatcher. It is deliberately not a runtime or an activation switch. `node supervised/archive/build.mjs` builds a Node 22 CommonJS module with external npm packages installed from the repository lockfile.
+
+The source manifest records original research hashes and public-copy hashes with every transformation. All application imports resolve to this repository's application and its single Store/Conflict implementation. Package imports use the lockfile. No private recovery files, proof fixtures, provider credentials, deployment account numbers or old endpoint identifiers are included.
+
+The pure runtime configuration validator was extracted to avoid pulling GPU/provider process code and top-level archived-worker filesystem reads into a queue service. Its registry is deliberately `UNENROLLED_REGISTRY/qsb-vault-worker`: a production deployment must enroll its actual immutable registry identity through a reviewed successor, not assume historical private ECR access. The old two-endpoint denylist is replaced by historical placeholders and is not an actual account inventory. The exported image digest and solver hashes identify algorithms, not permission to start resources. These sanitized files are **not byte-identical runtime attestation** for the historical distribution.
+
+`createExplicitJob` validates/binds metadata and reserves both outpoints atomically; callers still provide authenticated owner and chain validation. `dispatchExplicitJob` claims a durable invocation before invoking its one-shot launch callback. A prior or uncertain invocation blocks automatic relaunch. `admitInvocation` performs durable admission, not a reusable paid-work authorization. The running controller must independently fence current owner/revision/capability/reservations at work-start boundaries.
+
+No runtime host launcher is included in this archive. The draft research host bridge must not be imported unchanged: invalid registry versions, mutable evidence claims, acknowledgement deadlines and credential-pipe ownership require dedicated fixes and tests.

@@ -16,6 +16,7 @@
     "@aws-sdk/client-lambda": "^3.1135.0",
     "@aws-sdk/client-secrets-manager": "^3.1135.0",
     "@aws-sdk/client-sfn": "^3.1000.0",
+    "@aws-sdk/client-sqs": "3.1135.0",
     "@aws-sdk/lib-dynamodb": "^3.1000.0",
     "@hono/node-server": "^1.19.0",
     "@noble/curves": "^2.4.0",

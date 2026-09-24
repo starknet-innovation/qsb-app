@@ -35,7 +35,8 @@ The repository is a curated research snapshot. Some integration work and evidenc
 
 **Status: partial.** Creation, admission, durable coordination, current-state resolution and process ownership have separate scoped tests. Their final joined path remains a release gate.
 
-- [ ] Connect authenticated job creation to a trusted operator/runtime dispatcher. A queued response must remain distinct from a running search.
+- [x] Implement the source connection from authenticated job creation through an atomic outbox, SQS and durable dispatch/admission/host claims. [Implementation and test limits](../supervised/README.md). A queued response remains distinct from a running search.
+- [ ] Validate that final connection on the enrolled Linux deployment, including credential provisioning, watchdogs, process failure/restart and runtime/table/image identity alignment. Local synthetic composition does not close this gate.
 - [ ] Atomically claim invocation and launch authority before starting a process. Bind owner, request, revision, phase, reservations, capability, configuration and release identity.
 - [ ] Preserve uncertain launch outcomes and late provider IDs without an automatic duplicate paid submission.
 - [ ] Finish the host bridge with bounded acknowledgement, immutable inputs, owned process identity and durable terminal evidence.

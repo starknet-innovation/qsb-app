@@ -28,3 +28,7 @@ __pycache__/
 *signed-result*.json
 *signing-bundle*.json
 .DS_Store
+
+# Auditable service source archive; runtime work directories remain excluded.
+!supervised/archive/work/
+!supervised/archive/work/**

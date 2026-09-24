@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys, zipfile
 root = Path(sys.argv[1])
-for name in ('api', 'coordinator', 'reference', 'watchdog'):
+for name in ('api', 'coordinator', 'reference', 'watchdog', 'dispatch'):
     with zipfile.ZipFile(root / (name + '.zip'), 'w', zipfile.ZIP_DEFLATED) as archive:
         for source in sorted((root / name).iterdir()):
             if not source.is_file():

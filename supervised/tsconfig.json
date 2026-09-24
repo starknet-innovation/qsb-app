@@ -1,0 +1,1 @@
+{"extends":"../tsconfig.json","include":["dispatch/**/*.ts","host/**/*.ts","archive/entry.ts","archive/work/**/*.ts"],"exclude":["dist"]}

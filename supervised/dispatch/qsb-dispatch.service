@@ -1,0 +1,17 @@
+[Unit]
+Description=QSB one-shot supervised dispatch (requires independently provisioned credential fd 3)
+RequiresMountsFor=/evidence /source
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node /opt/qsb/dispatcher/dispatcher.cjs
+WorkingDirectory=/opt/qsb/dispatcher
+Environment=AWS_REGION=eu-west-1
+UMask=0077
+Restart=no
+TimeoutStartSec=35min
+KillMode=control-group
+NoNewPrivileges=yes
+# Never enable this unit without a reviewed broker that supplies a fresh private FIFO fd 3.
+# No secret is accepted through an EnvironmentFile or command line.

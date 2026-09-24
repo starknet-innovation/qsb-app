@@ -1,0 +1,106 @@
+{
+  "format": "qsb-public-service-archive-v1",
+  "files": [
+    {
+      "path": "work/yukon-mainnet-service-enrollment-20260923/dispatch.ts",
+      "source": "work/yukon-mainnet-service-enrollment-20260923/dispatch.ts",
+      "originalSha256": "4ef7db56f9992bfcf6774d5376354a5ccdf87232c4ef25a657383bf26dd76054",
+      "sha256": "5f91018b87e75c66d89c9ecce801ae8bf0cc673b4b4bf21b3801d2d479ad8160",
+      "transformations": [
+        "Relative app imports target public app; package imports resolve installed dependencies."
+      ]
+    },
+    {
+      "path": "work/yukon-mainnet-service-enrollment-20260923/admission.ts",
+      "source": "work/yukon-mainnet-service-enrollment-20260923/admission.ts",
+      "originalSha256": "881b90537c79b85686451de9d1b81e1e9dd074d3f134b4ea90515ca47c74010b",
+      "sha256": "4c49808f7e53a69dd40de35a8ef862c46c2935ae22301d801116743dbcf0611c",
+      "transformations": [
+        "Relative app imports target public app; package imports resolve installed dependencies."
+      ]
+    },
+    {
+      "path": "work/yukon-mainnet-service-enrollment-20260923/capability.ts",
+      "source": "work/yukon-mainnet-service-enrollment-20260923/capability.ts",
+      "originalSha256": "14902f68d89c38fdf79bca4af86ffee771ddfce767647e4058d8ef19dfe400fa",
+      "sha256": "7f3ff58616d3dd6db84ca592882e3bd704d652ca55d443ab2c6fdcbc5d694053",
+      "transformations": [
+        "Relative app imports target public app; package imports resolve installed dependencies."
+      ]
+    },
+    {
+      "path": "work/yukon-service-solved-completion-20260923/reservations.ts",
+      "source": "work/yukon-service-solved-completion-20260923/reservations.ts",
+      "originalSha256": "1e01abc57f73b34b470bea52b1894193f5672e39b5fdab9fc5b264e98984bae3",
+      "sha256": "3114225378a433f08b67d23c5c452bc95dac4693ff1522a5421a7cb676c05119",
+      "transformations": [
+        "Relative app imports target public app; package imports resolve installed dependencies."
+      ]
+    },
+    {
+      "path": "work/yukon-canonical-reservations-20260923/reservations.ts",
+      "source": "work/yukon-canonical-reservations-20260923/reservations.ts",
+      "originalSha256": "b68e100f22801de3c52c7545652765e12138e6ce601f7a09bddb428c6b545f94",
+      "sha256": "b6e1476d9e764290bd72f79cf6110dd94fbea87f299abd320e2fbf8b3f6c5dda",
+      "transformations": [
+        "Relative app imports target public app; package imports resolve installed dependencies."
+      ]
+    },
+    {
+      "path": "work/yukon-app-routing-20260923/routing.ts",
+      "source": "work/yukon-app-routing-20260923/routing.ts",
+      "originalSha256": "b0f77ba516bbdd3d557bc69b0619ba3e18e13b468a40607f8eb27d9905db0e34",
+      "sha256": "f890d87b2b0466da3f9f5407b6e0cf9d08c391acb4db8f22cb74bc51f61440c9",
+      "transformations": [
+        "Relative app imports target public app; package imports resolve installed dependencies."
+      ]
+    },
+    {
+      "path": "work/yukon-mainnet-cycling-runner-20260923/contract.ts",
+      "source": "work/yukon-mainnet-cycling-runner-20260923/contract.ts",
+      "originalSha256": "38f2d2c71a6b4a4c5a7153ace66a017c55ea1e458c22c98150577b54a9557356",
+      "sha256": "7b67c5148b712bdacfebb509627f548a282877370c38d02ebfc1d6f40fddc0a5",
+      "transformations": [
+        "Relative app imports target public app; package imports resolve installed dependencies."
+      ]
+    },
+    {
+      "path": "work/yukon-owned-pin-handoff-20260923/runtime-api.ts",
+      "source": "work/yukon-owned-pin-handoff-20260923/runtime-api.ts",
+      "originalSha256": "6f68076c31a58af12ab0897c7a4b1fc439e55e96e2eeff12665838f45a9ffdf6",
+      "sha256": "6f68076c31a58af12ab0897c7a4b1fc439e55e96e2eeff12665838f45a9ffdf6",
+      "transformations": [
+        "Relative app imports target public app; package imports resolve installed dependencies."
+      ]
+    },
+    {
+      "path": "work/yukon-pin-preflight-20260923/execution-gate.ts",
+      "source": "work/yukon-pin-preflight-20260923/execution-gate.ts",
+      "originalSha256": "0a1ed71250a145051d9b2baa8be30e67f47d1e90f8ceaf792180d441072f9c25",
+      "sha256": "8fb2c3b1f030c33caec61a2dd91ad5735c6e98bce1f9827ed1dae47133d4bd06",
+      "transformations": [
+        "Extracted immutable MANIFEST constant only; provider execution gate is not exported."
+      ]
+    },
+    {
+      "path": "work/yukon-indexed-controller-20260923/execution-gate.ts",
+      "source": "work/yukon-indexed-controller-20260923/execution-gate.ts",
+      "originalSha256": "a78e8d88859cdcae337851b3752c52f39392074578e075b7ace0a5e4bad7b65d",
+      "sha256": "4c2aa7811566cf653135ba3ba22efbdf32e5ddf76ab9cdace169e90b69d99acd",
+      "transformations": [
+        "Extracted immutable MANIFEST constant only; provider execution gate is not exported."
+      ]
+    },
+    {
+      "path": "work/yukon-mainnet-cycling-runner-20260923/transport.ts",
+      "source": "work/yukon-mainnet-cycling-runner-20260923/transport.ts",
+      "originalSha256": "67ab84cc2635251cbfcb59ae2a21da0958b8322fdd06cc32a49d73f3e8b95d6d",
+      "sha256": "ca70755776551bca6505bbe8e953fbfd23fabd8f5ada1525308ac7be7df29f4f",
+      "transformations": [
+        "Extracted pure validation only, runtime provider implementation excluded.",
+        "Registry and historical endpoint identifiers replaced with deliberately unenrolled placeholders.",
+        "Blueprint is a structural boundary type here; original runtime validates full blueprint."
+      ]
+    }
+  ]
+}

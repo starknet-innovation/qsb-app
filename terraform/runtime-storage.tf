@@ -63,7 +63,7 @@ resource "aws_sqs_queue" "dispatch" {
   visibility_timeout_seconds  = 2100
   message_retention_seconds   = 1209600
   depends_on                  = [aws_sqs_queue.dispatch_dead]
-  redrive_policy              = jsonencode({ deadLetterTargetArn = "arn:${data.aws_partition.current.partition}:sqs:${var.region}:${var.aws_account_id}:${var.name}-dispatch-dead.fifo", maxReceiveCount = 1 })
+  redrive_policy              = jsonencode({ deadLetterTargetArn = "arn:${data.aws_partition.current.partition}:sqs:${var.region}:${var.aws_account_id}:${var.name}-dispatch-dead.fifo", maxReceiveCount = 3 })
 }
 resource "aws_dynamodb_table" "cleanup" {
   count        = local.runtime_count
@@ -117,4 +117,15 @@ resource "aws_backup_selection" "evidence" {
   iam_role_arn = aws_iam_role.backup[0].arn
   resources    = [aws_ebs_volume.evidence[0].arn]
   depends_on   = [aws_iam_role_policy_attachment.backup]
+}
+
+# Public dispatcher package only. Protected runtime installation/enrollment remains explicit.
+resource "aws_s3_object" "dispatcher" {
+  for_each               = var.provision_runtime ? toset(["dispatcher.cjs", "host.py", "manifest.json"]) : toset([])
+  bucket                 = aws_s3_bucket.runtime[0].id
+  key                    = "releases/${var.source_commit}/dispatcher/${each.key}"
+  source                 = "${local.artifacts}/runtime/${each.key}"
+  source_hash            = filesha256("${local.artifacts}/runtime/${each.key}")
+  server_side_encryption = "AES256"
+  depends_on             = [terraform_data.release]
 }

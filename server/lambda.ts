@@ -1,3 +1,8 @@
 import { handle } from "hono/aws-lambda";
-import { app } from "./app";
-export const handler = handle(app);
+import { store } from "./store";
+import { createSupervisedCreationApp } from "../supervised/dispatch/routes";
+export const handler = handle(
+  createSupervisedCreationApp(store, {
+    enabled: process.env.SUPERVISED_EXECUTION_ENABLED === "true",
+  }),
+);

@@ -1,0 +1,484 @@
+{
+  "inputs": {
+    "../../src/lib/releases/qsb-config-a-ranked-v2.json": {
+      "bytes": 3442,
+      "imports": []
+    },
+    "../../src/lib/provenance.ts": {
+      "bytes": 2989,
+      "imports": [
+        {
+          "path": "@noble/hashes/sha2.js",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "@noble/hashes/utils.js",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "../../src/lib/releases/qsb-config-a-ranked-v2.json",
+          "kind": "import-statement",
+          "original": "./releases/qsb-config-a-ranked-v2.json"
+        }
+      ],
+      "format": "esm"
+    },
+    "work/yukon-canonical-reservations-20260923/reservations.ts": {
+      "bytes": 2091,
+      "imports": [
+        {
+          "path": "../../src/lib/provenance.ts",
+          "kind": "import-statement",
+          "original": "../../../../src/lib/provenance"
+        }
+      ],
+      "format": "esm"
+    },
+    "work/yukon-service-solved-completion-20260923/reservations.ts": {
+      "bytes": 1032,
+      "imports": [
+        {
+          "path": "../../src/lib/provenance.ts",
+          "kind": "import-statement",
+          "original": "../../../../src/lib/provenance"
+        },
+        {
+          "path": "work/yukon-canonical-reservations-20260923/reservations.ts",
+          "kind": "import-statement",
+          "original": "../yukon-canonical-reservations-20260923/reservations"
+        }
+      ],
+      "format": "esm"
+    },
+    "../../src/lib/network.ts": {
+      "bytes": 1330,
+      "imports": [
+        {
+          "path": "@scure/btc-signer",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "../../src/lib/model.ts": {
+      "bytes": 5103,
+      "imports": [
+        {
+          "path": "../../src/lib/network.ts",
+          "kind": "import-statement",
+          "original": "./network"
+        },
+        {
+          "path": "zod",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "work/yukon-pin-preflight-20260923/execution-gate.ts": {
+      "bytes": 185,
+      "imports": [],
+      "format": "esm"
+    },
+    "work/yukon-indexed-controller-20260923/execution-gate.ts": {
+      "bytes": 185,
+      "imports": [],
+      "format": "esm"
+    },
+    "work/yukon-owned-pin-handoff-20260923/runtime-api.ts": {
+      "bytes": 895,
+      "imports": [],
+      "format": "esm"
+    },
+    "work/yukon-app-routing-20260923/routing.ts": {
+      "bytes": 3933,
+      "imports": [
+        {
+          "path": "zod",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "../../src/lib/model.ts",
+          "kind": "import-statement",
+          "original": "../../../../src/lib/model"
+        },
+        {
+          "path": "../../src/lib/provenance.ts",
+          "kind": "import-statement",
+          "original": "../../../../src/lib/provenance"
+        },
+        {
+          "path": "work/yukon-pin-preflight-20260923/execution-gate.ts",
+          "kind": "import-statement",
+          "original": "../yukon-pin-preflight-20260923/execution-gate"
+        },
+        {
+          "path": "work/yukon-indexed-controller-20260923/execution-gate.ts",
+          "kind": "import-statement",
+          "original": "../yukon-indexed-controller-20260923/execution-gate"
+        },
+        {
+          "path": "work/yukon-owned-pin-handoff-20260923/runtime-api.ts",
+          "kind": "import-statement",
+          "original": "../yukon-owned-pin-handoff-20260923/runtime-api"
+        }
+      ],
+      "format": "esm"
+    },
+    "work/yukon-mainnet-cycling-runner-20260923/contract.ts": {
+      "bytes": 4681,
+      "imports": [
+        {
+          "path": "zod",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "@scure/btc-signer",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "@scure/base",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "../../src/lib/model.ts",
+          "kind": "import-statement",
+          "original": "../../../../src/lib/model"
+        },
+        {
+          "path": "../../src/lib/provenance.ts",
+          "kind": "import-statement",
+          "original": "../../../../src/lib/provenance"
+        },
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "work/yukon-mainnet-cycling-runner-20260923/transport.ts": {
+      "bytes": 1614,
+      "imports": [
+        {
+          "path": "work/yukon-pin-preflight-20260923/execution-gate.ts",
+          "kind": "import-statement",
+          "original": "../yukon-pin-preflight-20260923/execution-gate"
+        },
+        {
+          "path": "work/yukon-indexed-controller-20260923/execution-gate.ts",
+          "kind": "import-statement",
+          "original": "../yukon-indexed-controller-20260923/execution-gate"
+        }
+      ],
+      "format": "esm"
+    },
+    "work/yukon-mainnet-service-enrollment-20260923/capability.ts": {
+      "bytes": 2921,
+      "imports": [
+        {
+          "path": "../../src/lib/provenance.ts",
+          "kind": "import-statement",
+          "original": "../../../../src/lib/provenance"
+        },
+        {
+          "path": "work/yukon-app-routing-20260923/routing.ts",
+          "kind": "import-statement",
+          "original": "../yukon-app-routing-20260923/routing"
+        },
+        {
+          "path": "work/yukon-mainnet-cycling-runner-20260923/contract.ts",
+          "kind": "import-statement",
+          "original": "../yukon-mainnet-cycling-runner-20260923/contract"
+        },
+        {
+          "path": "work/yukon-mainnet-cycling-runner-20260923/transport.ts",
+          "kind": "import-statement",
+          "original": "../yukon-mainnet-cycling-runner-20260923/transport"
+        }
+      ],
+      "format": "esm"
+    },
+    "../../server/store.ts": {
+      "bytes": 5540,
+      "imports": [
+        {
+          "path": "@aws-sdk/client-dynamodb",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "@aws-sdk/lib-dynamodb",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "work/yukon-mainnet-service-enrollment-20260923/dispatch.ts": {
+      "bytes": 7545,
+      "imports": [
+        {
+          "path": "work/yukon-service-solved-completion-20260923/reservations.ts",
+          "kind": "import-statement",
+          "original": "../yukon-service-solved-completion-20260923/reservations"
+        },
+        {
+          "path": "work/yukon-mainnet-service-enrollment-20260923/capability.ts",
+          "kind": "import-statement",
+          "original": "./capability"
+        },
+        {
+          "path": "work/yukon-canonical-reservations-20260923/reservations.ts",
+          "kind": "import-statement",
+          "original": "../yukon-canonical-reservations-20260923/reservations"
+        },
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "../../src/lib/model.ts",
+          "kind": "import-statement",
+          "original": "../../../../src/lib/model"
+        },
+        {
+          "path": "../../server/store.ts",
+          "kind": "import-statement",
+          "original": "../../../../server/store"
+        },
+        {
+          "path": "../../src/lib/provenance.ts",
+          "kind": "import-statement",
+          "original": "../../../../src/lib/provenance"
+        },
+        {
+          "path": "work/yukon-app-routing-20260923/routing.ts",
+          "kind": "import-statement",
+          "original": "../yukon-app-routing-20260923/routing"
+        }
+      ],
+      "format": "esm"
+    },
+    "work/yukon-mainnet-service-enrollment-20260923/admission.ts": {
+      "bytes": 3773,
+      "imports": [
+        {
+          "path": "work/yukon-service-solved-completion-20260923/reservations.ts",
+          "kind": "import-statement",
+          "original": "../yukon-service-solved-completion-20260923/reservations"
+        },
+        {
+          "path": "work/yukon-mainnet-service-enrollment-20260923/capability.ts",
+          "kind": "import-statement",
+          "original": "./capability"
+        },
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "../../server/store.ts",
+          "kind": "import-statement",
+          "original": "../../../../server/store"
+        },
+        {
+          "path": "../../src/lib/provenance.ts",
+          "kind": "import-statement",
+          "original": "../../../../src/lib/provenance"
+        },
+        {
+          "path": "work/yukon-app-routing-20260923/routing.ts",
+          "kind": "import-statement",
+          "original": "../yukon-app-routing-20260923/routing"
+        },
+        {
+          "path": "work/yukon-canonical-reservations-20260923/reservations.ts",
+          "kind": "import-statement",
+          "original": "../yukon-canonical-reservations-20260923/reservations"
+        }
+      ],
+      "format": "esm"
+    },
+    "entry.ts": {
+      "bytes": 602,
+      "imports": [
+        {
+          "path": "work/yukon-mainnet-service-enrollment-20260923/dispatch.ts",
+          "kind": "import-statement",
+          "original": "./work/yukon-mainnet-service-enrollment-20260923/dispatch"
+        },
+        {
+          "path": "work/yukon-mainnet-service-enrollment-20260923/admission.ts",
+          "kind": "import-statement",
+          "original": "./work/yukon-mainnet-service-enrollment-20260923/admission"
+        },
+        {
+          "path": "work/yukon-mainnet-service-enrollment-20260923/capability.ts",
+          "kind": "import-statement",
+          "original": "./work/yukon-mainnet-service-enrollment-20260923/capability"
+        },
+        {
+          "path": "work/yukon-service-solved-completion-20260923/reservations.ts",
+          "kind": "import-statement",
+          "original": "./work/yukon-service-solved-completion-20260923/reservations"
+        },
+        {
+          "path": "work/yukon-app-routing-20260923/routing.ts",
+          "kind": "import-statement",
+          "original": "./work/yukon-app-routing-20260923/routing"
+        },
+        {
+          "path": "../../server/store.ts",
+          "kind": "import-statement",
+          "original": "../../server/store"
+        }
+      ],
+      "format": "esm"
+    }
+  },
+  "outputs": {
+    "dist/service.cjs.map": {
+      "imports": [],
+      "exports": [],
+      "inputs": {},
+      "bytes": 72675
+    },
+    "dist/service.cjs": {
+      "imports": [
+        {
+          "path": "@noble/hashes/sha2.js",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "@noble/hashes/utils.js",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "zod",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "@scure/btc-signer",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "zod",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "zod",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "@scure/btc-signer",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "@scure/base",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "@aws-sdk/client-dynamodb",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "@aws-sdk/lib-dynamodb",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "require-call",
+          "external": true
+        }
+      ],
+      "exports": [],
+      "entryPoint": "entry.ts",
+      "inputs": {
+        "entry.ts": {
+          "bytesInOutput": 641
+        },
+        "../../src/lib/provenance.ts": {
+          "bytesInOutput": 2082
+        },
+        "../../src/lib/releases/qsb-config-a-ranked-v2.json": {
+          "bytesInOutput": 3458
+        },
+        "work/yukon-canonical-reservations-20260923/reservations.ts": {
+          "bytesInOutput": 918
+        },
+        "work/yukon-service-solved-completion-20260923/reservations.ts": {
+          "bytesInOutput": 862
+        },
+        "work/yukon-app-routing-20260923/routing.ts": {
+          "bytesInOutput": 2472
+        },
+        "../../src/lib/network.ts": {
+          "bytesInOutput": 384
+        },
+        "../../src/lib/model.ts": {
+          "bytesInOutput": 2123
+        },
+        "work/yukon-pin-preflight-20260923/execution-gate.ts": {
+          "bytesInOutput": 90
+        },
+        "work/yukon-indexed-controller-20260923/execution-gate.ts": {
+          "bytesInOutput": 91
+        },
+        "work/yukon-owned-pin-handoff-20260923/runtime-api.ts": {
+          "bytesInOutput": 168
+        },
+        "work/yukon-mainnet-cycling-runner-20260923/contract.ts": {
+          "bytesInOutput": 4162
+        },
+        "work/yukon-mainnet-cycling-runner-20260923/transport.ts": {
+          "bytesInOutput": 1346
+        },
+        "work/yukon-mainnet-service-enrollment-20260923/capability.ts": {
+          "bytesInOutput": 2446
+        },
+        "work/yukon-mainnet-service-enrollment-20260923/dispatch.ts": {
+          "bytesInOutput": 6675
+        },
+        "../../server/store.ts": {
+          "bytesInOutput": 4586
+        },
+        "work/yukon-mainnet-service-enrollment-20260923/admission.ts": {
+          "bytesInOutput": 3542
+        }
+      },
+      "bytes": 38797
+    }
+  }
+}

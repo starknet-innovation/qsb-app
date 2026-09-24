@@ -66,8 +66,12 @@ run "dormant_runtime" {
     error_message = "Provisioned API transport must not activate the dispatcher."
   }
   assert {
-    condition     = jsondecode(aws_sqs_queue.dispatch[0].redrive_policy).maxReceiveCount == 1
-    error_message = "Uncertain dispatch must not be repeatedly redelivered as new paid work."
+    condition = aws_cloudwatch_event_rule.dispatch[0].state == "DISABLED" && aws_lambda_function.dispatch[0].environment[0].variables.SUPERVISED_EXECUTION_ENABLED == "false" && length(aws_s3_object.dispatcher) == 3
+    error_message = "Dispatcher artifacts must be provisioned without activation."
+  }
+  assert {
+    condition     = jsondecode(aws_sqs_queue.dispatch[0].redrive_policy).maxReceiveCount == 3
+    error_message = "Dispatch delivery retries must remain bounded; durable invocation claims prevent duplicate paid work."
   }
 }
 run "enrolled_cleanup" {

@@ -1,0 +1,23 @@
+/** Public binding only: no private assembly, signing, chain observation or authority from uploaded flags. */
+import {z} from 'zod';
+import * as btc from '@scure/btc-signer';
+import {hex} from '@scure/base';
+import {publicVaultSchema,withdrawalSchema} from '../../../../src/lib/model';
+import {fingerprint} from '../../../../src/lib/provenance';
+import {createHash} from 'node:crypto';
+const hash=(s:string|Uint8Array)=>createHash('sha256').update(s).digest('hex');
+const wallet=z.object({address:z.string(),publicKey:z.string().regex(/^(02|03)[a-f0-9]{64}$/),type:z.enum(['p2wpkh','p2sh'])}).strict();
+const bytes=z.string().regex(/^(?:[a-f0-9]{2})+$/),scalar=z.number().positive().finite();
+const state=z.object({config:z.literal('A'),hash_mode:z.literal('sha256'),n:z.literal(150),t1s:z.literal(8),t1b:z.literal(1),t2s:z.literal(7),t2b:z.literal(2),hors_commitments:z.array(z.array(bytes.length(40)).length(150)).length(2),dummy_sigs:z.array(z.array(bytes.max(146)).length(150)).length(2),pin_r:scalar,pin_s:scalar,pin_sig:bytes.max(146),round_sigs:z.array(z.object({r:scalar,s:scalar,sig:bytes.max(146)}).strict()).length(2),full_script_hex:bytes.max(20000)}).strict();
+const genesis='000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f';
+export const requestSchema=z.object({format:z.literal('qsb-mainnet-search-request-v1'),network:z.literal('mainnet'),genesisHash:z.literal(genesis),id:z.string().uuid(),vault:publicVaultSchema.extend({network:z.literal('mainnet')}),wallet,manifest:withdrawalSchema}).strict();
+const indexes=z.array(z.number().int().min(0).max(149)).length(9).refine(v=>new Set(v).size===9&&v.every((n,i)=>i===0||n>v[i-1]),'Noncanonical subset');
+export const solvedSchema=z.object({format:z.literal('qsb-mainnet-solved-state-v1'),network:z.literal('mainnet'),request:requestSchema,solution:z.object({sequence:z.number().int().min(2147483648).max(4294967295),locktime:z.number().int().min(500000000).max(1744600000),round1:indexes,round2:indexes}).strict(),release:z.object({pinRuntime:z.literal('0ef53314fcf1e6307bd2249dfdb7da483ae9ae08855c36328fbeda51cda1fea0'),runtimeHash:z.literal('14ca2c729ecee121c715b7ff1acb9b8656b8650f8f4c02e3454c1067d22edeb9'),solverReleaseHash:z.literal('966136928aca1b7546275599a0462a1870c92b2a8d184391967a250bb16d9291')}).strict()}).strict();
+export const RELEASE={pinRuntime:'0ef53314fcf1e6307bd2249dfdb7da483ae9ae08855c36328fbeda51cda1fea0',runtimeHash:'14ca2c729ecee121c715b7ff1acb9b8656b8650f8f4c02e3454c1067d22edeb9',solverReleaseHash:'966136928aca1b7546275599a0462a1870c92b2a8d184391967a250bb16d9291'};
+export function validateRequest(input:unknown){const r=requestSchema.parse(input),m=r.manifest,v=r.vault,s=state.parse(JSON.parse(v.publicStateJson));const pub=hex.decode(r.wallet.publicKey),native=btc.p2wpkh(pub,btc.NETWORK),nested=btc.p2sh(native,btc.NETWORK);if(r.wallet.address!==(r.wallet.type==='p2wpkh'?native.address:nested.address)||r.id!==v.id||m.vaultId!==r.id||v.paymentAddress!==r.wallet.address||v.scriptHex!==s.full_script_hex||hash(hex.decode(v.scriptHex))!==v.scriptHash||m.costAccepted!==true)throw Error('Public request binding differs');
+ if(v.configuration&&(v.configuration.network!=='mainnet'||v.configuration.scriptHash!==v.scriptHash||v.configuration.scriptBytesHash!==v.scriptHash||v.configuration.publicStateHash!==fingerprint(s)))throw Error('Vault configuration differs');
+ if(m.funding.txid.toLowerCase()===m.helper.txid.toLowerCase()&&m.funding.vout===m.helper.vout)throw Error('Duplicate outpoint');if(v.funding&&fingerprint(v.funding)!==fingerprint(m.funding))throw Error('Vault funding differs');
+ const script=btc.OutScript.encode(btc.Address(btc.NETWORK).decode(m.destination));if(hex.encode(script)!==m.outputScript||BigInt(m.outputValue)<=0n||BigInt(m.fee)<=0n||BigInt(m.funding.value)+BigInt(m.helper.value)!==BigInt(m.outputValue)+BigInt(m.fee))throw Error('Mainnet payout binding differs');return r;}
+export function validateSolvedState(input:unknown){const b=solvedSchema.parse(input);validateRequest(b.request);return b;}
+/** Caller must supply the original locally retained request and the hash from current trusted service admission. */
+export function localAssemblyInput(input:unknown,originalRequest:unknown,admittedDigest:string){const b=validateSolvedState(input),r=validateRequest(originalRequest);if(fingerprint(b)!==admittedDigest||fingerprint(b.request)!==fingerprint(r))throw Error('Solved state differs from admitted original request');return{vault:structuredClone(r.vault),manifest:structuredClone(r.manifest),solution:structuredClone(b.solution),solvedStateHash:admittedDigest,assemblyAuthorized:false as const,signingAuthorized:false as const};}
