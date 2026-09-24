@@ -81,6 +81,33 @@ int main(int argc, char **argv) {
                 self.assertEqual(out.returncode,2,args)
                 self.assertEqual(out.stdout,b'')
 
+    def test_output_failure_prevents_success(self):
+        code = r'''#include "pin_contract.h"
+int main(int argc,char**argv) {
+    if(argc!=2) return 9;
+    qsb_make_results();
+    FILE *f=qsb_open_hits(argv[1]);
+    fprintf(f,"sequence=2147483648 locktime=500000000 recid=0\n");
+    qsb_close_hits(f);
+    puts("published");
+}
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp);(p/'io.cpp').write_text(code)
+            subprocess.run(['c++','-I',str(Path(__file__).parent),str(p/'io.cpp'),'-o',str(p/'io')],check=True,capture_output=True)
+            for target in ('missing/child', '.', '/dev/full'):
+                if target=='/dev/full' and not Path(target).exists(): continue
+                out=subprocess.run([str(p/'io'),target],cwd=p,capture_output=True)
+                self.assertEqual(out.returncode,2,target)
+                self.assertEqual(out.stdout,b'')
+            out=subprocess.run([str(p/'io'),'results/hit'],cwd=p,capture_output=True,check=True)
+            self.assertEqual(out.stdout,b'published\n')
+            self.assertEqual((p/'results/hit').read_text(),'sequence=2147483648 locktime=500000000 recid=0\n')
+            (p/'results/hit').unlink();(p/'results').rmdir();(p/'results').write_text('blocked')
+            out=subprocess.run([str(p/'io'),'hit'],cwd=p,capture_output=True)
+            self.assertEqual(out.returncode,2)
+            self.assertFalse((p/'hit').exists())
+
     def test_capacity_fail_closed(self):
         code='#include "pin_contract.h"\nint main(int argc,char**argv){uint32_t v[]={0,1,63,64,65,1024,0xffffffff};for(int i=0;i<7;i++)printf("%d\\n",qsb_require_hit_capacity(v[i]));}'
         with tempfile.TemporaryDirectory() as tmp:

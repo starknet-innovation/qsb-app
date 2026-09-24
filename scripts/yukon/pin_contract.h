@@ -1,6 +1,9 @@
 #pragma once
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <sys/stat.h>
 #ifdef __CUDACC__
 #define QSB_HD __host__ __device__
 #else
@@ -57,4 +60,28 @@ static inline int qsb_valid_range(const qsb_pin_range *r) {
 }
 static inline uint32_t qsb_batch_size(uint64_t remaining, uint32_t batch) {
     return remaining < batch ? (uint32_t)remaining : batch;
+}
+
+static inline void qsb_require_host(int ok, const char *operation) {
+    if (!ok) {
+        fprintf(stderr, "QSB_RANGE_INCOMPLETE: %s failed\n", operation);
+        exit(2);
+    }
+}
+static inline void qsb_make_results(void) {
+    if (mkdir("results", 0755) != 0) {
+        struct stat st;
+        qsb_require_host(errno == EEXIST && stat("results", &st) == 0 && S_ISDIR(st.st_mode), "results directory");
+    }
+}
+static inline FILE *qsb_open_hits(const char *name) {
+    FILE *f = fopen(name, "a");
+    qsb_require_host(f != NULL, "open hit output");
+    return f;
+}
+static inline void qsb_close_hits(FILE *f) {
+    int failed = ferror(f);
+    if (fflush(f) != 0) failed = 1;
+    if (fclose(f) != 0) failed = 1;
+    qsb_require_host(!failed, "write/flush/close hit output");
 }

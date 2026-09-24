@@ -42,6 +42,9 @@ def adapt(text):
     text = replace(text, 'if (count > 64) count = 64;', 'if (!qsb_require_hit_capacity(count)) return 2;')
     text = replace(text, 'int nh = (h_hit > 64) ? 64 : (int)h_hit;', 'if (!qsb_require_hit_capacity(h_hit)) return 2;\n            int nh = (int)h_hit;')
     text = replace(text, 'int nh = (h_hit > 64) ? 64 : h_hit;', 'if (!qsb_require_hit_capacity(h_hit)) return 2;\n                int nh = (int)h_hit;', 2)
+    text = replace(text, 'mkdir("results", 0755);', 'qsb_make_results();', 2)
+    text = replace(text, 'FILE *f = fopen(fname, "a");', 'FILE *f = qsb_open_hits(fname);', 2)
+    text = replace(text, '                fclose(f);', '                qsb_close_hits(f);', 2)
     # Replace the benchmark CLI, including all easy/debug/sequence overrides.
     start = text.index('    if (argc < 2) {', text.index('int main('))
     end = text.index('    /* Use the specified GPU */', start)

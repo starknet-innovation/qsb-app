@@ -61,3 +61,10 @@ still pass. This is not native GPU coverage evidence. `QSB_RANGE_DRAINED` is a
 scheduling receipt only, deliberately not eligibility for completed-range credit:
 unchecked CUDA/OpenSSL/output errors and native boundary testing remain blockers.
 The previous compile receipt applies to the previous source, not this change.
+
+Both hit publishers now use checked directory creation, open, and
+write/flush/close wrappers. Failed output terminates the process with exit 2.
+Host tests exercise missing parents, a directory as output, an existing file
+blocking the results directory, and successful exact output; Linux also tests
+`/dev/full`. Fourteen unit tests pass locally (macOS skips unavailable
+`/dev/full`). CUDA and OpenSSL error handling remain separate pending work.
