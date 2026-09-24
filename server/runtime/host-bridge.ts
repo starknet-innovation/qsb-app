@@ -872,6 +872,7 @@ export function localAckStarter(
     new Promise((resolve, reject) => {
       const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
       if (!child.pid) {
+        child.once("error", () => undefined);
         reject(new Error("ProcessIdentityMissing"));
         return;
       }
@@ -939,7 +940,8 @@ export function localAckStarter(
         if (acked) rejectExclusive(error);
         else finish(error);
       });
-      child.on("exit", () => {
+      child.on("close", () => {
+        if (settled && !acked) return;
         const normalized = text.replace(/\r\n/g, "\n");
         if (normalized === expected) resolveExclusive();
         else if (acked) violate();

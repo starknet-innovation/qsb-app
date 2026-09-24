@@ -12,6 +12,7 @@ export type CpuVerifierResult =
 
 const script = `
 import json, sys
+sys.dont_write_bytecode = True
 sys.path.insert(0, sys.argv[1])
 from handler import handler
 event = json.load(sys.stdin)
@@ -163,7 +164,8 @@ export async function runEnrolledCpuVerifier(
       if (outcome.ok) resolve(outcome.value);
       else reject(outcome.error);
     };
-    const child = spawn("python3", ["-I", "-c", script, cpuDir], {
+    // -B still applies under -I. PYTHON* variables do not, so they cannot stop bytecode writes.
+    const child = spawn("python3", ["-I", "-B", "-c", script, cpuDir], {
       cwd: cpuDir,
       stdio: ["pipe", "pipe", "pipe"],
       env: {

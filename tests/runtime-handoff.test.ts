@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Signer } from "bip322-js";
@@ -22,6 +22,7 @@ import {
 import { retainedRequests } from "../src/mainnet/retainedRequest";
 import { validateRequest } from "../src/mainnet/solvedContract";
 import { assertServiceChain } from "../server/runtime/capability";
+import { CONTRACT as archiveContract } from "../supervised/archive/work/yukon-mainnet-service-enrollment-20260923/capability";
 import { runEnrolledCpuVerifier } from "../server/runtime/cpu-verifier";
 import { admitSupervisedJob, claimAdmittedLaunch } from "../server/runtime/dispatcher";
 import {
@@ -125,6 +126,72 @@ function memoryRetention() {
 }
 
 describe("supervised runtime handoff", () => {
+  it("keeps the three capability contracts equal", async () => {
+    const declared = (source: string) => {
+      const match = source.match(
+        /export const CONTRACT=\{format:'([^']+)',network:'([^']+)',coreSourceManifest:'([a-f0-9]{64})',cpuCallback:'([a-f0-9]{64})',profileHash:fingerprint\(supervisedProfile\(\)\),providerGpuLimit:(\d+),broadcastAuthorized:(true|false)\} as const;/,
+      );
+      if (!match) throw new Error("CapabilityContractUnparsed");
+      return {
+        format: match[1],
+        network: match[2],
+        coreSourceManifest: match[3],
+        cpuCallback: match[4],
+        providerGpuLimit: Number(match[5]),
+        broadcastAuthorized: match[6] === "true",
+      };
+    };
+    const archiveDeclared = declared(
+      readFileSync(
+        "supervised/archive/work/yukon-mainnet-service-enrollment-20260923/capability.ts",
+        "utf8",
+      ),
+    );
+    const runtimeDeclared = declared(
+      readFileSync(
+        "supervised/runtime/source/work/yukon-mainnet-service-enrollment-20260923/capability.ts",
+        "utf8",
+      ),
+    );
+    const runtimeRouting = (await import(
+      [
+        "..",
+        "supervised",
+        "runtime",
+        "source",
+        "work",
+        "yukon-app-routing-20260923",
+        "routing.ts",
+      ].join("/")
+    )) as { supervisedProfile: () => unknown };
+    const runtimeProvenance = (await import(
+      [
+        "..",
+        "supervised",
+        "runtime",
+        "source",
+        "outputs",
+        "qsb-vault",
+        "src",
+        "lib",
+        "provenance.ts",
+      ].join("/")
+    )) as { fingerprint: (value: unknown) => string };
+    const runtimeContract = {
+      ...runtimeDeclared,
+      profileHash: runtimeProvenance.fingerprint(runtimeRouting.supervisedProfile()),
+    };
+    expect(release.mainnetEnabled).toBe(false);
+    expect(archiveDeclared).toEqual(runtimeDeclared);
+    expect(archiveContract).toEqual({
+      ...archiveDeclared,
+      profileHash: contract.profileHash,
+    });
+    expect(archiveContract).toEqual(contract);
+    expect(runtimeContract).toEqual(contract);
+    expect(contract.broadcastAuthorized).toBe(false);
+  });
+
   it("keeps in-process admission off the default app and behind the dispatcher", async () => {
     const store = new MemoryStore();
     await seedCapability(store);
@@ -433,6 +500,71 @@ describe("supervised runtime handoff", () => {
     expect(uncertain.state).toBe("uncertain");
     expect(uncertain.processId).toMatch(/^\d+$/);
     await Promise.all(hanging.exits);
+  });
+
+  it("does not record a pid when the child cannot be spawned", async () => {
+    const { store, admitted } = await claimedFixture();
+    const starter = localAckStarter(
+      "qsb-missing-binary",
+      [],
+      1000,
+      admitted.job.mainnetRequestHash,
+    );
+    await expect(
+      launchOwnedProcess(
+        store,
+        address,
+        admitted.job.id,
+        0,
+        admitted.job.mainnetRequestHash,
+        starter.start,
+        new Date(),
+        1000,
+      ),
+    ).rejects.toThrow(/ProcessIdentityMissing/);
+    const launch = (
+      await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`)
+    )?.launch as { state: string; processId?: string };
+    expect(launch.state).toBe("uncertain");
+    expect(launch.processId).toBeUndefined();
+  });
+
+  it("treats stdout that follows the ack as a violation after the pipe closes", async () => {
+    const { store, admitted } = await claimedFixture();
+    const line = acknowledgementLine(admitted.job.mainnetRequestHash);
+    const starter = localAckStarter(
+      process.execPath,
+      [
+        "-e",
+        `process.stdout.write(${JSON.stringify(line)}); setTimeout(() => process.stdout.write("later\\n", () => process.exit(0)), 200);`,
+      ],
+      2000,
+      admitted.job.mainnetRequestHash,
+    );
+    const acknowledged = await launchOwnedProcess(
+      store,
+      address,
+      admitted.job.id,
+      0,
+      admitted.job.mainnetRequestHash,
+      starter.start,
+      new Date(),
+      2000,
+    );
+    expect(acknowledged.state).toBe("acknowledged");
+    const started = Date.now();
+    let protocol = "";
+    while (protocol !== "violated" && Date.now() - started < 2000) {
+      protocol =
+        (
+          (await store.get(`OWNER#${address}`, `LAUNCH#${admitted.job.id}#0`))?.launch as {
+            stdoutProtocol?: string;
+          }
+        ).stdoutProtocol ?? "";
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(protocol).toBe("violated");
+    await Promise.all(starter.exits);
   });
 
   it("records one late provider id after an uncertain paid attempt", async () => {
@@ -1582,6 +1714,31 @@ describe("supervised runtime handoff", () => {
     writeFileSync(
       path.join(tree, "worker/cpu/qsb_pipeline.cpython-312-x86_64-linux-gnu.so"),
       "",
+    );
+    await expect(
+      runEnrolledCpuVerifier(tree, { action: "verify", stage: "pinning" }),
+    ).rejects.toThrow(/CpuVerifierNotEnrolled/);
+  });
+
+  it("does not cache bytecode and still refuses a foreign cache", async () => {
+    const directory = mkdtempSync(`${tmpdir()}/qsb-pkg-`);
+    writePackageTree(process.cwd(), directory);
+    const tree = path.join(directory, "tree");
+    const first = await runEnrolledCpuVerifier(tree, {
+      action: "verify",
+      stage: "pinning",
+    });
+    const second = await runEnrolledCpuVerifier(tree, {
+      action: "verify",
+      stage: "pinning",
+    });
+    expect(first).toMatchObject({ ok: false, source: "worker/cpu/handler.py" });
+    expect(second).toMatchObject({ ok: false, source: "worker/cpu/handler.py" });
+    expect(existsSync(path.join(tree, "worker/cpu/__pycache__"))).toBe(false);
+    mkdirSync(path.join(tree, "worker/cpu/__pycache__"));
+    writeFileSync(
+      path.join(tree, "worker/cpu/__pycache__/handler.cpython-312.pyc"),
+      "not-enrolled",
     );
     await expect(
       runEnrolledCpuVerifier(tree, { action: "verify", stage: "pinning" }),
