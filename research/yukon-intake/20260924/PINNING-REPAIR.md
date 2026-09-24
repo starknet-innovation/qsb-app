@@ -1038,3 +1038,18 @@ new range. Compute is mocked in those tests. This prepares the fresh GPU-hit gat
 it does not close that gate or authorize production activation. A managed test
 pod can bound physical GPU allocation separately from the unresolved serverless
 startup behavior; pod execution would not certify that serverless behavior.
+
+## Campaign download verification
+
+`verify_pin_campaign.py` checks downloaded plan/intent/result bindings against the
+frozen binary, reconstructs the exact public transaction with the real CPU
+reference and checks each result's parameter/range identity. Missing results stay
+unresolved; malformed or substituted results reject. Receipts explicitly grant no
+coverage and do not claim a fresh withdrawal. The real-CPU regression accepts an
+empty bound result, preserves a missing-result intent and rejects changed ranges.
+
+The live campaign continues on source commit `db43c15`; this local postprocessor
+is not uploaded to or changing that running compute process. Initial downloaded
+outputs passed CPU binding with no candidates. This snapshot is progress only;
+final search outcome, complete cleanup and cost evidence will be recorded after
+termination. No new funded fixture was used.
