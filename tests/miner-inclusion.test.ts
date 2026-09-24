@@ -16,6 +16,8 @@ import {
   callMinerSubmit,
   describeExternalInclusion,
   grantExactSpendPermit,
+  localMinerTransport,
+  localTransportInvocations,
   judgeInclusionEvidence,
   rawTransactionSha256,
   type ExternalChainId,
@@ -361,7 +363,7 @@ describe("authorization before submit", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("calls a test double only after a non-mainnet record matches, and that result is not inclusion", async () => {
+  it("calls a local double only after a non-mainnet record matches, and that result is not inclusion", async () => {
     const sample = sampleTx();
     const permit = grantExactSpendPermit(
       grantInput("testnet4", "operator-fixture", {
@@ -369,19 +371,68 @@ describe("authorization before submit", () => {
         txid: sample.txid,
       }),
     );
-    const transport = vi.fn().mockResolvedValue({ httpStatus: 200, status: "success" });
+    const transport = localMinerTransport({ httpStatus: 200, status: "success" });
     const sent = await callMinerSubmit({
       permit,
       rawTxHex: sample.raw,
       transport,
     });
-    expect(transport).toHaveBeenCalledTimes(1);
-    expect(transport).toHaveBeenCalledWith(sample.raw);
+    expect(localTransportInvocations(transport)).toEqual([sample.raw]);
     expect(sent.included).toBe(false);
     expect(sent.httpSuccessIsInclusion).toBe(false);
     expect(sent.section7Closed).toBe(false);
     expect(sent.mainnetEnabled).toBe(false);
     expect(sent.broadcastAuthorized).toBe(false);
+  });
+
+  it("does not invoke a live host from a non-mainnet permit", async () => {
+    const sample = sampleTx();
+    const permit = grantExactSpendPermit(
+      grantInput("testnet4", "operator-fixture", {
+        raw: sample.raw,
+        txid: sample.txid,
+      }),
+    );
+    const fetchLive = vi.fn(async (raw: string) => {
+      await fetch("https://slipstream.mara.com/api/transactions", {
+        method: "POST",
+        body: raw,
+      });
+    });
+    await expect(
+      callMinerSubmit({ permit, rawTxHex: sample.raw, transport: fetchLive }),
+    ).rejects.toThrow("LiveMinerTransportRefused");
+    expect(fetchLive).not.toHaveBeenCalled();
+    for (const endpoint of [
+      "https://slipstream.mara.com",
+      "https://slipstream.mara.com/api/transactions",
+      "https://teststream.mara.com",
+      "https://teststream.mara.com/api/transactions",
+    ]) {
+      const send = vi.fn();
+      await expect(
+        callMinerSubmit({
+          permit,
+          rawTxHex: sample.raw,
+          transport: { endpoint, send },
+        }),
+      ).rejects.toThrow("LiveMinerTransportRefused");
+      expect(send).not.toHaveBeenCalled();
+    }
+    const forged = vi.fn();
+    await expect(
+      callMinerSubmit({
+        permit,
+        rawTxHex: sample.raw,
+        transport: {
+          format: "qsb-local-miner-transport-v1",
+          targetsLiveHost: false,
+          endpoint: "local://miner-double",
+          send: forged,
+        },
+      }),
+    ).rejects.toThrow("LiveMinerTransportRefused");
+    expect(forged).not.toHaveBeenCalled();
   });
 
   it("does not contact Teststream submit until a permit exists", async () => {

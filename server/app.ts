@@ -423,7 +423,7 @@ export function createApp(
       const sent = await callMinerSubmit({
         permit,
         rawTxHex: raw,
-        transport: (hex) => miner.submit(hex, permit),
+        transport: { endpoint: minerBase },
       });
       if (sent.included !== false || sent.section7Closed !== false)
         throw new MinerInclusionError("PreflightIsNotInclusion");

@@ -649,15 +649,91 @@ export function assertBroadcastPermit(
   return granted;
 }
 
-function targetsMainnetMiner(endpoint: string | undefined): boolean {
-  if (!endpoint) return false;
-  let host: string;
+function minerHostname(endpoint: string | undefined): string | undefined {
+  if (!endpoint) return undefined;
   try {
-    host = new URL(endpoint).hostname;
+    return new URL(endpoint).hostname;
   } catch {
-    return false;
+    return undefined;
   }
-  return host === new URL(EXTERNAL_MINER_CATALOG.mainnet.minerUrl).hostname;
+}
+
+function targetsMainnetMiner(endpoint: string | undefined): boolean {
+  return (
+    minerHostname(endpoint) ===
+    new URL(EXTERNAL_MINER_CATALOG.mainnet.minerUrl).hostname
+  );
+}
+
+function targetsLiveMiner(endpoint: string | undefined): boolean {
+  const host = minerHostname(endpoint);
+  if (!host) return false;
+  return (
+    host === new URL(EXTERNAL_MINER_CATALOG.mainnet.minerUrl).hostname ||
+    host === new URL(EXTERNAL_MINER_CATALOG.testnet4.minerUrl).hostname
+  );
+}
+
+const LOCAL_MINER_ENDPOINT = "local://miner-double";
+const localTransports = new WeakSet<LocalMinerTransport>();
+const localDeliveries = new WeakMap<
+  LocalMinerTransport,
+  { seen: string[]; result: unknown }
+>();
+
+export type LocalMinerTransport = {
+  readonly format: "qsb-local-miner-transport-v1";
+  readonly targetsLiveHost: false;
+  readonly endpoint: typeof LOCAL_MINER_ENDPOINT;
+};
+
+/** A canned in-process double. It has no host and cannot perform HTTP. */
+export function localMinerTransport(result: unknown): LocalMinerTransport {
+  const transport: LocalMinerTransport = Object.freeze({
+    format: "qsb-local-miner-transport-v1",
+    targetsLiveHost: false,
+    endpoint: LOCAL_MINER_ENDPOINT,
+  });
+  localTransports.add(transport);
+  localDeliveries.set(transport, { seen: [], result });
+  return transport;
+}
+
+export function localTransportInvocations(
+  transport: LocalMinerTransport,
+): readonly string[] {
+  const row = localDeliveries.get(transport);
+  if (!row) throw new MinerInclusionError("LiveMinerTransportRefused");
+  return Object.freeze(row.seen.slice());
+}
+
+function endpointOf(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || !("endpoint" in value))
+    return undefined;
+  const endpoint = (value as { endpoint?: unknown }).endpoint;
+  return typeof endpoint === "string" ? endpoint : undefined;
+}
+
+function assertLocalMinerTransport(value: unknown): LocalMinerTransport {
+  if (typeof value === "function")
+    throw new MinerInclusionError("LiveMinerTransportRefused");
+  if (targetsLiveMiner(endpointOf(value)))
+    throw new MinerInclusionError("LiveMinerTransportRefused");
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !localTransports.has(value as LocalMinerTransport)
+  )
+    throw new MinerInclusionError("LiveMinerTransportRefused");
+  const transport = value as LocalMinerTransport;
+  if (
+    transport.format !== "qsb-local-miner-transport-v1" ||
+    transport.targetsLiveHost !== false ||
+    transport.endpoint !== LOCAL_MINER_ENDPOINT ||
+    targetsLiveMiner(transport.endpoint)
+  )
+    throw new MinerInclusionError("LiveMinerTransportRefused");
+  return transport;
 }
 
 /** This checkout does not invoke a mainnet miner transport. A permit is not activation. */
@@ -672,7 +748,7 @@ export function assertMainnetTransportClosed(
 export async function callMinerSubmit(input: {
   permit: unknown;
   rawTxHex: string;
-  transport: (rawTxHex: string) => Promise<unknown>;
+  transport: unknown;
 }): Promise<{
   format: "qsb-miner-transport-result-v1";
   transportResult: unknown;
@@ -685,7 +761,11 @@ export async function callMinerSubmit(input: {
 }> {
   const granted = assertBroadcastPermit(input.permit, input.rawTxHex);
   assertMainnetTransportClosed(granted);
-  const transportResult = await input.transport(input.rawTxHex);
+  const transport = assertLocalMinerTransport(input.transport);
+  const delivery = localDeliveries.get(transport);
+  if (!delivery) throw new MinerInclusionError("LiveMinerTransportRefused");
+  delivery.seen.push(input.rawTxHex);
+  const transportResult = delivery.result;
   return Object.freeze({
     format: "qsb-miner-transport-result-v1",
     transportResult,
