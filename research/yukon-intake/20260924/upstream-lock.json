@@ -1,0 +1,77 @@
+{
+  "format": "qsb-yukon-intake-v1",
+  "repository": "Layr-Labs/quantum-safe-bitcoin-challenge",
+  "commit": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+  "archiveSha256": "4427d370500a526fe9abc5b9e463ed2f0ebc900537972d2bf05ddb903ab9af77",
+  "checkedAt": "2026-09-24T18:06:26.827609+00:00",
+  "status": "HOLD",
+  "deploymentAllowed": false,
+  "promotions": {
+    "pinning": {
+      "id": "871963fd-82c8-4c08-99f5-46d4b13f3fce",
+      "commit": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+      "row": "871963f     fkiene                  promoted    904971814  {\"gpu\":\"RTX_4090\",\"mode\":\"fixed_time\",\"unit\":\"verified candidates per second\"...  +23698411 (+16.22%)    7e95c40  9/24/26, 3:43 PM "
+    },
+    "subset": {
+      "id": "7aef224a-e3ff-43f9-9877-50cdbda3f653",
+      "commit": "9ac2515450446dbadbe061e98ebfc317c36d4999",
+      "row": "7aef224     Akashneelesh           promoted    623518629  {\"gpu\":\"RTX_4090\",\"mode\":\"fixed_time\",\"unit\":\"verified candidates per second\"...  +27610713 (+44.54%)    9ac2515  9/21/26, 5:29 PM "
+    }
+  },
+  "commits": {
+    "7e95c40c99e57bded233ce57c7f453fbde9fd21c": {
+      "sha": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+      "message": "Validate submission 871963fd-82c8-4c08-99f5-46d4b13f3fce\n\nCo-authored-by: fkiene <46886660+fkiene@users.noreply.github.com>",
+      "parents": [
+        "1fe5a8e40008befcd917668ea9b1a23c6ee590c4"
+      ]
+    },
+    "9ac2515450446dbadbe061e98ebfc317c36d4999": {
+      "sha": "9ac2515450446dbadbe061e98ebfc317c36d4999",
+      "message": "Validate submission 7aef224a-e3ff-43f9-9877-50cdbda3f653\n\nCo-authored-by: Akashneelesh <66639153+Akashneelesh@users.noreply.github.com>\nCo-authored-by: dun999 <136267097+dun999@users.noreply.github.com>\nCo-authored-by: fkiene <46886660+fkiene@users.noreply.github.com>\nCo-authored-by: Meganpark980320 <186258306+Meganpark980320@users.noreply.github.com>\nCo-authored-by: ercumentyildirim <43972346+ercumentyildirim@users.noreply.github.com>\nCo-authored-by: EvanYan1024 <136288110+EvanYan1024@users.noreply.github.com>\nCo-authored-by: terrapinelf <166810331+terrapinelf@users.noreply.github.com>\nCo-authored-by: jacklightChen <20631913+jacklightChen@users.noreply.github.com>\nCo-authored-by: Saviour1001 <71517788+Saviour1001@users.noreply.github.com>",
+      "parents": [
+        "e876032f79e6f4f3af2732bbba39403e29f0e227"
+      ]
+    }
+  },
+  "sourceFiles": {
+    "pinning/pinning.cu": "11bd015c5e4ae21a7ecec0640a7cbf6e1d32f2aa02ba2a379ec7cc9e145dc604",
+    "pinning/RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "pinning/GPUMath.h": "a5fe65bcd5e75f3963378b5a66c8610527bdfe5be27b7f21ae5b68b0ead10eda",
+    "pinning/negative_y_mac.cuh": "d8893d08e76acd5c9c00531e89783c309e1dab78c3cce6509e4c667e36ac0335",
+    "pinning/SlotReadback.h": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25",
+    "pinning/PriorityPipeline.h": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f",
+    "pinning/sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+    "pinning/GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "pinning/GLVScalar.cuh": "eda0e2a50f4f39846d664a1d36df52b94f8ce746bab652e3f5ba620ff671c1b1",
+    "pinning/sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+    "pinning/LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
+    "pinning/cofactor_checkpoint.h": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55",
+    "pinning/PackedRecovery.cuh": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe",
+    "pinning/ParityWindow.cuh": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4",
+    "subset/subset.cu": "103101573be38d528994aa8c35c35a06ae1a23b0d2d856dcfd5bc606392976a9",
+    "subset/tests/gpu_epochs/tree.cu": "c1afd09f93a338073e6753cf5a36b3827aa7397358fb13851b131ebea6d33c09",
+    "subset/GPUMath.h": "3205120d961990dc55e7e3c622411c2c581d506fa730f568a122530038b84ba6",
+    "subset/square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+    "subset/GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "subset/chain_replay_field.cuh": "7390f456f1f8c4cdbf0df2d9e42e8f88935b09e26e1f0be6af6ddbfa59ce4bd9",
+    "subset/hit_filter_field.cuh": "1efd238ee80935f8a7c0559eafce15e7d1e5a813a04173efd54e0f87074e3a45",
+    "subset/hit_filter_field_sc.cuh": "cde4221e38dfd4671255d96adc36cc34ecbdfa178ab4fd42645694a30cd192cb",
+    "subset/tests/gpu_epochs/filter_tail_sc.cuh": "890752b2dfb632e56232c1a148a4842354e461f04d23628b1581d1413e7471fc",
+    "subset/tests/gpu_epochs/prefix_cache.cuh": "8fbcb6bfa47ba4cdf79a4c65d4510b0cd1a2c7c57f9bd800e89c15dff1c43cb8",
+    "subset/tests/gpu_epochs/window_schedule_shared.cuh": "c05fc8a82c7b54b55a794540412b1f96deb76b8b05bf9bc24a207e2ff0fac685",
+    "subset/tests/gpu_epochs/epoch_groups.cuh": "ae0b03eae7d0c8036020a3af0d7965530372789ed4ee4bdbde7cc44be22a5c10",
+    "subset/tests/gpu_epochs/tree_inverse.cuh": "474a9e5eb4bfe457cf8019462f0223f71062c20b868375421893fb6e09ce4dde",
+    "subset/tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+    "subset/tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+    "subset/tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+    "subset/tests/gpu_epochs/hm43_warp_inverse.cuh": "dd932513b003b115546a4edb5e159643d8768c32d1e13e377058a929eb3ceb3d",
+    "subset/tests/gpu_epochs/zinv32.cuh": "12303e74b178d2cfc45951ddc0c6c31b634646bacc55ea5a43097997bdd51689",
+    "subset/tests/gpu_epochs/pair_shared.cuh": "bebdd754b5219eaf99b4afc38755999b3eb65b24bd9155df9409069f73d0cc67",
+    "subset/tests/gpu_epochs/parity_window_subset.cuh": "e0d48dbdb45b639ad0220aa108e336bd2287daf166990f8e0dcde32a47d03737"
+  },
+  "trackTrees": {
+    "pinning": "4ec9873574e99b1a6cd6ef2928ef8526b0d125c505eaacc76847bc3dacde5786",
+    "subset": "1128bd121c14d1cd2c6542788e22f9ab19772eb25f786e664a1b853b0c7a0970"
+  }
+}

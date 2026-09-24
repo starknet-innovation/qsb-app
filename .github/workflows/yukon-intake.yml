@@ -1,0 +1,32 @@
+name: Yukon candidate intake
+on:
+  pull_request:
+    paths:
+      - 'scripts/yukon/**'
+      - 'research/yukon-intake/**'
+      - '.github/workflows/yukon-intake.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s scripts/yukon -p 'test_*.py'
+      - run: python3 scripts/yukon/validate.py --out /tmp/yukon-intake
+      - name: Compile locked upstream sources without running them
+        run: |
+          docker build -f scripts/yukon/Dockerfile.compile -t qsb-yukon-intake:compile /tmp/yukon-intake
+          docker run --rm --network none --read-only qsb-yukon-intake:compile > /tmp/yukon-intake/compile-receipt.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: yukon-intake-evidence
+          path: |
+            /tmp/yukon-intake/result.json
+            /tmp/yukon-intake/compile-receipt.txt
+          if-no-files-found: warn
