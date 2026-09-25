@@ -4,7 +4,23 @@ export default defineConfig({
   testMatch: "**/*.e2e.ts",
   timeout: 120000,
   workers: 1,
-  use: { baseURL: "http://127.0.0.1:5173", headless: true },
+  forbidOnly: !!process.env.CI,
+  // Report metadata must not attempt a remote git fetch inside the network guard.
+  captureGitInfo: { commit: false, diff: false },
+  maxFailures: process.env.CI ? 1 : 0,
+  reporter: [["list"], ["html", { open: "never" }]],
+  use: {
+    baseURL: "http://127.0.0.1:5173",
+    headless: true,
+    launchOptions: {
+      proxy: {
+        server: "http://127.0.0.1:9",
+        bypass: "127.0.0.1,localhost,[::1]",
+      },
+    },
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+  },
   webServer: {
     command: "npm run dev",
     env: {
@@ -13,7 +29,7 @@ export default defineConfig({
       VITE_QSB_NETWORK: "mainnet",
     },
     url: "http://127.0.0.1:5173",
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env.CI,
     timeout: 30000,
   },
 });
