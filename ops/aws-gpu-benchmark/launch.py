@@ -18,6 +18,10 @@ set -euo pipefail
 # Arm immediately, then persist the absolute pre-launch deadline across reboots.
 trap '/sbin/shutdown -h now' ERR
 /sbin/shutdown -h +55
+if [ "$(date -u +%s)" -ge __DEADLINE_EPOCH__ ]; then
+    /sbin/shutdown -h now
+    exit 1
+fi
 cat > /etc/systemd/system/qsb-benchmark-expire.service <<'UNIT'
 [Unit]
 Description=Terminate the bounded QSB benchmark instance
@@ -45,7 +49,7 @@ touch /run/qsb-shutdown-armed
 
 def boot_script(start):
     deadline = (start + timedelta(minutes=55)).astimezone(timezone.utc)
-    return BOOT.replace('__DEADLINE__', deadline.strftime('%Y-%m-%d %H:%M:%S UTC'))
+    return BOOT.replace('__DEADLINE__', deadline.strftime('%Y-%m-%d %H:%M:%S UTC')).replace('__DEADLINE_EPOCH__', str(int(deadline.timestamp())))
 
 
 

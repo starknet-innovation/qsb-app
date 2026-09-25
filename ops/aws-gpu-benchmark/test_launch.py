@@ -125,6 +125,8 @@ class LaunchTests(unittest.TestCase):
         script = boot_script(datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc))
         self.assertIn('OnCalendar=2026-09-25 12:55:00 UTC', script)
         self.assertNotIn('OnBootSec', script)
+        self.assertNotIn('__DEADLINE', script)
+        self.assertIn(str(int(datetime(2026, 9, 25, 12, 55, tzinfo=timezone.utc).timestamp())), script)
         subprocess_result = __import__('subprocess').run(['bash', '-n'], input=script, text=True)
         self.assertEqual(subprocess_result.returncode, 0)
 
