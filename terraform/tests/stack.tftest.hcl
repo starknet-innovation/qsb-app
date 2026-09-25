@@ -128,6 +128,7 @@ run "configured_single_pipeline" {
 run "operator_reconcile_scope" {
   command = plan
   variables {
+    network                      = "mainnet"
     operator_principal_arns      = ["arn:aws:iam::123456789012:user/alice", "arn:aws:iam::123456789012:role/operators"]
     runpod_endpoint_id           = "exampleendpoint"
     runpod_secret_arn            = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/runpod-Example"
@@ -166,6 +167,7 @@ run "operator_reconcile_scope" {
 run "operator_without_cmk" {
   command = plan
   variables {
+    network            = "mainnet"
     runpod_endpoint_id = "exampleendpoint"
     runpod_secret_arn  = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/runpod-Example"
   }
@@ -176,6 +178,7 @@ run "operator_without_cmk" {
 }
 run "operator_without_provider" {
   command = plan
+  variables { network = "mainnet" }
   assert {
     condition     = length(jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement) == 3
     error_message = "An unconfigured provider must not grant any secret or KMS access."
@@ -183,11 +186,17 @@ run "operator_without_provider" {
 }
 run "reject_operator_wildcard" {
   command = plan
-  variables { operator_principal_arns = ["arn:aws:iam::123456789012:user/*"] }
+  variables {
+    network                 = "mainnet"
+    operator_principal_arns = ["arn:aws:iam::123456789012:user/*"]
+  }
   expect_failures = [var.operator_principal_arns]
 }
 run "reject_operator_empty" {
   command = plan
-  variables { operator_principal_arns = [] }
+  variables {
+    network                 = "mainnet"
+    operator_principal_arns = []
+  }
   expect_failures = [var.operator_principal_arns]
 }
