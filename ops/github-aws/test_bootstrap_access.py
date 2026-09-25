@@ -14,6 +14,12 @@ ROOT = Path(__file__).resolve().parent
 COMMIT = 'a' * 40
 ACCOUNT = '123456789012'
 ARN = f'arn:aws:access-analyzer:eu-west-1:{ACCOUNT}:analyzer/qsb-external-access'
+PROPAGATION = {'MalformedPolicyDocument': 'Invalid principal in policy: "AWS":"arn:aws:iam::123456789012:user/x"'}
+READS = {'list-roles', 'list-users', 'list-policies', 'get-policy-version', 'list-policy-versions',
+         'list-entities-for-policy', 'get-user-policy', 'get-role', 'list-attached-user-policies', 'list-user-policies',
+         'list-access-keys', 'list-groups-for-user', 'list-ssh-public-keys', 'list-service-specific-credentials',
+         'list-signing-certificates', 'list-mfa-devices', 'get-login-profile', 'list-attached-role-policies',
+         'list-role-policies'}
 
 
 class BootstrapAnalyzerReadiness(unittest.TestCase):
@@ -60,8 +66,9 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
             if errors.get(key):
                 code = errors[key].pop(0)
                 if code:
+                    code, text = code if isinstance(code, tuple) else (code, PROPAGATION.get(code, ''))
                     return subprocess.CompletedProcess(command, 254, '',
-                        f'An error occurred ({code}) when calling the operation')
+                        f'An error occurred ({code}) when calling the operation: {text}')
             if key == cli_failure:
                 return subprocess.CompletedProcess(command, 254, '',
                     'An error occurred (AccessDeniedException) when calling the operation')
@@ -90,10 +97,7 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
                 runpy.run_path(str(ROOT / 'bootstrap_access.py'), run_name='__main__')
 
     def assert_no_iam_mutations(self):
-        allowed = {'list-roles', 'list-users', 'list-policies', 'get-policy-version', 'get-user-policy', 'get-role',
-                   'list-attached-user-policies', 'list-user-policies', 'list-access-keys', 'list-groups-for-user',
-                   'list-attached-role-policies', 'list-role-policies'}
-        self.assertFalse([(s, op) for s, op in self.calls if s == 'iam' and op not in allowed])
+        self.assertFalse([(s, op) for s, op in self.calls if s == 'iam' and op not in READS])
 
     def test_inactive_existing_analyzer_blocks_before_any_iam_write(self):
         for status in ('DISABLED', 'FAILED', 'CREATING', 'UNKNOWN'):
@@ -169,8 +173,13 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
 
     def test_role_creation_retry_is_bounded_and_specific(self):
         with self.assertRaisesRegex(SystemExit, 'create-role failed: MalformedPolicyDocument'):
-            self.bootstrap([{'status': 'ACTIVE'}], errors={('iam', 'create-role'): ['MalformedPolicyDocument'] * 8})
-        self.assertEqual(self.calls.count(('iam', 'create-role')), 8)
+            self.bootstrap([{'status': 'ACTIVE'}], errors={('iam', 'create-role'): ['MalformedPolicyDocument'] * 24})
+        self.assertEqual(self.calls.count(('iam', 'create-role')), 24)
+        # A genuinely malformed document is not retried: only the propagation message is.
+        with self.assertRaisesRegex(SystemExit, 'create-role failed: MalformedPolicyDocument'):
+            self.bootstrap([{'status': 'ACTIVE'}],
+                           errors={('iam', 'create-role'): [('MalformedPolicyDocument', 'Syntax errors in policy')]})
+        self.assertEqual(self.calls.count(('iam', 'create-role')), 1)
         self.assertNotIn(('iam', 'attach-role-policy'), self.calls)
         with self.assertRaisesRegex(SystemExit, 'create-role failed: AccessDenied'):
             self.bootstrap([{'status': 'ACTIVE'}], errors={('iam', 'create-role'): ['AccessDenied']})
@@ -195,10 +204,18 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
             ('iam', 'list-users'): {'Users': [{'UserName': 'qsb-operator-user', 'Path': '/qsb/operators/'}]},
             ('iam', 'get-policy-version'): versions,
             ('iam', 'list-attached-user-policies'): {'AttachedPolicies': [{'PolicyArn': a} for a in out['user']['managed']]},
-            ('iam', 'list-user-policies'): {'PolicyNames': ['assume-qsb-roles']},
-            ('iam', 'get-user-policy'): {'PolicyDocument': out['user']['inline']},
+            ('iam', 'list-user-policies'): {'PolicyNames': drift.get('user_policies', ['assume-qsb-roles'])},
+            ('iam', 'get-user-policy'): {'PolicyDocument': drift.get('user_inline', out['user']['inline'])},
             ('iam', 'list-access-keys'): {'AccessKeyMetadata': drift.get('keys', [])},
-            ('iam', 'list-groups-for-user'): {'Groups': []},
+            ('iam', 'list-groups-for-user'): {'Groups': drift.get('groups', [])},
+            ('iam', 'list-policy-versions'): {'Versions': drift.get('versions', [{'VersionId': 'v1'}])},
+            ('iam', 'list-entities-for-policy'): {'PolicyUsers': [], 'PolicyGroups': [],
+                                                  'PolicyRoles': drift.get('attached_to', [])},
+            ('iam', 'list-ssh-public-keys'): {'SSHPublicKeys': drift.get('ssh', [])},
+            ('iam', 'list-service-specific-credentials'): {'ServiceSpecificCredentials': []},
+            ('iam', 'list-signing-certificates'): {'Certificates': []},
+            ('iam', 'list-mfa-devices'): {'MFADevices': []},
+            ('iam', 'get-login-profile'): {'LoginProfile': {}},
         }
 
     def test_resume_creates_only_the_missing_roles(self):
@@ -209,10 +226,52 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
         self.assertEqual(self.calls.count(('iam', 'attach-role-policy')), 4)
         self.assertEqual(self.calls.count(('iam', 'get-policy-version')), 4)
 
+    def with_roles(self, responses, **role):
+        """Add an existing qsb-viewonly role to a partial run, optionally drifted."""
+        from access import access
+        out = access(dict(account=ACCOUNT, region='eu-west-1', subject='repo:example/qsb:ref:refs/heads/main',
+                          state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
+                          origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
+                          operator_user='qsb-operator-user', gpu_vpc='vpc-0test'))
+        spec = out['viewonly']
+        responses[('iam', 'list-roles')] = {'Roles': [{'RoleName': 'qsb-viewonly', 'Path': '/qsb/bootstrap/'}]}
+        responses[('iam', 'get-role')] = {'Role': {'Path': '/qsb/bootstrap/', 'MaxSessionDuration': spec['max_session'],
+                                                   'AssumeRolePolicyDocument': role.get('trust', spec['trust'])}}
+        attached = role.get('attached', [spec['managed'][0], f'arn:aws:iam::{ACCOUNT}:policy/qsb/bootstrap/qsb-viewonly-1'])
+        responses[('iam', 'list-attached-role-policies')] = {'AttachedPolicies': [{'PolicyArn': x} for x in attached]}
+        responses[('iam', 'list-role-policies')] = {'PolicyNames': role.get('inline', [])}
+        return responses
+
+    def test_resume_fills_in_missing_policies_but_nothing_else(self):
+        # User created but its inline policy never written; role created with one attachment missing.
+        responses = self.with_roles(self.partial_run(user_policies=[]),
+                                    attached=[f'arn:aws:iam::{ACCOUNT}:policy/qsb/bootstrap/qsb-viewonly-1'])
+        self.bootstrap([{'status': 'ACTIVE'}], resume=True, responses_override=responses)
+        self.assertEqual(self.calls.count(('iam', 'put-user-policy')), 1)
+        self.assertNotIn(('iam', 'get-user-policy'), self.calls)
+        # qsb-viewonly gets only its missing managed policy; qsb-operator is created with its two.
+        self.assertEqual(self.calls.count(('iam', 'create-role')), 1)
+        self.assertEqual(self.calls.count(('iam', 'attach-role-policy')), 3)
+
+    def test_resume_refuses_role_drift(self):
+        other = {'Version': '2012-10-17', 'Statement': [{'Effect': 'Allow', 'Principal': {'AWS': '*'}, 'Action': 'sts:AssumeRole'}]}
+        for role, message in (({'trust': other}, 'differs in path, trust or session length'),
+                              ({'attached': ['arn:aws:iam::aws:policy/AdministratorAccess']}, 'policies this commit does not render'),
+                              ({'inline': ['extra']}, 'policies this commit does not render')):
+            with self.subTest(role=list(role)), self.assertRaisesRegex(SystemExit, message):
+                self.bootstrap([{'status': 'ACTIVE'}], resume=True,
+                               responses_override=self.with_roles(self.partial_run(), **role))
+            self.assert_no_iam_mutations()
+
     def test_resume_refuses_anything_that_differs(self):
         for drift, message in (({'document': {'Version': '2012-10-17', 'Statement': []}}, 'differs from the rendered'),
                                ({'path': '/elsewhere/'}, 'is not under /qsb/bootstrap/'),
-                               ({'keys': [{'AccessKeyId': 'AKIAEXAMPLE'}]}, 'has access keys')):
+                               ({'keys': [{'AccessKeyId': 'AKIAEXAMPLE'}]}, 'has access keys'),
+                               ({'versions': [{'VersionId': 'v1'}, {'VersionId': 'v2'}]}, 'more than one version'),
+                               ({'attached_to': [{'RoleName': 'someone-else'}]}, 'outside'),
+                               ({'ssh': [{'SSHPublicKeyId': 'APKAEXAMPLE'}]}, 'has SSH keys'),
+                               ({'groups': [{'GroupName': 'admins'}]}, 'is in a group'),
+                               ({'user_inline': {'Version': '2012-10-17', 'Statement': []}}, 'different inline policy')):
             with self.subTest(drift=list(drift)), self.assertRaisesRegex(SystemExit, message):
                 self.bootstrap([{'status': 'ACTIVE'}], resume=True, responses_override=self.partial_run(**drift))
             self.assert_no_iam_mutations()
