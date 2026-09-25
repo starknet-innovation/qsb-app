@@ -21,11 +21,13 @@ import {
   type PublicVault,
   sats,
   outpoint,
+  txid,
 } from "../src/lib/model";
 import { Conflict, store as defaultStore, type Store } from "./store";
 import { slipstream, MinerAuthenticationError } from "./providers";
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { chain, ChainError, type Esplora } from "./chain";
+import { matchVaultFunding } from "./transaction-checks";
 import { coordinatorPublicSolvedResult } from "../src/mainnet/coordinatorResult";
 import { outputScript } from "../src/lib/transactions";
 import { hex } from "@scure/base";
@@ -310,11 +312,9 @@ export function createApp(
       );
     const body = z
       .object({
-        rawTxHex: z.string().max(150000),
+        txid,
         amount: sats,
-        fee: sats,
         costAccepted: z.literal(true),
-        spentFixtureRefs: z.array(z.unknown()).max(32).optional(),
       })
       .strict()
       .parse(await c.req.json());
@@ -337,30 +337,26 @@ export function createApp(
         409,
       );
     assertVaultConfiguration(vault);
-    // The requester cannot supply exactSpend, so this route cannot satisfy 7.3.
-    const permit = authorizeConfiguredSpend({
-      chain: NETWORK_ID,
-      chainBaseUrl: chainBase,
-      minerEndpoint: minerBase,
-      rawTxHex: body.rawTxHex,
-      txid: transactionId(body.rawTxHex),
-      amountSats: body.amount,
-      feeSats: body.fee,
-      exactSpend: undefined,
-      spentFixtureRefs: body.spentFixtureRefs ?? [],
-      release,
-      walletApp: "xverse",
-    });
-    // Refuse the live miner before any chain read, miner preflight, or saved
-    // intent. callMinerSubmit rejects this endpoint without HTTP. A refusal
-    // must not leave the vault looking funded.
-    assertMainnetTransportClosed(permit, minerBase);
-    await callMinerSubmit({
-      permit,
-      rawTxHex: body.rawTxHex,
-      transport: { endpoint: minerBase },
-    });
-    throw new MinerInclusionError("LiveMinerTransportRefused");
+    // Xverse already broadcast this deposit. Read it from the chain provider
+    // and record vault.funding only when output 0 pays this vault the expected
+    // amount. Keep unconfirmed payments submitted. Do not submit it again.
+    // The 10000 USD vault ceiling stays policy; it does not enable mainnet
+    // or authorize a broadcast.
+    const watched = await ledger.raw(body.txid);
+    const payment = matchVaultFunding(
+      watched.tx,
+      vault.scriptHex,
+      BigInt(body.amount),
+    );
+    const chainStatus = await ledger.status(watched.tx.id);
+    vault.funding = {
+      txid: watched.tx.id,
+      vout: payment.vout,
+      value: payment.value,
+    };
+    vault.status = chainStatus.confirmed ? "confirmed" : "submitted";
+    await store.put({ ...row, vault, version: row.version + 1 }, row.version);
+    return c.json({ vault }, 201);
   });
   // Reconcile the durable intent without submitting it again. Private miner
   // visibility is distinct from independent canonical-chain confirmation.
@@ -451,8 +447,14 @@ export function createApp(
     if (!vault.funding) return c.json({ error: "Vault is not funded" }, 409);
     const status = await ledger.status(vault.funding.txid);
     if (vault.status !== "spent") {
-      vault.status = status.confirmed ? "confirmed" : "submitted";
-      await store.put({ ...row, vault, version: row.version + 1 }, row.version);
+      const next = status.confirmed ? "confirmed" : "submitted";
+      if (next !== vault.status) {
+        vault.status = next;
+        await store.put(
+          { ...row, vault, version: row.version + 1 },
+          row.version,
+        );
+      }
     }
     return c.json({
       vault,
@@ -530,6 +532,8 @@ export function createApp(
         { error: "Vault belongs to a different Bitcoin network." },
         409,
       );
+    if (v.status !== "confirmed")
+      return c.json({ error: "Vault funding is not confirmed." }, 409);
     if (
       !v.funding ||
       (["txid", "vout", "value"] as const).some(
@@ -633,7 +637,7 @@ export function createApp(
       release,
       walletApp: "xverse",
     });
-    // Same refusal as funding: no chain read, no miner preflight, and no
+    // Withdrawal transport refusal: no chain read, no miner preflight, and no
     // submitted job or transaction intent.
     assertMainnetTransportClosed(permit, minerBase);
     await callMinerSubmit({

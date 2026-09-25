@@ -5,7 +5,7 @@ test("synthetic signing requires opt-in, verifies both responses and makes no br
   await page.route("**/src/lib/wallet.ts", (r) =>
     r.fulfill({
       contentType: "application/javascript",
-      body: "export const signPsbt = (...args) => window.testSign(...args); export const connectWallet=()=>{}; export const signMessage=()=>{};",
+      body: "export const signPsbt = (...args) => window.testSign(...args); export const fundFromXverse = () => { throw new Error('funding is not this check'); }; export const connectWallet=()=>{}; export const signMessage=()=>{};",
     }),
   );
   await page.route("https://**", (r) => r.abort());

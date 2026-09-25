@@ -532,21 +532,17 @@ export default function App() {
                           disabled={!!busy}
                           onClick={() =>
                             action("Checking transaction", async () => {
-                              const observation = await api<{ status: string }>(
-                                `/transactions/${v.funding!.txid}/status`,
+                              const updated = await api<{
+                                vault: PublicVault;
+                                status: { confirmed: boolean };
+                              }>(`/vaults/${v.id}/funding`);
+                              setVaults((items) =>
+                                items.map((item) =>
+                                  item.id === v.id ? updated.vault : item,
+                                ),
                               );
-                              if (observation.status === "confirmed") {
-                                const updated = await api<{
-                                  vault: PublicVault;
-                                }>(`/vaults/${v.id}/funding`);
-                                setVaults((items) =>
-                                  items.map((item) =>
-                                    item.id === v.id ? updated.vault : item,
-                                  ),
-                                );
-                              }
                               setNotice(
-                                `Funding transaction: ${observation.status}. No transaction was resubmitted.`,
+                                `Funding transaction: ${updated.status.confirmed ? "confirmed" : "submitted"}. No transaction was resubmitted.`,
                               );
                             })
                           }

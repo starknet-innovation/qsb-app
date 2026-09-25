@@ -19,11 +19,13 @@ async function fixture(page: Page, changedSolution = false) {
       contentType: "text/javascript",
       body: `
     export async function signPsbt(){window.walletCalls++;throw new Error('TEST_WALLET_REACHED');}
+    export async function fundFromXverse(){throw new Error('TEST_WALLET_REACHED');}
     export async function connectWallet(){throw new Error('No wallet');}
     export async function signMessage(){throw new Error('No wallet');}
   `,
     }),
   );
+  await page.route("**/api/config", (route) => route.fulfill({ json: { network: "mainnet", operationsEnabled: true } }));
   let previousTxHex = "";
   await page.route("**/api/vaults/*/funding", (route) =>
     route.fulfill({ json: { previousTxHex } }),
