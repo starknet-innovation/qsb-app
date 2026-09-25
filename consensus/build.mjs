@@ -18,6 +18,8 @@ try {
       "run",
       "--rm",
       "--platform=linux/arm64",
+      "-e",
+      `QSB_BUILD_OWNER=${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
       "-v",
       `${work}:/work`,
       "-w",
@@ -26,6 +28,9 @@ try {
       "bash",
       "-euc",
       `
+ # Bind-mounted files must remain removable by the invoking Linux user,
+ # including when compilation or download fails. This mount is our fresh temp dir.
+ trap 'chown -R -- "$QSB_BUILD_OWNER" /work' EXIT
  dnf install -y gcc-c++ libstdc++-static tar gzip curl-minimal
  curl --fail --location --retry 2 https://bitcoincore.org/bin/bitcoin-core-27.2/bitcoin-27.2-aarch64-linux-gnu.tar.gz -o core.tar.gz
  echo '${hash}  core.tar.gz' | sha256sum -c -
