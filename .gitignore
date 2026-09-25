@@ -38,3 +38,5 @@ __pycache__/
 !supervised/runtime/source/work/
 !supervised/runtime/source/work/**
 supervised/runtime/runtime.tar.gz
+
+/ops/aws-gpu-benchmark/.build/
