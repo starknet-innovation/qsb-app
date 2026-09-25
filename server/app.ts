@@ -51,6 +51,7 @@ import {
   reportEsploraInclusion,
   transactionId,
 } from "./runtime/miner-inclusion";
+import { assertStoredJobSpend } from "./job-spend-record";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -585,7 +586,9 @@ export function createApp(
     const feeSats = job.manifest?.fee;
     if (typeof amountSats !== "string" || typeof feeSats !== "string")
       throw new MinerInclusionError("ExactSpendMismatch");
-    // The requester cannot supply exactSpend, so this route cannot satisfy 7.3.
+    // The signed withdrawal is bound to the stored manifest and verified solution.
+    // This route still does not accept a caller exactSpend record, so it cannot satisfy 7.3.
+    assertStoredJobSpend(job, rawTxHex);
     const permit = authorizeConfiguredSpend({
       chain: NETWORK_ID,
       chainBaseUrl: chainBase,
