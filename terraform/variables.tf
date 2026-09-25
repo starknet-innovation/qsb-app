@@ -48,7 +48,7 @@ variable "runpod_secret_arn" {
   type        = string
   default     = ""
   validation {
-    condition     = var.runpod_secret_arn == "" || can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$", var.runpod_secret_arn))
+    condition     = var.runpod_secret_arn == "" || can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$", var.runpod_secret_arn))
     error_message = "Supply a Secrets Manager ARN or leave empty."
   }
 }
@@ -56,6 +56,10 @@ variable "runpod_secret_kms_key_arn" {
   description = "Optional customer-managed KMS key ARN for the existing secret; no decrypt grant otherwise."
   type        = string
   default     = ""
+  validation {
+    condition     = var.runpod_secret_kms_key_arn == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", var.runpod_secret_kms_key_arn))
+    error_message = "Supply one exact KMS key ARN or leave empty; wildcards are not allowed."
+  }
 }
 variable "lambda_concurrency" {
   type    = number

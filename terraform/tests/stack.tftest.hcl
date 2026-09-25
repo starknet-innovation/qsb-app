@@ -200,3 +200,23 @@ run "reject_operator_empty" {
   }
   expect_failures = [var.operator_principal_arns]
 }
+
+run "reject_provider_secret_wildcard" {
+  command = plan
+  variables {
+    network            = "mainnet"
+    runpod_endpoint_id = "exampleendpoint"
+    runpod_secret_arn  = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/*"
+  }
+  expect_failures = [var.runpod_secret_arn]
+}
+run "reject_provider_key_wildcard" {
+  command = plan
+  variables {
+    network                   = "mainnet"
+    runpod_endpoint_id        = "exampleendpoint"
+    runpod_secret_arn         = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/runpod-Example"
+    runpod_secret_kms_key_arn = "arn:aws:kms:eu-west-1:123456789012:key/*"
+  }
+  expect_failures = [var.runpod_secret_kms_key_arn]
+}
