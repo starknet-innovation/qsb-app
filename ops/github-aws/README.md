@@ -143,7 +143,7 @@ an AWS Budgets alert on the account.
 4. `python3 ops/github-aws/bootstrap_access.py --profile ADMIN --inventory INVENTORY`
    prints the plan (names and policy sizes only). Add `--apply` to create it. It
    refuses to touch an existing identity and never creates a password, key or
-   MFA device. If a call fails midway, reconcile the partial identities; don't retry blind.
+   MFA device. If a call fails midway, don't delete anything or retry blind: rerun with `--apply --resume`. It first checks that every identity that already exists matches what this commit renders: path, policy documents, trust, session length, and no access keys, groups or extra policies. Then it creates or attaches only what's missing, and anything that differs stops it. Role creation retries a `MalformedPolicyDocument` error up to 8 times, 5 seconds apart, because IAM rejects a trust policy that names a just-created user until it has propagated.
 5. As root in the console, enable console access and assign a virtual or hardware
    TOTP MFA device: the CLI `mfa_serial` flow needs a six-digit TOTP code. A passkey
    or security key alone supports console role switching, not this CLI flow.
