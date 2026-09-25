@@ -1,0 +1,74 @@
+{
+  "evidence": "mock-provider-plan-inventory",
+  "runs": {
+    "baseline": {
+      "resourcesExcludingFrontendObjects": 40,
+      "frontendObjects": 21,
+      "resourceTypes": {
+        "aws_apigatewayv2_api": 1,
+        "aws_apigatewayv2_integration": 1,
+        "aws_apigatewayv2_route": 1,
+        "aws_apigatewayv2_stage": 1,
+        "aws_cloudfront_distribution": 1,
+        "aws_cloudfront_origin_access_control": 1,
+        "aws_cloudfront_response_headers_policy": 1,
+        "aws_cloudwatch_log_group": 5,
+        "aws_cloudwatch_metric_alarm": 4,
+        "aws_dynamodb_table": 1,
+        "aws_iam_role": 4,
+        "aws_iam_role_policy": 8,
+        "aws_lambda_function": 3,
+        "aws_lambda_permission": 1,
+        "aws_s3_bucket": 1,
+        "aws_s3_bucket_policy": 1,
+        "aws_s3_bucket_public_access_block": 1,
+        "aws_s3_bucket_server_side_encryption_configuration": 1,
+        "aws_s3_bucket_versioning": 1,
+        "aws_s3_object": 21,
+        "aws_sfn_state_machine": 1,
+        "terraform_data": 1
+      }
+    },
+    "configured_single_pipeline": {
+      "resourcesExcludingFrontendObjects": 41,
+      "frontendObjects": 21,
+      "resourceTypes": {
+        "aws_apigatewayv2_api": 1,
+        "aws_apigatewayv2_integration": 1,
+        "aws_apigatewayv2_route": 1,
+        "aws_apigatewayv2_stage": 1,
+        "aws_cloudfront_distribution": 1,
+        "aws_cloudfront_origin_access_control": 1,
+        "aws_cloudfront_response_headers_policy": 1,
+        "aws_cloudwatch_log_group": 5,
+        "aws_cloudwatch_metric_alarm": 4,
+        "aws_dynamodb_table": 1,
+        "aws_iam_role": 4,
+        "aws_iam_role_policy": 9,
+        "aws_lambda_function": 3,
+        "aws_lambda_permission": 1,
+        "aws_s3_bucket": 1,
+        "aws_s3_bucket_policy": 1,
+        "aws_s3_bucket_public_access_block": 1,
+        "aws_s3_bucket_server_side_encryption_configuration": 1,
+        "aws_s3_bucket_versioning": 1,
+        "aws_s3_object": 21,
+        "aws_sfn_state_machine": 1,
+        "terraform_data": 1
+      }
+    }
+  },
+  "testedCommit": "26666d264d7d1b90e86c55704f98449095abf3d7",
+  "terraformVersion": "1.15.5",
+  "awsProviderVersion": "6.66.0",
+  "commands": [
+    "node terraform/scripts/build.mjs --network=mainnet",
+    "terraform -chdir=terraform test -json -verbose -var=\"source_commit=$(git rev-parse HEAD)\" > /tmp/qsb-terraform-test.jsonl",
+    "python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-test.jsonl"
+  ],
+  "limitations": [
+    "Mock AWS provider only; no regional plan or apply.",
+    "Provider key remains an existing secret ARN; no value read.",
+    "No mainnet activation or Runpod allocation."
+  ]
+}

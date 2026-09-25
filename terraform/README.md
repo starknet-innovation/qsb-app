@@ -4,6 +4,8 @@ This folder deploys the **single Step Functions application pipeline** into a fr
 
 There is no supervised host, VPC/NAT, EBS/Backup, dispatch queue/DLQ, evidence bucket/table, watchdog, runtime installer or ECR repository in this application stack. Supervised source remains parked for removal under #23. GitHub OIDC deployment bootstrap remains separate and supported. Applying Terraform is not mainnet activation, wallet compatibility certification, or permission to spend funds. See [mainnet readiness](../docs/MAINNET-READINESS.md).
 
+Recorded local evidence: [single-pipeline mock plan inventory](../docs/SINGLE-PIPELINE-PLAN.json). The configured plan has 41 infrastructure resources plus 21 frontend objects for this build, three Lambda functions, four service roles and one table. Counts of frontend objects vary with the build. This is not a live regional plan or deployment.
+
 ## Resources
 
 | Component | Resources |
