@@ -24,5 +24,9 @@ class WatchdogTests(unittest.TestCase):
             before=batch.terminate_job.call_count
             with self.assertRaisesRegex(RuntimeError,'Unexpected job identity'):module.handler({},None)
             self.assertEqual(before,batch.terminate_job.call_count)
+            for tags in ({'Project':'unrelated'}, {}):
+                batch.describe_jobs.return_value={'jobs':[{'jobId':'old','jobQueue':'q','tags':tags}]}
+                with self.assertRaisesRegex(RuntimeError,'Unexpected job identity'):module.handler({},None)
+                self.assertEqual(before,batch.terminate_job.call_count)
 
 if __name__=='__main__':unittest.main()

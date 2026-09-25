@@ -1,3 +1,10 @@
+export type BatchSubmissionIdentity = {
+  jobName: string;
+  inputSha256: string;
+  inputKey: string;
+  queue: string;
+  definition: string;
+};
 import type { SolverPin } from "./provenance";
 import { NETWORK_ID } from "./network";
 import { z } from "zod";
@@ -74,7 +81,10 @@ export const withdrawalSchema = z
     fee: sats,
     idempotencyKey: z.string().uuid(),
     costAccepted: z.literal(true),
-    solverReleaseId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/).optional(),
+    solverReleaseId: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9-]{0,127}$/)
+      .optional(),
   })
   .strict();
 export type Withdrawal = z.infer<typeof withdrawalSchema>;
@@ -110,6 +120,7 @@ export type Job = {
   /** Audited operator decision allows one replacement, consumed atomically by resume. */
   oneSubmissionAllowed?: true;
   submissionStartedAt?: string;
+  batchSubmission?: BatchSubmissionIdentity;
   submissionReconciliation?: {
     kind: "provider-id" | "not-submitted";
     operator: string;

@@ -91,7 +91,7 @@ if (mode === "submit") {
   const vars = JSON.parse(
     readFileSync(path.join(dir, "gpu.tfvars.json"), "utf8"),
   );
-  const submit = await provider.prepareRun(vars.image);
+  const submit = await provider.prepareRun(vars.image, input);
   const intent = {
     commit,
     image: vars.image,
@@ -101,6 +101,7 @@ if (mode === "submit") {
       .update(JSON.stringify({ input }))
       .digest("hex"),
     status: "submission-intent",
+    batchSubmission: submit.identity,
     input,
   };
   // Atomic create prevents a second submit even if a response or this process is lost.
@@ -108,7 +109,7 @@ if (mode === "submit") {
   writeSync(fd, JSON.stringify(intent, null, 2) + "\n");
   fsyncSync(fd);
   closeSync(fd);
-  const result = await submit(input);
+  const result = await submit();
   persist({ ...intent, jobId: result.id, status: "submitted" });
   console.log(JSON.stringify({ stage, jobId: result.id, status: "submitted" }));
 } else {

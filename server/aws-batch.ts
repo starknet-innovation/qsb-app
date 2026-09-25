@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   BatchClient,
+  ListJobsCommand,
   DescribeJobDefinitionsCommand,
   DescribeJobQueuesCommand,
   DescribeComputeEnvironmentsCommand,
@@ -16,6 +17,7 @@ import {
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
 import { z } from "zod";
+import type { BatchSubmissionIdentity } from "../src/lib/model";
 import command from "./aws-batch-command.json";
 import { gpuSpendLimits } from "./gpu-spend";
 export type ComputeStatus = {
@@ -30,12 +32,16 @@ export type ComputeStatus = {
   executionTime?: number;
   output?: unknown;
 };
+export type PreparedRun = (() => Promise<{ id: string }>) & {
+  identity: BatchSubmissionIdentity;
+};
 export interface ComputeProvider {
   health(): Promise<unknown>;
-  prepareRun(
-    image: string,
-  ): Promise<(input: unknown) => Promise<{ id: string }>>;
-  status(id: string): Promise<ComputeStatus>;
+  prepareRun(image: string, input: unknown): Promise<PreparedRun>;
+  status(
+    id: string,
+    identity?: BatchSubmissionIdentity,
+  ): Promise<ComputeStatus>;
   cancel(id: string): Promise<unknown>;
 }
 export class AwsBatch implements ComputeProvider {
@@ -45,9 +51,13 @@ export class AwsBatch implements ComputeProvider {
     private bucket: string,
     private batch = new BatchClient({
       region: process.env.AWS_REGION,
-      maxAttempts: 1,
+      maxAttempts: 3,
     }),
     private s3 = new S3Client({
+      region: process.env.AWS_REGION,
+      maxAttempts: 3,
+    }),
+    private submitClient = new BatchClient({
       region: process.env.AWS_REGION,
       maxAttempts: 1,
     }),
@@ -64,6 +74,7 @@ export class AwsBatch implements ComputeProvider {
   async health() {
     const queues = await this.batch.send(
       new DescribeJobQueuesCommand({ jobQueues: [this.queue] }),
+      { abortSignal: AbortSignal.timeout(20000) },
     );
     let inQueue = 0,
       inProgress = 0;
@@ -77,6 +88,7 @@ export class AwsBatch implements ComputeProvider {
       for await (const page of paginateListJobs(
         { client: this.batch },
         { jobQueue: this.queue, jobStatus: status },
+        { abortSignal: AbortSignal.timeout(20000) },
       )) {
         if (status === "RUNNING")
           inProgress += page.jobSummaryList?.length || 0;
@@ -93,15 +105,17 @@ export class AwsBatch implements ComputeProvider {
       })),
     };
   }
-  async prepareRun(image: string) {
+  async prepareRun(image: string, input: unknown) {
     const [definitions, queues] = await Promise.all([
       this.batch.send(
         new DescribeJobDefinitionsCommand({
           jobDefinitions: [this.definition],
         }),
+        { abortSignal: AbortSignal.timeout(20000) },
       ),
       this.batch.send(
         new DescribeJobQueuesCommand({ jobQueues: [this.queue] }),
+        { abortSignal: AbortSignal.timeout(20000) },
       ),
     ]);
     const d = definitions.jobDefinitions?.[0],
@@ -135,6 +149,7 @@ export class AwsBatch implements ComputeProvider {
       new DescribeComputeEnvironmentsCommand({
         computeEnvironments: [q.computeEnvironmentOrder[0].computeEnvironment!],
       }),
+      { abortSignal: AbortSignal.timeout(20000) },
     );
     const e = env.computeEnvironments?.[0],
       c = e?.computeResources;
@@ -149,27 +164,35 @@ export class AwsBatch implements ComputeProvider {
       c.instanceTypes[0] !== "g5.xlarge"
     )
       throw new Error("ProviderLimitsUnconfirmed");
+    const body = JSON.stringify({ input });
+    if (Buffer.byteLength(body) > 150000)
+      throw new Error("ComputeInputTooLarge");
+    const digest = createHash("sha256").update(body).digest("hex"),
+      token = randomUUID(),
+      key = `inputs/${token}.json`;
+    await this.s3.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: body,
+        ContentType: "application/json",
+        IfNoneMatch: "*",
+      }),
+      { abortSignal: AbortSignal.timeout(20000) },
+    );
+    const identity: BatchSubmissionIdentity = {
+      jobName: `qsb-${token}`,
+      inputSha256: digest,
+      inputKey: key,
+      queue: this.queue,
+      definition: this.definition,
+    };
     let consumed = false;
-    return async (input: unknown) => {
+    const submit = async () => {
       if (consumed) throw new Error("SubmissionAlreadyAttempted");
       consumed = true;
-      const body = JSON.stringify({ input });
-      if (Buffer.byteLength(body) > 150000)
-        throw new Error("ComputeInputTooLarge");
-      const digest = createHash("sha256").update(body).digest("hex"),
-        token = randomUUID(),
-        key = `inputs/${token}.json`;
-      await this.s3.send(
-        new PutObjectCommand({
-          Bucket: this.bucket,
-          Key: key,
-          Body: body,
-          ContentType: "application/json",
-          IfNoneMatch: "*",
-        }),
-      );
       // SubmitJob has no idempotency token: disable SDK retries and never replay.
-      const r = await this.batch.send(
+      const r = await this.submitClient.send(
         new SubmitJobCommand({
           jobName: `qsb-${token}`,
           jobQueue: this.queue,
@@ -186,14 +209,46 @@ export class AwsBatch implements ComputeProvider {
           },
           tags: { Project: "qsb-gpu", QsbRequest: token, InputSha256: digest },
         }),
+        { abortSignal: AbortSignal.timeout(20000) },
       );
       if (!r.jobId) throw new Error("SubmissionOutcomeUnknown");
       return { id: r.jobId };
     };
+    return Object.assign(submit, { identity });
+  }
+  /** Discovery is positive evidence only: absence never authorizes a replacement. */
+  async findRequest(identity: BatchSubmissionIdentity): Promise<string> {
+    if (
+      identity.queue !== this.queue ||
+      identity.definition !== this.definition ||
+      !/^qsb-[a-f0-9-]{36}$/.test(identity.jobName)
+    )
+      throw new Error("ProviderRequestIdentityMismatch");
+    const ids = new Set<string>();
+    let nextToken: string | undefined;
+    const abortSignal = AbortSignal.timeout(20000);
+    do {
+      const page = await this.batch.send(
+        new ListJobsCommand({
+          jobQueue: this.queue,
+          filters: [{ name: "JOB_NAME", values: [identity.jobName] }],
+          nextToken,
+        }),
+        { abortSignal },
+      );
+      for (const j of page.jobSummaryList ?? []) {
+        if (j.jobName === identity.jobName && j.jobId) ids.add(j.jobId);
+      }
+      nextToken = page.nextToken;
+    } while (nextToken);
+    if (ids.size !== 1) throw new Error("BatchRequestNotUniquelyFound");
+    return [...ids][0];
   }
   private async describe(id: string) {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error("InvalidBatchJobId");
-    const r = await this.batch.send(new DescribeJobsCommand({ jobs: [id] })),
+    const r = await this.batch.send(new DescribeJobsCommand({ jobs: [id] }), {
+        abortSignal: AbortSignal.timeout(20000),
+      }),
       j = r.jobs?.[0];
     if (
       r.jobs?.length !== 1 ||
@@ -204,14 +259,32 @@ export class AwsBatch implements ComputeProvider {
       throw new Error("ProviderJobIdentityMismatch");
     return j;
   }
-  async status(id: string): Promise<ComputeStatus> {
+  async status(
+    id: string,
+    identity?: BatchSubmissionIdentity,
+  ): Promise<ComputeStatus> {
     const j = await this.describe(id);
+    if (
+      identity &&
+      (identity.queue !== this.queue ||
+        identity.definition !== this.definition ||
+        j.jobName !== identity.jobName ||
+        j.tags?.Project !== "qsb-gpu" ||
+        j.tags?.QsbRequest !== identity.jobName.slice(4) ||
+        j.tags?.InputSha256 !== identity.inputSha256 ||
+        j.container?.environment?.find((e) => e.name === "QSB_INPUT_KEY")
+          ?.value !== identity.inputKey ||
+        j.container?.environment?.find((e) => e.name === "QSB_INPUT_SHA256")
+          ?.value !== identity.inputSha256)
+    )
+      throw new Error("ProviderRequestIdentityMismatch");
     if (j.status === "SUCCEEDED") {
       const r = await this.s3.send(
         new GetObjectCommand({
           Bucket: this.bucket,
           Key: `outputs/${id}.json`,
         }),
+        { abortSignal: AbortSignal.timeout(20000) },
       );
       if (!r.Body) throw new Error("ComputeOutputMissing");
       if (r.ContentLength === undefined || r.ContentLength > 600000) {

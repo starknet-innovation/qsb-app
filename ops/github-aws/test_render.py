@@ -50,6 +50,18 @@ class SinglePipelinePolicies(unittest.TestCase):
         self.assertEqual(self.statement('boundary','GpuOutputs')['Action'], ['s3:GetObject'])
         self.assertEqual(self.statement('boundary','BatchCancel')['Condition'], {'StringEquals':{'aws:ResourceTag/Project':'qsb-gpu'}})
 
+    def test_batch_read_tag_and_artifact_resources_are_exact(self):
+        expected = {
+            'BatchRead': (['batch:DescribeJobs','batch:DescribeJobDefinitions','batch:DescribeJobQueues','batch:DescribeComputeEnvironments','batch:ListJobs'], ['*'], {'StringEquals':{'aws:RequestedRegion':'eu-west-1'}}),
+            'BatchTag': (['batch:TagResource'], ['arn:aws:batch:eu-west-1:123456789012:job/*'], {'StringEquals':{'aws:RequestTag/Project':'qsb-gpu'},'ForAllValues:StringEquals':{'aws:TagKeys':['Project','QsbRequest','InputSha256']}}),
+            'GpuInputs': (['s3:PutObject'], ['arn:aws:s3:::qsb-gpu-123456789012-eu-west-1-jobs/inputs/*'], None),
+            'GpuOutputs': (['s3:GetObject'], ['arn:aws:s3:::qsb-gpu-123456789012-eu-west-1-jobs/outputs/*'], None),
+        }
+        for sid, (actions, resources, condition) in expected.items():
+            statement = {'Sid':sid, 'Effect':'Allow', 'Action':actions, 'Resource':resources}
+            if condition is not None: statement['Condition'] = condition
+            self.assertEqual(self.statement('boundary',sid), statement)
+
     def test_role_passing_only_to_retained_execution_services(self):
         passing = self.statement('deploy', 'PassRuntimeRoles')
         self.assertEqual(passing['Resource'], ['arn:aws:iam::123456789012:role/qsb/runtime/qsb-*'])

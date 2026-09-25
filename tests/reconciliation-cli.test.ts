@@ -22,8 +22,8 @@ import { AwsBatch } from "../server/aws-batch";
 import { reconcileSubmissionCli, reconcileUnknownSubmission } from "../server/reconcile-submission";
 
 const required = {
-  TABLE_NAME: "dummy-table", AWS_REGION: "us-east-1", AWS_BATCH_JOB_DEFINITION: "arn:aws:batch:eu-west-1:905846953990:job-definition/qsb-gpu-solver:1", AWS_BATCH_JOB_BUCKET: "qsb-gpu-jobs",
-  AWS_BATCH_JOB_QUEUE: "arn:aws:batch:eu-west-1:905846953990:job-queue/qsb-gpu", WORKFLOW_ARN: "dummy-workflow", QSB_NETWORK: "mainnet", QSB_MAINNET_ENABLED: "true",
+  TABLE_NAME: "dummy-table", AWS_REGION: "us-east-1", AWS_BATCH_JOB_DEFINITION: "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:1", AWS_BATCH_JOB_BUCKET: "qsb-gpu-jobs",
+  AWS_BATCH_JOB_QUEUE: "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu", WORKFLOW_ARN: "dummy-workflow", QSB_NETWORK: "mainnet", QSB_MAINNET_ENABLED: "true",
 };
 const args = ["owner", "job", "--provider-id", "provider-1", "--operator", "test", "--evidence", "audit://test"];
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); mocks.allowed.mockReturnValue(true); process.exitCode = undefined; });
@@ -63,7 +63,7 @@ it("the library default also refuses disabled polling before any read", async ()
 });
 it("prints the polling refusal reason, exits nonzero and preserves the attached ID", async () => {
   for (const [key, value] of Object.entries(required)) vi.stubEnv(key, value);
-  const job = { id: "job", owner: "owner", vaultId: "v", status: "paused", stage: "pinning", attempt: 0, revision: 3, computeSeconds: 0, manifestHash: "a".repeat(64), manifest: {}, error: "Submission outcome unknown" } as Job;
+  const job = { batchSubmission: {jobName:"qsb-test",inputSha256:"a".repeat(64),inputKey:"inputs/test.json",queue:"queue",definition:"definition"}, id: "job", owner: "owner", vaultId: "v", status: "paused", stage: "pinning", attempt: 0, revision: 3, computeSeconds: 0, manifestHash: "a".repeat(64), manifest: {}, error: "Submission outcome unknown" } as Job;
   await store.put({ pk: "OWNER#owner", sk: "JOB#job", version: 0, job });
   await store.put({ pk: "OWNER#owner", sk: "VAULT#v", version: 0, vault: { network: "mainnet" } });
   mocks.secret.mockResolvedValue({ SecretString: JSON.stringify({ apiKey: "public-test-placeholder" }) });
@@ -80,7 +80,7 @@ it("prints the polling refusal reason, exits nonzero and preserves the attached 
 it.each(["400", "499"])("CLI records immediate HTTP %s recovery without waiting TTL", async (status) => {
   for (const [key, value] of Object.entries(required)) vi.stubEnv(key, value);
   const owner = `http-${status}`, pk = `OWNER#${owner}`;
-  const job = { id: "job", owner, vaultId: "v", status: "paused", stage: "pinning", attempt: 0, revision: 3, computeSeconds: 0, manifestHash: "a".repeat(64), manifest: {}, submissionStartedAt: new Date().toISOString(), error: "Submission outcome unknown" } as Job;
+  const job = { batchSubmission: {jobName:"qsb-test",inputSha256:"a".repeat(64),inputKey:"inputs/test.json",queue:"queue",definition:"definition"}, id: "job", owner, vaultId: "v", status: "paused", stage: "pinning", attempt: 0, revision: 3, computeSeconds: 0, manifestHash: "a".repeat(64), manifest: {}, submissionStartedAt: new Date().toISOString(), error: "Submission outcome unknown" } as Job;
   await store.put({ pk, sk: "JOB#job", version: 0, job });
   await store.put({ pk, sk: "VAULT#v", version: 0, vault: { network: "mainnet" } });
   mocks.secret.mockResolvedValue({ SecretString: JSON.stringify({ apiKey: "public-test-placeholder" }) });

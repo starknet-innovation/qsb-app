@@ -30,7 +30,7 @@ beforeEach(async () => {
     status: vi.fn(async () => ({ status: "IN_PROGRESS" })),
     cancel: vi.fn(async () => ({ status: "CANCELLED" })),
   };
-  provider.prepareRun = vi.fn(async () => provider.run);
+  provider.prepareRun = vi.fn(async (_image, input) => Object.assign(() => provider.run(input), {identity: {jobName:"qsb-test",inputSha256:"a".repeat(64),inputKey:"inputs/test.json",queue:"queue",definition:"definition"}}));
   cpu = vi.fn(async (input: any) =>
     input.action === "export"
       ? { parameterBase64: "public", parameterSha256: "b".repeat(64) }

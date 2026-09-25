@@ -317,3 +317,15 @@ not cancelled. After enabling again, resume a paused job to poll its existing
 provider ID. Reconcile uncertain submissions with the existing runbook; never
 reset an intent or submit a replacement solely because the switch was toggled.
 Reconcile outstanding jobs before changing capacity.
+
+### AWS migration decision and request recovery
+
+The user explicitly selected AWS for all QSB GPU work on 2026-09-25, superseding the earlier undecided-provider plan. Runpod is not the default or a fallback. This decision does not enable mainnet or enroll an unattested solver image.
+
+Before any paid intent is saved, `prepareRun` uploads the public input and returns its job name, SHA256, input key, queue and exact definition revision. The coordinator saves this `batchSubmission` identity together with `searching` and its spend reservation. An upload failure occurs before this marker and can be resumed without an unknown paid outcome.
+
+Use the existing reconciliation CLI with `--provider-id discover --operator ... --evidence ...` to search all statuses by the saved exact job name. Exactly one match is required. Both discovery and an explicitly supplied ID are checked against the saved name, request/project tags, input key/hash, queue and definition before attaching any queued, running, failed or completed job. Operator permissions need no access to input contents. Save incident evidence promptly: Batch guarantees terminal retention only for at least seven days.
+
+A list miss, expired retention, or an elapsed watchdog deadline is **not** proof of non-acceptance. Discovery never grants a replacement. If no match or positive rejection evidence exists, the submission stays paused for investigation; the migration intentionally does not weaken the never-resubmit invariant into a time-based retry. Historical jobs without a saved Batch identity require manual evidence review and are not automatically attached or replayed.
+
+The migration smoke image is not a production release: it lacks a build-provenance attestation and has been removed from the enrollment registry. Follow the attested release/copy procedure in `terraform/gpu/README.md` before any production enrollment.

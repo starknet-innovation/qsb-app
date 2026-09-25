@@ -74,6 +74,7 @@ beforeEach(async () => {
     manifestHash: "a".repeat(64),
     manifest: {},
     error: "Submission outcome unknown. Reconcile compute provider before resuming.",
+    batchSubmission: {jobName:"qsb-test",inputSha256:"a".repeat(64),inputKey:"inputs/test.json",queue:"queue",definition:"definition"},
     submissionStartedAt: "2026-09-24T00:00:00.000Z",
     updatedAt: now,
     createdAt: now,
@@ -324,4 +325,22 @@ it("does not let a 4xx field bypass the TTL-expired mode", async () => {
   await change({ submissionStartedAt: now });
   await expect(run({ ...replacement("ttl-expired"), httpStatus: 400 })).rejects.toThrow();
   expect((await job()).oneSubmissionAllowed).toBeUndefined();
+});
+
+it("discovers an accepted request from durable identity without any replacement", async () => {
+  lookup.findRequest = vi.fn(async () => "provider-1");
+  await run({...decision, providerId:"discover"});
+  expect(lookup.findRequest).toHaveBeenCalledWith((await job()).batchSubmission);
+  expect(lookup.status).toHaveBeenCalledWith("provider-1", (await job()).batchSubmission);
+  expect((await job()).oneSubmissionAllowed).toBeUndefined();
+});
+it("missing discovery evidence never grants a replacement", async () => {
+  lookup.findRequest = vi.fn(async () => {throw Error("BatchRequestNotUniquelyFound")});
+  await expect(run({...decision, providerId:"discover"})).rejects.toThrow("BatchRequestNotUniquelyFound");
+  expect((await job()).oneSubmissionAllowed).toBeUndefined();
+  expect(resumePolling).not.toHaveBeenCalled();
+});
+it("refuses to attach a job without a durable request identity", async () => {
+  await change({batchSubmission:undefined});
+  await expect(run()).rejects.toThrow("BatchRequestIdentityRequired");
 });

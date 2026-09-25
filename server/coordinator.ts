@@ -1,5 +1,9 @@
 import { deployedSolver } from "./solver-deployment";
-import { assertPaidSolverContract, assertSolverPin, solverRelease } from "../src/lib/provenance";
+import {
+  assertPaidSolverContract,
+  assertSolverPin,
+  solverRelease,
+} from "../src/lib/provenance";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
 import { chain } from "./chain";
@@ -69,12 +73,19 @@ export async function handler(event: Event | { action: "providerHealth" }) {
   const job = row.job as Job;
   if (event.revision !== job.revision) return { ...event, done: true };
   if (event.owner.startsWith("regtest:") && row.validation) {
-    const legacyState = row.validation as {active?: {id?: string}[]; cancel?: string[]};
-    if (job.computeProvider !== "aws-batch" && (legacyState.active?.some(x => x.id) || legacyState.cancel?.length)) {
+    const legacyState = row.validation as {
+      active?: { id?: string }[];
+      cancel?: string[];
+    };
+    if (
+      job.computeProvider !== "aws-batch" &&
+      (legacyState.active?.some((x) => x.id) || legacyState.cancel?.length)
+    ) {
       job.status = "paused";
-      job.error = "Legacy provider job requires reconciliation before AWS migration.";
-      await store.put({...row, version:row.version+1, job}, row.version);
-      return {...event,done:true};
+      job.error =
+        "Legacy provider job requires reconciliation before AWS migration.";
+      await store.put({ ...row, version: row.version + 1, job }, row.version);
+      return { ...event, done: true };
     }
     job.computeProvider = "aws-batch";
     return validationTick(event, row, store, await configuredCompute(), cpu);
@@ -121,12 +132,16 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     row.version++;
   }
   if (job.runpodId && job.computeProvider !== "aws-batch") {
-    job.status = "paused"; job.error = "Legacy provider job requires reconciliation before AWS migration."; await save(); return {...event,done:true};
+    job.status = "paused";
+    job.error =
+      "Legacy provider job requires reconciliation before AWS migration.";
+    await save();
+    return { ...event, done: true };
   }
   const provider = await configuredCompute();
   if (job.status === "paused") {
     if (job.runpodId) {
-      const pending = await provider.status(job.runpodId);
+      const pending = await provider.status(job.runpodId, job.batchSubmission);
       if (["IN_QUEUE", "IN_PROGRESS"].includes(pending.status)) {
         await provider.cancel(job.runpodId);
         // A cancellation acknowledgement is not a terminal job status. Keep
@@ -217,15 +232,26 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       ...job.parameterHashes,
       [key]: parameters.parameterSha256,
     };
-    let submit: (input: unknown) => Promise<{ id: string }>;
+    let submit: import("./aws-batch").PreparedRun;
     try {
       deployedSolver(selected.id);
       assertPaidSolverContract(selected);
-      submit = await provider.prepareRun(selected.image);
+      submit = await provider.prepareRun(selected.image, {
+        protocol: selected.protocol,
+        kernelCommit: selected.kernelCommit,
+        manifestHash: job.manifestHash,
+        stage: job.stage,
+        attempt: job.attempt,
+        searchVersion,
+        ...parameters,
+        ...(job.solution
+          ? { sequence: job.solution.sequence, locktime: job.solution.locktime }
+          : {}),
+      });
     } catch {
       job.status = "paused";
       job.error =
-        "Solver contract or compute provider image/limits unconfirmed; nothing was submitted. Resume after correcting provider configuration.";
+        "Solver contract, compute provider configuration or public input upload unconfirmed; nothing was submitted. Resume after correcting preparation.";
       await save();
       return { ...event, done: true };
     }
@@ -235,22 +261,12 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     job.gpuSubmissions = (job.gpuSubmissions ?? 0) + 1;
     job.status = "searching";
     job.computeProvider = "aws-batch";
+    job.batchSubmission = submit.identity;
     job.submissionStartedAt = new Date().toISOString();
     delete job.retryRequested;
     delete job.oneSubmissionAllowed;
     await save();
-    const result = await submit({
-      protocol: selected.protocol,
-      kernelCommit: selected.kernelCommit,
-      manifestHash: job.manifestHash,
-      stage: job.stage,
-      attempt: job.attempt,
-      searchVersion,
-      ...parameters,
-      ...(job.solution
-        ? { sequence: job.solution.sequence, locktime: job.solution.locktime }
-        : {}),
-    });
+    const result = await submit();
     job.runpodId = result.id;
     await store.put({ ...row, version: row.version + 2, job }, row.version + 1);
     return {
@@ -260,7 +276,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       polls: (event.polls || 0) + 1,
     };
   }
-  const result = await provider.status(job.runpodId);
+  const result = await provider.status(job.runpodId, job.batchSubmission);
   if (["FAILED", "CANCELLED", "TIMED_OUT"].includes(result.status)) {
     if (job.retryRequested) {
       delete job.runpodId;

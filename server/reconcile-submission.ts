@@ -1,7 +1,12 @@
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { z } from "zod";
 import { reconciliationEnvironmentError } from "./reconciliation-environment";
-import { release, type Job, type PublicVault } from "../src/lib/model";
+import {
+  release,
+  type Job,
+  type PublicVault,
+  type BatchSubmissionIdentity,
+} from "../src/lib/model";
 import { NETWORK_ID } from "../src/lib/network";
 import { assertSolverPin, solverRelease } from "../src/lib/provenance";
 import { rehearsalAddressAllowed, transactionsEnabled } from "./network";
@@ -39,17 +44,35 @@ export const reconciliationDecisionSchema = z.discriminatedUnion("kind", [
     })
     .strict()
     .superRefine((decision, ctx) => {
-      if (decision.reason === "rejected-before-acceptance" && decision.httpStatus === undefined)
-        ctx.addIssue({ code: "custom", path: ["httpStatus"], message: "Recorded HTTP 4xx required" });
-      if (decision.reason === "ttl-expired" && decision.httpStatus !== undefined)
-        ctx.addIssue({ code: "custom", path: ["httpStatus"], message: "HTTP status is only valid for rejected-before-acceptance" });
+      if (
+        decision.reason === "rejected-before-acceptance" &&
+        decision.httpStatus === undefined
+      )
+        ctx.addIssue({
+          code: "custom",
+          path: ["httpStatus"],
+          message: "Recorded HTTP 4xx required",
+        });
+      if (
+        decision.reason === "ttl-expired" &&
+        decision.httpStatus !== undefined
+      )
+        ctx.addIssue({
+          code: "custom",
+          path: ["httpStatus"],
+          message: "HTTP status is only valid for rejected-before-acceptance",
+        });
     }),
 ]);
 export type ReconciliationDecision = z.infer<
   typeof reconciliationDecisionSchema
 >;
 export type SubmissionLookup = {
-  status(id: string): Promise<{ id: string; status: string; output?: unknown }>;
+  findRequest?(identity: BatchSubmissionIdentity): Promise<string>;
+  status(
+    id: string,
+    identity?: BatchSubmissionIdentity,
+  ): Promise<{ id: string; status: string; output?: unknown }>;
   health(): Promise<{ jobs: { inQueue: number; inProgress: number } }>;
 };
 export type PollingStart = { started: boolean; reason?: string };
@@ -70,8 +93,8 @@ export type ReconciliationResult = {
 export function pollingStartAllowed(owner: string): boolean {
   return transactionsEnabled && rehearsalAddressAllowed(owner);
 }
-/** Operator-only reconciliation. Never submits or cancels work. The provider's
- * requests list is not submission history and status need not echo input.
+/** Operator-only reconciliation. Never submits or cancels work. Attach only
+ * positive evidence bound to the saved Batch request; list absence is not proof.
  */
 export async function reconcileUnknownSubmission(input: {
   store: Store;
@@ -86,8 +109,10 @@ export async function reconcileUnknownSubmission(input: {
 }): Promise<ReconciliationResult> {
   const { store, owner, jobId, lookup, log } = input;
   const decision = reconciliationDecisionSchema.parse(input.decision);
-  if (decision.kind === "provider-id" &&
-      !(input.pollingAllowed ?? pollingStartAllowed)(owner))
+  if (
+    decision.kind === "provider-id" &&
+    !(input.pollingAllowed ?? pollingStartAllowed)(owner)
+  )
     throw new ReconciliationError("PollingNotAllowed");
   const pk = `OWNER#${owner}`,
     sk = `JOB#${jobId}`;
@@ -96,6 +121,11 @@ export async function reconcileUnknownSubmission(input: {
   if (!row || !job) throw new ReconciliationError("JobNotFound");
   if (job.owner !== owner || job.id !== jobId)
     throw new ReconciliationError("JobIdentityMismatch");
+  if (decision.kind === "provider-id" && decision.providerId === "discover") {
+    if (!job.batchSubmission || !lookup.findRequest)
+      throw new ReconciliationError("BatchRequestIdentityRequired");
+    decision.providerId = await lookup.findRequest(job.batchSubmission);
+  }
   const recorded =
     decision.kind === "provider-id" &&
     job.status === "searching" &&
@@ -129,7 +159,12 @@ export async function reconcileUnknownSubmission(input: {
   if (!Number.isFinite(Date.parse(now)))
     throw new ReconciliationError("InvalidTime");
   if (decision.kind === "provider-id") {
-    const result = await lookup.status(decision.providerId);
+    if (!job.batchSubmission)
+      throw new ReconciliationError("BatchRequestIdentityRequired");
+    const result = await lookup.status(
+      decision.providerId,
+      job.batchSubmission,
+    );
     if (result.id !== decision.providerId)
       throw new ReconciliationError("ProviderIdMismatch");
     if (
@@ -173,7 +208,9 @@ export async function reconcileUnknownSubmission(input: {
         providerId: decision.providerId,
         resubmitted: false,
         pollingStarted: polling.started,
-        ...(!polling.started ? { reason: polling.reason ?? "polling-not-started" } : {}),
+        ...(!polling.started
+          ? { reason: polling.reason ?? "polling-not-started" }
+          : {}),
       };
     }
     job.runpodId = decision.providerId;
@@ -182,9 +219,10 @@ export async function reconcileUnknownSubmission(input: {
     delete job.error;
   } else {
     // A list miss, a timeout or a 5xx alone is not proof of non-acceptance.
-    // Only an explicitly recorded HTTP 4xx may bypass the TTL. All other
-    // outcomes require the durable full TTL; both paths still require drain.
-    if (decision.reason === "ttl-expired") throw new ReconciliationError("AwsBatchHasNoSubmissionTtl");
+    // Batch has no submission TTL. Retention and watchdog timing cannot prove
+    // non-acceptance; only evidenced pre-acceptance rejection permits replacement.
+    if (decision.reason === "ttl-expired")
+      throw new ReconciliationError("AwsBatchHasNoSubmissionTtl");
     const health = await lookup.health();
     if (health.jobs.inQueue !== 0 || health.jobs.inProgress !== 0)
       throw new ReconciliationError("EndpointNotDrained");
@@ -227,7 +265,8 @@ export async function reconcileUnknownSubmission(input: {
     resubmitted: false,
     pollingStarted: polling.started,
     ...(decision.kind === "provider-id" && !polling.started
-      ? { reason: polling.reason ?? "polling-not-started" } : {}),
+      ? { reason: polling.reason ?? "polling-not-started" }
+      : {}),
     ...(decision.kind === "provider-id"
       ? { providerId: decision.providerId }
       : {}),
@@ -300,7 +339,11 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
         ? { kind: "provider-id", providerId: options["--provider-id"] }
         : { kind: "not-submitted", reason: options["--not-submitted"] }),
       ...(options["--http-status"] !== undefined
-        ? { httpStatus: /^\d{3}$/.test(options["--http-status"]) ? Number(options["--http-status"]) : NaN }
+        ? {
+            httpStatus: /^\d{3}$/.test(options["--http-status"])
+              ? Number(options["--http-status"])
+              : NaN,
+          }
         : {}),
       operator: options["--operator"],
       evidence: options["--evidence"],
@@ -314,7 +357,8 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
       jobId,
       decision,
       lookup: {
-        status: (id) => endpoint.status(id),
+        findRequest: (identity) => endpoint.findRequest(identity),
+        status: (id, identity) => endpoint.status(id, identity),
         health: () => endpoint.health(),
       },
       log: (entry) => process.stderr.write(`${JSON.stringify(entry)}\n`),

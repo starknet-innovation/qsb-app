@@ -1,6 +1,6 @@
 terraform {
 
-  required_version = ">= 1.7, < 2.0"
+  required_version = ">= 1.9, < 2.0"
   required_providers {
     archive = { source = "hashicorp/archive", version = "~> 2.7" }
     aws = {
@@ -11,6 +11,14 @@ terraform {
 
   }
 
+}
+variable "aws_account_id" {
+  type        = string
+  description = "Expected operator account; explicitly provided outside Git."
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.aws_account_id))
+    error_message = "Use an exact AWS account ID."
+  }
 }
 variable "source_commit" {
   type = string
@@ -24,7 +32,7 @@ variable "image" {
   type = string
   validation {
 
-    condition     = can(regex("^905846953990\\.dkr\\.ecr\\.eu-west-1\\.amazonaws\\.com/qsb-solver@sha256:[a-f0-9]{64}$", var.image))
+    condition     = can(regex("^${var.aws_account_id}\\.dkr\\.ecr\\.eu-west-1\\.amazonaws\\.com/qsb-solver@sha256:[a-f0-9]{64}$", var.image))
     error_message = "Use the immutable AWS A10G solver image in the QSB repository."
 
   }
@@ -44,7 +52,7 @@ variable "vpc_id" {
 provider "aws" {
 
   region              = "eu-west-1"
-  allowed_account_ids = ["905846953990"]
+  allowed_account_ids = [var.aws_account_id]
   default_tags {
     tags = {
       Project = "qsb-gpu", SourceCommit = var.source_commit, ManagedBy = "Terraform"
@@ -68,7 +76,7 @@ resource "aws_ecr_repository" "solver" {
 
 }
 resource "aws_s3_bucket" "jobs" {
-  bucket = "qsb-gpu-905846953990-eu-west-1-jobs"
+  bucket = "qsb-gpu-${var.aws_account_id}-eu-west-1-jobs"
 }
 resource "aws_s3_bucket_public_access_block" "jobs" {
 
@@ -174,9 +182,9 @@ resource "aws_iam_role" "job" {
         Service = "ecs-tasks.amazonaws.com"
         }, Action = "sts:AssumeRole", Condition = {
         StringEquals = {
-          "aws:SourceAccount" = "905846953990"
+          "aws:SourceAccount" = var.aws_account_id
           }, ArnLike = {
-          "aws:SourceArn" = "arn:aws:ecs:eu-west-1:905846953990:*"
+          "aws:SourceArn" = "arn:aws:ecs:eu-west-1:${var.aws_account_id}:*"
         }
       }
     }]

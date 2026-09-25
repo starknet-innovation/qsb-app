@@ -100,7 +100,7 @@ beforeEach(() => {
     ),
   }));
   mocks.run.mockResolvedValue({ id: "compute-1" });
-  mocks.prepareRun.mockResolvedValue(mocks.run);
+  mocks.prepareRun.mockImplementation(async (_image, input) => Object.assign(() => mocks.run(input), {identity: {jobName:"qsb-test",inputSha256:"a".repeat(64),inputKey:"inputs/test.json",queue:"queue",definition:"definition"}}));
 });
 it("does not submit a paused unknown job that already has one later submission allowed", async () => {
   await seed({
@@ -502,7 +502,7 @@ it("routes an external descriptor through submission and CPU verification withou
   await seed({ solver: pin });
   await store.put({ pk, sk: "VAULT#v", version: 1, vault }, 0);
   await handler(event);
-  expect(mocks.prepareRun).toHaveBeenCalledWith(pin.descriptor.image);
+  expect(mocks.prepareRun).toHaveBeenCalledWith(pin.descriptor.image, expect.any(Object));
   expect(mocks.run).toHaveBeenCalledWith(
     expect.objectContaining({
       kernelCommit: "b".repeat(40),
@@ -573,7 +573,7 @@ it("still polls a paid job after the served release changes", async () => {
   process.env.SOLVER_RELEASE_ID = "external-test";
   mocks.status.mockResolvedValue({status:"IN_PROGRESS"});
   await handler(event);
-  expect(mocks.status).toHaveBeenCalledWith("paid-existing");
+  expect(mocks.status).toHaveBeenCalledWith("paid-existing", undefined);
   expect(mocks.run).not.toHaveBeenCalled();
   expect(mocks.prepareRun).not.toHaveBeenCalled();
   expect(mocks.cancel).not.toHaveBeenCalled();
@@ -607,7 +607,7 @@ it.each(["queued", "searching"] as const)("deployment switch pauses %s without l
   mocks.enabled = true;
   mocks.status.mockResolvedValue({status:"IN_PROGRESS"});
   expect(await handler({...event,revision:1})).toMatchObject({done:false,waitSeconds:5});
-  expect(mocks.status).toHaveBeenCalledWith("already-paid");
+  expect(mocks.status).toHaveBeenCalledWith("already-paid", undefined);
   expect(mocks.prepareRun).not.toHaveBeenCalled();
   expect(mocks.run).not.toHaveBeenCalled();
   expect(mocks.cancel).not.toHaveBeenCalled();
@@ -691,4 +691,15 @@ it('pauses a legacy provider ID without contacting AWS or resubmitting', async (
   expect((await store.get(pk,sk))!.job).toMatchObject({status:'paused',runpodId:'legacy-paid',error:'Legacy provider job requires reconciliation before AWS migration.'});
   expect(mocks.status).not.toHaveBeenCalled();
   expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it("persists the request identity in the same paid intent before calling SubmitJob", async () => {
+  await seed();
+  mocks.run.mockImplementationOnce(async () => {
+    const job = (await store.get(pk, sk))!.job as Job;
+    expect(job).toMatchObject({status:"searching",computeProvider:"aws-batch",batchSubmission:{jobName:"qsb-test",inputSha256:"a".repeat(64)},gpuSubmissions:1,gpuBudgetReservedSeconds:900});
+    throw Error("lost response");
+  });
+  await expect(handler(event)).rejects.toThrow("lost response");
+  expect((await store.get(pk,sk))!.job).toHaveProperty("batchSubmission.jobName", "qsb-test");
 });

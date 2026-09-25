@@ -120,6 +120,22 @@ run "configured_single_pipeline" {
     condition     = length(aws_iam_role.lambda) == 3 && toset(keys(aws_iam_role.lambda)) == toset(["api", "coordinator", "reference"]) && aws_lambda_function.coordinator.environment[0].variables.TABLE_NAME == aws_lambda_function.api.environment[0].variables.TABLE_NAME && aws_lambda_function.api.environment[0].variables.WORKFLOW_ARN == local.workflow_arn && aws_lambda_function.coordinator.environment[0].variables.REFERENCE_FUNCTION == aws_lambda_function.reference.function_name
     error_message = "Keep one coordinator pipeline, shared records and independent CPU verification."
   }
+  assert {
+    condition     = jsondecode(aws_sfn_state_machine.withdrawal.definition).StartAt == "CoordinateSearch" && aws_lambda_function.api.environment[0].variables.TABLE_NAME == aws_dynamodb_table.records.name
+    error_message = "Keep the entry state and exact shared records table."
+  }
+  assert {
+    condition = jsonencode(jsondecode(aws_iam_role_policy.batch[0].policy).Statement) == jsonencode([
+      { Effect = "Allow", Action = ["batch:DescribeJobs", "batch:DescribeJobDefinitions", "batch:DescribeJobQueues", "batch:DescribeComputeEnvironments", "batch:ListJobs"], Resource = "*", Condition = { StringEquals = { "aws:RequestedRegion" = var.region } } },
+      { Effect = "Allow", Action = "batch:SubmitJob", Resource = [var.batch_job_queue, var.batch_job_definition] },
+      { Effect = "Allow", Action = "batch:TagResource", Resource = "arn:aws:batch:${var.region}:${var.aws_account_id}:job/*", Condition = { StringEquals = { "aws:RequestTag/Project" = "qsb-gpu" }, "ForAllValues:StringEquals" = { "aws:TagKeys" = ["Project", "QsbRequest", "InputSha256"] } } },
+      { Effect = "Allow", Action = ["batch:CancelJob", "batch:TerminateJob"], Resource = "arn:aws:batch:${var.region}:${var.aws_account_id}:job/*", Condition = { StringEquals = { "aws:ResourceTag/Project" = "qsb-gpu" } } },
+      { Effect = "Allow", Action = "s3:PutObject", Resource = "arn:aws:s3:::${var.batch_job_bucket}/inputs/*" },
+      { Effect = "Allow", Action = "s3:GetObject", Resource = "arn:aws:s3:::${var.batch_job_bucket}/outputs/*" }
+    ])
+    error_message = "Paid submission, tag/cancel and input/output permissions must remain exactly scoped."
+  }
+
 }
 run "operator_reconcile_scope" {
   command = plan
@@ -128,7 +144,7 @@ run "operator_reconcile_scope" {
     batch_job_queue              = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu"
     batch_job_definition         = "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:1"
     batch_job_bucket             = "qsb-gpu-jobs"
-    operator_principal_arns      = ["arn:aws:iam::123456789012:user/alice"]
+    operator_principal_arns      = ["arn:aws:iam::123456789012:user/alice", "arn:aws:iam::123456789012:role/operators"]
     iam_role_path                = "/qsb/runtime/"
     iam_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary"
   }
@@ -140,6 +156,23 @@ run "operator_reconcile_scope" {
     condition     = toset(flatten([for s in jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement : s.Action])) == toset(["dynamodb:GetItem", "dynamodb:PutItem", "states:StartExecution", "batch:DescribeJobs", "batch:ListJobs", "batch:DescribeJobQueues", "s3:GetObject"]) && alltrue([for s in slice(jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement, 0, 2) : s.Condition["ForAllValues:StringLike"]["dynamodb:LeadingKeys"] == ["OWNER#*"] && s.Condition.Null["dynamodb:LeadingKeys"] == "false"])
     error_message = "The operator can reconcile OWNER records and read results, never submit paid jobs or write system/outpoint rows."
   }
+  assert {
+    condition = jsonencode(jsondecode(aws_iam_role.operator_reconcile.assume_role_policy).Statement) == jsonencode([{
+      Effect = "Allow", Principal = { AWS = sort(tolist(var.operator_principal_arns)) }, Action = "sts:AssumeRole", Condition = { Bool = { "aws:MultiFactorAuthPresent" = "true" } }
+    }])
+    error_message = "Only the exact configured principals with MFA may assume the operator role."
+  }
+  assert {
+    condition = jsonencode(jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement) == jsonencode([
+      { Sid = "ReadOwnedRecords", Effect = "Allow", Action = ["dynamodb:GetItem"], Resource = "arn:aws:dynamodb:${var.region}:${var.aws_account_id}:table/${aws_dynamodb_table.records.name}", Condition = { "ForAllValues:StringLike" = { "dynamodb:LeadingKeys" = ["OWNER#*"] }, Null = { "dynamodb:LeadingKeys" = "false" } } },
+      { Sid = "ReconcileOwnedJobAndAudit", Effect = "Allow", Action = ["dynamodb:PutItem"], Resource = "arn:aws:dynamodb:${var.region}:${var.aws_account_id}:table/${aws_dynamodb_table.records.name}", Condition = { "ForAllValues:StringLike" = { "dynamodb:LeadingKeys" = ["OWNER#*"] }, Null = { "dynamodb:LeadingKeys" = "false" } } },
+      { Sid = "StartCoordinator", Effect = "Allow", Action = ["states:StartExecution"], Resource = local.workflow_arn },
+      { Effect = "Allow", Action = ["batch:DescribeJobs", "batch:ListJobs", "batch:DescribeJobQueues"], Resource = "*", Condition = { StringEquals = { "aws:RequestedRegion" = var.region } } },
+      { Effect = "Allow", Action = "s3:GetObject", Resource = "arn:aws:s3:::${var.batch_job_bucket}/outputs/*" }
+    ])
+    error_message = "Operator statements must retain exact actions, effects, resources and conditions; never SubmitJob."
+  }
+
 }
 run "operator_without_provider" {
   command = plan
@@ -261,4 +294,21 @@ run "mainnet_reject_testnet" {
     network         = "testnet4"
   }
   expect_failures = [var.mainnet_enabled, terraform_data.release]
+}
+
+run "reject_provider_queue_wildcard" {
+  command = plan
+  variables {
+    network         = "mainnet"
+    batch_job_queue = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-*"
+  }
+  expect_failures = [var.batch_job_queue]
+}
+run "reject_provider_bucket_wildcard" {
+  command = plan
+  variables {
+    network          = "mainnet"
+    batch_job_bucket = "qsb-*"
+  }
+  expect_failures = [var.batch_job_bucket]
 }
