@@ -30,6 +30,10 @@ run "baseline" {
     error_message = "The default mainnet plan must not deploy the supervised runtime."
   }
   assert {
+    condition     = aws_lambda_function.coordinator.timeout == 90 && jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.TimeoutSeconds > aws_lambda_function.coordinator.timeout
+    error_message = "Workflow timeout must cover the coordinator preflight and paid submission budget."
+  }
+  assert {
     condition     = !can(jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Retry)
     error_message = "Do not add generic automatic retries around billable coordination."
   }
