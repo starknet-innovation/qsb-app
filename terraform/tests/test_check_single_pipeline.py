@@ -77,6 +77,27 @@ class DeployChecks(unittest.TestCase):
         # Without --first-apply, an update plan is fine.
         self.assertEqual(self.run_check(doc, '--deploy')[0], 0)
 
+    def unknown_api_env(self, table_ref='aws_dynamodb_table.records.name', extra=()):
+        """A real first plan: the API environment is unknown, so the configuration is checked."""
+        doc = plan()
+        for r in doc['planned_values']['root_module']['resources']:
+            if r['type'] == 'aws_lambda_function' and r['name'] in ('api', 'reference'):
+                r['values'].pop('environment')
+        refs = lambda *more: {'variables': {'references': [table_ref, 'aws_dynamodb_table.records', *more]}}
+        doc['configuration'] = {'root_module': {'resources': [
+            {'address': 'aws_lambda_function.api', 'expressions': {'environment': [refs(*extra)]}},
+            {'address': 'aws_lambda_function.reference', 'expressions': {'environment': [{'variables': {'references': []}}]}},
+        ]}}
+        return doc
+
+    def test_unknown_environment_is_checked_from_configuration(self):
+        self.assertEqual(self.run_check(self.unknown_api_env(), '--deploy', '--first-apply')[0], 0)
+        self.refused(self.unknown_api_env(table_ref='aws_dynamodb_table.other.name'), 'must use the same table')
+        self.refused(self.unknown_api_env(extra=('var.batch_job_queue',)), 'Only coordinator may receive')
+        doc = self.unknown_api_env()
+        del doc['configuration']
+        self.refused(doc, 'unknown until apply')
+
     def test_flags_need_a_saved_plan(self):
         events = [{'type': 'test_run', '@testrun': 'baseline'}, {'type': 'test_summary', 'test_summary': {'status': 'pass'}}]
         code, err = self.run_check(events, '--deploy', jsonl=True)

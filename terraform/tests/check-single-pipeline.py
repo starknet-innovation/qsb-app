@@ -41,7 +41,18 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def validate(rows, expanded):
+def config_env_references(configuration, name):
+    """References behind a Lambda's environment in a saved plan's configuration section."""
+    resources = {r['address']: r for r in (configuration or {}).get('root_module', {}).get('resources', [])}
+    function = resources.get(f'aws_lambda_function.{name}')
+    require(function is not None, f'aws_lambda_function.{name} missing from the plan configuration')
+    variables = (function.get('expressions', {}).get('environment') or [{}])[0].get('variables', {})
+    return variables.get('references', []) if isinstance(variables, dict) else []
+
+
+def validate(rows, expanded, configuration=None):
+    """In a real first plan a Lambda environment can be unknown until apply (the API's includes the
+    CloudFront domain and workflow ARN). Then the configuration's references are checked instead."""
     types = Counter(row['type'] for row in rows)
     require(not (types.keys() - ALLOWED), 'Unexpected application resource type')
     for kind, names in EXPECTED.items():
@@ -54,11 +65,25 @@ def validate(rows, expanded):
         funcs = {r['name']: r for r in rows if r['type'] == 'aws_lambda_function'}
         envs = {name: (row.get('values', {}).get('environment') or [{}])[0].get('variables', {})
                 for name, row in funcs.items()}
-        require(envs['api'].get('TABLE_NAME') and envs['api']['TABLE_NAME'] == envs['coordinator'].get('TABLE_NAME'),
-                'API and coordinator must use the same table')
-        require(all(not any(k.startswith('SUPERVISED_') for k in env) for env in envs.values()),
+        unknown = {name for name, env in envs.items() if not env}
+        require(not unknown or configuration is not None,
+                f'environment of {sorted(unknown)} is unknown until apply; pass a saved plan with its configuration')
+        refs = {name: config_env_references(configuration, name) for name in unknown}
+        table = 'aws_dynamodb_table.records.name'
+        if {'api', 'coordinator'} & unknown:
+            for name in {'api', 'coordinator'} & unknown:
+                require(table in refs[name], 'API and coordinator must use the same table')
+            for name in {'api', 'coordinator'} - unknown:
+                require(envs[name].get('TABLE_NAME'), 'API and coordinator must use the same table')
+        else:
+            require(envs['api'].get('TABLE_NAME') and envs['api']['TABLE_NAME'] == envs['coordinator'].get('TABLE_NAME'),
+                    'API and coordinator must use the same table')
+        require(all(not any(k.startswith('SUPERVISED_') for k in env) for env in envs.values()) and
+                all(not any('supervised' in r.lower() for r in refs[name]) for name in unknown),
                 'No supervised routing in application Lambda environments')
-        require('AWS_BATCH_JOB_QUEUE' not in envs['api'] and 'AWS_BATCH_JOB_QUEUE' not in envs['reference'],
+        batch_in = lambda name: ('AWS_BATCH_JOB_QUEUE' in envs[name] if name not in unknown
+                                 else any('batch_job_queue' in r for r in refs[name]))
+        require(not batch_in('api') and not batch_in('reference'),
                 'Only coordinator may receive the AWS Batch binding reference')
         policies = [r for r in rows if r['type'] == 'aws_iam_role_policy' and r['name'] == 'batch']
         require(len(policies) == (1 if envs['coordinator'].get('AWS_BATCH_JOB_QUEUE') else 0),
@@ -132,7 +157,7 @@ def main():
             require(set(result['runs']) == {'baseline', 'configured_single_pipeline'},
                     'Both baseline and configured-provider plans are required')
         else:
-            result = validate(module_resources(plan['planned_values']['root_module']), True)
+            result = validate(module_resources(plan['planned_values']['root_module']), True, plan.get('configuration'))
             result['evidence'] = 'saved-plan-inventory'
             if '--deploy' in flags:
                 result.update(deploy_checks(plan, '--first-apply' in flags))
