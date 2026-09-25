@@ -104,6 +104,59 @@ export default function TransactionDialog({
       txid: string;
       amount: string;
     }>();
+  const [signedReview, setSignedReview] = useState<{rawTxHex: string; txid: string; manifest: Withdrawal; generation: number; epoch: number}>();
+  const [signedDownload, setSignedDownload] = useState<string>();
+  const [submitAllowed, setSubmitAllowed] = useState(false);
+  const submitAttempted = useRef(false);
+  async function reviewSigned(rawTxHex: string, txid: string, check: () => void) {
+    if (!job) throw Error("Withdrawal job is missing.");
+    check();
+    setSignedReview({rawTxHex, txid, manifest: structuredClone(job.manifest), generation: generation.current, epoch: readSessionEpoch()});
+    setResult("Signed locally in Xverse. Nothing was broadcast. Review the exact transaction before submitting.");
+    try {
+      const config = await api<{exactSubmitEnabled?: boolean}>("/config");
+      check();
+      setSubmitAllowed(config.exactSubmitEnabled === true);
+      if (config.exactSubmitEnabled !== true) setResult("Submission is disabled. Keep the downloaded signed result; nothing was broadcast.");
+    } catch {
+      check();
+      setSubmitAllowed(false);
+      setResult("Submission availability could not be verified. Keep the downloaded signed result; nothing was broadcast.");
+    }
+  }
+  async function approveSigned() {
+    if (!signedReview || !job || !submitAllowed || submitAttempted.current) return;
+    submitAttempted.current = true;
+    await act("Submitting the approved exact transaction", async (check) => {
+      const assertCurrent = () => {
+        check();
+        if (signedReview.generation !== generation.current || signedReview.epoch !== readSessionEpoch())
+          throw Error("Wallet session changed. Reopen the transaction.");
+      };
+      assertCurrent();
+      const config = await api<{exactSubmitEnabled?: boolean}>("/config");
+      assertCurrent();
+      if (config.exactSubmitEnabled !== true) {
+        setSubmitAllowed(false);
+        setResult("Submission is disabled. Keep the downloaded signed result; nothing was broadcast.");
+        return;
+      }
+      try {
+        const response = await api<{txid: string; status: string}>(`/jobs/${job.id}/submit`, {rawTxHex: signedReview.rawTxHex});
+        assertCurrent();
+        if (response.txid !== signedReview.txid || !["submitted", "uncertain", "confirmed"].includes(response.status)) throw Error("Unexpected submission response.");
+        setResult(`${response.status}: ${response.txid}. Keep the signed result and check Activity for chain confirmation. Do not submit another transaction.`);
+        onUpdated();
+      } catch (error) {
+        assertCurrent();
+        const message = error instanceof Error ? error.message : "Submission response unavailable.";
+        setResult(/disabled/i.test(message)
+          ? "Submission is disabled. Keep the downloaded signed result; no submission was accepted by this route."
+          : "Submission outcome is uncertain. Keep the downloaded signed result and reconcile it from Activity. Do not submit again.");
+        throw error;
+      }
+    });
+  }
   const deposit = vault.status === "unfunded";
   const fundingKey = `qsb-funding:${vault.id}`;
   function rememberFunding(next?: { txid: string; amount: string }) {
@@ -456,22 +509,19 @@ export default function TransactionDialog({
             base64.decode(returned),
             wallet,
           );
-          downloadPublicResult(JSON.stringify(published), published.jobId);
-          setResult(
-            `Signed locally in Xverse: ${published.txid}. Nothing was broadcast. QSB consensus and chain inclusion are not established here.`,
-          );
+          const publicText = JSON.stringify(published);
+          setSignedDownload(publicText);
+          downloadPublicResult(publicText, published.jobId);
+          await reviewSigned(published.rawTxHex, published.txid, check);
           return;
         }
         const signed = verifySignedPsbt(expected, base64.decode(returned));
         signed.finalize();
-        const r = await api<{ submission: { txid: string; status: string } }>(
-          `/jobs/${job.id}/submit`,
-          { rawTxHex: hex.encode(signed.extract()) },
-        );
-        setResult(
-          `${r.submission.status}: ${r.submission.txid}. The transaction may take time to be mined.`,
-        );
-        onUpdated();
+        const rawTxHex = hex.encode(signed.extract());
+        const publicText = JSON.stringify({jobId: job.id, txid: signed.id, rawTxHex});
+        setSignedDownload(publicText);
+        downloadPublicResult(publicText, job.id);
+        await reviewSigned(rawTxHex, signed.id, check);
       },
     );
   }
@@ -531,13 +581,23 @@ export default function TransactionDialog({
         {job && solvedResult !== undefined && (
           <p>
             The solved result is public. Xverse signs the helper on this
-            device. The recovery backup stays in this browser, and nothing is
-            broadcast.
+            device. The recovery backup stays in this browser. Signing does not
+            broadcast; submission requires your separate approval.
           </p>
         )}
         {result ? (
           <>
             <p role="status">{result}</p>
+            {signedReview && <section aria-label="Exact transaction approval">
+              <p>Transaction ID: {signedReview.txid}<br />
+                Destination: {signedReview.manifest.destination}<br />
+                Payout: {formatBtc(signedReview.manifest.outputValue)} BTC<br />
+                Miner fee: {formatBtc(signedReview.manifest.fee)} BTC</p>
+              {signedDownload && job && <button className="secondary" onClick={() => downloadPublicResult(signedDownload, job.id)}>Download signed result again</button>}
+              <button disabled={!!busy || !submitAllowed || submitAttempted.current || signedReview.generation !== generation.current || signedReview.epoch !== readSessionEpoch()} onClick={approveSigned}>Approve exact transaction and submit</button>
+              <button className="secondary" disabled={!!busy} onClick={onClose}>Cancel submission</button>
+            </section>}
+
             {intentBackup && (
               <button
                 className="secondary"

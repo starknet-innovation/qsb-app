@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   typecheck-and-test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     env:
       PYTHONDONTWRITEBYTECODE: "1"
@@ -58,3 +58,43 @@ jobs:
           python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-test.jsonl
           python3 terraform/tests/check-single-pipeline.py
           python3 ops/github-aws/test_render.py
+
+  browser-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.2
+      - run: npm ci --ignore-scripts
+      - run: npm run vendor
+      - run: git diff --exit-code
+      - name: Install locked Playwright Chromium and Linux dependencies
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Run all browser safety specs with external traffic blocked
+        shell: bash
+        run: |
+          # Keep the runner's existing control channel, but deny new outbound
+          # connections from both Chromium and the local API. No provider or
+          # miner request can escape the specs' local stubs (IPv4 or IPv6).
+          cleanup() {
+            sudo iptables -D OUTPUT ! -o lo -m conntrack --ctstate NEW -j REJECT || true
+            sudo ip6tables -D OUTPUT ! -o lo -m conntrack --ctstate NEW -j REJECT || true
+          }
+          trap cleanup EXIT
+          sudo iptables -I OUTPUT 1 ! -o lo -m conntrack --ctstate NEW -j REJECT
+          sudo ip6tables -I OUTPUT 1 ! -o lo -m conntrack --ctstate NEW -j REJECT
+          npm run test:e2e
+      - name: Upload browser failure report and traces
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-safety-failure
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
