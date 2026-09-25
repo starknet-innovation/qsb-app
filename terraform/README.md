@@ -117,20 +117,27 @@ records and idle/storage billing require separate operational observation.
 
 ### Reconciliation operator role
 
-`operator_principal_arns` is required, with no default: supply exact existing IAM
-user or role ARNs in your private tfvars. Account-root delegation and wildcards
-are rejected. The role uses the configured IAM path and permissions boundary;
-its ARN is `operator_reconcile_role_arn`. The MFA condition is mandatory, so a
-federated session that does not provide `aws:MultiFactorAuthPresent` cannot assume
-it. Do not remove the condition to work around that.
+For the bootstrap human-access flow, run reconciliation directly as the
+MFA-backed `qsb-operator`; follow [Reconciliation with the bootstrap operator
+profile](../docs/OPERATIONAL-RUNBOOK.md#reconciliation-with-the-bootstrap-operator-profile).
+That session has broader deployment and QSB data privileges, not merely the
+CLI's exact-record scope. Do not configure a second assume-role hop: the bootstrap
+user and its roles explicitly deny role chaining.
 
-See the [operator assume-role procedure](../docs/OPERATIONAL-RUNBOOK.md#assume-the-reconciliation-role).
-The inline policy grants only GetItem/PutItem on present OWNER partitions, one
-coordinator StartExecution, and the configured provider secret. Optional CMK
-decryption is scoped to the configured key through Secrets Manager. A configured
-boundary and the key policy must also allow it; this change does not broaden
-administrator-managed boundaries. A future provider replacement changes the
-provider credential grant, not record or workflow authority.
+Terraform still declares the separately scoped `operator_reconcile_role_arn`.
+`operator_principal_arns` is required with no default; for this bootstrap flow,
+supply the exact `qsb-operator` role ARN in private tfvars. `NoRoleChaining` keeps
+that principal from assuming the runtime reconcile role, so this role stays
+dormant for the bootstrap identity. Account-root delegation and wildcards are
+rejected. The role uses the configured IAM path and permissions boundary, and
+requires MFA; do not weaken those conditions to bypass the bootstrap design.
+
+Its inline policy remains distinct from the broader `qsb-operator` policy:
+GetItem/PutItem on present OWNER partitions, StartExecution on the one workflow,
+and, when Batch is configured, regional Batch DescribeJobs/ListJobs/DescribeJobQueues
+plus GetObject on the configured outputs prefix. It has no provider-secret or
+KMS decrypt grant. The administrator-managed boundary must also permit those
+actions; this stack does not change its policy.
 
 ### Served solver release
 

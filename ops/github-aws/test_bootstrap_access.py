@@ -17,7 +17,7 @@ ARN = f'arn:aws:access-analyzer:eu-west-1:{ACCOUNT}:analyzer/qsb-external-access
 
 
 class BootstrapAnalyzerReadiness(unittest.TestCase):
-    def bootstrap(self, existing, statuses=(), dry=False):
+    def bootstrap(self, existing, statuses=(), dry=False, *, responses_override=None, cli_failure=None):
         self.calls = []
         states = iter(statuses)
         last = 'CREATING'
@@ -46,14 +46,27 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
                 ('iam', 'list-users'): {'Users': []},
                 ('iam', 'list-policies'): {'Policies': [{'PolicyName': 'qsb-runtime-boundary'}]},
                 ('iam', 'create-policy'): {'Policy': {'Arn': f'arn:aws:iam::{ACCOUNT}:policy/qsb/bootstrap/test'}},
+                ('iam', 'create-user'): {},
+                ('iam', 'attach-user-policy'): {},
+                ('iam', 'put-user-policy'): {},
+                ('iam', 'create-role'): {},
+                ('iam', 'attach-role-policy'): {},
                 ('accessanalyzer', 'list-analyzers'): {'analyzers': existing},
                 ('accessanalyzer', 'create-analyzer'): {'arn': ARN},
             }
-            if (service, operation) == ('accessanalyzer', 'get-analyzer'):
+            key = (service, operation)
+            if key == cli_failure:
+                return subprocess.CompletedProcess(command, 254, '',
+                    'An error occurred (AccessDeniedException) when calling the operation')
+            if key in (responses_override or {}):
+                response = responses_override[key]
+            elif key == ('accessanalyzer', 'get-analyzer'):
                 last = next(states, last)
                 response = {'analyzer': {'arn': ARN, 'type': 'ACCOUNT', 'status': last}}
             else:
-                response = responses.get((service, operation), {})
+                if key not in responses:
+                    self.fail(f'Unexpected AWS operation {key}')
+                response = responses[key]
             return subprocess.CompletedProcess(command, 0, json.dumps(response), '')
 
         with tempfile.TemporaryDirectory() as directory:
@@ -100,6 +113,41 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
                 self.bootstrap([], [status])
             self.assert_no_iam_mutations()
             self.assertEqual(self.calls.count(('accessanalyzer', 'get-analyzer')), 1)
+
+    def test_missing_creation_identity_stops_before_iam_write(self):
+        with self.assertRaisesRegex(SystemExit, 'creation returned no identity'):
+            self.bootstrap([], responses_override={('accessanalyzer', 'create-analyzer'): {}})
+        self.assert_no_iam_mutations()
+        self.assertNotIn(('accessanalyzer', 'get-analyzer'), self.calls)
+
+    def test_mismatched_created_analyzer_identity_stops_before_iam_write(self):
+        for change in ({'arn': ARN + '-other'}, {'type': 'ORGANIZATION'}):
+            response = {'arn': ARN, 'type': 'ACCOUNT', 'status': 'ACTIVE', **change}
+            with self.subTest(change=change), self.assertRaisesRegex(SystemExit, 'identity mismatch'):
+                self.bootstrap([], responses_override={('accessanalyzer', 'get-analyzer'): {'analyzer': response}})
+            self.assert_no_iam_mutations()
+            self.assertEqual(self.calls.count(('accessanalyzer', 'get-analyzer')), 1)
+
+    def test_analyzer_cli_failures_stop_before_iam_write(self):
+        for operation in ('list-analyzers', 'create-analyzer', 'get-analyzer'):
+            with self.subTest(operation=operation), self.assertRaisesRegex(
+                    SystemExit, f'accessanalyzer {operation} failed: AccessDeniedException; reconcile before retrying'):
+                self.bootstrap([], cli_failure=('accessanalyzer', operation))
+            self.assert_no_iam_mutations()
+            self.assertEqual(self.calls[-1], ('accessanalyzer', operation))
+
+    def test_existing_identity_clashes_stop_before_any_analyzer_call(self):
+        clashes = [
+            (('iam', 'list-roles'), {'Roles': [{'RoleName': 'qsb-operator'}]}),
+            (('iam', 'list-users'), {'Users': [{'UserName': 'qsb-operator-user'}]}),
+            (('iam', 'list-policies'), {'Policies': [{'PolicyName': 'qsb-runtime-boundary'},
+                                                   {'PolicyName': 'qsb-gpu-boundary'}]}),
+        ]
+        for key, response in clashes:
+            with self.subTest(key=key), self.assertRaisesRegex(SystemExit, 'Already exists, inspect before updating'):
+                self.bootstrap([], responses_override={key: response})
+            self.assert_no_iam_mutations()
+            self.assertFalse([call for call in self.calls if call[0] == 'accessanalyzer'])
 
     def test_plan_does_not_create_or_inspect_analyzers(self):
         with self.assertRaises(SystemExit):

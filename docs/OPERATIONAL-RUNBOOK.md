@@ -47,9 +47,10 @@ Treat `unknown`, `timeout`, and `http-ambiguous` as unpaid-or-paid until a provi
 
 ## Reconcile an unknown AWS Batch submission
 
-This section describes the pre-#54 implementation. The bootstrap `qsb-operator`
-profile cannot run it because it has no secret-read grant. Wait for #54 and the
-Batch deployment; do not add credential access to make this legacy path work.
+Run this as `qsb-operator` against the deployed AWS Batch coordinator; see
+[Reconciliation with the bootstrap operator profile](#reconciliation-with-the-bootstrap-operator-profile).
+The Batch path needs no provider secret. The profile has broader deployment
+privileges than this CLI uses; it is not a scoped reconciliation-only session.
 
 An unknown POST is never retried automatically. The operator command requires an
 explicit decision with an operator identifier and a public evidence reference.
@@ -63,8 +64,8 @@ Required environment: `TABLE_NAME` (the CLI refuses MemoryStore), `AWS_REGION`,
 `terraform output -raw transactions_enabled` or uncached `GET /api/config`
 (`operationsEnabled`, with `network` equal to `mainnet`). Missing or malformed
 values refuse before application imports. Both modes validate the required values before application imports,
-credentials, or database/provider reads and writes. The operator role needs GetItem on job/vault records, transactional PutItem
-on the job and `RECONCILIATION#` audit rows, Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. It cannot submit or cancel Batch jobs and does not broadcast.
+credentials, or database/provider reads and writes. The CLI needs GetItem on job/vault records, transactional PutItem
+on the job, `RECONCILIATION#` and `RECONCILIATION_REQUEST#` audit rows, Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. The CLI never submits or cancels Batch jobs and does not broadcast; the `qsb-operator` session itself has broader deployment and data permissions.
 
 To attach a known provider ID from AWS Batch's console and matching operator logs:
 

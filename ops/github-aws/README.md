@@ -181,7 +181,7 @@ combination after bootstrap as described below before relying on it. Agents such
 session that you started. They never see or type the code. Then:
 
 - confirm with `python3 ops/github-aws/verify_access.py --profile qsb-view --inventory INVENTORY --live`;
-- **After #54 merges and the Batch deployment is installed**, run the #14 reconcile CLI as `qsb-operator`. It covers the records, workflow and Batch calls in that version. The older Runpod CLI requires secret access this role deliberately lacks; do not grant it Secrets Manager access to work around that dependency. The #25 reconcile role stays unreachable from this user and the two bootstrap roles by design: their explicit denies prevent chaining into a runtime role. This does not prevent the operator from granting an outside principal access through runtime trust or bucket policies. Terraform still needs a value for `operator_principal_arns`; set it to the `qsb-operator` role ARN, which `NoRoleChaining` keeps from assuming it, so that role stays dormant;
+- **With the Batch deployment installed**, run the #14 reconcile CLI as `qsb-operator`. It covers the records, workflow and Batch calls in that version. The older Runpod CLI requires secret access this role deliberately lacks; do not grant it Secrets Manager access to work around that dependency. The #25 reconcile role stays unreachable from this user and the two bootstrap roles by design: their explicit denies prevent chaining into a runtime role. This does not prevent the operator from granting an outside principal access through runtime trust or bucket policies. Terraform still needs a value for `operator_principal_arns`; set it to the `qsb-operator` role ARN, which `NoRoleChaining` keeps from assuming it, so that role stays dormant;
 - keep root for break-glass only.
 
 **Verify** before relying on these, against current AWS docs:
@@ -193,12 +193,21 @@ session that you started. They never see or type the code. Then:
 
 The operator explicitly denies function URL creation/updates, DynamoDB resource
 policy writes and ECR repository policy writes. Lambda AddPermission is limited
-to API Gateway and EventBridge principals; keep their SourceArn/SourceAccount
-bindings in the reviewed Terraform. These restrictions do not inspect runtime
-role trust, S3 bucket policy contents or cross-account log subscriptions. An
-operator can still grant persistent outside access through those remaining
-surfaces, including frontend content access. MFA on the original operator session
-does not make those downstream grants expire.
+to API Gateway and EventBridge principals. This principal restriction does not
+validate the permission's `SourceArn` or `SourceAccount`; keep source restrictions
+bound to the reviewed account and resources in Terraform. An operator can still grant persistent outside access via:
+
+- a Lambda permission for either allowed service principal whose `SourceArn` or
+  `SourceAccount` names another account, or whose source restrictions are missing;
+- runtime role trust changes, S3 bucket policies (including frontend content
+  access), or cross-account log subscriptions.
+
+[Cross-account API Gateway integrations](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-cross-account-lambda-integrations.html)
+and [EventBridge cross-account service targets](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-service-cross-account.html)
+can provide an outside invocation path through those allowed service principals.
+MFA on the original operator session does not make downstream grants expire.
+Do not assume Access Analyzer reports every service-principal permission; review
+the actual source restrictions and test alert delivery independently.
 
 `bootstrap_access.py` creates an IAM Access Analyzer external-access analyzer,
 `qsb-external-access`, if the selected region has no account analyzer. Before creating
@@ -211,9 +220,10 @@ are never replaced automatically. This checks analyzer readiness, not alert deli
 The operator is denied every
 Access Analyzer action, and `qsb-viewonly` can list findings. After bootstrap,
 root should route its findings to an independently controlled alert destination.
-Also alert on CloudTrail CreateRole, UpdateAssumeRolePolicy, PutBucketPolicy and
-PutSubscriptionFilter calls by qsb-operator, and review Lambda service-principal
-permission changes. Keep alert rules outside `qsb-gpu-*`, and their roles,
+Also alert on CloudTrail CreateRole, UpdateAssumeRolePolicy, PutBucketPolicy,
+PutSubscriptionFilter and Lambda AddPermission calls by qsb-operator. Review each
+Lambda service-principal permission's SourceArn/SourceAccount for missing or
+outside-account bindings. Keep alert rules outside `qsb-gpu-*`, and their roles,
 policies and destinations outside all QSB deploy resource patterns, so the
 operator cannot disable them. Configure and test delivery as root; the bootstrap
 creates only the analyzer, not alert or monitoring resources. Findings require human review,
