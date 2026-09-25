@@ -499,12 +499,12 @@ it.each(["queued", "searching"] as const)("deployment switch pauses %s without l
   await store.put({...paused,version:paused.version+1,job:resumed},paused.version);
   mocks.enabled = true;
   mocks.status.mockResolvedValue({status:"IN_PROGRESS"});
-  expect(await handler({...event,revision:1})).toMatchObject({done:false});
+  expect(await handler({...event,revision:1})).toMatchObject({done:false,waitSeconds:5});
   expect(mocks.status).toHaveBeenCalledWith("already-paid");
   expect(mocks.prepareRun).not.toHaveBeenCalled();
   expect(mocks.run).not.toHaveBeenCalled();
   expect(mocks.cancel).not.toHaveBeenCalled();
-  expect((await store.get(pk,sk))!.job).toMatchObject({...frozen,status:"queued",revision:1});
+  expect((await store.get(pk,sk))!.job).toMatchObject({...frozen,status:"searching",revision:1});
   expect(await store.get(reservation.pk,reservation.sk)).toEqual(reservation);
 });
 it("deployment pause preserves unknown-submission blockers", async () => {
@@ -557,4 +557,23 @@ it("marks a searching job with a lost POST response unknown before deployment pa
   await handler(event);
   expect(mocks.prepareRun).not.toHaveBeenCalled();
   expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it.each(["IN_QUEUE", "IN_PROGRESS"])("resumed paid job polls %s with a five-second wait", async (status) => {
+  await seed({status:"queued",runpodId:"already-paid",retryRequested:true});
+  mocks.status.mockResolvedValue({status});
+  expect(await handler(event)).toMatchObject({done:false,waitSeconds:5});
+  expect((await store.get(pk,sk))!.job).toMatchObject({status:"searching",runpodId:"already-paid"});
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+it("persists resumed polling state before a transient provider failure", async () => {
+  await seed({status:"queued",runpodId:"already-paid",retryRequested:true});
+  mocks.status.mockRejectedValueOnce(new Error("HTTP 429"));
+  await expect(handler(event)).rejects.toThrow("HTTP 429");
+  expect((await store.get(pk,sk))!.job).toMatchObject({status:"searching",runpodId:"already-paid"});
+  mocks.status.mockResolvedValue({status:"IN_PROGRESS"});
+  expect(await handler(event)).toMatchObject({done:false,waitSeconds:5});
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
 });

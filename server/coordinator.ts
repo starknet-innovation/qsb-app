@@ -129,6 +129,14 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     await save();
     return { ...event, done: true };
   }
+  // Resume may queue a job that already owns a paid provider submission.
+  // Persist polling state before external reads so even a transient failure leaves
+  // it eligible for operator reconciliation, without issuing another POST.
+  if (job.status === "queued" && job.runpodId) {
+    job.status = "searching";
+    await save();
+    row.version++;
+  }
   const runpod = await configuredRunpod();
   if (job.status === "paused") {
     if (job.runpodId) {
