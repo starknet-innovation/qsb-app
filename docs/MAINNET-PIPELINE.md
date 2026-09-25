@@ -20,6 +20,6 @@ While those flags are false, this checkout refuses:
 - vault funding (`POST /api/vaults/:id/fund`)
 - job creation (`POST /api/jobs`), so `startWorkflow` is not called from a public request
 - job resume (`POST /api/jobs/:id/resume`)
-- job submission (`POST /api/jobs/:id/submit`)
+- job submission (`POST /api/jobs/:id/submit`) by default; #20 adds a separate, default-off `QSB_EXACT_SUBMIT_ENABLED` switch for a solved, exact signed withdrawal. See [EXACT-SUBMIT.md](EXACT-SUBMIT.md).
 
 A refusal does not write a job, start the state machine, or contact a miner. Issue #22 (enable mainnet and complete a withdrawal) is not part of this change.

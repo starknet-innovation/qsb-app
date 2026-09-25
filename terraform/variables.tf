@@ -95,3 +95,13 @@ variable "operator_principal_arns" {
     error_message = "Supply at least one exact IAM user or role ARN; root, wildcard and session principals are not accepted."
   }
 }
+
+variable "exact_submit_enabled" {
+  description = "Single exact-withdrawal submit switch. Keep false until explicit issue #22 transaction authorization. Does not enable wallet creation or search."
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.exact_submit_enabled || var.network == "mainnet"
+    error_message = "Exact submission is implemented for mainnet only."
+  }
+}

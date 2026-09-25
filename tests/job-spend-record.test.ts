@@ -3,11 +3,17 @@ import { Signer } from "bip322-js";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { ConsensusError } from "../server/consensus";
 import { createApp } from "../server/app";
 import { Esplora } from "../server/chain";
 import { Slipstream } from "../server/providers";
 import { MemoryStore } from "../server/store";
-import { release, type Job, type PublicVault, type Withdrawal } from "../src/lib/model";
+import {
+  release,
+  type Job,
+  type PublicVault,
+  type Withdrawal,
+} from "../src/lib/model";
 import { outputScript } from "../src/lib/transactions";
 import {
   assertStoredJobSpend,
@@ -148,9 +154,7 @@ describe("stored withdrawal spend record", () => {
       locktime: solution.locktime,
     });
     const record = buildStoredSpendRecord(job());
-    expect(() =>
-      assertStoredJobSpend(job(), signedTx(record)),
-    ).not.toThrow();
+    expect(() => assertStoredJobSpend(job(), signedTx(record))).not.toThrow();
     expect(release.mainnetEnabled).toBe(false);
     expect("broadcastAuthorized" in release).toBe(false);
   });
@@ -164,10 +168,16 @@ describe("stored withdrawal spend record", () => {
 
   it("rejects a stored destination that differs from its unchanged output script", () => {
     const record = buildStoredSpendRecord(job());
-    const otherAddress = btc.p2wpkh(secp256k1.getPublicKey(new Uint8Array(32).fill(7))).address!;
-    const mismatched = job({ manifest: { ...manifest, destination: otherAddress } });
+    const otherAddress = btc.p2wpkh(
+      secp256k1.getPublicKey(new Uint8Array(32).fill(7)),
+    ).address!;
+    const mismatched = job({
+      manifest: { ...manifest, destination: otherAddress },
+    });
     assertMismatch(signedTx(record), mismatched);
-    expect(() => buildStoredSpendRecord(mismatched)).toThrow("ExactSpendMismatch");
+    expect(() => buildStoredSpendRecord(mismatched)).toThrow(
+      "ExactSpendMismatch",
+    );
   });
 
   it("rejects a wrong amount when the stored fee still matches that output", () => {
@@ -223,18 +233,16 @@ describe("stored withdrawal spend record", () => {
   it("rejects wrong inputs", () => {
     const record = buildStoredSpendRecord(job());
     assertMismatch(signedTx(record, { helperTxid: "33".repeat(32) }));
-    assertMismatch(
-      signedTx(record, { fundingSequence: record.sequence + 1 }),
-    );
+    assertMismatch(signedTx(record, { fundingSequence: record.sequence + 1 }));
   });
 
   it("rejects an unbalanced stored fee before trusting the signed bytes", () => {
     const unbalanced = job({
       manifest: { ...manifest, fee: "20001" },
     });
-    expect(() =>
-      assertStoredJobSpend(unbalanced, "00"),
-    ).toThrow("ExactSpendMismatch");
+    expect(() => assertStoredJobSpend(unbalanced, "00")).toThrow(
+      "ExactSpendMismatch",
+    );
   });
 
   it("rejects a helper signature that is not SIGHASH_ALL", () => {
@@ -264,7 +272,9 @@ describe("submit route binds the stored spend", () => {
     const store = new MemoryStore();
     const chain = new Esplora();
     const miner = new Slipstream();
-    const unspent = vi.spyOn(chain, "unspent");
+    const unspent = vi
+      .spyOn(chain, "unspent")
+      .mockResolvedValue({ previousTxHex: "", confirmations: 1 });
     const raw = vi.spyOn(chain, "raw");
     const submit = vi.spyOn(miner, "submit");
     const test = vi.spyOn(miner, "test");
@@ -292,7 +302,16 @@ describe("submit route binds the stored spend", () => {
       version: 0,
       job: { ...stored, owner },
     });
-    const app = createApp(store, { chain, miner, enabled: true });
+    const app = createApp(store, {
+      chain,
+      miner,
+      exactSubmit: true,
+      consensus: {
+        verify: async () => {
+          throw new ConsensusError();
+        },
+      },
+    });
     const challenge = await (
       await app.request(
         new Request("http://localhost/api/auth/challenge", {
@@ -379,21 +398,23 @@ describe("submit route binds the stored spend", () => {
     expect(release.mainnetEnabled).toBe(false);
   });
 
-  it("accepts the binding and still refuses the permit and the miner", async () => {
+  it("refuses a bound spend when offline consensus rejects", async () => {
     const record = buildStoredSpendRecord(job());
     const result = await post(signedTx(record));
     expect(result.status).toBe(409);
-    expect(result.body).toMatchObject({ error: "SpendAuthorizationRequired" });
+    expect(result.body).toMatchObject({
+      error: "Offline Bitcoin Core consensus verification failed.",
+    });
     expect(result.submit).not.toHaveBeenCalled();
     expect(result.test).not.toHaveBeenCalled();
     expect(result.raw).not.toHaveBeenCalled();
-    expect(result.unspent).not.toHaveBeenCalled();
+    expect(result.unspent).toHaveBeenCalledTimes(2);
     expect(
       (await result.store.get("OWNER#" + result.owner, "JOB#" + job().id))?.job,
     ).toMatchObject({ status: "awaiting_authorization" });
   });
 
-  it("checks spend binding for a submitted job before refusing the permit", async () => {
+  it("checks spend binding and refuses submitted jobs without an intent", async () => {
     const record = buildStoredSpendRecord(job());
     const submitted = job({ status: "submitted" });
     const mismatch = await post(
@@ -404,6 +425,8 @@ describe("submit route binds the stored spend", () => {
     expect(mismatch.body).toMatchObject({ error: "ExactSpendMismatch" });
     const match = await post(signedTx(record), submitted);
     expect(match.status).toBe(409);
-    expect(match.body).toMatchObject({ error: "SpendAuthorizationRequired" });
+    expect(match.body).toMatchObject({
+      error: "Withdrawal is not ready for authorization.",
+    });
   });
 });

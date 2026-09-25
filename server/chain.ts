@@ -2,7 +2,12 @@ import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { z } from "zod";
 import { outputScript } from "../src/lib/transactions";
-import { outpoint, txid } from "../src/lib/model";
+import {
+  outpoint,
+  txid,
+  withdrawalSchema,
+  type Withdrawal,
+} from "../src/lib/model";
 
 import { NETWORK_ID, NETWORK_CONFIG } from "../src/lib/network";
 import { chainBase, testnet4Genesis } from "./network";
@@ -32,7 +37,8 @@ export class Esplora {
     return text;
   }
   async assertNetwork() {
-    const expected = NETWORK_ID === "testnet4" ? testnet4Genesis : NETWORK_CONFIG.genesisHash;
+    const expected =
+      NETWORK_ID === "testnet4" ? testnet4Genesis : NETWORK_CONFIG.genesisHash;
     // Check each operation; do not cache a provider's identity across requests.
     if ((await this.read("/block-height/0")).trim() !== expected)
       throw new ChainError(
@@ -73,6 +79,83 @@ export class Esplora {
       confirmations: tip - s.block_height + 1,
       blockHash: s.block_hash,
       blockHeight: s.block_height,
+    };
+  }
+  /** Follow the funding outpoint because a valid legacy scriptSig mutation changes txid. */
+  async withdrawalInclusion(manifest: Withdrawal) {
+    const approved = withdrawalSchema.parse(manifest);
+    await this.assertNetwork();
+    const spent = z
+      .discriminatedUnion("spent", [
+        z.object({ spent: z.literal(false) }),
+        z.object({
+          spent: z.literal(true),
+          txid,
+          vin: z.number().int().min(0).max(0xffffffff),
+        }),
+      ])
+      .parse(
+        JSON.parse(
+          await this.read(
+            `/tx/${approved.funding.txid}/outspend/${approved.funding.vout}`,
+          ),
+        ),
+      );
+    if (!spent.spent)
+      return {
+        confirmed: false,
+        confirmations: 0,
+        outpointMatched: false,
+        outputMatched: false,
+      };
+    // raw() binds the response bytes to the provider's actual spender txid.
+    const { tx } = await this.raw(spent.txid);
+    if (tx.inputsLength !== 2 || spent.vin >= tx.inputsLength)
+      throw new ChainError("Withdrawal spender input mismatch.");
+    const fundingInput = tx.getInput(spent.vin);
+    if (
+      !fundingInput.txid ||
+      hex.encode(fundingInput.txid) !== approved.funding.txid.toLowerCase() ||
+      fundingInput.index !== approved.funding.vout
+    )
+      throw new ChainError("Withdrawal spender input mismatch.");
+    const expected = [approved.helper, approved.funding]
+      .map((point) => `${point.txid.toLowerCase()}:${point.vout}`)
+      .sort();
+    const actual = [0, 1]
+      .map((index) => {
+        const input = tx.getInput(index);
+        return `${input.txid ? hex.encode(input.txid) : ""}:${input.index}`;
+      })
+      .sort();
+    if (
+      expected[0] === expected[1] ||
+      expected.some((point, index) => point !== actual[index])
+    )
+      throw new ChainError("Withdrawal spender input mismatch.");
+    if (tx.outputsLength !== 1)
+      throw new ChainError("Withdrawal spender output mismatch.");
+    const output = tx.getOutput(0);
+    if (
+      !output.script ||
+      hex.encode(output.script) !== approved.outputScript.toLowerCase() ||
+      hex.encode(outputScript(approved.destination)) !==
+        approved.outputScript.toLowerCase() ||
+      output.amount !== BigInt(approved.outputValue) ||
+      BigInt(approved.helper.value) +
+        BigInt(approved.funding.value) -
+        output.amount !==
+        BigInt(approved.fee)
+    )
+      throw new ChainError("Withdrawal spender output mismatch.");
+    // Do not accept the outspend endpoint's supplied status: status() separately
+    // checks the spender and its canonical block against the current chain tip.
+    const status = await this.status(spent.txid);
+    return {
+      ...status,
+      txid: tx.id,
+      outpointMatched: true,
+      outputMatched: true,
     };
   }
   async unspent(point: z.infer<typeof outpoint>, script: string) {

@@ -1,3 +1,10 @@
+import { submitExact, SubmitDisabled } from "./submit-exact";
+import {
+  CoreConsensus,
+  ConsensusError,
+  type ConsensusVerifier,
+} from "./consensus";
+import { exactSubmitEnabled } from "./exact-submit-permit";
 import { mainnetUiConfig, type MainnetUiOptions } from "./mainnetConfig";
 import {
   assertVaultConfiguration,
@@ -52,7 +59,6 @@ import {
   reportEsploraInclusion,
   transactionId,
 } from "./runtime/miner-inclusion";
-import { assertStoredJobSpend } from "./job-spend-record";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -70,6 +76,8 @@ export function createApp(
     chain?: Esplora;
     miner?: typeof slipstream;
     enabled?: boolean;
+    exactSubmit?: boolean;
+    consensus?: ConsensusVerifier;
     mainnetUi?: MainnetUiOptions;
     // Trusted server wiring only; routes under /api/jobs inherit the auth middleware.
     installAuthenticatedJobRoutes?: (routes: AuthenticatedJobRoutes) => void;
@@ -124,6 +132,8 @@ export function createApp(
     }),
   );
   app.onError((e, c) => {
+    if (e instanceof SubmitDisabled) return c.json({ error: e.message }, 503);
+    if (e instanceof ConsensusError) return c.json({ error: e.message }, 409);
     if (e instanceof MinerAuthenticationError)
       return c.json({ error: e.message }, 503);
     if (e instanceof MinerInclusionError)
@@ -373,7 +383,9 @@ export function createApp(
     const row = await store.get(pk, `TX#${id}`);
     if (!row) return c.json({ error: "Transaction intent not found" }, 404);
     const [chainResult, minerResult] = await Promise.allSettled([
-      ledger.status(id),
+      row.kind === "exact-withdrawal"
+        ? ledger.withdrawalInclusion(withdrawalSchema.parse(row.manifest))
+        : ledger.status(id),
       miner.status(id),
     ]);
     const onChain =
@@ -392,6 +404,10 @@ export function createApp(
       { ...row, status, checkedAt, version: row.version + 1 },
       row.version,
     );
+    const actualTxid =
+      onChain && "txid" in onChain && typeof onChain.txid === "string"
+        ? onChain.txid
+        : id;
     const judgment = judgeInclusionEvidence({
       ...(inMiner
         ? {
@@ -410,11 +426,11 @@ export function createApp(
               ...("blockHeight" in onChain && onChain.blockHeight !== undefined
                 ? { blockHeight: onChain.blockHeight }
                 : {}),
-              txid: id,
+              txid: actualTxid,
             },
           }
         : {}),
-      expectedTxid: id,
+      expectedTxid: actualTxid,
     });
     // A fulfilled ledger.status call is this route's Esplora query. The
     // report uses its own reason and limits when that query confirms.
@@ -424,6 +440,7 @@ export function createApp(
     );
     return c.json({
       txid: id,
+      includedTxid: onChain?.confirmed ? actualTxid : undefined,
       status,
       checkedAt,
       chain: onChain,
@@ -487,8 +504,7 @@ export function createApp(
     if (supervisedServiceJob(job))
       return c.json(
         {
-          error:
-            "Supervised jobs are not delivered by the coordinator result.",
+          error: "Supervised jobs are not delivered by the coordinator result.",
         },
         409,
       );
@@ -586,62 +602,25 @@ export function createApp(
     return c.json({ job }, 201);
   });
   app.post("/api/jobs/:id/submit", async (c) => {
-    if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
+    if (!(dependencies.exactSubmit ?? exactSubmitEnabled()))
       return c.json({ error: `${NETWORK_ID} withdrawals are disabled.` }, 503);
     const body = z
-      .object({
-        rawTxHex: z.string().max(150000),
-        spentFixtureRefs: z.array(z.unknown()).max(32).optional(),
-      })
+      .object({ rawTxHex: z.string().max(150000) })
       .strict()
       .parse(await c.req.json());
-    const { rawTxHex } = body;
-    const pk = `OWNER#${c.get("owner")}`,
-      sk = `JOB#${c.req.param("id")}`,
-      row = await store.get(pk, sk);
-    if (!row) return c.json({ error: "Job not found" }, 404);
-    const job = row.job as Job;
-    if (supervisedServiceJob(job))
-      return c.json(
-        { error: "Supervised jobs are not controlled by this route." },
-        409,
-      );
-    const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
-    if (!vaultRow) return c.json({ error: "Vault not found" }, 404);
-    if ((vaultRow.vault as PublicVault).network !== NETWORK_ID)
-      return c.json(
-        { error: "Vault belongs to a different Bitcoin network." },
-        409,
-      );
-    const amountSats = job.manifest?.outputValue;
-    const feeSats = job.manifest?.fee;
-    if (typeof amountSats !== "string" || typeof feeSats !== "string")
-      throw new MinerInclusionError("ExactSpendMismatch");
-    // The signed withdrawal is bound to the stored manifest and verified solution.
-    // This route still does not accept a caller exactSpend record, so it cannot satisfy 7.3.
-    assertStoredJobSpend(job, rawTxHex);
-    const permit = authorizeConfiguredSpend({
-      chain: NETWORK_ID,
-      chainBaseUrl: chainBase,
-      minerEndpoint: minerBase,
-      rawTxHex,
-      txid: transactionId(rawTxHex),
-      amountSats,
-      feeSats,
-      exactSpend: undefined,
-      spentFixtureRefs: body.spentFixtureRefs ?? [],
-      release,
-      walletApp: "xverse",
-    });
-    // Same refusal as funding: no chain read, no miner preflight, and no
-    // submitted job or transaction intent.
-    assertMainnetTransportClosed(permit, minerBase);
-    await callMinerSubmit({
-      permit,
-      rawTxHex,
-      transport: { endpoint: minerBase },
-    });
-    throw new MinerInclusionError("LiveMinerTransportRefused");
+    const result = await submitExact(
+      c.get("owner"),
+      c.req.param("id"),
+      body.rawTxHex,
+      {
+        store,
+        chain: ledger,
+        miner,
+        consensus: dependencies.consensus ?? new CoreConsensus(),
+        enabled: dependencies.exactSubmit ?? exactSubmitEnabled(),
+      },
+    );
+    return c.json(result);
   });
   app.post("/api/jobs/:id/pause", async (c) => {
     const pk = `OWNER#${c.get("owner")}`,
@@ -735,8 +714,25 @@ export function createApp(
         409,
       );
     if (!job.txid) return c.json({ job });
-    const status = await ledger.status(job.txid),
-      vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
+    const intent = await store.get(pk, `TX#${job.txid}`);
+    if (!intent) return c.json({ error: "Transaction intent not found" }, 404);
+    if (intent.kind === "exact-withdrawal" && intent.jobId !== job.id)
+      return c.json(
+        { error: "Transaction intent belongs to a different job" },
+        409,
+      );
+    const status =
+      intent.kind === "exact-withdrawal"
+        ? await ledger.withdrawalInclusion(
+            withdrawalSchema.parse(intent.manifest),
+          )
+        : await ledger.status(job.txid);
+    const includedTxid = status.confirmed
+      ? "txid" in status && typeof status.txid === "string"
+        ? status.txid
+        : job.txid
+      : undefined;
+    const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
     if (!vaultRow) return c.json({ error: "Vault not found" }, 404);
     const vault = vaultRow.vault as PublicVault;
     job.status = status.confirmed ? "confirmed" : "submitted";
@@ -749,7 +745,9 @@ export function createApp(
         expected: vaultRow.version,
       },
     ]);
-    return c.json({ job, status });
+    // Keep job.txid bound to the durable original intent even when the mined
+    // legacy scriptSig has a different transaction identifier.
+    return c.json({ job, status, includedTxid });
   });
   const authenticatedGet = {
     get: ((path: string, ...handlers: any[]) => {
