@@ -27,3 +27,9 @@ The host script uses a durable one-shot marker to reject execution retries.
 The controller commit and image build commit are separate identities. Record
 both, the image digest, verified live price, AMI, raw outputs and final cloud
 cleanup. This is a one-off experiment, not production activation.
+
+If measured SSM throughput cannot fit the image inside the deadline, `transfer.py`
+uses a fresh private encrypted S3 bucket with TLS required. The host role gains
+GetObject on exactly the image object; it receives no bucket listing, writing,
+application access, presigned URL or operator credentials. Check the trusted
+archive hash after download. Delete the object and bucket during cleanup.

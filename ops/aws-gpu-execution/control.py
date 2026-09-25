@@ -80,7 +80,10 @@ def main():
         s.update(phase='prepared',functionArn=function_arn);save(path,s)
     else:
         s=json.loads(path.read_text());name=s['name']
-        if s['controllerCommit']!=commit: raise ValueError('Controller commit changed: reconcile first')
+        if s['controllerCommit']!=commit:
+            if args.mode!='cleanup': raise ValueError('Controller commit changed: reconcile first')
+            subprocess.run(['git','merge-base','--is-ancestor',s['controllerCommit'],commit],cwd=ROOT,check=True)
+            s['cleanupControllerCommit']=commit
         if args.mode=='arm':
             if s['phase']!='prepared': raise ValueError('Already armed or launched')
             # Start the fixed deadline before launch. Repeating arm is forbidden.
