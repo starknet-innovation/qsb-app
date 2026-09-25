@@ -58,9 +58,7 @@ function transactItem(
           TableName: table,
           Item: writes.find(
             (write) =>
-              write.row.pk === step.pk &&
-              write.row.sk === step.sk &&
-              write.remove !== true,
+              write.row.pk === step.pk && write.row.sk === step.sk && write.remove !== true,
           )!.row,
           ConditionExpression:
             step.condition === "attribute_not_exists(pk)"
@@ -181,9 +179,7 @@ export class MemoryStore implements Store {
       if (
         !conditionOnly &&
         (seen.has(key) ||
-          (expected === undefined
-            ? old !== undefined
-            : old?.version !== expected))
+          (expected === undefined ? old !== undefined : old?.version !== expected))
       )
         throw new Conflict("Input reserved or concurrent update");
       if (conditionOnly && old?.version !== expected)
@@ -243,26 +239,21 @@ export class DynamoStore implements Store {
   constructor(private table: string) {}
   async atomicPut(writes: AtomicWrite[]) {
     if (
-      writes.some(
-        (write) => isReservationRow(write.row) || isAuthorityRow(write.row),
-      )
+      writes.some((write) => isReservationRow(write.row) || isAuthorityRow(write.row))
     )
       rejectGuarded(await this.get(AUTHORITY_PK, AUTHORITY_SK), writes);
     const steps = dynamoReservationTransaction(writes);
-    const authorityCheck = steps.find(
-      (step) => step.kind === "authority-absent",
-    );
+    const authorityCheck = steps.find((step) => step.kind === "authority-absent");
     try {
       await this.client.send(
         new TransactWriteCommand({
-          TransactItems: steps.map((step) =>
-            transactItem(this.table, step, writes),
-          ),
+          TransactItems: steps.map((step) => transactItem(this.table, step, writes)),
         }),
       );
     } catch (e) {
-      const reasons = (e as { CancellationReasons?: { Code?: string }[] })
-        .CancellationReasons;
+      const reasons = (
+        e as { CancellationReasons?: { Code?: string }[] }
+      ).CancellationReasons;
       // Do not disguise authorization, capacity, validation or unknown failures as
       // optimistic concurrency. A mixed cancellation must preserve its real error.
       const conflictCodes = new Set([
@@ -404,10 +395,7 @@ export class DynamoStore implements Store {
         new ScanCommand({
           TableName: this.table,
           FilterExpression: "sk = :sk AND begins_with(pk, :prefix)",
-          ExpressionAttributeValues: {
-            ":sk": "RESERVATION",
-            ":prefix": "OUTPOINT#",
-          },
+          ExpressionAttributeValues: { ":sk": "RESERVATION", ":prefix": "OUTPOINT#" },
           ExclusiveStartKey: start,
           ConsistentRead: true,
         }),
