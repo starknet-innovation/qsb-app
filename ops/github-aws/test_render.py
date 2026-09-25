@@ -3,6 +3,9 @@
 These inspect policy structure; use verify.py for AWS IAM simulation.
 """
 import unittest
+import fnmatch
+import re
+from pathlib import Path
 
 from render import render
 
@@ -30,6 +33,23 @@ class SinglePipelinePolicies(unittest.TestCase):
                         self.assertNotIn(action.split(':')[0], removed, (kind, action))
         runtime_actions = [a for s in self.policies['boundary']['Statement'] for a in s['Action']]
         self.assertFalse(any(a.startswith('s3:') for a in runtime_actions))
+
+    def test_role_deletion_lookup_is_scoped_without_instance_profile_management(self):
+        statement = self.statement('deploy', 'ManageRuntimeRoles')
+        self.assertIn('iam:ListInstanceProfilesForRole', statement['Action'])
+        self.assertEqual(statement['Resource'], ['arn:aws:iam::123456789012:role/qsb/runtime/qsb-*'])
+        for s in self.policies['deploy']['Statement']:
+            if s['Effect'] == 'Allow':
+                for action in s['Action']:
+                    if 'InstanceProfile' in action:
+                        self.assertEqual(action, 'iam:ListInstanceProfilesForRole')
+
+    def test_example_secret_fits_provider_boundary(self):
+        root = Path(__file__).resolve().parents[2]
+        example = (root / 'terraform/terraform.tfvars.example').read_text()
+        secret = re.search(r'^# runpod_secret_arn\s*=\s*"([^"\n]+)"', example, re.M).group(1)
+        resources = self.statement('boundary', 'ProviderSecret')['Resource']
+        self.assertTrue(any(fnmatch.fnmatchcase(secret, resource) for resource in resources))
 
     def test_role_passing_only_to_retained_execution_services(self):
         passing = self.statement('deploy', 'PassRuntimeRoles')

@@ -45,7 +45,7 @@ def render(c):
     allow('RegisteredQsbApis', ['apigateway:GET','apigateway:POST','apigateway:PUT','apigateway:PATCH','apigateway:DELETE'],api_resources)
     allow('ApiDiscovery',['apigateway:GET'],[f'arn:aws:apigateway:{region}::/apis'])
     allow('CreateBoundedRuntimeRoles',['iam:CreateRole','iam:PutRolePolicy','iam:AttachRolePolicy','iam:UpdateAssumeRolePolicy','iam:PutRolePermissionsBoundary'],[runtime_roles],{'StringEquals':{'iam:PermissionsBoundary':boundary}})
-    allow('ManageRuntimeRoles',['iam:GetRole','iam:GetRolePolicy','iam:ListRolePolicies','iam:ListAttachedRolePolicies','iam:ListRoleTags','iam:TagRole','iam:UntagRole','iam:DeleteRolePolicy','iam:DetachRolePolicy','iam:DeleteRole','iam:UpdateRole','iam:UpdateRoleDescription'],[runtime_roles])
+    allow('ManageRuntimeRoles',['iam:GetRole','iam:ListInstanceProfilesForRole','iam:GetRolePolicy','iam:ListRolePolicies','iam:ListAttachedRolePolicies','iam:ListRoleTags','iam:TagRole','iam:UntagRole','iam:DeleteRolePolicy','iam:DetachRolePolicy','iam:DeleteRole','iam:UpdateRole','iam:UpdateRoleDescription'],[runtime_roles])
     allow('ReadRuntimeBoundary',['iam:GetPolicy','iam:GetPolicyVersion'],[boundary])
     allow('PassRuntimeRoles',['iam:PassRole'],[runtime_roles],{'StringEquals':{'iam:PassedToService':['lambda.amazonaws.com','states.amazonaws.com']}})
     allow('StateList',['s3:ListBucket','s3:GetBucketLocation'],['arn:aws:s3:::'+c['state_bucket']])

@@ -109,7 +109,7 @@ run "configured_single_pipeline" {
   variables {
     network            = "mainnet"
     runpod_endpoint_id = "exampleendpoint"
-    runpod_secret_arn  = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/runpod-Example"
+    runpod_secret_arn  = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb-vault/runpod-Example"
   }
   assert {
     condition     = output.runpod_configured && output.transactions_enabled == false && length(aws_iam_role_policy.runpod) == 1 && length(jsondecode(aws_iam_role_policy.runpod[0].policy).Statement) == 1 && jsondecode(aws_iam_role_policy.runpod[0].policy).Statement[0].Effect == "Allow" && jsondecode(aws_iam_role_policy.runpod[0].policy).Statement[0].Resource == var.runpod_secret_arn && toset(try(tolist(jsondecode(aws_iam_role_policy.runpod[0].policy).Statement[0].Action), [jsondecode(aws_iam_role_policy.runpod[0].policy).Statement[0].Action])) == toset(["secretsmanager:GetSecretValue"])
@@ -131,7 +131,7 @@ run "operator_reconcile_scope" {
     network                      = "mainnet"
     operator_principal_arns      = ["arn:aws:iam::123456789012:user/alice", "arn:aws:iam::123456789012:role/operators"]
     runpod_endpoint_id           = "exampleendpoint"
-    runpod_secret_arn            = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/runpod-Example"
+    runpod_secret_arn            = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb-vault/runpod-Example"
     runpod_secret_kms_key_arn    = "arn:aws:kms:eu-west-1:123456789012:key/mrk-11111111111111111111111111111111"
     iam_role_path                = "/qsb/runtime/"
     iam_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary"
@@ -169,7 +169,7 @@ run "operator_without_cmk" {
   variables {
     network            = "mainnet"
     runpod_endpoint_id = "exampleendpoint"
-    runpod_secret_arn  = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/runpod-Example"
+    runpod_secret_arn  = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb-vault/runpod-Example"
   }
   assert {
     condition     = length(jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement) == 4 && !contains(flatten([for s in jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement : s.Action]), "kms:Decrypt")
@@ -215,7 +215,7 @@ run "reject_provider_key_wildcard" {
   variables {
     network                   = "mainnet"
     runpod_endpoint_id        = "exampleendpoint"
-    runpod_secret_arn         = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/runpod-Example"
+    runpod_secret_arn         = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb-vault/runpod-Example"
     runpod_secret_kms_key_arn = "arn:aws:kms:eu-west-1:123456789012:key/*"
   }
   expect_failures = [var.runpod_secret_kms_key_arn]
