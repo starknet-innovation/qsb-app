@@ -8,7 +8,7 @@ locals {
     RUNPOD_WORKERS_MAX          = tostring(local.gpu_spend.workersMax)
     RUNPOD_WORKERS_MIN          = tostring(local.gpu_spend.workersMin)
     RUNPOD_EXECUTION_TIMEOUT_MS = tostring(local.gpu_spend.executionTimeoutMs)
-    MAX_JOB_ATTEMPTS            = tostring(local.gpu_spend.maxJobAttempts)
+    MAX_JOB_GPU_SECONDS         = tostring(local.gpu_spend.maxJobGpuSeconds)
   }
   functions = toset(["api", "coordinator", "reference"])
   mime = {

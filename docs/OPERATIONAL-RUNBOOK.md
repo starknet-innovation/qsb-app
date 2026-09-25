@@ -11,7 +11,7 @@ The checked-in capability limit is `providerGpuLimit: 1` in `server/mainnet-capa
 - `maxConcurrentSearches`: 1
 - `maxGpuWorkers`: 1
 - `minIdleWorkers`: 0
-- The coordinator path uses `server/gpu-spend.json`: `workersMax` 1, `workersMin` 0, `executionTimeoutMs` 900000, and `maxJobAttempts` 32768 (lifetime submissions, including retries and all stages). A 64-hit output is not credited as a finished range. These checks do not start a worker, evaluate the USD ceiling, or authorize a spend.
+- The coordinator path uses `server/gpu-spend.json`: `workersMax` 1, `workersMin` 0, `executionTimeoutMs` 900000, and `maxJobGpuSeconds` 172800 (48 GPU-hours per job, reserved across retries and all stages). A 64-hit output is not credited as a finished range. These checks do not start a worker, evaluate the USD ceiling, or authorize a spend.
 - `costUnit` is `operator-units`. `maxCostUnits` is a positive integer of those units. The operator cost field is not the experimental USD ceiling. A plan that labels the field as USD, or that supplies `vaultUsd`, `feeUsd`, or `gpuUsd` on the runbook, is refused with `CostFieldIsNotUsdCeiling`.
 - The experimental USD limits are vault 10000, fee 1000, and GPU 1000. They are encoded only in `assertExperimentalUsdLimits`. That check cannot run while `release.mainnetEnabled` and `broadcastAuthorized` are false: it throws `UsdLimitCheckClosed` and does not compare amounts. It does not read `maxCostUnits`, approve activation, or authorize a spend.
 - A missing or zero operator cost ceiling is refused. A plan above the concurrency cap is refused. `acceptOperationalRunbook` does not provision workers. `executed`, `provisioned`, and `usdLimitsEvaluated` stay false. `costFieldIsUsdCeiling` stays false.
@@ -55,27 +55,29 @@ Local builds and source flags are not live-configuration evidence. A clean pushe
 
 Every proposed mainnet spend requires a separate exact-transaction authorization. The activation decision does not carry the transaction id, amount, or fee, and it does not set `broadcastAuthorized`. An exact spend record is still not a broadcast. This checkout grants neither.
 
-### Coordinator attempt allowance
+### Coordinator GPU-time allowance
 
-`server/gpu-spend.json` is the bundled source of truth. Its schema accepts positive
-integer submission caps up to 1,000,000; changing a value requires the normal
-review/build/deploy process, not four matching literals. The default is 32,768
-lifetime submissions. Stage-local `attempt` is a range index, not the spend counter:
-stage transitions reset that index but never reset `gpuSubmissions`.
+`server/gpu-spend.json` is the bundled source of truth. The selected budget is
+172,800 seconds (48 GPU-hours) per job. Changing it requires review/build/deploy.
+Before every paid POST, the coordinator atomically saves the greater of cumulative
+reserved seconds and observed compute seconds, plus the submission's timeout
+(currently 900 seconds). It pauses if this would exceed the budget. This permits
+192 worst-case reservations from a fresh job; it does not guarantee a solution.
 
-This is a conservative allowance, not a measured expected search time. Exact
-range arithmetic gives ceil(C(150,9) / 2^34) = 4,829 ranges per subset round;
-two complete rounds consume 9,658 submissions, leaving 23,110 for pinning/retries.
-The upstream ~2^47 honest-work comment corresponds to about 8,192 subset-sized
-units but is a theoretical estimate, not performance or success evidence. The
-32,768 default supplies four times that estimate; hard instances can still stop.
-The cap cannot promise a hit or support claims about withdrawal price. At the
-900-second timeout, the execution allowance alone is at most 8,192 worker-hours;
-startup, idle time, storage and provider retries/billing are not an invoice cap.
-No paid run is authorized by changing this configuration.
+Reservations are permanent: short runs, failed/cancelled/timed-out jobs, unknown
+POST outcomes, stage changes and resume requests do not refund or reset them.
+`computeSeconds` remains observed execution telemetry, not complete billing data.
+Legacy jobs with a recorded submission count reserve 900 seconds per historical
+submission. New jobs explicitly initialize their reservation at creation; missing or invalid
+accounting otherwise pauses for reconciliation (even at range zero). Stage-local `attempt` is only a
+range index. The retained `gpuSubmissions` count is telemetry/migration evidence,
+not the configured cap.
+
+Startup, idle time, storage and provider retry/billing behavior are not an invoice
+cap. No paid run is authorized by changing this configuration.
 
 Before a paid claim, endpoint-limit failures pause with `Runpod limits unconfirmed;
-nothing was submitted` and leave the lifetime count unchanged. Fix the endpoint
+nothing was submitted` and leave the time reservation unchanged. Fix the endpoint
 permission/configuration, then resume normally. A failure after the paid POST
 boundary remains an unknown submission and must be reconciled, never retried
 blindly. The 90-second coordinator timeout budgets the CPU export (25 seconds),

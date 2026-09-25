@@ -9,7 +9,7 @@ import { release, type Job, type PublicVault } from "../src/lib/model";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { z } from "zod";
 import { searchVersion, workRange, subsetRank } from "./search-ranges";
-import { gpuSpendLimits } from "./gpu-spend";
+import { gpuSpendLimits, nextGpuReservation } from "./gpu-spend";
 import {
   HOST_HIT_CAPACITY,
   publishedHitRecords,
@@ -167,10 +167,20 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       await save();
       return { ...event, done: true };
     }
-    if ((job.gpuSubmissions ?? 0) >= gpuSpendLimits.maxJobAttempts) {
+    let reservedSeconds: number;
+    try {
+      reservedSeconds = nextGpuReservation(
+        job,
+        gpuSpendLimits.executionTimeoutMs,
+      );
+      if (reservedSeconds > gpuSpendLimits.maxJobGpuSeconds)
+        throw new Error(
+          "GPU-time budget reached. Further GPU work needs a reviewed budget change.",
+        );
+    } catch (error) {
       job.status = "paused";
       job.error =
-        "Attempt cap reached. Further GPU work on this job needs a reviewed limit change.";
+        error instanceof Error ? error.message : "GPU-time accounting invalid.";
       await save();
       return { ...event, done: true };
     }
@@ -209,6 +219,9 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       await save();
       return { ...event, done: true };
     }
+    // This reservation and the never-resubmit marker share the same conditional
+    // write. No result status refunds time, including a lost POST response.
+    job.gpuBudgetReservedSeconds = reservedSeconds;
     job.gpuSubmissions = (job.gpuSubmissions ?? 0) + 1;
     job.status = "searching";
     delete job.retryRequested;
@@ -335,19 +348,13 @@ export async function handler(event: Event | { action: "providerHealth" }) {
         delete job.retryRequested;
         job.attempt++;
         delete job.runpodId;
-        if ((job.gpuSubmissions ?? 0) >= gpuSpendLimits.maxJobAttempts) {
+        job.status = "queued";
+        try {
+          workRange(job.stage, job.attempt);
+        } catch {
           job.status = "paused";
           job.error =
-            "Attempt cap reached. Further GPU work on this job needs a reviewed limit change.";
-        } else {
-          job.status = "queued";
-          try {
-            workRange(job.stage, job.attempt);
-          } catch {
-            job.status = "paused";
-            job.error =
-              "Search range exhausted; a reviewed new range is required.";
-          }
+            "Search range exhausted; a reviewed new range is required.";
         }
       } else {
         if (job.retryRequested) {

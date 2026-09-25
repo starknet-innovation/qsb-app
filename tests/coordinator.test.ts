@@ -7,11 +7,19 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   cpu: vi.fn(),
 }));
+vi.mock("../server/gpu-spend", async (importOriginal) => {
+  const actual = await importOriginal<any>();
+  return {
+    ...actual,
+    gpuSpendLimits: { ...actual.gpuSpendLimits, maxJobGpuSeconds: 36000 },
+  };
+});
 vi.mock("../src/lib/model", async (importOriginal) => {
   const actual = await importOriginal<any>();
   return { ...actual, release: { ...actual.release, mainnetEnabled: true } };
 });
 vi.mock("../server/providers", () => ({
+  slipstream: {},
   Runpod: class {
     health = mocks.health;
     run = mocks.run;
@@ -56,6 +64,7 @@ async function seed(extra: Partial<Job> = {}) {
     stage: "pinning",
     attempt: 0,
     computeSeconds: 0,
+    gpuBudgetReservedSeconds: 0,
     manifestHash: "a".repeat(64),
     manifest: {},
     ...extra,
@@ -186,57 +195,6 @@ function completedOutput(attempt: number, candidates: string[]) {
   };
 }
 
-it("does not start another GPU attempt once the job reaches the attempt cap", async () => {
-  await seed({
-    status: "queued",
-    attempt: 0,
-    gpuSubmissions: gpuSpendLimits.maxJobAttempts,
-  });
-  expect(await handler(event)).toMatchObject({ done: true });
-  expect(mocks.run).not.toHaveBeenCalled();
-  expect(mocks.cpu).not.toHaveBeenCalled();
-  expect((await store.get(pk, sk))?.job).toMatchObject({
-    attempt: 0,
-    status: "paused",
-    error: expect.stringContaining("Attempt cap reached"),
-  });
-});
-
-it("does not retry a job once its counted GPU submissions reach the cap", async () => {
-  await seed({
-    status: "queued",
-    attempt: 0,
-    gpuSubmissions: gpuSpendLimits.maxJobAttempts,
-    retryRequested: true,
-  });
-  expect(await handler(event)).toMatchObject({ done: true });
-  expect(mocks.run).not.toHaveBeenCalled();
-  expect((await store.get(pk, sk))?.job).toMatchObject({
-    attempt: 0,
-    gpuSubmissions: gpuSpendLimits.maxJobAttempts,
-    status: "paused",
-    error: expect.stringContaining("Attempt cap reached"),
-  });
-});
-
-it("pauses after the last in-cap range instead of queueing another paid attempt", async () => {
-  const attempt = gpuSpendLimits.maxJobAttempts - 1;
-  await seed({
-    status: "searching",
-    runpodId: "compute-1",
-    attempt,
-    gpuSubmissions: gpuSpendLimits.maxJobAttempts,
-  });
-  mocks.status.mockResolvedValue(completedOutput(attempt, []));
-  expect(await handler(event)).toMatchObject({ done: true });
-  expect(mocks.run).not.toHaveBeenCalled();
-  expect((await store.get(pk, sk))?.job).toMatchObject({
-    attempt: gpuSpendLimits.maxJobAttempts,
-    status: "paused",
-    error: expect.stringContaining("Attempt cap reached"),
-  });
-});
-
 it("does not credit a 64-hit output as a finished range", async () => {
   await seed({ status: "searching", runpodId: "compute-1", attempt: 3 });
   mocks.status.mockResolvedValue(
@@ -275,7 +233,7 @@ it.each([
 ])(
   "pauses a failed limits preflight without a paid claim: %s",
   async (error) => {
-    await seed({ gpuSubmissions: 7 });
+    await seed({ gpuSubmissions: 7, gpuBudgetReservedSeconds: 6300 });
     mocks.prepareRun.mockRejectedValueOnce(error);
     expect(await handler(event)).toMatchObject({ done: true });
     expect(mocks.run).not.toHaveBeenCalled();
@@ -283,6 +241,7 @@ it.each([
     expect(row.job).toMatchObject({
       status: "paused",
       gpuSubmissions: 7,
+      gpuBudgetReservedSeconds: 6300,
       attempt: 0,
       error: expect.stringContaining("nothing was submitted"),
     });
@@ -299,26 +258,33 @@ it.each([
     expect(mocks.run).toHaveBeenCalledTimes(1);
     expect((await store.get(pk, sk))!.job).toMatchObject({
       gpuSubmissions: 8,
+      gpuBudgetReservedSeconds: 7200,
       runpodId: "compute-1",
     });
   },
 );
-it("allows the final subset range after many previous-stage submissions", async () => {
-  await seed({ stage: "round2", attempt: 4828, gpuSubmissions: 12000 });
-  expect(await handler(event)).toMatchObject({ done: false });
-  expect(mocks.run).toHaveBeenCalledOnce();
-  expect((await store.get(pk, sk))!.job).toMatchObject({
-    gpuSubmissions: 12001,
+it("retains the time budget across a stage transition", async () => {
+  await seed({
+    stage: "round2",
     attempt: 4828,
+    gpuBudgetReservedSeconds: 36000,
+  });
+  expect(await handler(event)).toMatchObject({ done: true });
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect((await store.get(pk, sk))!.job).toMatchObject({
+    status: "paused",
+    gpuBudgetReservedSeconds: 36000,
+    error: expect.stringContaining("GPU-time budget reached"),
   });
 });
 it("counts a failed paid POST as uncertain and never resubmits it", async () => {
-  await seed({ gpuSubmissions: 7 });
+  await seed({ gpuSubmissions: 7, gpuBudgetReservedSeconds: 6300 });
   mocks.run.mockRejectedValueOnce(new Error("lost response"));
   await expect(handler(event)).rejects.toThrow("lost response");
   expect((await store.get(pk, sk))!.job).toMatchObject({
     status: "searching",
     gpuSubmissions: 8,
+    gpuBudgetReservedSeconds: 7200,
   });
   await handler(event);
   expect(mocks.run).toHaveBeenCalledOnce();
@@ -326,4 +292,146 @@ it("counts a failed paid POST as uncertain and never resubmits it", async () => 
     status: "paused",
     error: expect.stringContaining("outcome unknown"),
   });
+});
+
+it.each(["FAILED", "CANCELLED", "TIMED_OUT"])(
+  "exhausts repeated %s retries without refunding time",
+  async (terminal) => {
+    await seed({ gpuBudgetReservedSeconds: 34200 });
+    for (let i = 0; i < 2; i++) {
+      await handler(event);
+      mocks.status.mockResolvedValue({ status: terminal, executionTime: 1 });
+      await handler(event);
+      const row = (await store.get(pk, sk))!;
+      expect(row.job).toMatchObject({
+        status: "paused",
+        gpuBudgetReservedSeconds: 35100 + i * 900,
+      });
+      await store.put(
+        {
+          ...row,
+          version: row.version + 1,
+          job: { ...(row.job as Job), status: "queued", retryRequested: true },
+        },
+        row.version,
+      );
+      await handler(event); // Reconcile the terminal ID before any replacement.
+    }
+    await handler(event);
+    expect(mocks.run).toHaveBeenCalledTimes(2);
+    expect((await store.get(pk, sk))!.job).toMatchObject({
+      status: "paused",
+      gpuBudgetReservedSeconds: 36000,
+      error: expect.stringContaining("GPU-time budget reached"),
+    });
+  },
+);
+it("journals the final 900-second reservation before the paid POST", async () => {
+  await seed({ gpuBudgetReservedSeconds: 35100 });
+  mocks.run.mockImplementationOnce(async () => {
+    expect((await store.get(pk, sk))!.job).toMatchObject({
+      status: "searching",
+      gpuBudgetReservedSeconds: 36000,
+    });
+    return { id: "last-job" };
+  });
+  await handler(event);
+  expect(mocks.run).toHaveBeenCalledOnce();
+});
+it("rejects a submission with only 899 seconds remaining before preflight", async () => {
+  await seed({ gpuBudgetReservedSeconds: 35101 });
+  await handler(event);
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+it("does not refund a short successful range", async () => {
+  await seed({
+    status: "searching",
+    runpodId: "last-job",
+    gpuBudgetReservedSeconds: 36000,
+  });
+  mocks.status.mockResolvedValue(completedOutput(0, []));
+  await handler(event);
+  await handler(event);
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect((await store.get(pk, sk))!.job).toMatchObject({
+    status: "paused",
+    computeSeconds: 1,
+    gpuBudgetReservedSeconds: 36000,
+  });
+});
+
+it("preserves the exhausted reservation through the authenticated resume route", async () => {
+  const { createApp } = await import("../server/app");
+  const { Signer } = await import("bip322-js");
+  const btc = await import("@scure/btc-signer");
+  const { secp256k1 } = await import("@noble/curves/secp256k1.js");
+  const key = new Uint8Array(32).fill(1);
+  const owner = btc.p2wpkh(secp256k1.getPublicKey(key)).address!;
+  const ownerPk = `OWNER#${owner}`;
+  const app = createApp(store, { enabled: true });
+  const req = (path: string, body: unknown, token?: string) =>
+    new Request(`http://localhost/api${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+  const challenge = await (
+    await app.request(req("/auth/challenge", { address: owner }))
+  ).json();
+  const login = await app.request(
+    req("/auth/verify", {
+      id: challenge.id,
+      signature: Signer.sign(btc.WIF().encode(key), owner, challenge.message),
+    }),
+  );
+  expect(login.status).toBe(200);
+  const { token } = await login.json();
+  await seed({ status: "paused", gpuBudgetReservedSeconds: 36000 });
+  const row = (await store.get(pk, sk))!;
+  await store.put({ ...row, pk: ownerPk, job: { ...(row.job as Job), owner } });
+  await store.put({ ...(await store.get(pk, "VAULT#v"))!, pk: ownerPk });
+  const response = await app.request(
+    req(`/jobs/${event.jobId}/resume`, {}, token),
+  );
+  expect(response.status).toBe(202);
+  expect((await store.get(ownerPk, sk))!.job).toMatchObject({
+    revision: 1,
+    gpuBudgetReservedSeconds: 36000,
+  });
+  await handler({ ...event, owner, revision: 1 });
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect((await store.get(ownerPk, sk))!.job).toMatchObject({
+    status: "paused",
+    gpuBudgetReservedSeconds: 36000,
+  });
+});
+it("retains the reservation when a verified pin advances to round1", async () => {
+  await seed({
+    status: "searching",
+    runpodId: "last-job",
+    gpuBudgetReservedSeconds: 36000,
+  });
+  mocks.status.mockResolvedValue(completedOutput(0, []));
+  const range = workRange("pinning", 0);
+  mocks.cpu.mockResolvedValueOnce({
+    Payload: Buffer.from(
+      JSON.stringify({
+        valid: true,
+        sequence: range.sequence,
+        locktime: range.locktime,
+      }),
+    ),
+  });
+  await handler(event);
+  expect((await store.get(pk, sk))!.job).toMatchObject({
+    stage: "round1",
+    attempt: 0,
+    gpuBudgetReservedSeconds: 36000,
+  });
+  await handler(event);
+  expect(mocks.run).not.toHaveBeenCalled();
 });
