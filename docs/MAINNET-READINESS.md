@@ -1,5 +1,7 @@
 # Mainnet readiness checklist
 
+**Issue #20 update:** [The coordinator exact-submit path](EXACT-SUBMIT.md) now runs offline Core input verification, persists a transaction intent before its single miner POST, and reconciles by funding outpoint. Its dedicated switch defaults off. Historical parked-supervisor checks below remain separate; no live submit or miner inclusion is certified.
+
 **Status: NOT READY. Mainnet activation and transaction broadcast are not authorized.**
 
 Updated 24 September 2026. This is the public release checklist, distilled from the local validation record. It intentionally excludes operational identifiers, credentials, wallet material, signed transactions and private evidence locations.

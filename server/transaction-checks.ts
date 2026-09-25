@@ -59,10 +59,14 @@ export function matchVaultFunding(
   return { vout: 0, value: amount.toString() };
 }
 
-function helperSighashAll(input: ReturnType<btc.Transaction["getInput"]>): void {
+function helperSighashAll(
+  input: ReturnType<btc.Transaction["getInput"]>,
+): void {
   const signature = input.finalScriptWitness?.[0];
   if (!signature?.length || signature[signature.length - 1] !== 0x01)
-    throw new ChainError("Withdrawal authorization or wallet signature missing.");
+    throw new ChainError(
+      "Withdrawal authorization or wallet signature missing.",
+    );
 }
 
 /** Local withdrawal spend check shared by the submit route and checkWithdrawal. */
@@ -179,8 +183,10 @@ export async function checkWithdrawal(
     throw new ChainError("Withdrawal is not ready for authorization.");
   assertWithdrawalSpendAgainstJob(job, raw);
   const m = withdrawalSchema.parse(job.manifest);
-  await chain.unspent(m.funding, vault.scriptHex);
-  await chain.unspent(m.helper, hex.encode(outputScript(vault.paymentAddress)));
+  await Promise.all([
+    chain.unspent(m.funding, vault.scriptHex),
+    chain.unspent(m.helper, hex.encode(outputScript(vault.paymentAddress))),
+  ]);
   const tx = parse(raw);
   return { txid: tx.id };
 }

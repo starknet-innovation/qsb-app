@@ -15,3 +15,5 @@ output "runpod_limits" {
   }
 }
 output "operator_reconcile_role_arn" { value = aws_iam_role.operator_reconcile.arn }
+
+output "exact_submit_enabled" { value = var.exact_submit_enabled }

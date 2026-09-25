@@ -24,6 +24,8 @@ for (const [name,entry] of [['api','server/lambda.ts'],['coordinator','server/co
   mkdirSync(path.join(out,name));
   await build({entryPoints:[entry],outfile:path.join(out,name,'index.js'),bundle:true,platform:'node',target:'node22',format:'cjs',minify:true,define:{'import.meta.env':'undefined'},logLevel:'warning'});
 }
+execFileSync('node',[path.join(root,'consensus/build.mjs'),path.join(out,'api/native')],{stdio:'inherit'});
+execFileSync('node',[path.join(root,'consensus/test-linux.mjs'),path.join(out,'api/native')],{stdio:'inherit'});
 mkdirSync(path.join(out,'reference'));
 for (const name of readdirSync('worker/cpu').filter(n=>n.endsWith('.py') || n==='LICENSE')) cpSync(path.join('worker/cpu',name),path.join(out,'reference',name));
 execFileSync('python3',[path.join(root,'terraform/scripts/zip.py'),out],{stdio:'inherit'});

@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   typecheck-and-test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     env:
       PYTHONDONTWRITEBYTECODE: "1"

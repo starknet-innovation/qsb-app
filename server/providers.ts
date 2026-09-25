@@ -1,3 +1,8 @@
+import {
+  consumeExactSubmitPermit,
+  isExactSubmitPermit,
+  exactSubmitEnabled,
+} from "./exact-submit-permit";
 import { z } from "zod";
 import {
   SecretsManagerClient,
@@ -6,6 +11,7 @@ import {
 import { gpuSpendLimits } from "./gpu-spend";
 import { minerBase } from "./network";
 import {
+  transactionId,
   assertBroadcastPermit,
   assertMainnetTransportClosed,
   assertPermitMinerEndpoint,
@@ -130,6 +136,25 @@ export class Slipstream {
     });
   }
   async submit(hex: string, permit: unknown) {
+    if (isExactSubmitPermit(permit)) {
+      consumeExactSubmitPermit(permit, hex);
+      if (!exactSubmitEnabled()) throw new Error("ExactSubmitDisabled");
+      if (this.base !== "https://slipstream.mara.com")
+        throw new Error("ExactSubmitMinerMismatch");
+      const result = z
+        .object({ status: z.literal("success"), message: minerTxid })
+        .parse(
+          await this.request("/api/transactions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tx_hex: hex }),
+          }),
+        );
+      if (result.message.toLowerCase() !== transactionId(hex))
+        throw new Error("Miner transaction hash mismatch");
+      return result;
+    }
+
     // Exact spend authorization is required before any miner HTTP, including
     // the chain probe. A missing permit must not reach the network. The
     // instance base must be the miner origin bound into the permit. A mainnet

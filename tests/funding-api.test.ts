@@ -93,7 +93,12 @@ async function setup(reject = false) {
     expect(row?.rawTxHex).toBe(rawTxHex);
     throw Error("Lost HTTP response");
   });
-  const app = createApp(store, { chain, miner, enabled: true });
+  const app = createApp(store, {
+    chain,
+    miner,
+    enabled: true,
+    exactSubmit: true,
+  });
   const c = await (
     await app.request(req("/auth/challenge", { address }))
   ).json();
@@ -160,10 +165,11 @@ it("rejects a requester-supplied exact spend and does not fund", async () => {
   expect(f.test).not.toHaveBeenCalled();
   expect(f.raw).not.toHaveBeenCalled();
   expect(f.unspent).not.toHaveBeenCalled();
-  expect(await f.store.get("OWNER#" + address, "TX#" + f.tx.id)).toBeUndefined();
-  const stored = (
-    await f.store.get("OWNER#" + address, "VAULT#" + f.vault.id)
-  )?.vault as { status: string; funding?: unknown };
+  expect(
+    await f.store.get("OWNER#" + address, "TX#" + f.tx.id),
+  ).toBeUndefined();
+  const stored = (await f.store.get("OWNER#" + address, "VAULT#" + f.vault.id))
+    ?.vault as { status: string; funding?: unknown };
   expect(stored.status).toBe("unfunded");
   expect(stored.funding).toBeUndefined();
   const again = await f.app.request(
@@ -284,7 +290,9 @@ it("does not save a withdrawal intent before the transport refusal", async () =>
   expect(f.test).not.toHaveBeenCalled();
   expect(f.raw).not.toHaveBeenCalled();
   expect(f.unspent).not.toHaveBeenCalled();
-  expect(await f.store.get("OWNER#" + address, "TX#" + f.tx.id)).toBeUndefined();
+  expect(
+    await f.store.get("OWNER#" + address, "TX#" + f.tx.id),
+  ).toBeUndefined();
   expect(
     (await f.store.get("OWNER#" + address, "JOB#" + jobId))?.job,
   ).toMatchObject({ status: "awaiting_authorization" });

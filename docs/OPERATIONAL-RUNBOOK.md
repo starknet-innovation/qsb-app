@@ -229,3 +229,50 @@ The role grants no broadcast permission and changes no mainnet activation flag.
 Policy references: [DynamoDB LeadingKeys](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/specifying-conditions.html)
 and [AWS MFA-protected API access](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_configure-api-require.html).
 Local policy/plan tests do not prove a live assumed-role session or regional IAM enforcement.
+
+### Reconcile an uncertain withdrawal (TX#)
+
+This is separate from Runpod submission reconciliation above. Never use the
+Runpod `--not-submitted` action for a signed withdrawal. Keep **both the vault
+funding and helper outpoints reserved** and tell the user to keep the helper UTXO
+unspent while the result is uncertain. Never request another signature or accept
+replacement bytes for the vault.
+
+1. Inspect `/api/transactions/:originalTxid/status` and its miner observation.
+   Confirmation is established from the funding outpoint's actual spender and
+   expected spend, not solely from the original txid. Investigate a foreign-spend
+   alert immediately; do not treat it as successful inclusion.
+2. Under the scoped reconciliation-role session above, set `TABLE_NAME`,
+   `AWS_REGION` and `QSB_NETWORK=mainnet` for the intended deployment, then run:
+
+   ```sh
+   npx tsx scripts/reconcile-withdrawal.ts OWNER JOB \
+     --operator OPERATOR --evidence audit://incident/reference
+   ```
+
+   This command records a conditional observation of the existing original
+   intent. It performs chain/miner GETs and OWNER-row database writes only.
+   It takes no transaction bytes, new signature, provider ID, retry or submit
+   option. It does not need a Runpod endpoint or provider secret. Miner status
+   authentication, if required by the deployment, uses the service's configured
+   runtime authorization; do not paste keys into the command or fetch secret
+   values manually. If the operator identity lacks that access, the miner read
+   remains unavailable; it is not proof that the miner never received the tx.
+3. An `uncertain` result remains locked. A saved POST acknowledgement may report
+   `submitted`; only matching canonical chain inclusion reports `confirmed`.
+   Evidence of unspent funding plus unknown miner status **does not permit
+   another POST**. Any re-POST requires new explicit user approval and a separate
+   reviewed operation. This CLI intentionally cannot perform it.
+4. Database-version conflicts or failed observations are safe to investigate and
+   rerun because this command never submits. Do not delete the TX# row, clear
+   `job.txid`, release reservations, or alter the original bytes to bypass it.
+   A spent helper requires resolving the #8 re-authorization question; there is
+   no automatic replacement path.
+
+See [EXACT-SUBMIT.md](EXACT-SUBMIT.md) for byte binding and uncertainty semantics.
+
+The withdrawal API Lambda has a 120-second timeout; API Gateway still returns
+a timeout after its 30-second integration budget. A caller timeout does not stop
+an already running Lambda or prove the miner never received the POST. Treat it as
+an uncertain withdrawal and follow the TX# observation procedure above. Do not
+retry the POST or reset its durable intent.

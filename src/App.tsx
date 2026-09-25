@@ -703,9 +703,12 @@ export default function App() {
                         className="secondary"
                         onClick={() =>
                           action("Checking confirmation", async () => {
-                            const observation = await api<{ status: string }>(
+                            const observation = await api<{ status: string; alert?: string }>(
                               `/transactions/${j.txid}/status`,
                             );
+                            if (observation.status === "conflict") {
+                              throw Error(`${observation.alert ?? "Funding outpoint was spent by a different transaction."} Contact the operator; do not resubmit or spend the helper output.`);
+                            }
                             if (observation.status !== "confirmed") {
                               setNotice(
                                 `Withdrawal transaction: ${observation.status}. No transaction was resubmitted.`,

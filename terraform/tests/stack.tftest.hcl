@@ -220,3 +220,31 @@ run "reject_provider_key_wildcard" {
   }
   expect_failures = [var.runpod_secret_kms_key_arn]
 }
+
+run "exact_submit_default_off" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition = !output.exact_submit_enabled && aws_lambda_function.api.environment[0].variables.QSB_EXACT_SUBMIT_ENABLED == "false"
+    error_message = "The exact submit switch must default off."
+  }
+}
+run "exact_submit_explicit_switch" {
+  command = plan
+  variables {
+    network = "mainnet"
+    exact_submit_enabled = true
+  }
+  assert {
+    condition = output.exact_submit_enabled && aws_lambda_function.api.environment[0].variables.QSB_EXACT_SUBMIT_ENABLED == "true" && !output.transactions_enabled
+    error_message = "Only the exact submit path is enabled by the explicit switch."
+  }
+}
+run "exact_submit_reject_testnet" {
+  command = plan
+  variables {
+    network = "testnet4"
+    exact_submit_enabled = true
+  }
+  expect_failures = [var.exact_submit_enabled, terraform_data.release]
+}
