@@ -113,7 +113,6 @@ export async function validationTick(
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
   if (
     selected.searchVersion !== searchVersion ||
-    selected.kernelCommit !== release.kernelCommit ||
     selected.generatorCommit !== release.qsbCommit
   )
     throw new Error("SolverRuntimeMismatch");
@@ -149,7 +148,7 @@ export async function validationTick(
         stage: z.string(),
         manifestHash: z.string(),
         attempt: z.number().int(),
-        kernelCommit: z.literal(release.kernelCommit),
+        kernelCommit: z.literal(selected.kernelCommit),
         checkpoint: z.string(),
         candidates: z.array(z.string().max(16384)).max(32),
         workRange: z.record(z.string(), z.unknown()),

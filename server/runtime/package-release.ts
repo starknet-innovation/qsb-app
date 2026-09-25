@@ -14,9 +14,6 @@ import archived from "../../src/lib/releases/qsb-config-a-ranked-v2.json";
 import {
   componentForPath,
   enrolledSourcePaths,
-  historicalCandidateRoots,
-  historicalVendorExtras,
-  optimizedSubsetRoot,
   unpackagedReleaseScripts,
 } from "./closure";
 import { assertInsideRepo, sha256Hex } from "./identity";
@@ -50,12 +47,7 @@ export type SourceReleaseManifest = {
     packageLockSha256: string;
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
-    compiler: "CUDA 12.8.1 nvcc";
-    cudaArchDefault: string;
-    dockerfileFlags: { pinning: string[]; historicalSubset: string[] };
-    defaultArchFlags: { pinning: string[]; historicalSubset: string[] };
-    images: { build: string; runtime: string };
-    runpodPin: string;
+    solverRepository: "https://github.com/starknet-innovation/qsb-solver";
     imageBuildStatus: "not-produced";
   };
   releases: {
@@ -99,37 +91,6 @@ export type SourceReleaseManifest = {
   };
   privateEvidence: string[];
 };
-
-export function parseWorkerDockerfile(text: string): {
-  buildImage: string;
-  runtimeImage: string;
-  pinningFlags: string[];
-  subsetFlags: string[];
-  cudaArch: string;
-  runpodPin: string;
-} {
-  if (/^\s*(?:COPY|ADD)\s+\S*research\/optimized-subset/m.test(text))
-    throw new Error("Dockerfile selects the optimized subset");
-  const froms = [...text.matchAll(/^FROM\s+(\S+)/gm)].map((match) => match[1]);
-  const pinning = text.match(/nvcc\s+(.+?)\s+-o\s+\/pinning\b/);
-  const subset = text.match(/nvcc\s+(.+?)\s+-o\s+\/subset\b/);
-  const arch = text.match(/^ARG\s+CUDA_ARCH=(\d+)\s*$/m);
-  const runpod = text.match(/runpod==([0-9.]+)/);
-  if (froms.length !== 2 || !pinning || !subset || !arch || !runpod)
-    throw new Error("Worker Dockerfile build inputs could not be read");
-  return {
-    buildImage: froms[0] ?? "",
-    runtimeImage: froms[1] ?? "",
-    pinningFlags: pinning[1]?.split(/\s+/) ?? [],
-    subsetFlags: subset[1]?.split(/\s+/) ?? [],
-    cudaArch: `sm_${arch[1]}`,
-    runpodPin: runpod[1] ?? "",
-  };
-}
-
-function expandArch(flags: string[], arch: string): string[] {
-  return flags.map((flag) => flag.replace("${CUDA_ARCH}", arch.slice(3)));
-}
 
 function walkFiles(
   root: string,
@@ -279,35 +240,6 @@ function hashFile(root: string, relativePath: string): string {
   return sha256Hex(readFileSync(absolute));
 }
 
-/** Historical Dockerfile inputs are the archived source hashes plus the license and notes allowlist. */
-export function reviewedVendorFiles(root: string, relativeDir: string): string[] {
-  const pins = new Map<string, string>();
-  for (const [relativePath, digest] of Object.entries({
-    ...archived.sourceHashes,
-    ...historicalVendorExtras,
-  })) {
-    if (!relativePath.startsWith(`${relativeDir}/`)) continue;
-    const archivedDigest = (archived.sourceHashes as Record<string, string>)[relativePath];
-    const extraDigest = historicalVendorExtras[relativePath];
-    if (archivedDigest && extraDigest && archivedDigest !== extraDigest)
-      throw new Error(`Historical source hash mismatch ${relativePath}`);
-    pins.set(relativePath, digest);
-  }
-  const pinned = [...pins.entries()].sort(([left], [right]) => left.localeCompare(right));
-  const allowed = new Set(pinned.map(([relativePath]) => relativePath));
-  for (const relativePath of walkFiles(root, relativeDir, false)) {
-    if (!allowed.has(relativePath))
-      throw new Error(`Unexpected release input ${relativePath}`);
-  }
-  for (const [relativePath, digest] of pinned) {
-    if (!existsSync(assertInsideRepo(root, relativePath)))
-      throw new Error(`Missing release input ${relativePath}`);
-    if (hashFile(root, relativePath) !== digest)
-      throw new Error(`Historical source hash mismatch ${relativePath}`);
-  }
-  return pinned.map(([relativePath]) => relativePath);
-}
-
 const NODE_REQUIREMENT_SENTENCE = "Requires Node.js 22 or newer";
 
 /** The Node requirement is the sentence in the enrolled README, not a free-standing literal. */
@@ -324,7 +256,7 @@ const PACKAGED_README = `# QSB source release
 
 **Research snapshot — not a production release. Mainnet operations are disabled by default.** Do not use this package to hold real funds.
 
-This tree is the enrolled source closure. It does not include the Vite application, Playwright or unit-test harnesses, \`scripts/vendor.py\`, or the experimental runtime and optimized-image build entrypoints. Those commands remain in the full checkout.
+This tree is the enrolled source closure. It does not include the Vite application, Playwright or unit-test harnesses, \`scripts/vendor.py\`, or the experimental runtime entrypoints. Solver images are built and attested in https://github.com/starknet-innovation/qsb-solver.
 
 Requires Node.js 22 or newer, npm, and Python 3.
 
@@ -335,7 +267,7 @@ npm ci
 npm run package:release -- --check
 \`\`\`
 
-\`package:release --check\` rebuilds the source manifest from this tree and compares it to \`../release-manifest.json\`. It does not build a CUDA image, and \`research/optimized-subset\` is not selected by \`worker/Dockerfile\`. \`broadcastAuthorized\` and mainnet stay disabled.
+\`package:release --check\` rebuilds the source manifest from this tree and compares it to \`../release-manifest.json\`. It does not include or build CUDA sources; solver identity is supplied by the release-descriptor registry. \`broadcastAuthorized\` and mainnet stay disabled.
 `;
 
 /** Instructions for the packaged tree. The full checkout README is left unchanged. */
@@ -413,17 +345,6 @@ export function componentIdentities(
   return components;
 }
 
-export function enrollHistoricalPair(
-  pinningFiles: readonly string[],
-  subsetFiles: readonly string[],
-): { pinning: boolean; historicalSubset: boolean } {
-  const pinning = pinningFiles.length > 0;
-  const historicalSubset = subsetFiles.length > 0;
-  if (!pinning || !historicalSubset)
-    throw new Error("HistoricalCandidatePairIncomplete");
-  return { pinning: true, historicalSubset: true };
-}
-
 export function assertCompatibleStages(manifest: SourceReleaseManifest): void {
   const { pinning, historicalSubset, optimizedSubset } = manifest.releases;
   if (
@@ -441,11 +362,6 @@ export function assertCompatibleStages(manifest: SourceReleaseManifest): void {
 }
 
 export function createSourceManifest(root: string): SourceReleaseManifest {
-  const dockerfileText = readFileSync(
-    assertInsideRepo(root, "worker/Dockerfile"),
-    "utf8",
-  );
-  const built = parseWorkerDockerfile(dockerfileText);
   const packagedPackage = packagedPackageJson(
     readFileSync(assertInsideRepo(root, "package.json"), "utf8"),
   );
@@ -462,14 +378,7 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
     if (!existsSync(assertInsideRepo(root, relativePath)))
       throw new Error(`Missing release input ${relativePath}`);
   }
-  const pinningFiles = reviewedVendorFiles(root, historicalCandidateRoots[0]);
-  const subsetFiles = reviewedVendorFiles(root, historicalCandidateRoots[1]);
-  const enrolled = enrollHistoricalPair(pinningFiles, subsetFiles);
-  const historical = [...pinningFiles, ...subsetFiles];
-  const optimized = reviewedTreeFiles(root, optimizedSubsetRoot);
-  if (!optimized.length)
-    throw new Error("Optimized subset source is not in this checkout");
-  const sourcePaths = [...required, ...historical, ...optimized].sort();
+  const sourcePaths = [...required].sort();
   const sourceFiles: Record<string, string> = {};
   for (const relativePath of sourcePaths) {
     sourceFiles[relativePath] =
@@ -497,18 +406,7 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
       packageLockSha256: hashFile(root, "package-lock.json"),
       dependencies: packageJson.dependencies,
       devDependencies: packageJson.devDependencies,
-      compiler: "CUDA 12.8.1 nvcc",
-      cudaArchDefault: built.cudaArch,
-      dockerfileFlags: {
-        pinning: built.pinningFlags,
-        historicalSubset: built.subsetFlags,
-      },
-      defaultArchFlags: {
-        pinning: expandArch(built.pinningFlags, built.cudaArch),
-        historicalSubset: expandArch(built.subsetFlags, built.cudaArch),
-      },
-      images: { build: built.buildImage, runtime: built.runtimeImage },
-      runpodPin: built.runpodPin,
+      solverRepository: "https://github.com/starknet-innovation/qsb-solver",
       imageBuildStatus: "not-produced",
     },
     releases: {
@@ -517,22 +415,22 @@ export function createSourceManifest(root: string): SourceReleaseManifest {
         replacesSolverPipeline: false,
         selectedByWorkerDockerfile: true,
         compatiblePipelinePartner: "historicalSubset",
-        sourcesEnrolled: enrolled.pinning,
+        sourcesEnrolled: false,
       },
       historicalSubset: {
         role: "historical-pipeline-stage",
         replacesSolverPipeline: false,
         selectedByWorkerDockerfile: true,
         compatiblePipelinePartner: "pinning",
-        sourcesEnrolled: enrolled.historicalSubset,
+        sourcesEnrolled: false,
       },
       optimizedSubset: {
         role: "isolated-research",
         replacesSolverPipeline: false,
         selectedByWorkerDockerfile: false,
         compatiblePipelinePartner: null,
-        sourcesEnrolled: true,
-        note: "research/optimized-subset is not selected by worker/Dockerfile and is not a substitute for the pinning plus historical subset pipeline.",
+        sourcesEnrolled: false,
+        note: "Optimized subset sources are maintained in qsb-solver; an isolated subset does not replace the pinning plus historical subset pipeline.",
       },
     },
     identities: {
@@ -652,24 +550,7 @@ export const sourceReleaseManifestSchema = z
         packageLockSha256: z.string().regex(/^[a-f0-9]{64}$/),
         dependencies: z.record(z.string(), z.string()),
         devDependencies: z.record(z.string(), z.string()),
-        compiler: z.literal("CUDA 12.8.1 nvcc"),
-        cudaArchDefault: z.string().min(1),
-        dockerfileFlags: z
-          .object({
-            pinning: z.array(z.string()),
-            historicalSubset: z.array(z.string()),
-          })
-          .strict(),
-        defaultArchFlags: z
-          .object({
-            pinning: z.array(z.string()),
-            historicalSubset: z.array(z.string()),
-          })
-          .strict(),
-        images: z
-          .object({ build: z.string().min(1), runtime: z.string().min(1) })
-          .strict(),
-        runpodPin: z.string().min(1),
+        solverRepository: z.literal("https://github.com/starknet-innovation/qsb-solver"),
         imageBuildStatus: z.literal("not-produced"),
       })
       .strict(),
@@ -701,7 +582,7 @@ export const sourceReleaseManifestSchema = z
             compatiblePipelinePartner: z.null(),
             sourcesEnrolled: z.boolean(),
             note: z.literal(
-              "research/optimized-subset is not selected by worker/Dockerfile and is not a substitute for the pinning plus historical subset pipeline.",
+              "Optimized subset sources are maintained in qsb-solver; an isolated subset does not replace the pinning plus historical subset pipeline.",
             ),
           })
           .strict(),
@@ -745,8 +626,6 @@ function assertSourceDerivedFields(
   manifest: SourceReleaseManifest,
   treeRoot: string,
 ): void {
-  const dockerfile = readPackagedFile(treeRoot, "worker/Dockerfile").toString("utf8");
-  const built = parseWorkerDockerfile(dockerfile);
   const packageJsonText = readPackagedFile(treeRoot, "package.json").toString("utf8");
   const packageJson = JSON.parse(packageJsonText) as {
     dependencies: Record<string, string>;
@@ -775,18 +654,7 @@ function assertSourceDerivedFields(
     packageLockSha256,
     dependencies: packageJson.dependencies,
     devDependencies: packageJson.devDependencies,
-    compiler: "CUDA 12.8.1 nvcc" as const,
-    cudaArchDefault: built.cudaArch,
-    dockerfileFlags: {
-      pinning: built.pinningFlags,
-      historicalSubset: built.subsetFlags,
-    },
-    defaultArchFlags: {
-      pinning: expandArch(built.pinningFlags, built.cudaArch),
-      historicalSubset: expandArch(built.subsetFlags, built.cudaArch),
-    },
-    images: { build: built.buildImage, runtime: built.runtimeImage },
-    runpodPin: built.runpodPin,
+    solverRepository: "https://github.com/starknet-innovation/qsb-solver" as const,
     imageBuildStatus: "not-produced" as const,
   };
   const stable = (value: unknown): string => {
@@ -850,22 +718,7 @@ export function verifyPackageTree(outDir: string): SourceReleaseManifest {
       throw new Error(`Missing release input ${relativePath}`);
   }
   const enrolledPaths = Object.keys(manifest.identities.sourceFiles).sort();
-  const enrolledSet = new Set(enrolledPaths);
-  for (const relativeDir of [...historicalCandidateRoots, optimizedSubsetRoot]) {
-    for (const relativePath of walkFiles(treeRoot, relativeDir, true)) {
-      if (!enrolledSet.has(relativePath))
-        throw new Error(`Unexpected release input ${relativePath}`);
-    }
-  }
-  const pinningFiles = reviewedVendorFiles(treeRoot, historicalCandidateRoots[0]);
-  const subsetFiles = reviewedVendorFiles(treeRoot, historicalCandidateRoots[1]);
-  enrollHistoricalPair(pinningFiles, subsetFiles);
-  const optimized = enrolledPaths.filter((relativePath) =>
-    relativePath.startsWith(`${optimizedSubsetRoot}/`),
-  );
-  if (!optimized.length)
-    throw new Error("Optimized subset source is not in this checkout");
-  const closure = [...new Set([...required, ...pinningFiles, ...subsetFiles, ...optimized])].sort();
+  const closure = [...new Set(required)].sort();
   const walked = walkFiles(treeRoot, ".", false);
   if (closure.join("\n") !== enrolledPaths.join("\n") || walked.join("\n") !== enrolledPaths.join("\n"))
     throw new Error("Packaged tree does not match the manifest path set");

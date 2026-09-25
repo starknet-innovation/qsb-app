@@ -7,6 +7,8 @@ import {
   solverRelease,
   currentSolverId,
   vaultConfiguration,
+  externalSolverDescriptorSchema,
+  solverRegistry,
 } from "../src/lib/provenance";
 const vault = () => ({
   network: "regtest",
@@ -57,6 +59,7 @@ describe("immutable vault and solver provenance", () => {
   it("rejects modified flags even with retained release id", () => {
     const v = vault();
     const p = pinSolver(v);
+    if (!("flags" in p.descriptor)) throw new Error("Expected archive");
     p.descriptor.flags.pinning.push("-DUNSAFE=1");
     expect(() => assertSolverPin(p, v)).toThrow("SolverReleaseMismatch");
   });
@@ -85,13 +88,47 @@ describe("immutable vault and solver provenance", () => {
   });
 });
 
-it("archives hashes for the exact local adapter, range implementation and kernel sources", async () => {
+it("preserves the archived descriptor byte-for-byte without requiring CUDA sources", async () => {
   const { readFileSync } = await import("node:fs");
-  for (const [path, hash] of Object.entries(
-    solverRelease(currentSolverId).sourceHashes,
-  ))
-    expect(
-      createHash("sha256").update(readFileSync(path)).digest("hex"),
-      path,
-    ).toBe(hash);
+  expect(
+    createHash("sha256")
+      .update(readFileSync("src/lib/releases/qsb-config-a-ranked-v2.json"))
+      .digest("hex"),
+  ).toBe("76cec4ab084e3c40501ecb8245a7b2968dadc7d587840a82adc5382544255c59");
+});
+const external = () => ({
+  schemaVersion: 2,
+  id: "qsb-external-test",
+  protocol: "qsb-config-a-v1",
+  generatorCommit: "2c9172051d5c150ef0a994ca6b988a08a3ef9e85",
+  searchVersion: "ranked-v2",
+  solverRepository: "https://github.com/starknet-innovation/qsb-solver",
+  solverCommit: "a".repeat(40),
+  kernelCommit: "b".repeat(40),
+  image: "ghcr.io/starknet-innovation/qsb-solver@sha256:" + "c".repeat(64),
+});
+it("registers a source-independent immutable external release", () => {
+  const descriptor = externalSolverDescriptorSchema.parse(external());
+  expect(descriptor).not.toHaveProperty("sourceHashes");
+  const registered = solverRegistry([descriptor]);
+  expect(JSON.parse(registered.get(descriptor.id)!)).toEqual(descriptor);
+  expect(registered.has(currentSolverId)).toBe(true);
+});
+it.each([
+  { searchVersion: "ranked-v3" },
+  { solverCommit: "main" },
+  { image: "ghcr.io/starknet-innovation/qsb-solver:latest" },
+  { solverRepository: "https://example.com/solver" },
+  { sourceHashes: {} },
+  { protocol: "other" },
+])("rejects incompatible or unpinned external descriptors %j", (change) => {
+  expect(() => solverRegistry([{ ...external(), ...change }])).toThrow();
+});
+it("refuses duplicate releases and archived ID replacement", () => {
+  expect(() => solverRegistry([external(), external()])).toThrow(
+    "DuplicateSolverRelease",
+  );
+  expect(() =>
+    solverRegistry([{ ...external(), id: currentSolverId }]),
+  ).toThrow("DuplicateSolverRelease");
 });

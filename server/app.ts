@@ -564,7 +564,7 @@ export function createApp(
       vaultId: manifest.vaultId,
       manifest,
       manifestHash: hash(JSON.stringify(manifest)),
-      solver: pinSolver(v),
+      solver: pinSolver(v, manifest.solverReleaseId),
       createdAt: now,
       updatedAt: now,
       status: "queued",

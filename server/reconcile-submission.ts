@@ -126,7 +126,6 @@ export async function reconcileUnknownSubmission(input: {
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
   if (
     selected.searchVersion !== searchVersion ||
-    selected.kernelCommit !== release.kernelCommit ||
     selected.generatorCommit !== release.qsbCommit
   )
     throw new ReconciliationError("SolverRuntimeMismatch");

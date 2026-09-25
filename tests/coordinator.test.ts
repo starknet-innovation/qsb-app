@@ -7,6 +7,21 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   cpu: vi.fn(),
 }));
+vi.mock("../src/lib/releases/registry.generated", () => ({
+  default: [
+    {
+      schemaVersion: 2,
+      id: "external-test",
+      protocol: "qsb-config-a-v1",
+      generatorCommit: "2c9172051d5c150ef0a994ca6b988a08a3ef9e85",
+      searchVersion: "ranked-v2",
+      solverRepository: "https://github.com/starknet-innovation/qsb-solver",
+      solverCommit: "a".repeat(40),
+      kernelCommit: "b".repeat(40),
+      image: "ghcr.io/starknet-innovation/qsb-solver@sha256:" + "c".repeat(64),
+    },
+  ],
+}));
 vi.mock("../server/gpu-spend", async (importOriginal) => {
   const actual = await importOriginal<any>();
   return {
@@ -46,6 +61,8 @@ vi.mock("@aws-sdk/client-lambda", () => ({
     constructor(public input: any) {}
   },
 }));
+import { createHash } from "node:crypto";
+import { pinSolver } from "../src/lib/provenance";
 import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job } from "../src/lib/model";
@@ -109,11 +126,16 @@ it("does not submit a paused unknown job that already has one later submission a
   });
 });
 it("consumes a one-submission allowance before the paid call and does not replay it", async () => {
-  await seed({ oneSubmissionAllowed: true, gpuSubmissions: 7, gpuBudgetReservedSeconds: 6300 });
+  await seed({
+    oneSubmissionAllowed: true,
+    gpuSubmissions: 7,
+    gpuBudgetReservedSeconds: 6300,
+  });
   mocks.run.mockRejectedValue(Error("timeout"));
   await expect(handler(event)).rejects.toThrow("timeout");
   expect((await store.get(pk, sk))?.job).toMatchObject({
-    gpuSubmissions: 8, gpuBudgetReservedSeconds: 7200,
+    gpuSubmissions: 8,
+    gpuBudgetReservedSeconds: 7200,
     submissionStartedAt: expect.any(String),
   });
   expect(
@@ -124,7 +146,8 @@ it("consumes a one-submission allowance before the paid call and does not replay
   expect((await store.get(pk, sk))?.job).toMatchObject({
     status: "paused",
     error: expect.stringContaining("outcome unknown"),
-    gpuSubmissions: 8, gpuBudgetReservedSeconds: 7200,
+    gpuSubmissions: 8,
+    gpuBudgetReservedSeconds: 7200,
   });
   expect(
     ((await store.get(pk, sk))?.job as Job).oneSubmissionAllowed,
@@ -469,4 +492,76 @@ it("retains the reservation when a verified pin advances to round1", async () =>
   });
   await handler(event);
   expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it("routes an external descriptor through submission and CPU verification without CUDA pins", async () => {
+  const vault = {
+    network: "mainnet",
+    config: "A",
+    scriptHex: "51",
+    scriptHash: createHash("sha256")
+      .update(Buffer.from("51", "hex"))
+      .digest("hex"),
+    publicStateJson: "{}",
+  };
+  const pin = pinSolver(vault, "external-test");
+  expect(pin.descriptor).not.toHaveProperty("sourceHashes");
+  await seed({ solver: pin });
+  await store.put({ pk, sk: "VAULT#v", version: 1, vault }, 0);
+  await handler(event);
+  expect(mocks.run).toHaveBeenCalledWith(
+    expect.objectContaining({
+      kernelCommit: "b".repeat(40),
+      searchVersion: "ranked-v2",
+    }),
+  );
+  mocks.status.mockResolvedValue({
+    status: "COMPLETED",
+    executionTime: 1000,
+    output: {
+      status: "completed",
+      stage: "pinning",
+      manifestHash: "a".repeat(64),
+      attempt: 0,
+      candidates: ["public-hit"],
+      kernelCommit: "b".repeat(40),
+      checkpoint: "range-complete",
+      workRange: workRange("pinning", 0),
+    },
+  });
+  mocks.cpu.mockResolvedValue({
+    Payload: Buffer.from(
+      JSON.stringify({
+        valid: true,
+        sequence: 2147483648,
+        locktime: 500000000,
+      }),
+    ),
+  });
+  await handler(event);
+  expect(
+    JSON.parse(mocks.cpu.mock.calls.at(-1)![0].input.Payload.toString()),
+  ).toMatchObject({ action: "verify", candidates: ["public-hit"] });
+  expect((await store.get(pk, sk))?.job).toMatchObject({
+    stage: "round1",
+    solution: { sequence: 2147483648, locktime: 500000000 },
+  });
+});
+it("rejects worker identity mismatch before invoking the CPU verifier", async () => {
+  await seed({ status: "searching", runpodId: "compute-1" });
+  mocks.status.mockResolvedValue({
+    status: "COMPLETED",
+    output: {
+      status: "completed",
+      stage: "pinning",
+      manifestHash: "a".repeat(64),
+      attempt: 0,
+      candidates: [],
+      kernelCommit: "b".repeat(40),
+      checkpoint: "range-complete",
+      workRange: workRange("pinning", 0),
+    },
+  });
+  await expect(handler(event)).rejects.toThrow("CandidateContextMismatch");
+  expect(mocks.cpu).not.toHaveBeenCalled();
 });

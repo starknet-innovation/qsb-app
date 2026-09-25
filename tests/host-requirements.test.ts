@@ -115,7 +115,7 @@ describe("local execution host rehearsal", () => {
       expect(report.experimentalRuntimePointsAtHistoricalWorkerDockerfile).toBe(
         false,
       );
-      expect(report.operatorSteps.join(" ")).toContain("worker/optimized/Dockerfile");
+      expect(report.operatorSteps.join(" ")).toContain("starknet-innovation/qsb-solver");
       expect(report.operatorSteps.join(" ")).toContain("supervised/runtime");
       expect(report.operatorSteps.join(" ")).toContain("000000000000");
       expect(report.operatorSteps.join(" ")).toContain("historical Lambda");

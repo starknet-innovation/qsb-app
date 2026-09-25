@@ -1,4 +1,4 @@
-import {fingerprint} from './lib/provenance';
+import {fingerprint, solverReleases, currentSolverId} from './lib/provenance';
 import {readSessionEpoch} from './lib/api';
 import {prepareMainnetSearchRequest,retainedMainnetSubmission} from './mainnet/submission';
 import {retainedRequests} from './mainnet/retainedRequest';
@@ -90,6 +90,7 @@ export default function TransactionDialog({
     [amount, setAmount] = useState(""),
     [fee, setFee] = useState(""),
     [destination, setDestination] = useState(wallet.address),
+    [solverId, setSolverId] = useState(currentSolverId),
     [accepted, setAccepted] = useState(false),
     [file, setFile] = useState(""),
     [pass, setPass] = useState(""),
@@ -299,6 +300,7 @@ export default function TransactionDialog({
             JSON.parse(unlocked.authorization.manifestJson),
           )
         : undefined;
+      const selectedSolver = previousIntent ? previousIntent.solverReleaseId : solverId === currentSolverId ? undefined : solverId;
       const manifest: Withdrawal = {
         vaultId: vault.id,
         funding,
@@ -309,6 +311,7 @@ export default function TransactionDialog({
         fee: feeSats.toString(),
         idempotencyKey: previousIntent?.idempotencyKey || crypto.randomUUID(),
         costAccepted: true,
+        ...(!supervisedSearch && selectedSolver ? { solverReleaseId: selectedSolver } : {}),
       };
       const manifestJson = JSON.stringify(withdrawalSchema.parse(manifest)),
         manifestHash = await digest(manifestJson),
@@ -644,6 +647,17 @@ export default function TransactionDialog({
                       value={destination}
                       onChange={(e) => setDestination(e.target.value)}
                     />
+                  </label>
+                )}
+                {!deposit && !supervisedSearch && (
+                  <label>
+                    Solver release
+                    <select value={solverId} disabled={!!busy || !!unlocked?.authorization}
+                      onChange={(event) => setSolverId(event.target.value)}>
+                      {solverReleases().map((descriptor) => (
+                        <option key={descriptor.id} value={descriptor.id}>{descriptor.id}</option>
+                      ))}
+                    </select>
                   </label>
                 )}
                 <label>

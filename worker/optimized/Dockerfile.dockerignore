@@ -1,9 +1,0 @@
-**
-!research/
-!research/optimized-subset/
-!research/optimized-subset/**
-!worker/
-!worker/optimized/
-!worker/optimized/**
-**/__pycache__
-**/*.pyc

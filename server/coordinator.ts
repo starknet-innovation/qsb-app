@@ -29,7 +29,7 @@ const candidateOutput = z.object({
   manifestHash: z.string(),
   attempt: z.number().int(),
   candidates: z.array(z.string().max(16384)).max(32),
-  kernelCommit: z.literal(release.kernelCommit),
+  kernelCommit: z.string().regex(/^[a-f0-9]{40}$/),
   checkpoint: z.enum(["range-complete", "requires-verification-or-resume"]),
   workRange: z
     .object({
@@ -146,7 +146,6 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
   if (
     selected.searchVersion !== searchVersion ||
-    selected.kernelCommit !== release.kernelCommit ||
     selected.generatorCommit !== release.qsbCommit
   )
     throw new Error("SolverRuntimeMismatch");
@@ -267,6 +266,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     const output = candidateOutput.parse(result.output);
     const expectedRange = workRange(job.stage, job.attempt);
     if (
+      output.kernelCommit !== selected.kernelCommit ||
       output.manifestHash !== job.manifestHash ||
       output.stage !== job.stage ||
       output.attempt !== job.attempt

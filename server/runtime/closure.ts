@@ -5,6 +5,7 @@ import { assertInsideRepo } from "./identity";
 /** Files the public checkout can package without reading a developer work directory. */
 export const requiredReleasePaths = [
   "AGENTS.md",
+  "contracts/ranked-v2.json",
   "docs/source-build/20260924/solver-build-receipt.json",
   "server/app.ts",
   "server/chain.ts",
@@ -54,12 +55,12 @@ export const requiredReleasePaths = [
   "src/mainnet/solvedContract.ts",
   "src/mainnet/submission.ts",
   "src/mainnet/submissionClient.ts",
-  "worker/Dockerfile",
-  "worker/handler.py",
-  "worker/optimized/source-lock.json",
-  "worker/prepare_kernels.py",
-  "worker/search_ranges.py",
-  "worker/validation/field_assumptions.py",
+  "public/qsb/LICENSE",
+  "public/qsb/bitcoin_tx.py",
+  "public/qsb/secp256k1.py",
+  "public/qsb/qsb_pipeline.py",
+  "public/qsb/bridge.py",
+  "public/qsb/manifest.json",
   "worker/cpu/LICENSE",
   "worker/cpu/bitcoin_tx.py",
   "worker/cpu/gpu_emulator.py",
@@ -68,6 +69,7 @@ export const requiredReleasePaths = [
   "worker/cpu/secp256k1.py",
   "worker/cpu/verify_hit.py",
   "scripts/package-release.ts",
+  "scripts/generate-solver-registry.mjs",
   "scripts/storage-inventory.ts",
 ] as const;
 
@@ -82,6 +84,9 @@ export const buildMetadataPaths = [
 /** Scripts whose entrypoints or toolchains are outside this source package. */
 export const unpackagedReleaseScripts = [
   "dev",
+  "prebuild",
+  "pretest",
+  "pretypecheck",
   "build",
   "test",
   "test:e2e",
@@ -171,24 +176,3 @@ export const componentForPath = (relativePath: string): string => {
     return "historical-subset";
   return "api";
 };
-
-export const historicalCandidateRoots = [
-  "vendor/challenge/candidates/pinning",
-  "vendor/challenge/candidates/subset",
-] as const;
-
-/** Licenses and notes. Kept out of the archived solver descriptor. */
-export const historicalVendorExtras: Record<string, string> = {
-  "vendor/challenge/candidates/pinning/COPYING":
-    "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
-  "vendor/challenge/candidates/pinning/RESEARCH.md":
-    "e7a32a084d2f8eafb1cbe7774a9826b36506bf37059d5b2573a6fe38d61db2a8",
-  "vendor/challenge/candidates/pinning/SOURCE-MANIFEST.json":
-    "9ad8ae159e6dd05c6c52c55bd1311f1346068176c41211f548e848afe8da6aac",
-  "vendor/challenge/candidates/subset/COPYING":
-    "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
-  "vendor/challenge/candidates/subset/TREE_INVERSE.md":
-    "4457a27fbbd4af653045efe5f1d3507871b698eaf9e28d5a4de21fcb3bde318a",
-};
-
-export const optimizedSubsetRoot = "research/optimized-subset";

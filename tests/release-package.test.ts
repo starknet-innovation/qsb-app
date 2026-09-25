@@ -13,7 +13,6 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   enrolledSourcePaths,
-  historicalVendorExtras,
   requiredReleasePaths,
 } from "../server/runtime/closure";
 import archivedRelease from "../src/lib/releases/qsb-config-a-ranked-v2.json";
@@ -22,7 +21,6 @@ import {
   assertCompatibleStages,
   componentIdentities,
   createSourceManifest,
-  enrollHistoricalPair,
   nodeRequirementFromReadme,
   recordedManifestPath,
   serializeManifest,
@@ -97,10 +95,10 @@ describe("source release package", () => {
     expect(packaged.scripts["test:e2e"]).toBeUndefined();
     expect(packaged.scripts.typecheck).toBeUndefined();
     expect(packaged.scripts.vendor).toBeUndefined();
-    expect(Object.keys(packaged.scripts)).toEqual([
-      "package:release",
-      "inventory:storage",
+    expect(Object.keys(packaged.scripts).sort()).toEqual([
+      "inventory:storage", "package:release", "prepackage:release",
     ]);
+    expect(packaged.scripts["prepackage:release"]).toContain("generate-solver-registry.mjs");
     expect(packaged.scripts["package:release"]).toContain("package-release");
     expect(packaged.scripts["inventory:storage"]).toContain("storage-inventory");
     const packagedReadme = readFileSync(
@@ -135,35 +133,12 @@ describe("source release package", () => {
         { cwd: path.join(directoryForScripts, "tree"), encoding: "utf8" },
       ),
     ).toContain("matches this checkout");
-    expect(manifest.buildInputs.dockerfileFlags.pinning).toEqual([
-      "-O3",
-      "-arch=sm_${CUDA_ARCH}",
-      "-DQSB_SLOTPIPE=0",
-    ]);
-    expect(manifest.buildInputs.defaultArchFlags.historicalSubset).toContain(
-      "-arch=sm_89",
-    );
-    const dockerfile = readFileSync(
-      path.join(root, "worker/Dockerfile"),
-      "utf8",
-    );
-    expect(dockerfile).toContain("vendor/challenge/candidates");
-    expect(dockerfile).not.toMatch(
-      /^\s*(?:COPY|ADD)\s+\S*research\/optimized-subset/m,
-    );
-    expect(
-      certifyWrapper(
-        {
-          wrapperSha256:
-            manifest.identities.sourceFiles["worker/handler.py"] ?? "",
-          nativeSha256: manifest.identities.nativeBinaries.pinning.value,
-        },
-        {
-          wrapperBytes: readFileSync(path.join(root, "worker/handler.py")),
-          nativeSha256: "cd".repeat(32),
-        },
-      ),
-    ).toEqual({ ok: false, reason: "native-not-enrolled" });
+    expect(manifest.buildInputs.solverRepository).toBe("https://github.com/starknet-innovation/qsb-solver");
+    for (const file of Object.keys(manifest.identities.sourceFiles)) {
+      expect(file).not.toMatch(/^(research\/optimized-subset|vendor\/challenge)\//);
+      expect(file.startsWith("worker/") && !file.startsWith("worker/cpu/")).toBe(false);
+    }
+
   });
 
   it("rejects a modified wrapper even when the native hash is unchanged", () => {
@@ -173,7 +148,7 @@ describe("source release package", () => {
     expect(verifyPackageTree(directory).format).toBe(
       "qsb-source-release-manifest-v1",
     );
-    const wrapper = path.join(directory, "tree/worker/handler.py");
+    const wrapper = path.join(directory, "tree/worker/cpu/handler.py");
     const enrolled = {
       wrapperSha256: sha256Hex(readFileSync(wrapper)),
       nativeSha256: "ab".repeat(32),
@@ -225,104 +200,23 @@ describe("source release package", () => {
         "harness:core"
       ],
     ).toBe("bash scripts/test-core.sh");
-    expect(manifest.releases.pinning.sourcesEnrolled).toBe(true);
-    expect(manifest.releases.historicalSubset.sourcesEnrolled).toBe(true);
-    expect(manifest.identities.sourceFiles["vendor/challenge/candidates/pinning/pinning.cu"]).toMatch(
-      /^[a-f0-9]{64}$/,
-    );
-    expect(manifest.identities.sourceFiles["vendor/challenge/candidates/subset/subset.cu"]).toMatch(
-      /^[a-f0-9]{64}$/,
-    );
+    expect(manifest.releases.pinning.sourcesEnrolled).toBe(false);
+    expect(manifest.releases.historicalSubset.sourcesEnrolled).toBe(false);
+    expect(manifest.releases.optimizedSubset.sourcesEnrolled).toBe(false);
+    for (const file of ["public/qsb/qsb_pipeline.py", "worker/cpu/verify_hit.py"]) {
+      expect(manifest.identities.sourceFiles[file]).toMatch(/^[a-f0-9]{64}$/);
+    }
   });
 
-  it("packages the Dockerfile historical inputs and checks the tree inside the checkout", () => {
+  it("preserves the archived descriptor without enrolling its CUDA source pins", () => {
     const manifest = createSourceManifest(root);
-    const archivedHashes = archivedRelease.sourceHashes as Record<string, string>;
     expect(archivedRelease.id).toBe("qsb-config-a-ranked-v2-2791ed0");
-    for (const [relativePath, digest] of Object.entries(historicalVendorExtras)) {
-      expect(archivedHashes[relativePath]).toBeUndefined();
-      expect(manifest.identities.sourceFiles[relativePath]).toBe(digest);
+    expect(manifest.identities.sourceFiles["src/lib/releases/qsb-config-a-ranked-v2.json"])
+      .toBe(sha256Hex(readFileSync(path.join(root, "src/lib/releases/qsb-config-a-ranked-v2.json"))));
+    for (const file of Object.keys(archivedRelease.sourceHashes)) {
+      if (file.startsWith("vendor/challenge/") || (file.startsWith("worker/") && !file.startsWith("worker/cpu/")))
+        expect(manifest.identities.sourceFiles[file]).toBeUndefined();
     }
-    for (const relativePath of [
-      "vendor/challenge/candidates/pinning/pinning.cu",
-      "vendor/challenge/candidates/subset/subset.cu",
-    ]) {
-      expect(manifest.identities.sourceFiles[relativePath]).toBe(archivedHashes[relativePath]);
-    }
-    const directory = path.join(root, "release/dist");
-    writePackageTree(root, directory, manifest);
-    const tree = path.join(directory, "tree");
-    for (const relativePath of [
-      "vendor/challenge/candidates/pinning/pinning.cu",
-      "vendor/challenge/candidates/subset/subset.cu",
-      "vendor/challenge/candidates/pinning/COPYING",
-      "vendor/challenge/candidates/subset/COPYING",
-    ]) {
-      expect(existsSync(path.join(tree, relativePath))).toBe(true);
-    }
-    const modules = path.join(tree, "node_modules");
-    symlinkSync(path.join(root, "node_modules"), modules, "dir");
-    try {
-      expect(
-        execFileSync(
-          process.execPath,
-          [path.join(root, "node_modules/tsx/dist/cli.mjs"), "scripts/package-release.ts", "--check"],
-          { cwd: tree, encoding: "utf8" },
-        ),
-      ).toContain("matches this checkout");
-    } finally {
-      rmSync(modules, { force: true });
-    }
-    const extra = path.join(root, "vendor/challenge/candidates/pinning/local-notes.txt");
-    writeFileSync(extra, "not allowlisted\n");
-    try {
-      expect(() => createSourceManifest(root)).toThrow(/Unexpected release input/);
-    } finally {
-      rmSync(extra, { force: true });
-    }
-  });
-
-  it("rejects an untracked optimized file and leaves ignored files out", () => {
-    const unexpected = path.join(root, "research/optimized-subset/local-notes.txt");
-    writeFileSync(unexpected, "not tracked\n");
-    try {
-      expect(() => createSourceManifest(root)).toThrow(/Unexpected release input/);
-    } finally {
-      rmSync(unexpected, { force: true });
-    }
-    const ignored = path.join(root, "research/optimized-subset/.env");
-    writeFileSync(ignored, "SECRET=not-enrolled\n");
-    try {
-      const manifest = createSourceManifest(root);
-      expect(manifest.identities.sourceFiles["research/optimized-subset/.env"]).toBeUndefined();
-      expect(
-        manifest.identities.sourceFiles["vendor/challenge/candidates/pinning/pinning.cu"],
-      ).toMatch(/^[a-f0-9]{64}$/);
-      expect(
-        Object.keys(manifest.identities.sourceFiles).some(
-          (relativePath) =>
-            relativePath.includes("__pycache__") || relativePath.endsWith(".pyc"),
-        ),
-      ).toBe(false);
-    } finally {
-      rmSync(ignored, { force: true });
-    }
-  });
-
-  it("requires both historical candidate roots", () => {
-    expect(enrollHistoricalPair(["a"], ["b"])).toEqual({
-      pinning: true,
-      historicalSubset: true,
-    });
-    expect(() => enrollHistoricalPair([], [])).toThrow(
-      /HistoricalCandidatePairIncomplete/,
-    );
-    expect(() => enrollHistoricalPair(["a"], [])).toThrow(
-      /HistoricalCandidatePairIncomplete/,
-    );
-    expect(() => enrollHistoricalPair([], ["b"])).toThrow(
-      /HistoricalCandidatePairIncomplete/,
-    );
   });
 
   it("rejects extra tree files and unproduced native identities", () => {
@@ -377,7 +271,7 @@ describe("source release package", () => {
     writePackageTree(root, directory, manifest);
     const derived = JSON.parse(readFileSync(manifestPathAgain, "utf8")) as {
       sourceCommit: { status: string; value: string | null };
-      buildInputs: { images: { build: string } };
+      buildInputs: { solverRepository: string };
       releases: { pinning: { sourcesEnrolled: boolean } };
     };
     derived.sourceCommit = { status: "bound", value: "ab".repeat(32) };
@@ -385,11 +279,11 @@ describe("source release package", () => {
     expect(() => verifyPackageTree(directory)).toThrow();
     writePackageTree(root, directory, manifest);
     const images = JSON.parse(readFileSync(manifestPathAgain, "utf8")) as {
-      buildInputs: { images: { build: string } };
+      buildInputs: { solverRepository: string };
     };
-    images.buildInputs.images.build = "forged.example/image:latest";
+    images.buildInputs.solverRepository = "https://forged.example/solver";
     writeFileSync(manifestPathAgain, JSON.stringify(images));
-    expect(() => verifyPackageTree(directory)).toThrow(/build inputs/);
+    expect(() => verifyPackageTree(directory)).toThrow(/solverRepository|build inputs/);
     writePackageTree(root, directory, manifest);
     const incompletePath = path.join(directory, "release-manifest.json");
     const incomplete = JSON.parse(readFileSync(incompletePath, "utf8")) as {
