@@ -81,7 +81,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "68ac8ecc33014ab0baa1a1405e48eebb9933aab8a4bca30cb9b177b4c9c14f3c",
+      "api": "5aff68a9db387926563bb07285a25a485da0d531ad26dbcece1ee48a12f56ad6",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "aa52623e93d5326f68bd158a27a8a89195fc4721204873df2cc56ac7a2ad8f4c",
@@ -168,7 +168,7 @@
       "research/optimized-subset/subset/tests/gpu_epochs/zinv32.cuh": "12303e74b178d2cfc45951ddc0c6c31b634646bacc55ea5a43097997bdd51689",
       "scripts/package-release.ts": "5b1d0d9e5169c8e83a1b9259033c710011a3d8cf46b02824a1c73708de4d2031",
       "scripts/storage-inventory.ts": "c8ecc1d3ed239f444efd50ab8bb704be13408f609aba1e80d16a5325d5e4603e",
-      "server/app.ts": "99901b1a674155c880773919110ed940726761be0f1b781bacfb88e2686ca03e",
+      "server/app.ts": "d41c1ba2a92a235ee357dbc36569cd89586769a75d5c4ff6bb025089a0bf270e",
       "server/chain.ts": "488d7c7a12e89c36e34af155b6b52fbc6ffe7942111044f697a1a6b6f250af2e",
       "server/consensus.ts": "97c5c9d98b61883803c3e0287b727351911ac0a5081e9fc1a85269e910ea38e9",
       "server/coordinator.ts": "9805201bbb7d63b685f90de485a217bb196c29d02aa5c2f5e4a928a96f080c4d",
@@ -205,7 +205,7 @@
       "server/search-ranges.ts": "91ef5ec81fc82868cd9c695410bbc069732c4fc34109db5a9b44de36b59039d7",
       "server/store.ts": "6073bcf106a00911ed0921e8ad323db21208e071d16c5089324f686a96fcfd63",
       "server/submit-exact.ts": "a2a79bf2efdf1722819e28a6aeb2c94ac81a29bbfc530daa562114ccb977e555",
-      "server/transaction-checks.ts": "24e1e2027b3dd5a4aaceb2a42a53458c4df7d5417ed740152f33fcfabb12d5ed",
+      "server/transaction-checks.ts": "435947247325c64ad13e29adef1410201e9b1c6a16df79df34a4802b0140d5c8",
       "server/validation-search.ts": "2944683a6a9f7965caafdd02c06779a67e17bed576680d4770fb4a65f1e54e53",
       "src/lib/api.ts": "b7d24b75c3305f5254ad7a9e9989bd390efd74a17b13862c39764d434854c22e",
       "src/lib/backup.ts": "bc8be06c10e970dad3ef335f9f2788bb58628c350490052155cf37a54840c572",

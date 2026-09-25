@@ -105,3 +105,31 @@ export async function signPsbt(
   await assertWalletNetwork(address);
   return r.result.psbt;
 }
+export async function fundFromXverse(
+  address: string,
+  psbt: string,
+  indices: number[],
+  rememberBroadcast: (txid: string | undefined) => void,
+) {
+  await assertWalletNetwork(address);
+  const r = await request(
+    "signPsbt",
+    { psbt, signInputs: { [address]: indices }, broadcast: true },
+    providerId,
+  );
+  if (r.status !== "success")
+    throw new Error(r.error.message || "Transaction signature declined.");
+  const returnedId = r.result && "txid" in r.result ? r.result.txid : undefined;
+  // A successful broadcast must be retained before network or PSBT checks.
+  rememberBroadcast(typeof returnedId === "string" && /^[a-f0-9]{64}$/i.test(returnedId) ? returnedId.toLowerCase() : undefined);
+  await assertWalletNetwork(address);
+  const signed = r.result?.psbt;
+  const txid = r.result && "txid" in r.result ? r.result.txid : undefined;
+  if (
+    typeof signed !== "string" ||
+    typeof txid !== "string" ||
+    !/^[a-f0-9]{64}$/i.test(txid)
+  )
+    throw new Error("Xverse reported a broadcast but returned an incomplete receipt. Reconcile the deposit; do not send another.");
+  return { psbt: signed, txid };
+}

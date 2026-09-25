@@ -39,6 +39,25 @@ function assertOutput(
       "Transaction output does not match the approved intent.",
     );
 }
+/**
+ * A deposit pays the vault script at output 0. Optional change follows.
+ * The helper is a separate UTXO chosen at withdrawal, not an output here.
+ */
+export function matchVaultFunding(
+  tx: btc.Transaction,
+  scriptHex: string,
+  amount: bigint,
+): { vout: 0; value: string } {
+  if (amount <= 0n || tx.outputsLength < 1)
+    throw new ChainError("Invalid funding transaction.");
+  const output = tx.getOutput(0);
+  const script = output.script ? hex.encode(output.script) : "";
+  if (script !== scriptHex.toLowerCase())
+    throw new ChainError("Funding transaction does not pay this vault.");
+  if (output.amount !== amount)
+    throw new ChainError("Funding amount does not match.");
+  return { vout: 0, value: amount.toString() };
+}
 
 function helperSighashAll(input: ReturnType<btc.Transaction["getInput"]>): void {
   const signature = input.finalScriptWitness?.[0];
