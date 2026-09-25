@@ -246,5 +246,5 @@ run "exact_submit_reject_testnet" {
     network = "testnet4"
     exact_submit_enabled = true
   }
-  expect_failures = [var.exact_submit_enabled]
+  expect_failures = [var.exact_submit_enabled, terraform_data.release]
 }

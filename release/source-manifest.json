@@ -81,7 +81,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "5aff68a9db387926563bb07285a25a485da0d531ad26dbcece1ee48a12f56ad6",
+      "api": "32fdcdbd200464255c2789b3454d74ac5e1654eaaf7a0bd530689e48ec2990bc",
       "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "aa52623e93d5326f68bd158a27a8a89195fc4721204873df2cc56ac7a2ad8f4c",
@@ -170,7 +170,7 @@
       "scripts/storage-inventory.ts": "c8ecc1d3ed239f444efd50ab8bb704be13408f609aba1e80d16a5325d5e4603e",
       "server/app.ts": "d41c1ba2a92a235ee357dbc36569cd89586769a75d5c4ff6bb025089a0bf270e",
       "server/chain.ts": "488d7c7a12e89c36e34af155b6b52fbc6ffe7942111044f697a1a6b6f250af2e",
-      "server/consensus.ts": "97c5c9d98b61883803c3e0287b727351911ac0a5081e9fc1a85269e910ea38e9",
+      "server/consensus.ts": "b04587efdb62982aeb32895ff0f01c7358f1c41b4e9b10175daf06101b46bae5",
       "server/coordinator.ts": "9805201bbb7d63b685f90de485a217bb196c29d02aa5c2f5e4a928a96f080c4d",
       "server/exact-submit-permit.ts": "e49e8f88714f831e42d0416f1072e0bb0fece81eaece946888bcd033cbf4a642",
       "server/gpu-spend.json": "df8fba56d88c1f2c645e3babdcd59b28702938c300a8bef8734a760cfe79ecda",

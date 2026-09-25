@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it, expect, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
@@ -61,6 +64,66 @@ it("rejects unconfirmed/spent chain outputs before native invocation", async () 
   await expect(
     new CoreConsensus().verify(hex.encode(tx.extract()), chain),
   ).rejects.toThrow("consensus");
+});
+// Fake executable only observes that contextual guards precede interpreter launch.
+// These tests do not claim cryptographic verification.
+it("rejects money-range and immature coinbase inputs before interpreter launch", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "qsb-consensus-guards-"));
+  const executable = path.join(dir, "fake"),
+    marker = path.join(dir, "invoked");
+  writeFileSync(
+    executable,
+    "#!/bin/sh\ncat >/dev/null\ntouch '" +
+      marker +
+      "'\nprintf 'core-27.2-api2-all-inputs-valid\\n'\n",
+    { mode: 0o700 },
+  );
+  try {
+    const verifier = new CoreConsensus(executable);
+    for (const kind of [
+      "output-max",
+      "output-total",
+      "input-max",
+      "input-total",
+      "overspend",
+      "coinbase-99",
+    ]) {
+      const { tx, chain, previous } = fixture(false);
+      const decoded = btc.RawTx.decode(tx.extract());
+      if (kind === "output-max") decoded.outputs[0].amount = 2100000000000001n;
+      if (kind === "output-total")
+        decoded.outputs = [
+          { amount: 2100000000000000n, script: new Uint8Array([0x51]) },
+          { amount: 1n, script: new Uint8Array([0x51]) },
+        ];
+      if (kind === "overspend") decoded.outputs[0].amount = 300001n;
+      if (kind === "input-max")
+        previous.updateOutput(0, { amount: 2100000000000001n });
+      if (kind === "input-total")
+        previous.updateOutput(0, { amount: 2100000000000000n });
+      if (kind === "coinbase-99") {
+        previous.updateInput(0, { txid: "00".repeat(32), index: 0xffffffff });
+        vi.mocked(chain.unspent).mockResolvedValue({
+          previousTxHex: "",
+          confirmations: 99,
+        });
+      }
+      await expect(
+        verifier.verify(hex.encode(btc.RawTx.encode(decoded)), chain),
+      ).rejects.toThrow("consensus");
+      expect(existsSync(marker)).toBe(false);
+    }
+    const { tx, chain, previous } = fixture(false);
+    previous.updateInput(0, { txid: "00".repeat(32), index: 0xffffffff });
+    vi.mocked(chain.unspent).mockResolvedValue({
+      previousTxHex: "",
+      confirmations: 100,
+    });
+    await verifier.verify(hex.encode(tx.extract()), chain);
+    expect(existsSync(marker)).toBe(true); // mature boundary reaches fake interpreter
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 // Opt-in real native gate. The ordinary unit suite never pretends a mock is Core.
 const native = process.env.QSB_TEST_CONSENSUS_BINARY;

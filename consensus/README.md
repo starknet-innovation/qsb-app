@@ -28,7 +28,9 @@ library does not discover activation rules from a chain tip.
 This checks **input scripts**, not standalone block validity, relay policy,
 confirmation or mining. Exact layout, input/output amounts and fee come from the
 preceding exact-spend check; confirmed unspent prevouts come from the chain
-reader. A successful check does not authorize broadcast by itself. Miner policy
+reader. The adapter also rejects individual or total values outside MoneyRange,
+overspending, and coinbase prevouts with fewer than 100 confirmations. A
+successful check does not authorize broadcast by itself. Miner policy
 and later inclusion remain separate.
 
 Primary sources:
@@ -62,9 +64,12 @@ For the packaged Linux build, run
 `node consensus/test-linux.mjs terraform/.build/api/native`. This runs the same
 real signed mutation suite through network-disabled, read-only Linux containers
 using the exact packaged executable/library. The 2026-09-25 local Linux/arm64
-Amazon Linux 2023 run passed six tests: four originals accepted, fifteen transaction mutations
+Amazon Linux 2023 run passed seven tests: four originals accepted, fifteen transaction mutations
 and eight spent-output mutations rejected; missing executable and chain failure
-also rejected. One Taproot test uses an unsigned OP_TRUE second input, showing
+also rejected. Additional contextual tests prove rejection before native launch
+for output/input MoneyRange overflow, overspending and 99-confirmation coinbase
+prevouts; the 100-confirmation boundary reaches an explicitly fake interpreter.
+One Taproot test uses an unsigned OP_TRUE second input, showing
 that changing only the other input amount or script breaks input zero's signature.
 Legacy signatures do not commit other-input amounts: chain/exact-spend binding
 is essential and cannot be replaced by the interpreter. This does not need
