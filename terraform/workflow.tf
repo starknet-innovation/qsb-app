@@ -25,7 +25,7 @@ resource "aws_sfn_state_machine" "withdrawal" {
     level                  = "ERROR"
   }
   definition = jsonencode({ StartAt = "CoordinateSearch", States = {
-    CoordinateSearch       = { Type = "Task", Resource = "arn:${data.aws_partition.current.partition}:lambda:${var.region}:${var.aws_account_id}:function:${var.name}-coordinator", TimeoutSeconds = 35, Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.failure", Next = "NeedsOperatorAttention" }], Next = "SearchFinished" },
+    CoordinateSearch       = { Type = "Task", Resource = "arn:${data.aws_partition.current.partition}:lambda:${var.region}:${var.aws_account_id}:function:${var.name}-coordinator", TimeoutSeconds = aws_lambda_function.coordinator.timeout + 5, Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.failure", Next = "NeedsOperatorAttention" }], Next = "SearchFinished" },
     SearchFinished         = { Type = "Choice", Choices = [{ Variable = "$.done", BooleanEquals = true, Next = "Finished" }, { Variable = "$.polls", NumericGreaterThanEquals = 1000, Next = "SaveContinuation" }], Default = "WaitForCompute" },
     WaitForCompute         = { Type = "Wait", SecondsPath = "$.waitSeconds", Next = "CoordinateSearch" },
     SaveContinuation       = { Type = "Pass", Parameters = { continuation = { "owner.$" = "$.owner", "jobId.$" = "$.jobId", "revision.$" = "$.revision", polls = 0 } }, Next = "ContinueSearch" },
