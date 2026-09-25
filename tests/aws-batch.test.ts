@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
+import command from "../server/aws-batch-command.json";
 import { AwsBatch } from "../server/aws-batch";
 const queue = "arn:aws:batch:eu-west-1:905846953990:job-queue/qsb-gpu";
 const definition =
@@ -14,6 +15,9 @@ function setup() {
     status: "ACTIVE",
     containerProperties: {
       image,
+      command,
+      readonlyRootFilesystem: true,
+      privileged: false,
       resourceRequirements: [
         { type: "GPU", value: "1" },
         { type: "VCPU", value: "4" },
@@ -81,10 +85,11 @@ function setup() {
     submit,
   };
 }
-it.each(["image", "retry", "size", "spot", "overrun"])(
+it.each(["image", "retry", "size", "spot", "overrun", "caps"])(
   "fails closed before paid submission for %s",
   async (kind) => {
     const t = setup();
+    if (kind === "caps") t.config.containerProperties.command = [];
     if (kind === "image") t.config.containerProperties.image += "wrong";
     if (kind === "retry") t.config.retryStrategy.attempts = 2;
     if (kind === "size") t.compute.computeResources.maxvCpus = 8;

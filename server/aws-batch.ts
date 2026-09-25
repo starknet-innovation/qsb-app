@@ -16,6 +16,7 @@ import {
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
 import { z } from "zod";
+import command from "./aws-batch-command.json";
 import { gpuSpendLimits } from "./gpu-spend";
 export type ComputeStatus = {
   id: string;
@@ -114,6 +115,10 @@ export class AwsBatch implements ComputeProvider {
       throw new Error("ProviderImageUnconfirmed");
     const resources = d.containerProperties?.resourceRequirements;
     if (
+      d.containerProperties?.readonlyRootFilesystem !== true ||
+      d.containerProperties?.privileged !== false ||
+      JSON.stringify(d.containerProperties?.command) !==
+        JSON.stringify(command) ||
       d.retryStrategy?.attempts !== 1 ||
       d.timeout?.attemptDurationSeconds !==
         gpuSpendLimits.executionTimeoutMs / 1000 ||

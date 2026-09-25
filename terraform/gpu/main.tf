@@ -246,6 +246,8 @@ resource "aws_launch_template" "gpu" {
 
 }
 resource "aws_batch_compute_environment" "gpu" {
+  # Creation provenance on instances is immutable; changing the app commit must not replace idle capacity.
+  lifecycle { ignore_changes = [compute_resources[0].tags["SourceCommit"]] }
 
   name  = "qsb-gpu"
   type  = "MANAGED"
@@ -301,7 +303,8 @@ resource "aws_batch_job_definition" "solver" {
   propagate_tags = true
   container_properties = jsonencode({
 
-    image = var.image, jobRoleArn = aws_iam_role.job.arn, executionRoleArn = aws_iam_role.execution.arn,
+    command = jsondecode(file("${path.module}/../../server/aws-batch-command.json")),
+    image   = var.image, jobRoleArn = aws_iam_role.job.arn, executionRoleArn = aws_iam_role.execution.arn,
     resourceRequirements = [{
       type = "VCPU", value = "4"
       }, {
@@ -314,10 +317,8 @@ resource "aws_batch_job_definition" "solver" {
     }],
     readonlyRootFilesystem = true, privileged = false,
     linuxParameters = {
-      capabilities = {
-        drop = ["ALL"]
-        }, tmpfs = [{
-          containerPath = "/tmp", size = 2048, mountOptions = ["rw", "nosuid", "nodev"]
+      tmpfs = [{
+        containerPath = "/tmp", size = 2048, mountOptions = ["rw", "nosuid", "nodev"]
       }]
     },
     logConfiguration = {
