@@ -58,7 +58,7 @@
       }
     }
   },
-  "testedCommit": "3170f64653a8d71a525ebd42e73e4f4f749d5bb4",
+  "testedCommit": "b85fd0236bb57e9d6a1e79790c380070b8060056",
   "terraformVersion": "1.15.5",
   "awsProviderVersion": "6.66.0",
   "commands": [
