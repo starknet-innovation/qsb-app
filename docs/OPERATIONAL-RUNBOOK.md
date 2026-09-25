@@ -91,3 +91,10 @@ boundary remains an unknown submission and must be reconciled, never retried
 blindly. The 90-second coordinator timeout budgets the CPU export (25 seconds),
 endpoint check (20 seconds), paid POST (20 seconds), and persistence overhead;
 it reduces timeout exposure but does not make a POST and database write atomic.
+
+### App-role IAM merge gate
+
+See [APP-ROLE-SANDBOX.md](APP-ROLE-SANDBOX.md) for the reproducible 60-decision
+read-only simulation and exact regional transaction/batch requests, expected
+responses and consistent-read checks. The live sandbox portion remains pending
+operator confirmation; simulator output alone does not release the merge hold.

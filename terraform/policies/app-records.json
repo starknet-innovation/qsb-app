@@ -1,0 +1,42 @@
+[
+  {
+    "Sid": "TableDataAccess",
+    "Effect": "Allow",
+    "Action": [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:Query",
+      "dynamodb:ConditionCheckItem"
+    ]
+  },
+  {
+    "Sid": "DenyOutpointDelete",
+    "Effect": "Deny",
+    "Action": [
+      "dynamodb:DeleteItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:BatchWriteItem"
+    ],
+    "Condition": {
+      "ForAnyValue:StringLike": {
+        "dynamodb:LeadingKeys": ["OUTPOINT#*"]
+      }
+    }
+  },
+  {
+    "Sid": "DenySystemRowWrites",
+    "Effect": "Deny",
+    "Action": [
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:BatchWriteItem"
+    ],
+    "Condition": {
+      "ForAnyValue:StringLike": {
+        "dynamodb:LeadingKeys": ["SYSTEM#*"]
+      }
+    }
+  }
+]
