@@ -74,7 +74,7 @@ export default function Costs() {
       <label>Assumed transaction virtual size (vB)<input inputMode="numeric" value={size} onChange={e => setSize(e.target.value)} placeholder="Not the locking-script size" /></label>
       <p role="status">Illustrative miner fee: <strong>{miner !== undefined && Number.isSafeInteger(miner) ? `${miner.toLocaleString()} sats` : "Requires a rate and a positive whole-number size"}</strong>. Calculate funding and withdrawal separately; verify the final signed transaction's weight.</p>
       <p>A fee change during search may require waiting or recomputing a newly authorized transaction. We will not silently change your payout or reuse one-time signing material.</p>
-      <p><a href="https://docs.runpod.io/serverless/pricing" target="_blank" rel="noreferrer">Runpod billing rules</a> · <a href="https://slipstream.mara.com/docs/" target="_blank" rel="noreferrer">MARA documentation</a></p>
+      <p><a href="https://aws.amazon.com/ec2/pricing/on-demand/" target="_blank" rel="noreferrer">AWS EC2 pricing</a> · <a href="https://slipstream.mara.com/docs/" target="_blank" rel="noreferrer">MARA documentation</a></p>
     </section>
   </div>;
 }
