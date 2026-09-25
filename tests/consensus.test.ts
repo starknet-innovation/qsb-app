@@ -65,6 +65,29 @@ it("rejects unconfirmed/spent chain outputs before native invocation", async () 
     new CoreConsensus().verify(hex.encode(tx.extract()), chain),
   ).rejects.toThrow("consensus");
 });
+it("starts both previous-output reads together while preserving ordered input verification", async () => {
+  const { tx, chain, previous } = fixture(false);
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.mocked(chain.raw).mockImplementation(async () => {
+    await barrier;
+    return { tx: previous, raw: hex.encode(previous.toBytes(true, true)) };
+  });
+  const result = new CoreConsensus("/nonexistent/qsb-consensus").verify(
+    hex.encode(tx.extract()),
+    chain,
+  );
+  const rejected = expect(result).rejects.toThrow("consensus");
+  expect(chain.raw).toHaveBeenCalledTimes(2);
+  expect(chain.unspent).not.toHaveBeenCalled();
+  release();
+  await rejected;
+  expect(
+    vi.mocked(chain.unspent).mock.calls.map((call) => call[0].vout),
+  ).toEqual([0, 1]);
+});
 // Fake executable only observes that contextual guards precede interpreter launch.
 // These tests do not claim cryptographic verification.
 it("rejects money-range and immature coinbase inputs before interpreter launch", async () => {

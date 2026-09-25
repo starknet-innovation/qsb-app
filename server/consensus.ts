@@ -41,50 +41,56 @@ export class CoreConsensus implements ConsensusVerifier {
         if (outputTotal > maxMoney) throw new ConsensusError();
       }
       const rows: string[] = [raw.toLowerCase(), String(tx.inputsLength)];
-      for (let i = 0; i < tx.inputsLength; i++) {
-        const input = tx.getInput(i);
-        const id = hex.encode(input.txid!);
-        const previous = await chain.raw(id);
-        const output = previous.tx.getOutput(input.index!);
-        if (
-          output.amount === undefined ||
-          output.amount < 0n ||
-          output.amount > maxMoney ||
-          !output.script
-        )
-          throw new ConsensusError();
+      const spentOutputs = await Promise.all(
+        Array.from({ length: tx.inputsLength }, async (_, i) => {
+          const input = tx.getInput(i);
+          const id = hex.encode(input.txid!);
+          const previous = await chain.raw(id);
+          const output = previous.tx.getOutput(input.index!);
+          if (
+            output.amount === undefined ||
+            output.amount < 0n ||
+            output.amount > maxMoney ||
+            !output.script
+          )
+            throw new ConsensusError();
+
+          const script = hex.encode(output.script);
+          // Reject unknown witness versions; this verifier deliberately implements the
+          // currently activated SegWit v0 and Taproot v1 rules, not future upgrades.
+          const s = output.script;
+          if (
+            s.length >= 4 &&
+            s.length <= 42 &&
+            s[1] === s.length - 2 &&
+            s[0] >= 0x51 &&
+            s[0] <= 0x60 &&
+            !(s[0] === 0x51 && s.length === 34)
+          )
+            throw new ConsensusError();
+          const observation = await chain.unspent(
+            { txid: id, vout: input.index!, value: String(output.amount) },
+            script,
+          );
+          const first = previous.tx.getInput(0);
+          const coinbase =
+            previous.tx.inputsLength === 1 &&
+            first.index === 0xffffffff &&
+            first.txid !== undefined &&
+            first.txid.every((byte) => byte === 0);
+          if (
+            coinbase &&
+            (!Number.isSafeInteger(observation.confirmations) ||
+              observation.confirmations < 100)
+          )
+            throw new ConsensusError();
+          return { amount: output.amount, script };
+        }),
+      );
+      for (const output of spentOutputs) {
         inputTotal += output.amount;
         if (inputTotal > maxMoney) throw new ConsensusError();
-        const script = hex.encode(output.script);
-        // Reject unknown witness versions; this verifier deliberately implements the
-        // currently activated SegWit v0 and Taproot v1 rules, not future upgrades.
-        const s = output.script;
-        if (
-          s.length >= 4 &&
-          s.length <= 42 &&
-          s[1] === s.length - 2 &&
-          s[0] >= 0x51 &&
-          s[0] <= 0x60 &&
-          !(s[0] === 0x51 && s.length === 34)
-        )
-          throw new ConsensusError();
-        const observation = await chain.unspent(
-          { txid: id, vout: input.index!, value: String(output.amount) },
-          script,
-        );
-        const first = previous.tx.getInput(0);
-        const coinbase =
-          previous.tx.inputsLength === 1 &&
-          first.index === 0xffffffff &&
-          first.txid !== undefined &&
-          first.txid.every((byte) => byte === 0);
-        if (
-          coinbase &&
-          (!Number.isSafeInteger(observation.confirmations) ||
-            observation.confirmations < 100)
-        )
-          throw new ConsensusError();
-        rows.push(String(output.amount), script);
+        rows.push(String(output.amount), output.script);
       }
       if (inputTotal < outputTotal) throw new ConsensusError();
       await new Promise<void>((resolve, reject) => {

@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   typecheck-and-test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     env:
       PYTHONDONTWRITEBYTECODE: "1"
@@ -24,10 +24,6 @@ jobs:
         run: git diff --exit-code
       - run: npm run typecheck
       - run: npm test -- --no-file-parallelism
-      - name: Enable arm64 native consensus build on the x86 runner
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
-        with:
-          platforms: arm64
       - name: Build coordinator deployment artifacts
         run: node terraform/scripts/build.mjs --network=mainnet
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd

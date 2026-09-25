@@ -118,15 +118,35 @@ export async function submitExact(
   } catch {
     // HTTP errors, rejection, timeout or malformed response are never automatic retry authority.
   }
-  try {
-    await store.put(
-      { ...intent, version: 1, status, attemptedAt: new Date().toISOString() },
-      0,
-    );
-  } catch (error) {
-    if (!(error instanceof Conflict)) throw error;
-    // Status reconciliation may have advanced the row during the POST; never overwrite it.
-    return summary((await store.get(pk, intent.sk))!);
+  // Merge the POST acknowledgement even if a concurrent read advanced the row.
+  // This retries only the conditional database write, never the paid/network POST.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const current = await store.get(pk, intent.sk);
+    if (!current || current.rawHash !== rawHash)
+      throw new ChainError("Original intent unavailable after submission.");
+    const nextStatus =
+      current.status === "confirmed" || current.status === "conflict"
+        ? current.status
+        : status === "submitted"
+          ? "submitted"
+          : current.status;
+    try {
+      await store.put(
+        {
+          ...current,
+          version: current.version + 1,
+          status: nextStatus,
+          postAcknowledged:
+            current.postAcknowledged === true || status === "submitted",
+          attemptedAt: new Date().toISOString(),
+        },
+        current.version,
+      );
+      return { txid, status: nextStatus as string };
+    } catch (error) {
+      if (!(error instanceof Conflict)) throw error;
+    }
   }
-  return { txid, status };
+  // Retain the original uncertain intent if reconciliation continually races.
+  return summary((await store.get(pk, intent.sk))!);
 }

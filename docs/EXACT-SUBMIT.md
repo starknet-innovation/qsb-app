@@ -69,3 +69,60 @@ The direct miner transport follows the official
 [MARA OpenAPI](https://slipstream.mara.com/docs/openapi.json), read 25 September 2026.
 Runtime authorization, if configured, remains confined to the exact MARA origin;
 no operator credentials were retrieved in implementation or testing.
+
+## Operator recovery without another POST
+
+For an `uncertain` intent, preserve the original signed bytes and both outpoint
+reservations. **Keep the helper UTXO unspent**: spending it elsewhere makes this
+withdrawal unable to confirm. Do not ask the user to sign a replacement or reuse
+one-time material.
+
+First inspect `GET /api/transactions/:originalTxid/status`. An unspent funding
+outpoint is not proof that the miner accepted a POST. The response remains
+`uncertain` unless the intent recorded acknowledgement. A funding spend with
+unexpected inputs/outputs is an alert requiring investigation, not a successful
+withdrawal.
+
+An authorized operator can persist the same observation and an audit reference:
+
+```sh
+QSB_NETWORK=mainnet TABLE_NAME=your-records-table AWS_REGION=eu-west-1 \
+  npx tsx scripts/reconcile-withdrawal.ts OWNER JOB \
+    --operator OPERATOR --evidence audit://incident/reference
+```
+
+Use the approved scoped reconciliation-role session described in the operational
+runbook. This CLI requires the persistent table and mainnet configuration before
+importing clients. It loads `JOB#` → original `TX#`, checks owner/job identity,
+exact signed-byte hash and stored spend binding, then observes the funding
+outpoint and original miner txid using the same status logic as the API. It saves
+the observation conditionally against both intent and job versions. It never
+posts a transaction, changes the original bytes/txid, starts work, or releases
+reservations. An alternate valid mined txid is recorded separately. An alert
+produces a nonzero exit code. Failed reads or concurrent changes must be
+investigated and the read-only observation rerun; they cannot authorize a POST.
+
+Even when the funding is unspent and the miner reports no transaction, this tool
+**does not re-POST**. Another POST would need new explicit user approval and a
+separate reviewed operation; neither a network error nor an operator evidence
+string is that approval. Definite miner rejections currently retain the same
+conservative uncertain state. An expired or spent helper is a re-authorization
+problem under #8, not permission to accept a different transaction.
+
+Pre-submit input checks now fetch the two independent input observations in
+parallel, preserving all amount/script/unspent/confirmation checks and ordered
+Core spent-output data. Timeout reductions do not remove the crash boundary
+between creating the intent, POSTing and recording its result.
+
+If a later observation no longer confirms a previously confirmed intent, operator
+reconciliation downgrades the job to submitted and clears its current inclusion
+identifier while retaining the original txid, signed bytes and reservations.
+It never substitutes another transaction. A successful POST acknowledgement is
+merged through conditional database-write races; those retries repeat only the
+database write, never the POST.
+
+The API Lambda timeout is 120 seconds to budget chain reads, the bounded native
+check and the miner POST. The API Gateway integration remains 30 seconds: a
+browser timeout can therefore occur while Lambda continues. That timeout is an
+unknown outcome, not permission to submit again. Inspect the retained transaction
+status or use the reconciliation CLI; never clear its intent to make a retry.

@@ -111,14 +111,14 @@ export class Esplora {
     // raw() binds the response bytes to the provider's actual spender txid.
     const { tx } = await this.raw(spent.txid);
     if (tx.inputsLength !== 2 || spent.vin >= tx.inputsLength)
-      throw new ChainError("Withdrawal spender input mismatch.");
+      throw new WithdrawalConflict("Withdrawal spender input mismatch.");
     const fundingInput = tx.getInput(spent.vin);
     if (
       !fundingInput.txid ||
       hex.encode(fundingInput.txid) !== approved.funding.txid.toLowerCase() ||
       fundingInput.index !== approved.funding.vout
     )
-      throw new ChainError("Withdrawal spender input mismatch.");
+      throw new WithdrawalConflict("Withdrawal spender input mismatch.");
     const expected = [approved.helper, approved.funding]
       .map((point) => `${point.txid.toLowerCase()}:${point.vout}`)
       .sort();
@@ -132,9 +132,9 @@ export class Esplora {
       expected[0] === expected[1] ||
       expected.some((point, index) => point !== actual[index])
     )
-      throw new ChainError("Withdrawal spender input mismatch.");
+      throw new WithdrawalConflict("Withdrawal spender input mismatch.");
     if (tx.outputsLength !== 1)
-      throw new ChainError("Withdrawal spender output mismatch.");
+      throw new WithdrawalConflict("Withdrawal spender output mismatch.");
     const output = tx.getOutput(0);
     if (
       !output.script ||
@@ -147,7 +147,7 @@ export class Esplora {
         output.amount !==
         BigInt(approved.fee)
     )
-      throw new ChainError("Withdrawal spender output mismatch.");
+      throw new WithdrawalConflict("Withdrawal spender output mismatch.");
     // Do not accept the outspend endpoint's supplied status: status() separately
     // checks the spender and its canonical block against the current chain tip.
     const status = await this.status(spent.txid);
@@ -203,3 +203,6 @@ export class Esplora {
   }
 }
 export const chain = new Esplora();
+
+/** A known funding spender contradicts the approved withdrawal. */
+export class WithdrawalConflict extends ChainError {}

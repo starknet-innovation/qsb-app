@@ -373,3 +373,35 @@ describe("authenticated exact submit route", () => {
     expect(f.miner.submit).not.toHaveBeenCalled();
   });
 });
+it("persists POST acknowledgement through a concurrent intent observation write without reposting", async () => {
+  const f = await fixture();
+  const originalPut = f.store.put.bind(f.store);
+  let raced = false;
+  vi.spyOn(f.store, "put").mockImplementation(async (row, expected) => {
+    if (row.sk === `TX#${f.id}` && row.postAcknowledged === true && !raced) {
+      raced = true;
+      const current = (await f.store.get(f.pk, row.sk))!;
+      await originalPut(
+        {
+          ...current,
+          version: current.version + 1,
+          status: "uncertain",
+          observation: { source: "concurrent-status" },
+        },
+        current.version,
+      );
+    }
+    return originalPut(row, expected);
+  });
+  expect(
+    await submitExact(f.stored.owner, f.stored.id, f.raw, f.deps),
+  ).toMatchObject({ status: "submitted" });
+  expect(raced).toBe(true);
+  expect(await f.store.get(f.pk, `TX#${f.id}`)).toMatchObject({
+    postAcknowledged: true,
+    status: "submitted",
+    observation: { source: "concurrent-status" },
+  });
+  await submitExact(f.stored.owner, f.stored.id, f.raw, f.deps);
+  expect(f.miner.submit).toHaveBeenCalledOnce();
+});

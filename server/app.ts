@@ -1,3 +1,4 @@
+import { observeWithdrawal } from "./withdrawal-status";
 import { submitExact, SubmitDisabled } from "./submit-exact";
 import {
   CoreConsensus,
@@ -161,6 +162,7 @@ export function createApp(
       )),
       network: NETWORK_ID,
       operationsEnabled: enabled,
+      exactSubmitEnabled: dependencies.exactSubmit ?? exactSubmitEnabled(),
       billing: "not_configured",
       awsRegion: process.env.AWS_REGION || "local",
       maxBtc: null,
@@ -369,26 +371,21 @@ export function createApp(
     const pk = `OWNER#${c.get("owner")}`;
     const row = await store.get(pk, `TX#${id}`);
     if (!row) return c.json({ error: "Transaction intent not found" }, 404);
-    const [chainResult, minerResult] = await Promise.allSettled([
-      row.kind === "exact-withdrawal"
-        ? ledger.withdrawalInclusion(withdrawalSchema.parse(row.manifest))
-        : ledger.status(id),
-      miner.status(id),
-    ]);
-    const onChain =
-      chainResult.status === "fulfilled" ? chainResult.value : null;
-    const inMiner =
-      minerResult.status === "fulfilled" ? minerResult.value : null;
-    const status = onChain?.confirmed
-      ? "confirmed"
-      : onChain || inMiner
-        ? "submitted"
-        : "uncertain";
+    const observation = await observeWithdrawal(row, ledger, miner);
+    const onChain = observation.chain;
+    const inMiner = observation.miner;
+    const status = observation.status;
     const checkedAt = new Date().toISOString();
     // A missing record or unavailable provider is not proof of rejection. Keep
     // the signed intent and input reservations even if neither can see it yet.
     await store.put(
-      { ...row, status, checkedAt, version: row.version + 1 },
+      {
+        ...row,
+        status,
+        alert: observation.alert ?? null,
+        checkedAt,
+        version: row.version + 1,
+      },
       row.version,
     );
     const actualTxid =
@@ -423,7 +420,7 @@ export function createApp(
     // report uses its own reason and limits when that query confirms.
     const section7Inclusion = reportEsploraInclusion(
       judgment,
-      chainResult.status === "fulfilled",
+      onChain !== null,
     );
     return c.json({
       txid: id,
@@ -437,6 +434,7 @@ export function createApp(
             reportedConfirmed: inMiner.transaction.status.confirmed,
           }
         : { visible: null },
+      alert: observation.alert,
       retrySafe: false,
       section7Inclusion,
     });
@@ -716,12 +714,34 @@ export function createApp(
         { error: "Transaction intent belongs to a different job" },
         409,
       );
-    const status =
+    const observation =
       intent.kind === "exact-withdrawal"
-        ? await ledger.withdrawalInclusion(
-            withdrawalSchema.parse(intent.manifest),
-          )
-        : await ledger.status(job.txid);
+        ? await observeWithdrawal(intent, ledger, miner)
+        : undefined;
+    if (observation && observation.status !== "confirmed") {
+      await store.put(
+        {
+          ...intent,
+          version: intent.version + 1,
+          status: observation.status,
+          alert: observation.alert ?? null,
+          checkedAt: new Date().toISOString(),
+        },
+        intent.version,
+      );
+      if (job.status === "confirmed") {
+        job.status = "submitted";
+        await store.put({ ...row, job, version: row.version + 1 }, row.version);
+      }
+      return c.json({
+        job,
+        status: observation.chain,
+        submissionStatus: observation.status,
+        alert: observation.alert,
+        retrySafe: false,
+      });
+    }
+    const status = observation?.chain ?? (await ledger.status(job.txid));
     const includedTxid = status.confirmed
       ? "txid" in status && typeof status.txid === "string"
         ? status.txid
