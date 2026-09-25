@@ -26,9 +26,6 @@ def render(c):
         'lambda': ['function:qsb-*', 'function:QsbVault*', 'function:QsbXverse*'],
         'dynamodb': ['table/qsb-*', 'table/QsbVault*'],
         'states': ['stateMachine:qsb-*', 'stateMachine:QsbVault*', 'stateMachine:QsbXverse*'],
-        'ecr': ['repository/qsb-*'],
-        'sqs': ['qsb-*'],
-        'events': ['rule/qsb-*'],
         'cloudwatch': ['alarm:qsb-*', 'alarm:QsbVault*', 'alarm:QsbXverse*'],
     }
     for service, resources in named.items():
@@ -36,7 +33,7 @@ def render(c):
     allow('QsbBuckets', ['s3:*'], [f'arn:aws:s3:::qsb-*-{account}-{region}-*',f'arn:aws:s3:::qsb-*-{account}-{region}-*/*', 'arn:aws:s3:::qsbvaultweb-*','arn:aws:s3:::qsbvaultweb-*/*','arn:aws:s3:::qsbvaulttestnet4web-*','arn:aws:s3:::qsbvaulttestnet4web-*/*'])
     log_arns = [arn('logs','log-group:'+x) for x in ['/qsb/qsb-*','/aws/lambda/qsb-*','/aws/vendedlogs/states/qsb-*','QsbVault*','QsbXverse*']]
     allow('QsbLogs', ['logs:*'], log_arns)
-    allow('RegionalDiscovery', ['logs:DescribeLogGroups','lambda:ListFunctions','states:ListStateMachines','cloudwatch:DescribeAlarms','ecr:GetAuthorizationToken','ec2:Describe*'], ['*'], {'StringEquals':{'aws:RequestedRegion':region}})
+    allow('RegionalDiscovery', ['logs:DescribeLogGroups','lambda:ListFunctions','states:ListStateMachines','cloudwatch:DescribeAlarms'], ['*'], {'StringEquals':{'aws:RequestedRegion':region}})
     # AWS has no tag/name authorization for OAC/response-header policy IDs.
     # Admin registers exact IDs; no wildcard permission to modify other projects.
     edge = [cf('distribution/'+x) for x in c['distributions']]
@@ -48,9 +45,9 @@ def render(c):
     allow('RegisteredQsbApis', ['apigateway:GET','apigateway:POST','apigateway:PUT','apigateway:PATCH','apigateway:DELETE'],api_resources)
     allow('ApiDiscovery',['apigateway:GET'],[f'arn:aws:apigateway:{region}::/apis'])
     allow('CreateBoundedRuntimeRoles',['iam:CreateRole','iam:PutRolePolicy','iam:AttachRolePolicy','iam:UpdateAssumeRolePolicy','iam:PutRolePermissionsBoundary'],[runtime_roles],{'StringEquals':{'iam:PermissionsBoundary':boundary}})
-    allow('ManageRuntimeRoles',['iam:GetRole','iam:GetRolePolicy','iam:ListRolePolicies','iam:ListAttachedRolePolicies','iam:ListInstanceProfilesForRole','iam:ListRoleTags','iam:TagRole','iam:UntagRole','iam:DeleteRolePolicy','iam:DetachRolePolicy','iam:DeleteRole','iam:UpdateRole','iam:UpdateRoleDescription'],[runtime_roles])
+    allow('ManageRuntimeRoles',['iam:GetRole','iam:GetRolePolicy','iam:ListRolePolicies','iam:ListAttachedRolePolicies','iam:ListRoleTags','iam:TagRole','iam:UntagRole','iam:DeleteRolePolicy','iam:DetachRolePolicy','iam:DeleteRole','iam:UpdateRole','iam:UpdateRoleDescription'],[runtime_roles])
     allow('ReadRuntimeBoundary',['iam:GetPolicy','iam:GetPolicyVersion'],[boundary])
-    allow('PassRuntimeRoles',['iam:PassRole'],[runtime_roles],{'StringEquals':{'iam:PassedToService':['lambda.amazonaws.com','states.amazonaws.com','ec2.amazonaws.com','backup.amazonaws.com','apigateway.amazonaws.com']}})
+    allow('PassRuntimeRoles',['iam:PassRole'],[runtime_roles],{'StringEquals':{'iam:PassedToService':['lambda.amazonaws.com','states.amazonaws.com']}})
     allow('StateList',['s3:ListBucket','s3:GetBucketLocation'],['arn:aws:s3:::'+c['state_bucket']])
     allow('StateObjects',['s3:GetObject','s3:PutObject'],['arn:aws:s3:::'+c['state_bucket']+'/qsb/*'])
     allow('StateLocks',['s3:DeleteObject'],['arn:aws:s3:::'+c['state_bucket']+'/qsb/*.tflock'])
@@ -62,11 +59,7 @@ def render(c):
     allow('Functions',['lambda:InvokeFunction'],[arn('lambda','function:qsb-*')],target=runtime)
     allow('Workflow',['states:StartExecution','states:DescribeExecution'],[arn('states','stateMachine:qsb-*'),arn('states','execution:qsb-*:*')],target=runtime)
     allow('RuntimeLogs',['logs:CreateLogStream','logs:PutLogEvents'],log_arns,target=runtime)
-    allow('RuntimeObjects',['s3:GetObject','s3:GetObjectVersion','s3:PutObject','s3:ListBucket'],[f'arn:aws:s3:::qsb-*-{account}-{region}-*',f'arn:aws:s3:::qsb-*-{account}-{region}-*/*'],target=runtime)
-    allow('RuntimeQueues',['sqs:SendMessage','sqs:ReceiveMessage','sqs:DeleteMessage','sqs:ChangeMessageVisibility','sqs:GetQueueAttributes'],[arn('sqs','qsb-*')],target=runtime)
     allow('ProviderSecret',['secretsmanager:GetSecretValue'],[arn('secretsmanager','secret:qsb-vault/runpod-*')],target=runtime)
-    allow('RuntimeImages',['ecr:BatchGetImage','ecr:GetDownloadUrlForLayer','ecr:BatchCheckLayerAvailability'],[arn('ecr','repository/qsb-*')],target=runtime)
-    allow('ImageAuthentication',['ecr:GetAuthorizationToken'],['*'],target=runtime)
     # AWS log-delivery control APIs have no resource-level authorization.
     allow('WorkflowLogDelivery',['logs:CreateLogDelivery','logs:GetLogDelivery','logs:UpdateLogDelivery','logs:DeleteLogDelivery','logs:ListLogDeliveries','logs:PutResourcePolicy','logs:DescribeResourcePolicies','logs:DescribeLogGroups'],['*'],{'StringEquals':{'aws:RequestedRegion':region}},runtime)
     trust={'Version':'2012-10-17','Statement':[{'Effect':'Allow','Principal':{'Federated':iam('oidc-provider/token.actions.githubusercontent.com')},'Action':'sts:AssumeRoleWithWebIdentity','Condition':{'StringEquals':{'token.actions.githubusercontent.com:aud':'sts.amazonaws.com','token.actions.githubusercontent.com:sub':c['subject']}}}]}

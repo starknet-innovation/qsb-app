@@ -1,5 +1,4 @@
 mock_provider "aws" {
-  mock_data "aws_ami" { defaults = { id = "ami-0123456789abcdef0" } }
   mock_data "aws_partition" { defaults = { partition = "aws" } }
   mock_data "aws_caller_identity" { defaults = { account_id = "123456789012" } }
 }
@@ -32,7 +31,7 @@ run "coordinator_least_privilege" {
   command = plan
   variables { network = "mainnet" }
   assert {
-    condition = jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[0].Action == ["dynamodb:GetItem"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Action == ["dynamodb:PutItem"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Condition["ForAllValues:StringLike"]["dynamodb:LeadingKeys"] == ["OWNER#*"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Condition.Null["dynamodb:LeadingKeys"] == "false" && length(jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement) == 2 && !contains(keys(aws_iam_role_policy.records), "coordinator")
+    condition     = jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[0].Action == ["dynamodb:GetItem"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Action == ["dynamodb:PutItem"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Condition["ForAllValues:StringLike"]["dynamodb:LeadingKeys"] == ["OWNER#*"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Condition.Null["dynamodb:LeadingKeys"] == "false" && length(jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement) == 2 && !contains(keys(aws_iam_role_policy.records), "coordinator")
     error_message = "Coordinator may only GetItem and PutItem on present OWNER keys."
   }
 }
@@ -54,7 +53,7 @@ run "baseline" {
     error_message = "The API must not receive the provider secret or enable rehearsal."
   }
   assert {
-    condition     = length(aws_instance.runtime) == 0 && !contains(keys(aws_lambda_function.api.environment[0].variables), "SUPERVISED_EXECUTION_ENABLED") && !contains(keys(aws_lambda_function.api.environment[0].variables), "SUPERVISED_DISPATCH_QUEUE_URL")
+    condition     = !contains(keys(aws_lambda_function.api.environment[0].variables), "SUPERVISED_EXECUTION_ENABLED") && !contains(keys(aws_lambda_function.api.environment[0].variables), "SUPERVISED_DISPATCH_QUEUE_URL")
     error_message = "The default mainnet plan must not deploy the supervised runtime."
   }
   assert {
@@ -91,21 +90,6 @@ run "reject_wrong_commit" {
   }
   expect_failures = [terraform_data.release]
 }
-run "reject_mainnet_supervised_runtime" {
-  command = plan
-  variables {
-    network                   = "mainnet"
-    provision_runtime         = true
-    runtime_ami_id            = "ami-0123456789abcdef0"
-    runtime_ami_owner         = "123456789012"
-    runtime_availability_zone = "eu-west-1a"
-    runpod_endpoint_id        = "exampleendpoint"
-    runpod_secret_arn         = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:test-Example"
-    cleanup_endpoints         = { disposabletest1 = { delete_after = "2026-09-24T20:00:00Z" } }
-  }
-  expect_failures = [terraform_data.release]
-}
-
 run "ci_runtime_roles_are_bounded" {
   command = plan
   variables {
@@ -116,5 +100,26 @@ run "ci_runtime_roles_are_bounded" {
   assert {
     condition     = alltrue([for role in aws_iam_role.lambda : role.path == "/qsb/runtime/" && role.permissions_boundary == var.iam_permissions_boundary_arn]) && aws_iam_role.workflow.path == "/qsb/runtime/" && aws_iam_role.workflow.permissions_boundary == var.iam_permissions_boundary_arn
     error_message = "CI-created Lambda and workflow roles must keep the required path and boundary."
+  }
+}
+
+run "configured_single_pipeline" {
+  command = plan
+  variables {
+    network            = "mainnet"
+    runpod_endpoint_id = "exampleendpoint"
+    runpod_secret_arn  = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/runpod-Example"
+  }
+  assert {
+    condition     = output.runpod_configured && output.transactions_enabled == false && length(aws_iam_role_policy.runpod) == 1 && jsondecode(aws_iam_role_policy.runpod[0].policy).Statement == [{ Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = var.runpod_secret_arn }]
+    error_message = "Only one provider-key reference may be enrolled; configuration must not activate transactions."
+  }
+  assert {
+    condition     = aws_lambda_function.coordinator.environment[0].variables.RUNPOD_SECRET_ARN == var.runpod_secret_arn && !contains(keys(aws_lambda_function.api.environment[0].variables), "RUNPOD_SECRET_ARN") && length(aws_lambda_function.reference.environment) == 0 && aws_lambda_function.coordinator.environment[0].variables.TABLE_NAME == aws_lambda_function.api.environment[0].variables.TABLE_NAME && aws_lambda_function.api.environment[0].variables.TABLE_NAME == aws_dynamodb_table.records.name
+    error_message = "API and coordinator must share the one table; only coordinator receives the provider reference."
+  }
+  assert {
+    condition     = length(aws_iam_role.lambda) == 3 && toset(keys(aws_iam_role.lambda)) == toset(["api", "coordinator", "reference"]) && aws_lambda_function.api.environment[0].variables.WORKFLOW_ARN == local.workflow_arn && aws_lambda_function.coordinator.environment[0].variables.REFERENCE_FUNCTION == aws_lambda_function.reference.function_name && jsondecode(aws_sfn_state_machine.withdrawal.definition).StartAt == "CoordinateSearch"
+    error_message = "Keep the API-to-workflow-to-coordinator path and its CPU reference Lambda."
   }
 }
