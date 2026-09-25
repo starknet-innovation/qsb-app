@@ -257,7 +257,7 @@ python3 ops/github-aws/update_installed.py --profile ADMIN --inventory INVENTORY
 
 **`--apply`** runs only from a clean `main` that matches `origin`, with an administrator profile, today root. It shows the plan, then asks you to type `apply`.
 
-Every plan prints a `plan_hash`, a digest of the commit and everything it read and would write. To apply without the prompt, for example when an agent runs it with your OK, pass `--yes --plan-hash HASH` using the hash from a plan-mode run you reviewed. If anything differs from that run, it refuses, including a target that plan mode couldn't read. A plan reviewed as `qsb-viewonly` therefore authorises only what that plan actually showed.
+Every plan-mode run prints a `plan_hash`, a digest of the commit and everything it read and would write. `--apply` runs don't print it, so a hash always comes from a plan someone could review. To apply without the prompt, for example when an agent runs it with your OK, pass `--yes --plan-hash HASH` using the hash from a plan-mode run you reviewed. If anything differs from that run, it refuses, including a target that plan mode couldn't read. A plan reviewed as `qsb-viewonly` therefore authorises only what that plan actually showed.
 
 The updater never changes who a role trusts. A trust update that would move a principal, or the GitHub OIDC `sub`/`aud`, is refused, because those values come from the inventory and need a separately reviewed step. It updates only what differs:
 - a new default version for managed policies;

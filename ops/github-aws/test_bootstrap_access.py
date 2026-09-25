@@ -219,7 +219,8 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
             ('iam', 'list-policies'): {'Policies': listed},
             ('iam', 'list-users'): {'Users': [{'UserName': 'qsb-operator-user', 'Path': drift.get('user_path', '/qsb/operators/')}]},
             ('iam', 'get-policy-version'): versions,
-            ('iam', 'list-attached-user-policies'): {'AttachedPolicies': [{'PolicyArn': a} for a in out['user']['managed']]},
+            ('iam', 'list-attached-user-policies'): {'AttachedPolicies': [
+                {'PolicyArn': a} for a in out['user']['managed'] + drift.get('user_managed', [])]},
             ('iam', 'list-user-policies'): {'PolicyNames': drift.get('user_policies', ['assume-qsb-roles'])},
             ('iam', 'get-user-policy'): {'PolicyDocument': drift.get('user_inline', out['user']['inline'])},
             ('iam', 'list-access-keys'): {'AccessKeyMetadata': drift.get('keys', [])},
@@ -304,7 +305,10 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
                                ({'ssh': [{'SSHPublicKeyId': 'APKAEXAMPLE'}]}, 'has SSH keys'),
                                ({'groups': [{'GroupName': 'admins'}]}, 'is in a group'),
                                ({'user_inline': {'Version': '2012-10-17', 'Statement': []}}, 'different inline policy'),
-                               ({'user_path': '/elsewhere/'}, 'is not under /qsb/operators/')):
+                               ({'user_path': '/elsewhere/'}, 'is not under /qsb/operators/'),
+                               ({'user_managed': ['arn:aws:iam::aws:policy/AdministratorAccess']},
+                                'has policies this commit does not render'),
+                               ({'user_policies': ['assume-qsb-roles', 'extra']}, 'has policies this commit does not render')):
             with self.subTest(drift=list(drift)), self.assertRaisesRegex(SystemExit, message):
                 self.bootstrap([{'status': 'ACTIVE'}], resume=True, responses_override=self.partial_run(**drift))
             self.assert_no_iam_mutations()

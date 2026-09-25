@@ -13,8 +13,10 @@ Without --apply it prints the plan: for each target `identical`, `missing` or `d
 with the statements added, removed or changed and, for changed ones, the actions,
 resources and principals that differ (account numbers masked). With --apply, from `main`
 only and with an administrator profile (today the account root), it asks for a typed
-confirmation (or --yes after reviewing that exact plan), updates only what differs, and
-reads back every change. It never creates or deletes an identity, never attaches or
+confirmation, updates only what differs, and reads back every change. To skip the prompt,
+pass --yes --plan-hash with the plan_hash that a reviewed plan-mode run printed; any
+difference from that run, including a target plan mode couldn't read, is refused. It never
+changes who a role trusts: moving a principal or an OIDC sub/aud is refused. It never creates or deletes an identity, never attaches or
 detaches a policy, and never deletes a policy version. It refuses before any write when a
 changed managed policy already has IAM's five versions, the number of rendered access
 policies changed, something is missing, or a role carries policies this commit doesn't render.
@@ -267,7 +269,9 @@ plan_hash = hashlib.sha256(json.dumps(
     {'commit': commit, 'targets': [[label, kind, '<unreadable>' if installed is UNREADABLE else installed, wanted]
                                    for label, kind, installed, wanted, _ in targets]},
     sort_keys=True, default=str).encode()).hexdigest()[:16]
-print(json.dumps({'commit': commit, 'apply': a.apply, 'plan_hash': plan_hash, 'plan': plan}, indent=2), flush=True)
+# Only plan mode prints the hash, so an apply can't be re-run with a hash it produced itself.
+header = {'commit': commit, 'apply': a.apply, **({} if a.apply else {'plan_hash': plan_hash}), 'plan': plan}
+print(json.dumps(header, indent=2), flush=True)
 if any(t[1] == 'missing' for t in targets):
     raise SystemExit('Some identities are missing; run the bootstrap first')
 if blockers:
@@ -277,7 +281,7 @@ if not a.apply:
 changes = [t for t in targets if t[2] != t[3]]
 if a.yes and a.plan_hash != plan_hash:
     raise SystemExit('--yes needs --plan-hash from a reviewed plan-mode run of this exact state; '
-                     f'this plan is {plan_hash}. Nothing was changed')
+                     'run plan mode, review it, and quote its plan_hash. Nothing was changed')
 if changes and not a.yes:
     if not sys.stdin.isatty():
         raise SystemExit('Review the plan above, then confirm interactively or rerun with --yes; nothing was changed')

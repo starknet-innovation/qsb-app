@@ -47,10 +47,8 @@ class UpdateInstalled(unittest.TestCase):
     def run_update(self, iam, apply=True, yes=True, branch='main', plan_hash='auto', tty=False, answer=None):
         if apply and yes and plan_hash == 'auto':
             # Like an operator: review a plan-mode run first, then apply quoting its hash.
-            try:
+            with contextlib.suppress(SystemExit):
                 self.run_update(iam, apply=False, branch=branch)
-            except SystemExit:
-                pass
             plan_hash = self.plan_hash
         self.calls, self.args = [], []
 
@@ -268,6 +266,16 @@ class UpdateInstalled(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, 'trusted principal would change'):
             self.run_update(iam)
         self.assertEqual(self.writes(), [])
+
+    def test_only_plan_mode_prints_the_hash(self):
+        iam = self.installed()
+        iam['roles']['qsb-viewonly']['max'] = 14400
+        with self.assertRaises(SystemExit) as refused:
+            self.run_update(iam, plan_hash='0' * 16)
+        self.assertIsNone(self.plan_hash)
+        with self.assertRaises(SystemExit):
+            self.run_update(iam, apply=False)
+        self.assertNotIn(self.plan_hash, str(refused.exception))
 
     def test_yes_is_bound_to_the_reviewed_plan(self):
         iam = self.installed()
