@@ -1,9 +1,16 @@
+variable "build_manifest_path" {
+  type        = string
+  default     = null
+  description = "Optional build manifest path; artifact hashes are always checked against this module's .build directory."
+}
 locals {
-  artifacts    = "${path.module}/.build"
-  build        = jsondecode(file("${local.artifacts}/manifest.json"))
-  workflow_arn = "arn:${data.aws_partition.current.partition}:states:${var.region}:${var.aws_account_id}:stateMachine:${var.name}-withdrawal"
-  compute      = var.batch_job_queue != "" && var.batch_job_definition != "" && var.batch_job_bucket != ""
-  gpu_spend    = jsondecode(file("${path.module}/../server/gpu-spend.json"))
+  artifacts         = "${path.module}/.build"
+  build             = jsondecode(file("${local.artifacts}/manifest.json"))
+  checked_build     = var.build_manifest_path != null ? jsondecode(file(var.build_manifest_path)) : local.build
+  workflow_arn      = "arn:${data.aws_partition.current.partition}:states:${var.region}:${var.aws_account_id}:stateMachine:${var.name}-withdrawal"
+  solver_release_id = try(local.build.identities.solver.id, "")
+  compute           = var.batch_job_queue != "" && var.batch_job_definition != "" && var.batch_job_bucket != ""
+  gpu_spend         = jsondecode(file("${path.module}/../server/gpu-spend.json"))
   gpu_limit_env = {
     GPU_WORKERS_MAX          = tostring(local.gpu_spend.workersMax)
     GPU_WORKERS_MIN          = tostring(local.gpu_spend.workersMin)
@@ -23,6 +30,10 @@ resource "terraform_data" "release" {
     precondition {
       condition     = local.build.commit == var.source_commit && local.build.clean && local.build.network == var.network
       error_message = "Rebuild from the requested clean commit and matching network before deployment."
+    }
+    precondition {
+      condition     = var.solver_release_id == local.solver_release_id && try(local.checked_build.commit == local.build.commit && local.checked_build.identities.solver == local.build.identities.solver && local.checked_build.identities.reference.appCommit == var.source_commit && local.checked_build.identities.reference.artifact == "reference.zip" && local.checked_build.identities.reference.sha256 == local.build.files["reference.zip"], false)
+      error_message = "Rebuild with the selected --solver-release and matching CPU artifact; deployment identities must come from that build."
     }
     precondition {
       condition     = alltrue([for name, hash in local.build.files : filesha256("${local.artifacts}/${name}") == hash]) && toset(fileset("${local.artifacts}/frontend", "**")) == toset(local.build.frontend_files)

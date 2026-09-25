@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 3,
+  "id": "qsb-ranked-v2-aea823a49420-9e62d3c4eae0",
+  "protocol": "qsb-config-a-v1",
+  "generatorCommit": "2c9172051d5c150ef0a994ca6b988a08a3ef9e85",
+  "searchVersion": "ranked-v2",
+  "searchContract": "c570e14089e62de5185d9c8ba9f8f85d1b22c788edc524cd98a9ecaac5c26f7a",
+  "solverRepository": "https://github.com/starknet-innovation/qsb-solver",
+  "solverCommit": "aea823a494204084d462dbf00db9e1a96e22c5c7",
+  "kernelCommit": "2791ed0588f5014ccd688d48ba5502df2879f2f1",
+  "image": "ghcr.io/starknet-innovation/qsb-solver@sha256:9e62d3c4eae05b4c5164a78679ad7f383aeefa0f9bfc30121fadab2ca9db623e"
+}

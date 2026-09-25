@@ -46,6 +46,52 @@ variable "image" {
   }
 
 }
+variable "release_manifest_path" {
+  type        = string
+  description = "Path to the generated app terraform/.build/manifest.json; never a hand-edited deployment identity."
+}
+locals {
+  release_build = jsondecode(file(var.release_manifest_path))
+  enrolled_releases = { for name in fileset("${path.module}/../../src/lib/releases", "*.json") :
+    jsondecode(file("${path.module}/../../src/lib/releases/${name}")).id => jsondecode(file("${path.module}/../../src/lib/releases/${name}"))
+  }
+  enrolled_solver = try(local.enrolled_releases[local.release_build.identities.solver.id], null)
+}
+resource "terraform_data" "release_identity" {
+  input = local.release_build.identities
+  lifecycle {
+    precondition {
+      condition     = try(local.release_build.clean && local.release_build.commit == var.source_commit && local.release_build.identities.reference.appCommit == var.source_commit, false)
+      error_message = "Use a generated clean app build matching source_commit."
+    }
+    precondition {
+      condition = try(
+        local.enrolled_solver.schemaVersion == 3 &&
+        local.enrolled_solver.image == local.release_build.identities.solver.image &&
+        local.enrolled_solver.solverCommit == local.release_build.identities.solver.solverCommit,
+        false
+      )
+      error_message = "Build solver must match an enrolled schema-3 descriptor's ID, image and source commit."
+    }
+    precondition {
+      condition = try(
+        local.release_build.identities.reference.artifact == "reference.zip" &&
+        local.release_build.identities.reference.sha256 == local.release_build.files["reference.zip"] &&
+        alltrue([for name, hash in local.release_build.files : filesha256("${dirname(var.release_manifest_path)}/${name}") == hash]),
+        false
+      )
+      error_message = "CPU identity and every build artifact must match the manifest file hashes."
+    }
+    precondition {
+      condition = try(
+        can(regex("^ghcr\\.io/starknet-innovation/qsb-solver@sha256:[a-f0-9]{64}$", local.release_build.identities.solver.image)) &&
+        var.image == "${var.aws_account_id}.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", local.release_build.identities.solver.image)[1]}",
+        false
+      )
+      error_message = "GPU image must preserve the enrolled producer manifest digest from the app build."
+    }
+  }
+}
 variable "gpu_ami" {
   type        = string
   default     = "ami-05db4db06e751ab89"
@@ -309,6 +355,7 @@ resource "aws_batch_job_queue" "gpu" {
 
 }
 resource "aws_batch_job_definition" "solver" {
+  depends_on = [terraform_data.release_identity]
 
   name                  = "qsb-gpu-solver"
   type                  = "container"

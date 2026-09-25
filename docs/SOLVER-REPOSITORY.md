@@ -37,11 +37,14 @@ contract. Before enrollment:
    This is control-plane consistency, not runtime attestation. Selecting a
    descriptor does not reconfigure Batch or publish an image.
 
-Withdrawal selection can name solverReleaseId; the browser lists registered
-releases and the server freezes the chosen descriptor in the job. Existing vaults
-are bound to protocol/generator, not a solver. Existing jobs retain their original
-pin. The historical descriptor remains the default until an operator deliberately
-selects a new release. Imported optimized research remains HOLD and subset-only;
+The browser shows the deployment-selected release. New withdrawal requests default
+to that served ID; an explicit different ID is refused before reservations. The
+server freezes that descriptor in the job. Existing vaults are bound to
+protocol/generator, not a solver, and existing jobs retain their original pin.
+Build with `--solver-release=RELEASE_ID` to record the producer image/source
+identity alongside the CPU artifact in `terraform/.build/manifest.json`; deployment
+must select the same ID. An unconfigured build serves no solver. Archived pins
+continue to verify without being selected for new paid work. Imported optimized research remains HOLD and subset-only;
 it cannot replace the two-stage pipeline through a descriptor.
 
 ## Historical evidence
@@ -95,11 +98,36 @@ enrollment are required before that external solver can run. The archived app
 descriptor/default also remains byte-identical; its placeholder image is not a
 deployable release and fails the endpoint image check against a real deployment.
 
-The schema 3 producer update is [qsb-solver PR #3](https://github.com/starknet-innovation/qsb-solver/pull/3); it has not published a replacement release. No future digest or descriptor is invented here.
+The schema 3 producer update is [qsb-solver PR #3](https://github.com/starknet-innovation/qsb-solver/pull/3). The verified AWS release is enrolled below; the earlier v0.1.0 descriptor remains inspection-only.
 
 New job admission requires the explicit deployment `SOLVER_RELEASE_ID` (Terraform
 `solver_release_id`) shared by API and coordinator. Requests omitting a solver
 select that served release. A mismatched explicit request, missing configuration,
 unbound external descriptor or archived placeholder refuses before reservations.
-Historical pins remain readable. With no runnable schema-v3 release enrolled yet,
-new jobs refuse cleanly instead of reserving funds for an unusable solver.
+Historical pins remain readable. The enrolled AWS release below is available for explicit build/deployment selection. An unconfigured deployment still refuses new jobs before reservations.
+
+## AWS release enrollment: aws-v0.1.0
+
+The verbatim [producer release asset](https://github.com/starknet-innovation/qsb-solver/releases/tag/aws-v0.1.0)
+is enrolled as `src/lib/releases/qsb-solver-aws-v0-1-0.json`. Its ID, canonical
+image digest and solver source commit are read from that file, not duplicated in
+deployment configuration. The historical descriptor and published v0.1.0 remain unchanged.
+The producer's [tag build](https://github.com/starknet-innovation/qsb-solver/actions/runs/36139077364)
+selects the AWS target and `sm_86`. GitHub CLI provenance verification passed against
+that release workflow, source commit and tag on 25 September 2026. An anonymous GHCR manifest fetch also matched the enrolled digest, confirming public registry access:
+
+```sh
+gh attestation verify "oci://$(node -p 'require("./src/lib/releases/qsb-solver-aws-v0-1-0.json").image')" \
+  --repo starknet-innovation/qsb-solver \
+  --signer-workflow starknet-innovation/qsb-solver/.github/workflows/release.yml \
+  --source-ref refs/tags/aws-v0.1.0 \
+  --source-digest "$(node -p 'require("./src/lib/releases/qsb-solver-aws-v0-1-0.json").solverCommit')" \
+  --deny-self-hosted-runners
+gh release download aws-v0.1.0 -R starknet-innovation/qsb-solver -p solver.json -O - \
+  | cmp - src/lib/releases/qsb-solver-aws-v0-1-0.json
+```
+
+Build the app with the descriptor's ID as `--solver-release` to generate the
+CPU/solver deployment identities. This enrollment does not select a live solver,
+copy an image to an operator account, enable mainnet, or certify a fresh full
+search/withdrawal. Those remain separate deployment and execution steps.

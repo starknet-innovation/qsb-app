@@ -39,7 +39,10 @@ npm ci
 npm run vendor
 npm test
 # Commit and push any source changes before proceeding.
+# No solver selected: valid unconfigured deployment, no new GPU jobs.
 node terraform/scripts/build.mjs --network=mainnet
+# For an explicitly selected solver, instead build with its enrolled ID:
+# node terraform/scripts/build.mjs --network=mainnet --solver-release=RELEASE_ID
 export TF_VAR_source_commit="$(git rev-parse HEAD)"
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 # Edit terraform.tfvars: intended account, region/name; optional existing AWS Batch references.
@@ -95,6 +98,7 @@ terraform -chdir=terraform init -backend=false
 terraform -chdir=terraform validate
 # First build from the current clean committed checkout (mainnet identity for these tests).
 export TF_VAR_source_commit="$(git rev-parse HEAD)"
+node --import tsx terraform/scripts/review-fixtures.mjs
 terraform -chdir=terraform test -json -verbose > /tmp/qsb-terraform-tests.jsonl
 python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-tests.jsonl
 ```
@@ -141,8 +145,9 @@ actions; this stack does not change its policy.
 
 ### Served solver release
 
-Set `solver_release_id` only to an enrolled schema-v3 descriptor matching the
-endpoint's immutable image. Terraform passes the same `SOLVER_RELEASE_ID` to API
+Build with `node terraform/scripts/build.mjs --network=mainnet --solver-release=RELEASE_ID`, using the enrolled schema-v3 producer descriptor. The existing generated `.build/manifest.json` records its canonical image digest, solver repository commit and descriptor hash alongside the actual CPU `reference.zip` digest and app commit. These are two repository commits after the solver split; they are not claimed to be one source tree. Without `--solver-release`, the generated selection is null and no solver is served.
+
+Set `solver_release_id` to that exact generated ID (or leave it empty for an unconfigured build). Terraform rejects a selection different from the build and verifies the CPU artifact identity. It reads the same generated `SOLVER_RELEASE_ID` for API
 and coordinator. Empty, unsupported, unbound or mismatched releases refuse new
 job admission before outpoint reservations. Omitted request IDs select this
 deployment release, not the archived placeholder. The coordinator rechecks the
