@@ -16,3 +16,6 @@ operator_principal_arns = ["arn:aws:iam::123456789012:user/qsb-operator"]
 
 # Requires explicit exact-transaction authorization under #22; no activation here.
 exact_submit_enabled = false
+
+# Set only after publishing/enrolling a schema-v3 release and configuring its exact image.
+# solver_release_id = "enrolled-release-id"

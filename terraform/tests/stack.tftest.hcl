@@ -248,3 +248,24 @@ run "exact_submit_reject_testnet" {
   }
   expect_failures = [var.exact_submit_enabled, terraform_data.release]
 }
+
+run "solver_release_shared_by_api_and_coordinator" {
+  command = plan
+  variables {
+    solver_release_id = "qsb-reviewed-release"
+    network = "mainnet"
+  }
+  assert {
+    condition = aws_lambda_function.api.environment[0].variables.SOLVER_RELEASE_ID == "qsb-reviewed-release" && aws_lambda_function.coordinator.environment[0].variables.SOLVER_RELEASE_ID == "qsb-reviewed-release"
+    error_message = "API admission and coordinator must use the same deployment release."
+  }
+}
+
+run "solver_release_defaults_unconfigured" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition = aws_lambda_function.api.environment[0].variables.SOLVER_RELEASE_ID == "" && aws_lambda_function.coordinator.environment[0].variables.SOLVER_RELEASE_ID == ""
+    error_message = "A runnable release must never be silently selected by infrastructure defaults."
+  }
+}

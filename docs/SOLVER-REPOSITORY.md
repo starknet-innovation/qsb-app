@@ -97,3 +97,10 @@ descriptor/default also remains byte-identical; its placeholder image is not a
 deployable release and fails the endpoint image check against a real deployment.
 
 The schema 3 producer update is [qsb-solver PR #3](https://github.com/starknet-innovation/qsb-solver/pull/3); it has not published a replacement release. No future digest or descriptor is invented here.
+
+New job admission requires the explicit deployment `SOLVER_RELEASE_ID` (Terraform
+`solver_release_id`) shared by API and coordinator. Requests omitting a solver
+select that served release. A mismatched explicit request, missing configuration,
+unbound external descriptor or archived placeholder refuses before reservations.
+Historical pins remain readable. With no runnable schema-v3 release enrolled yet,
+new jobs refuse cleanly instead of reserving funds for an unusable solver.

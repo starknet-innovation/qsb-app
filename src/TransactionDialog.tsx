@@ -1,4 +1,4 @@
-import {fingerprint, solverReleases, currentSolverId, assertPaidSolverContract} from './lib/provenance';
+import {fingerprint} from './lib/provenance';
 import {readSessionEpoch} from './lib/api';
 import {prepareMainnetSearchRequest,retainedMainnetSubmission} from './mainnet/submission';
 import {retainedRequests} from './mainnet/retainedRequest';
@@ -90,7 +90,7 @@ export default function TransactionDialog({
     [amount, setAmount] = useState(""),
     [fee, setFee] = useState(""),
     [destination, setDestination] = useState(wallet.address),
-    [solverId, setSolverId] = useState(currentSolverId),
+    [solverId, setSolverId] = useState<string | null>(null),
     [accepted, setAccepted] = useState(false),
     [file, setFile] = useState(""),
     [pass, setPass] = useState(""),
@@ -189,6 +189,13 @@ export default function TransactionDialog({
     generation.current++;
     dialog.current?.showModal();
     setPendingFunding(readFundingGuard());
+    if (!job && !supervisedSearch && !deposit) {
+      const active = generation.current;
+      api<{solverReleaseId?: string | null}>("/config").then(config => {
+        if (active === generation.current)
+          setSolverId(typeof config.solverReleaseId === "string" ? config.solverReleaseId : null);
+      }).catch(() => { if (active === generation.current) setSolverId(null); });
+    }
     if (!job)
       api<{ utxos: Point[] }>("/payment-utxos")
         .then((x) => setPoints(x.utxos))
@@ -353,7 +360,16 @@ export default function TransactionDialog({
             JSON.parse(unlocked.authorization.manifestJson),
           )
         : undefined;
-      const selectedSolver = previousIntent ? previousIntent.solverReleaseId : solverId === currentSolverId ? undefined : solverId;
+      let selectedSolver = previousIntent?.solverReleaseId;
+      if (!supervisedSearch) {
+        const config = await api<{solverReleaseId?: string | null}>("/config");
+        check();
+        if (!config.solverReleaseId || config.solverReleaseId !== solverId)
+          throw Error("The deployment solver is unavailable or changed. Reopen the withdrawal before saving an intent.");
+        if (previousIntent && previousIntent.solverReleaseId !== config.solverReleaseId)
+          throw Error("The saved intent uses a different solver. Keep its backup and contact the operator; do not create a new intent.");
+        selectedSolver = config.solverReleaseId;
+      }
       const manifest: Withdrawal = {
         vaultId: vault.id,
         funding,
@@ -712,14 +728,7 @@ export default function TransactionDialog({
                 {!deposit && !supervisedSearch && (
                   <label>
                     Solver release
-                    <select value={solverId} disabled={!!busy || !!unlocked?.authorization}
-                      onChange={(event) => setSolverId(event.target.value)}>
-                      {solverReleases().filter((descriptor) => {
-                        try { assertPaidSolverContract(descriptor); return true; } catch { return false; }
-                      }).map((descriptor) => (
-                        <option key={descriptor.id} value={descriptor.id}>{descriptor.id}</option>
-                      ))}
-                    </select>
+                    <input value={solverId || "No runnable solver is configured"} readOnly />
                   </label>
                 )}
                 <label>

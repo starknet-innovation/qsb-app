@@ -1,3 +1,4 @@
+import { deployedSolver } from "./solver-deployment";
 import { assertPaidSolverContract, assertSolverPin, solverRelease } from "../src/lib/provenance";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
@@ -212,6 +213,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     };
     let submit: (input: unknown) => Promise<{ id: string }>;
     try {
+      deployedSolver(selected.id);
       assertPaidSolverContract(selected);
       submit = await runpod.prepareRun(selected.image);
     } catch {

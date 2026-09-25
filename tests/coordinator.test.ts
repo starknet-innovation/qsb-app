@@ -8,30 +8,9 @@ const mocks = vi.hoisted(() => ({
   cpu: vi.fn(),
 }));
 vi.mock("../src/lib/releases/registry.generated", async () => {
-  const hash = await import("node:crypto"), contract = await import("../contracts/ranked-v2.json");
-  return ({
-  default: [
-    {
-      schemaVersion: 3,
-      searchContract: (() => {
-        function canonical(value: any): string {
-          if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-          if (value !== null && typeof value === "object") return `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`;
-          return JSON.stringify(value);
-        }
-        return hash.createHash("sha256").update(canonical(contract.default)).digest("hex");
-      })(),
-      id: "external-test",
-      protocol: "qsb-config-a-v1",
-      generatorCommit: "2c9172051d5c150ef0a994ca6b988a08a3ef9e85",
-      searchVersion: "ranked-v2",
-      solverRepository: "https://github.com/starknet-innovation/qsb-solver",
-      solverCommit: "a".repeat(40),
-      kernelCommit: "b".repeat(40),
-      image: "ghcr.io/starknet-innovation/qsb-solver@sha256:" + "c".repeat(64),
-    },
-  ],
-}); });
+  const { servedFixture, otherFixture } = await import("./solver-fixture");
+  return {default:[servedFixture,otherFixture]};
+});
 vi.mock("../server/gpu-spend", async (importOriginal) => {
   const actual = await importOriginal<any>();
   return {
@@ -72,6 +51,7 @@ vi.mock("@aws-sdk/client-lambda", () => ({
   },
 }));
 import { createHash } from "node:crypto";
+import { fixtureVault } from "./solver-fixture";
 import { pinSolver } from "../src/lib/provenance";
 import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
@@ -93,6 +73,7 @@ async function seed(extra: Partial<Job> = {}) {
     gpuBudgetReservedSeconds: 0,
     manifestHash: "a".repeat(64),
     manifest: {},
+    solver: pinSolver(fixtureVault, "served-test"),
     ...extra,
   } as Job;
   await store.put({ pk, sk, version: 0, job });
@@ -100,12 +81,13 @@ async function seed(extra: Partial<Job> = {}) {
     pk,
     sk: "VAULT#v",
     version: 0,
-    vault: { publicStateJson: "{}", network: "mainnet" },
+    vault: fixtureVault,
   });
 }
 beforeEach(() => {
   (store as MemoryStore).rows.clear();
   vi.clearAllMocks();
+  process.env.SOLVER_RELEASE_ID = "served-test";
   process.env.RUNPOD_SECRET_ARN = "test-arn";
   process.env.RUNPOD_ENDPOINT_ID = "test-endpoint";
   process.env.REFERENCE_FUNCTION = "test-reference";
@@ -506,6 +488,7 @@ it("retains the reservation when a verified pin advances to round1", async () =>
 });
 
 it("routes an external descriptor through submission and CPU verification without CUDA pins", async () => {
+  process.env.SOLVER_RELEASE_ID = "external-test";
   const vault = {
     network: "mainnet",
     config: "A",
@@ -576,4 +559,24 @@ it("rejects worker identity mismatch before invoking the CPU verifier", async ()
   });
   await expect(handler(event)).rejects.toThrow("CandidateContextMismatch");
   expect(mocks.cpu).not.toHaveBeenCalled();
+});
+
+it("rejects a deployment release mismatch before reserving paid time", async () => {
+  await seed();
+  process.env.SOLVER_RELEASE_ID = "external-test";
+  await handler(event);
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect((await store.get(pk,sk))!.job).toMatchObject({status:"paused",gpuBudgetReservedSeconds:0});
+});
+it("still polls a paid job after the served release changes", async () => {
+  await seed({status:"searching",runpodId:"paid-existing"});
+  process.env.SOLVER_RELEASE_ID = "external-test";
+  mocks.status.mockResolvedValue({status:"IN_PROGRESS"});
+  await handler(event);
+  expect(mocks.status).toHaveBeenCalledWith("paid-existing");
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
+  expect(mocks.cancel).not.toHaveBeenCalled();
+  expect((await store.get(pk,sk))!.job).toMatchObject({status:"searching",runpodId:"paid-existing"});
 });

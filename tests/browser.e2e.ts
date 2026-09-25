@@ -106,7 +106,7 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
   ).address!;
   let vault: any, submitted: any;
   await page.route("**/api/config", (route) =>
-    route.fulfill({ json: { network: "mainnet", operationsEnabled: true } }),
+    route.fulfill({ json: { network: "mainnet", operationsEnabled: true, solverReleaseId: "browser-served-test" } }),
   );
   await page.route("**/api/payment-utxos", (route) =>
     route.fulfill({
@@ -130,6 +130,8 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
   }, address);
   vault = fixture.vault;
   const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Solver release")).toHaveValue("browser-served-test");
+  await expect(dialog.getByLabel("Solver release")).toHaveAttribute("readonly", "");
   await dialog
     .getByLabel("Recovery backup", { exact: true })
     .setInputFiles({
@@ -156,6 +158,7 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
     .click();
   const download = await downloaded;
   await expect(dialog).toContainText("Keep the updated withdrawal backup");
+  expect(submitted.solverReleaseId).toBe("browser-served-test");
   expect(submitted.outputValue).toBe("100000");
   expect(submitted.destination).toBe(address);
   expect(JSON.stringify(submitted)).not.toContain("hors_secrets");

@@ -131,3 +131,15 @@ decryption is scoped to the configured key through Secrets Manager. A configured
 boundary and the key policy must also allow it; this change does not broaden
 administrator-managed boundaries. A future provider replacement changes the
 provider credential grant, not record or workflow authority.
+
+### Served solver release
+
+Set `solver_release_id` only to an enrolled schema-v3 descriptor matching the
+endpoint's immutable image. Terraform passes the same `SOLVER_RELEASE_ID` to API
+and coordinator. Empty, unsupported, unbound or mismatched releases refuse new
+job admission before outpoint reservations. Omitted request IDs select this
+deployment release, not the archived placeholder. The coordinator rechecks the
+selection before paid work and still verifies the endpoint image before each POST.
+Do not change the served release while pinned jobs remain active. Existing
+historical descriptors remain available for inspection. Publication/enrollment
+and live endpoint-response verification remain prerequisites before #22.
