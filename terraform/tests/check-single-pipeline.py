@@ -41,18 +41,30 @@ def require(condition, message):
         raise ValueError(message)
 
 
+# Everything the API Lambda's environment may draw on (terraform/compute.tf). In a real first plan that
+# environment is unknown until apply, because it includes the CloudFront domain, so the plan's configuration
+# references are checked against this list instead: any new reference fails closed until reviewed here.
+# References carry no key names or constants; re-run with --deploy after the first apply, when the
+# environment is known, and rely on the mock-plan tests for constants.
+API_ENV_REFERENCES = {
+    'aws_cloudfront_distribution.web', 'aws_cloudfront_distribution.web.domain_name',
+    'aws_dynamodb_table.records', 'aws_dynamodb_table.records.name',
+    'local.solver_release_id', 'local.workflow_arn',
+    'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network',
+}
+
+
 def config_env_references(configuration, name):
-    """References behind a Lambda's environment in a saved plan's configuration section."""
+    """References behind a Lambda's environment map in a saved plan's configuration section."""
     resources = {r['address']: r for r in (configuration or {}).get('root_module', {}).get('resources', [])}
     function = resources.get(f'aws_lambda_function.{name}')
     require(function is not None, f'aws_lambda_function.{name} missing from the plan configuration')
     variables = (function.get('expressions', {}).get('environment') or [{}])[0].get('variables', {})
-    return variables.get('references', []) if isinstance(variables, dict) else []
+    return set(variables.get('references', [])) if isinstance(variables, dict) else set()
 
 
-def validate(rows, expanded, configuration=None):
-    """In a real first plan a Lambda environment can be unknown until apply (the API's includes the
-    CloudFront domain and workflow ARN). Then the configuration's references are checked instead."""
+def validate(rows, expanded, configuration=None, unknown_env=frozenset()):
+    """unknown_env names the Lambdas whose environment Terraform marks unknown (after_unknown)."""
     types = Counter(row['type'] for row in rows)
     require(not (types.keys() - ALLOWED), 'Unexpected application resource type')
     for kind, names in EXPECTED.items():
@@ -65,25 +77,24 @@ def validate(rows, expanded, configuration=None):
         funcs = {r['name']: r for r in rows if r['type'] == 'aws_lambda_function'}
         envs = {name: (row.get('values', {}).get('environment') or [{}])[0].get('variables', {})
                 for name, row in funcs.items()}
-        unknown = {name for name, env in envs.items() if not env}
-        require(not unknown or configuration is not None,
-                f'environment of {sorted(unknown)} is unknown until apply; pass a saved plan with its configuration')
-        refs = {name: config_env_references(configuration, name) for name in unknown}
-        table = 'aws_dynamodb_table.records.name'
-        if {'api', 'coordinator'} & unknown:
-            for name in {'api', 'coordinator'} & unknown:
-                require(table in refs[name], 'API and coordinator must use the same table')
-            for name in {'api', 'coordinator'} - unknown:
-                require(envs[name].get('TABLE_NAME'), 'API and coordinator must use the same table')
-        else:
-            require(envs['api'].get('TABLE_NAME') and envs['api']['TABLE_NAME'] == envs['coordinator'].get('TABLE_NAME'),
-                    'API and coordinator must use the same table')
-        require(all(not any(k.startswith('SUPERVISED_') for k in env) for env in envs.values()) and
-                all(not any('supervised' in r.lower() for r in refs[name]) for name in unknown),
+        require(unknown_env <= {'api'}, f'environment of {sorted(unknown_env - {"api"})} is unknown at plan; '
+                                        'only the API environment is expected to be')
+        table = next((r.get('values', {}).get('name') for r in rows if r['type'] == 'aws_dynamodb_table'), None)
+        for name in ('api', 'coordinator'):
+            if name in unknown_env:
+                require(configuration is not None, 'the API environment is unknown until apply; pass a saved '
+                                                   'plan with its configuration section')
+                refs = config_env_references(configuration, name)
+                require(refs <= API_ENV_REFERENCES, 'API environment draws on something not reviewed: '
+                        f'{sorted(refs - API_ENV_REFERENCES)}')
+                require('aws_dynamodb_table.records.name' in refs, 'API and coordinator must use the same table')
+            else:
+                value = envs[name].get('TABLE_NAME')
+                require(value and (value == table if table else value == envs['coordinator'].get('TABLE_NAME')),
+                        'API and coordinator must use the same table')
+        require(all(not any(k.startswith('SUPERVISED_') for k in env) for env in envs.values()),
                 'No supervised routing in application Lambda environments')
-        batch_in = lambda name: ('AWS_BATCH_JOB_QUEUE' in envs[name] if name not in unknown
-                                 else any('batch_job_queue' in r for r in refs[name]))
-        require(not batch_in('api') and not batch_in('reference'),
+        require('AWS_BATCH_JOB_QUEUE' not in envs['api'] and 'AWS_BATCH_JOB_QUEUE' not in envs['reference'],
                 'Only coordinator may receive the AWS Batch binding reference')
         policies = [r for r in rows if r['type'] == 'aws_iam_role_policy' and r['name'] == 'batch']
         require(len(policies) == (1 if envs['coordinator'].get('AWS_BATCH_JOB_QUEUE') else 0),
@@ -114,6 +125,17 @@ def deploy_checks(plan, first_apply):
         require(actions <= {('create',)}, 'first apply must be create-only: the state key must be empty and no '
                                           'resource may already exist')
     return {'deployChecks': 'passed', 'roles': len(roles), 'firstApply': first_apply}
+
+
+def unknown_lambda_env(changes):
+    """Lambdas whose environment variables Terraform marks unknown until apply."""
+    out = set()
+    for row in changes:
+        if row.get('type') == 'aws_lambda_function' and row.get('mode', 'managed') == 'managed':
+            env = (row.get('change', {}).get('after_unknown') or {}).get('environment')
+            if isinstance(env, list) and env and isinstance(env[0], dict) and env[0].get('variables') is True:
+                out.add(row['name'])
+    return frozenset(out)
 
 
 def module_resources(module):
@@ -153,11 +175,13 @@ def main():
                     rows = [dict(row, values=row['change']['after'])
                             for row in event['test_plan']['resource_changes']
                             if row.get('mode') == 'managed' and row['change']['after'] is not None]
-                    result['runs'][name] = validate(rows, True)
+                    result['runs'][name] = validate(rows, True, None,
+                                                    unknown_lambda_env(event['test_plan']['resource_changes']))
             require(set(result['runs']) == {'baseline', 'configured_single_pipeline'},
                     'Both baseline and configured-provider plans are required')
         else:
-            result = validate(module_resources(plan['planned_values']['root_module']), True, plan.get('configuration'))
+            result = validate(module_resources(plan['planned_values']['root_module']), True, plan.get('configuration'),
+                              unknown_lambda_env(plan.get('resource_changes', [])))
             result['evidence'] = 'saved-plan-inventory'
             if '--deploy' in flags:
                 result.update(deploy_checks(plan, '--first-apply' in flags))

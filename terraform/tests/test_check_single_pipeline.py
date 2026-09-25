@@ -18,12 +18,15 @@ def role(name, trust=OPERATOR):
 
 
 def plan():
-    rows = [{'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed', 'values': {}},
+    rows = [{'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed', 'values': {'name': 'qsb-app-records'}},
             {'type': 'aws_s3_bucket', 'name': 'frontend', 'mode': 'managed', 'values': {}},
             {'type': 'aws_sfn_state_machine', 'name': 'withdrawal', 'mode': 'managed', 'values': {}}]
+    # Like the real stack: api and coordinator read the table; the reference Lambda has no environment.
     rows += [{'type': 'aws_lambda_function', 'name': f, 'mode': 'managed',
-              'values': {'function_name': f'qsb-app-{f}', 'environment': [{'variables': {'TABLE_NAME': 't'}}]}}
-             for f in ('api', 'coordinator', 'reference')]
+              'values': {'function_name': f'qsb-app-{f}', 'environment': [{'variables': {'TABLE_NAME': 'qsb-app-records'}}]}}
+             for f in ('api', 'coordinator')]
+    rows += [{'type': 'aws_lambda_function', 'name': 'reference', 'mode': 'managed',
+              'values': {'function_name': 'qsb-app-reference'}}]
     # The validator expects five aws_iam_role rows in an expanded plan (a real plan has three `lambda`
     # roles, one `workflow` and one `operator_reconcile`); any five with those names satisfy it.
     rows += [role('lambda'), role('workflow'), role('operator_reconcile'), role('lambda'), role('workflow')]
@@ -77,26 +80,58 @@ class DeployChecks(unittest.TestCase):
         # Without --first-apply, an update plan is fine.
         self.assertEqual(self.run_check(doc, '--deploy')[0], 0)
 
-    def unknown_api_env(self, table_ref='aws_dynamodb_table.records.name', extra=()):
-        """A real first plan: the API environment is unknown, so the configuration is checked."""
+    def unknown_api_env(self, refs=None):
+        """A real first plan: Terraform marks the API environment unknown, so its configuration is checked."""
         doc = plan()
         for r in doc['planned_values']['root_module']['resources']:
-            if r['type'] == 'aws_lambda_function' and r['name'] in ('api', 'reference'):
+            if r['type'] == 'aws_lambda_function' and r['name'] == 'api':
                 r['values'].pop('environment')
-        refs = lambda *more: {'variables': {'references': [table_ref, 'aws_dynamodb_table.records', *more]}}
+        doc['resource_changes'] += [
+            {'type': 'aws_lambda_function', 'name': 'api', 'mode': 'managed',
+             'change': {'actions': ['create'], 'after_unknown': {'environment': [{'variables': True}]}}},
+            {'type': 'aws_lambda_function', 'name': 'reference', 'mode': 'managed',
+             'change': {'actions': ['create'], 'after_unknown': {'environment': []}}}]
+        if refs is None:
+            refs = ['aws_dynamodb_table.records', 'aws_dynamodb_table.records.name', 'aws_cloudfront_distribution.web',
+                    'aws_cloudfront_distribution.web.domain_name', 'var.mainnet_enabled']
         doc['configuration'] = {'root_module': {'resources': [
-            {'address': 'aws_lambda_function.api', 'expressions': {'environment': [refs(*extra)]}},
-            {'address': 'aws_lambda_function.reference', 'expressions': {'environment': [{'variables': {'references': []}}]}},
-        ]}}
+            {'address': 'aws_lambda_function.api', 'expressions': {'environment': [{'variables': {'references': refs}}]}}]}}
         return doc
 
-    def test_unknown_environment_is_checked_from_configuration(self):
+    def test_absent_environment_is_known_and_empty(self):
+        # The CI mock-plan case: the reference Lambda has no environment block and there's no configuration.
+        self.assertEqual(self.run_check(plan(), '--deploy')[0], 0)
+
+    def test_unknown_api_environment_is_checked_against_reviewed_references(self):
         self.assertEqual(self.run_check(self.unknown_api_env(), '--deploy', '--first-apply')[0], 0)
-        self.refused(self.unknown_api_env(table_ref='aws_dynamodb_table.other.name'), 'must use the same table')
-        self.refused(self.unknown_api_env(extra=('var.batch_job_queue',)), 'Only coordinator may receive')
+        self.refused(self.unknown_api_env(refs=['aws_dynamodb_table.records.name', 'var.batch_job_queue']),
+                     'not reviewed')
+        self.refused(self.unknown_api_env(refs=['aws_dynamodb_table.records.name', 'local.batch_env']), 'not reviewed')
+        self.refused(self.unknown_api_env(refs=['var.network']), 'must use the same table')
         doc = self.unknown_api_env()
         del doc['configuration']
         self.refused(doc, 'unknown until apply')
+
+    def test_only_the_api_environment_may_be_unknown(self):
+        doc = self.unknown_api_env()
+        doc['resource_changes'].append({'type': 'aws_lambda_function', 'name': 'coordinator', 'mode': 'managed',
+                                        'change': {'actions': ['create'],
+                                                   'after_unknown': {'environment': [{'variables': True}]}}})
+        self.refused(doc, 'only the API environment is expected')
+
+    def test_known_table_names_must_match_the_table(self):
+        doc = plan()
+        for r in doc['planned_values']['root_module']['resources']:
+            if r['type'] == 'aws_lambda_function' and r['name'] == 'coordinator':
+                r['values']['environment'][0]['variables']['TABLE_NAME'] = 'qsb-other'
+        self.refused(doc, 'must use the same table')
+
+    def test_supervised_routing_is_refused(self):
+        doc = plan()
+        for r in doc['planned_values']['root_module']['resources']:
+            if r['type'] == 'aws_lambda_function' and r['name'] == 'api':
+                r['values']['environment'][0]['variables']['SUPERVISED_EXECUTION_ENABLED'] = 'true'
+        self.refused(doc, 'No supervised routing')
 
     def test_flags_need_a_saved_plan(self):
         events = [{'type': 'test_run', '@testrun': 'baseline'}, {'type': 'test_summary', 'test_summary': {'status': 'pass'}}]
