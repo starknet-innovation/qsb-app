@@ -34,6 +34,7 @@ it("switch off prevents credential resolution and all HTTP even with an internal
   expect(request).not.toHaveBeenCalled();
 });
 it("makes one exact mainnet POST and consumes the permit", async () => {
+  vi.stubEnv("QSB_MAINNET_ENABLED", "true");
   vi.stubEnv("QSB_EXACT_SUBMIT_ENABLED", "true");
   const { raw, id } = transaction();
   const request = vi
@@ -63,7 +64,8 @@ it("makes one exact mainnet POST and consumes the permit", async () => {
 it.each(["timeout", "wrong-id", "malformed", "rejected"])(
   "never retries %s",
   async (kind) => {
-    vi.stubEnv("QSB_EXACT_SUBMIT_ENABLED", "true");
+    vi.stubEnv("QSB_MAINNET_ENABLED", "true");
+  vi.stubEnv("QSB_EXACT_SUBMIT_ENABLED", "true");
     const { raw } = transaction();
     const request = vi.fn();
     if (kind === "timeout") request.mockRejectedValue(new Error("timeout"));
@@ -88,6 +90,7 @@ it.each(["timeout", "wrong-id", "malformed", "rejected"])(
   },
 );
 it("rejects changed bytes and a different miner before HTTP", async () => {
+  vi.stubEnv("QSB_MAINNET_ENABLED", "true");
   vi.stubEnv("QSB_EXACT_SUBMIT_ENABLED", "true");
   const { raw } = transaction(),
     request = vi.fn();

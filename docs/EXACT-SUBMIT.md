@@ -128,3 +128,5 @@ unknown outcome, not permission to submit again. Inspect the retained transactio
 status or use the reconciliation CLI; never clear its intent to make a retry.
 
 Chain-provider failures preserve the last recorded conflict or confirmation and its evidence; only the last-check time advances. A successful chain observation can downgrade that state after a reorg or an absent/unconfirmed spender. An unavailable provider is never reorg evidence.
+
+The deployment must also set `mainnet_enabled=true` (`QSB_MAINNET_ENABLED="true"`). Both switches are required at the API and final provider boundary. See [the switch matrix](OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches); both defaults remain false.

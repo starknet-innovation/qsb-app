@@ -115,3 +115,13 @@ variable "solver_release_id" {
     error_message = "solver_release_id must be an enrolled release ID, not an image/tag or URL."
   }
 }
+
+variable "mainnet_enabled" {
+  description = "Enable mainnet funding/search routes and coordinator. Requires explicit approval for issue #22; exact submission has a separate switch."
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.mainnet_enabled || var.network == "mainnet"
+    error_message = "mainnet_enabled is only supported on mainnet."
+  }
+}

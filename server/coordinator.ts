@@ -104,8 +104,21 @@ export async function handler(event: Event | { action: "providerHealth" }) {
   )
     return { ...event, done: true };
   if (!transactionsEnabled || !rehearsalAddressAllowed(event.owner)) {
-    job.status = "failed";
-    job.error = "Production QSB validation is not complete.";
+    // Capture an uncertain POST before replacing the searching status marker.
+    // Otherwise /resume could mistake this paused job for unsubmitted work.
+    if (job.status === "searching" && !job.runpodId) {
+      if (!job.error?.includes("Submission outcome unknown"))
+        job.error = `Submission outcome unknown. Reconcile Runpod before resuming.${job.error ? ` ${job.error}` : ""}`;
+      delete job.oneSubmissionAllowed;
+    }
+    // A deployment rollback must leave paid work reconcilable/resumable.
+    // Preserve all IDs, attempt markers, reservations and earlier blocking errors.
+    job.status = "paused";
+    const disabledReason = !transactionsEnabled
+      ? `${NETWORK_ID === "mainnet" ? "Mainnet" : "Network"} disabled by deployment.`
+      : "Wallet is not allowed by deployment configuration.";
+    if (!job.error?.includes(disabledReason))
+      job.error = `${disabledReason}${job.error ? ` ${job.error}` : ""}`;
     await save();
     return { ...event, done: true };
   }
@@ -116,6 +129,14 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     job.error = "Compute and verification configuration required.";
     await save();
     return { ...event, done: true };
+  }
+  // Resume may queue a job that already owns a paid provider submission.
+  // Persist polling state before external reads so even a transient failure leaves
+  // it eligible for operator reconciliation, without issuing another POST.
+  if (job.status === "queued" && job.runpodId) {
+    job.status = "searching";
+    await save();
+    row.version++;
   }
   const runpod = await configuredRunpod();
   if (job.status === "paused") {

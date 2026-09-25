@@ -5,6 +5,7 @@ export type ExactSubmitPermit = Readonly<{ rawHash: string }>;
 const live = new WeakSet<object>();
 export const exactSubmitEnabled = () =>
   process.env.QSB_NETWORK === "mainnet" &&
+  process.env.QSB_MAINNET_ENABLED === "true" &&
   process.env.QSB_EXACT_SUBMIT_ENABLED === "true";
 export function issueExactSubmitPermit(raw: string): ExactSubmitPermit {
   const permit = Object.freeze({

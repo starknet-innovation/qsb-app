@@ -13,7 +13,7 @@ const commit = execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()
 const clean = !execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim();
 if (!clean && !process.argv.includes('--allow-dirty')) throw Error('Commit changes first; --allow-dirty is for local validation only and cannot pass the Terraform release gate.');
 const model = readFileSync('src/lib/model.ts','utf8');
-if (!/mainnetEnabled:\s*false/.test(model)) throw Error('This deployment package only supports mainnet-disabled source');
+if (!/mainnetEnabled:\s*false/.test(model)) throw Error('Source must keep mainnet disabled by default; use the deployment switch');
 // These are the reviewed local preparation/build tools, never downloaded setup scripts.
 execFileSync('npm',['run','vendor'],{stdio:'inherit'});
 execFileSync('npm',['run','build'],{stdio:'inherit',env:{...process.env,VITE_QSB_NETWORK:network,QSB_NETWORK:network}});
@@ -36,5 +36,5 @@ for(const n of ['api.zip','coordinator.zip','reference.zip',...frontendFiles.map
 const after=execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim();
 // Dependency preparation must not silently modify tracked source.
 if(clean && after) throw Error('Build changed tracked source; review and rebuild from a clean commit');
-writeFileSync(path.join(out,'manifest.json'),JSON.stringify({commit,clean,network,transactionsEnabled:false,files,frontend_files:frontendFiles},null,2)+'\n');
+writeFileSync(path.join(out,'manifest.json'),JSON.stringify({commit,clean,network,mainnetEnabledDefault:false,files,frontend_files:frontendFiles},null,2)+'\n');
 console.log(`Prepared ${network} artifacts for ${commit}; clean=${clean}. No cloud changes.`);

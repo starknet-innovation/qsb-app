@@ -5,7 +5,7 @@ output "cloudfront_distribution_id" { value = aws_cloudfront_distribution.web.id
 output "table_name" { value = aws_dynamodb_table.records.name }
 output "workflow_arn" { value = aws_sfn_state_machine.withdrawal.arn }
 output "source_commit" { value = var.source_commit }
-output "transactions_enabled" { value = false }
+output "transactions_enabled" { value = var.mainnet_enabled }
 output "runpod_configured" { value = local.runpod }
 output "runpod_limits" {
   value = {
@@ -16,4 +16,4 @@ output "runpod_limits" {
 }
 output "operator_reconcile_role_arn" { value = aws_iam_role.operator_reconcile.arn }
 
-output "exact_submit_enabled" { value = var.exact_submit_enabled }
+output "exact_submit_enabled" { value = var.mainnet_enabled && var.exact_submit_enabled }

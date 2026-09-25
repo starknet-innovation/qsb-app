@@ -1,5 +1,5 @@
 import { NETWORK_ID, NETWORK_CONFIG } from "../src/lib/network";
-import { release } from "../src/lib/model";
+
 
 export const transactionsEnabled =
   NETWORK_ID === "testnet4"
@@ -9,7 +9,7 @@ export const transactionsEnabled =
           .split(",")
           .some((x) => x.trim()),
       )
-    : release.mainnetEnabled;
+    : process.env.QSB_MAINNET_ENABLED === "true";
 export function rehearsalAddressAllowed(address: string): boolean {
   return (
     NETWORK_ID !== "testnet4" ||

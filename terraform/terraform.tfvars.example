@@ -15,6 +15,7 @@ network        = "mainnet" # Network identity only; transactions remain disabled
 operator_principal_arns = ["arn:aws:iam::123456789012:user/qsb-operator"]
 
 # Requires explicit exact-transaction authorization under #22; no activation here.
+mainnet_enabled = false
 exact_submit_enabled = false
 
 # Set only after publishing/enrolling a schema-v3 release and configuring its exact image.

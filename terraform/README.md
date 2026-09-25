@@ -143,3 +143,5 @@ selection before paid work and still verifies the endpoint image before each POS
 Do not change the served release while pinned jobs remain active. Existing
 historical descriptors remain available for inspection. Publication/enrollment
 and live endpoint-response verification remain prerequisites before #22.
+
+Mainnet funding/search is controlled by `mainnet_enabled` (default false), wired identically to API and coordinator. Exact submission additionally needs `exact_submit_enabled` (default false). Enablement requires explicit issue #22 approval; no source toggle or frontend rebuild is needed. See [switch matrix and deployment checks](../docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches).

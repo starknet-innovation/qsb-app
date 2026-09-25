@@ -236,8 +236,8 @@ run "exact_submit_explicit_switch" {
     exact_submit_enabled = true
   }
   assert {
-    condition = output.exact_submit_enabled && aws_lambda_function.api.environment[0].variables.QSB_EXACT_SUBMIT_ENABLED == "true" && !output.transactions_enabled
-    error_message = "Only the exact submit path is enabled by the explicit switch."
+    condition = !output.exact_submit_enabled && aws_lambda_function.api.environment[0].variables.QSB_EXACT_SUBMIT_ENABLED == "true" && !output.transactions_enabled
+    error_message = "A submit request cannot enable the effective submit output while mainnet is disabled."
   }
 }
 run "exact_submit_reject_testnet" {
@@ -268,4 +268,44 @@ run "solver_release_defaults_unconfigured" {
     condition = aws_lambda_function.api.environment[0].variables.SOLVER_RELEASE_ID == "" && aws_lambda_function.coordinator.environment[0].variables.SOLVER_RELEASE_ID == ""
     error_message = "A runnable release must never be silently selected by infrastructure defaults."
   }
+}
+
+run "mainnet_defaults_off" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition = !output.transactions_enabled && aws_lambda_function.api.environment[0].variables.QSB_MAINNET_ENABLED == "false" && aws_lambda_function.coordinator.environment[0].variables.QSB_MAINNET_ENABLED == "false"
+    error_message = "Both mainnet entry points must default disabled."
+  }
+}
+run "mainnet_on_submit_off" {
+  command = plan
+  variables {
+    network = "mainnet"
+    mainnet_enabled = true
+  }
+  assert {
+    condition = output.transactions_enabled && !output.exact_submit_enabled && aws_lambda_function.api.environment[0].variables.QSB_MAINNET_ENABLED == "true" && aws_lambda_function.coordinator.environment[0].variables.QSB_MAINNET_ENABLED == "true"
+    error_message = "Funding and search must share the mainnet switch without enabling submission."
+  }
+}
+run "mainnet_and_submit_on" {
+  command = plan
+  variables {
+    network = "mainnet"
+    mainnet_enabled = true
+    exact_submit_enabled = true
+  }
+  assert {
+    condition = output.transactions_enabled && output.exact_submit_enabled
+    error_message = "Both switches can be configured explicitly from the same release package."
+  }
+}
+run "mainnet_reject_testnet" {
+  command = plan
+  variables {
+    mainnet_enabled = true
+    network = "testnet4"
+  }
+  expect_failures = [var.mainnet_enabled, terraform_data.release]
 }

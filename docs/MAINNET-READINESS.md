@@ -260,3 +260,7 @@ For each closed checkbox, record the relevant source commit/artifact identity, t
 This checklist captures the currently known release work, not a guarantee that testing cannot reveal another blocker. Add new findings instead of weakening acceptance criteria. Selected upstream notices and licensing boundaries remain in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md); the original application license decision is separate from technical mainnet readiness.
 
 Issue #35 follow-up: coordinator/preflight changes invalidate the historical parked supervisor core enrollment. Production `mainnet-capability.json` is unchanged and refuses this changed source. Lifecycle unit tests explicitly simulate the old digest, with a separate real-digest admission test proving rejection; they do not reauthorize a parked runtime. Any future activation would require independent reenrollment, outside this split.
+
+### Issue #48 deployment configuration update
+
+The single-pipeline deployment no longer requires changing `release.mainnetEnabled` in source. Use Terraform `mainnet_enabled` (funding/search) and, separately, `exact_submit_enabled` (exact approved withdrawal submission). Both default false; issue #22 still requires explicit approval. `/api/config` advertises the deployed state. Historical research activation evaluators above are not the authority for this route. See [the operational switch matrix](OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches).

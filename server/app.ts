@@ -162,6 +162,7 @@ export function createApp(
         mainnetUiRoutes,
       )),
       network: NETWORK_ID,
+      mainnetEnabled: NETWORK_ID === "mainnet" && enabled,
       operationsEnabled: enabled,
       solverReleaseId: deployedSolverId(),
       exactSubmitEnabled: dependencies.exactSubmit ?? exactSubmitEnabled(),
