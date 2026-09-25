@@ -110,25 +110,31 @@ export default function TransactionDialog({
     if (next) localStorage.setItem(fundingKey, JSON.stringify(next));
     else localStorage.removeItem(fundingKey);
   }
+  function readFundingGuard() {
+    const saved = localStorage.getItem(fundingKey);
+    if (saved === null) return undefined;
+    try {
+      const parsed = JSON.parse(saved) as { txid?: unknown; amount?: unknown };
+      if (
+        typeof parsed.txid === "string" &&
+        (parsed.txid === "" || /^[a-f0-9]{64}$/i.test(parsed.txid)) &&
+        typeof parsed.amount === "string" &&
+        /^(0|[1-9][0-9]*)$/.test(parsed.amount)
+      ) return { txid: parsed.txid, amount: parsed.amount };
+    } catch { /* An unreadable guard must not permit another deposit. */ }
+    return { txid: "", amount: "0" };
+  }
+  function refusePendingDeposit() {
+    const saved = readFundingGuard();
+    if (saved) {
+      setPendingFunding(saved);
+      throw Error("Another tab reported a deposit. Record or reconcile it before continuing; do not deposit again.");
+    }
+  }
   useEffect(() => {
     generation.current++;
     dialog.current?.showModal();
-    const saved = localStorage.getItem(fundingKey);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as { txid?: unknown; amount?: unknown };
-        if (
-          typeof parsed.txid === "string" &&
-          (parsed.txid === "" || /^[a-f0-9]{64}$/i.test(parsed.txid)) &&
-          typeof parsed.amount === "string" &&
-          /^(0|[1-9][0-9]*)$/.test(parsed.amount)
-        )
-          setPendingFunding({ txid: parsed.txid, amount: parsed.amount });
-        else localStorage.removeItem(fundingKey);
-      } catch {
-        localStorage.removeItem(fundingKey);
-      }
-    }
+    setPendingFunding(readFundingGuard());
     if (!job)
       api<{ utxos: Point[] }>("/payment-utxos")
         .then((x) => setPoints(x.utxos))
@@ -224,6 +230,16 @@ export default function TransactionDialog({
           wallet.address,
         );
         check();
+        refusePendingDeposit();
+        const latest = (await api<{ vaults: PublicVault[] }>("/vaults")).vaults.find(
+          (item) => item.id === vault.id,
+        );
+        check();
+        // A second tab may have broadcast while the server lookup was pending.
+        refusePendingDeposit();
+        if (!latest || latest.status !== "unfunded" || latest.funding)
+          throw Error("This vault already has a deposit or is unavailable. Reopen it to refresh its funding state; do not deposit again.");
+        // This preflight cannot serialize prompts approved simultaneously on two devices.
         let broadcastReported = false;
         try {
           const funded = await fundFromXverse(

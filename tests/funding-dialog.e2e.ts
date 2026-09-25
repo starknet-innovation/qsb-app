@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
-for (const failAfterBroadcast of [false, true]) {
-  test(`retains broadcast before verification; finalized PSBT (failure=${failAfterBroadcast})`, async ({
+for (const scenario of ["success", "post-broadcast-failure", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard"]) {
+  const failAfterBroadcast = scenario === "post-broadcast-failure";
+  test(`deposit dialog preserves one-deposit guard (${scenario})`, async ({
     page,
   }) => {
     await page.route("**/src/lib/qsb.ts*", (r) =>
@@ -20,6 +21,11 @@ for (const failAfterBroadcast of [false, true]) {
         if(path==='/config')return {network:'mainnet',operationsEnabled:true};
         if(path==='/payment-utxos')return {utxos:[f.point]};
         if(path==='/payment-input')return {previousTxHex:f.previousTxHex};
+        if(path==='/vaults'){
+          if(window.serverReadFailure)throw Error('SERVER_READ_FAILED');
+          if(window.guardDuringFetch)localStorage.setItem('qsb-funding:'+f.vault.id,JSON.stringify({txid:'ab'.repeat(32),amount:'50000'}));
+          return {vaults:window.serverVaults??[f.vault]};
+        }
         if(path.endsWith('/fund')){window.recordCalls++;return {vault:{...f.vault,status:'submitted',funding:{txid:body.txid}}};}
         throw Error('Unexpected API '+path);
       }`,
@@ -59,9 +65,37 @@ for (const failAfterBroadcast of [false, true]) {
       .check();
     await dialog.getByLabel("Deposit amount (BTC)").fill("0.0005");
     await dialog.getByLabel("Miner fee (BTC, exact amount)").fill("0.0001");
+    // Change another device/tab's state only after this dialog has opened.
+    await page.evaluate((scenario) => {
+      const w = window as any, vault = w.fundingFixture.vault;
+      if (scenario === "server-read-failure") w.serverReadFailure = true;
+      if (scenario.startsWith("server-")) w.serverVaults = scenario === "server-missing" ? [] : [{
+        ...vault,
+        status: scenario === "server-funding" ? "unfunded" : scenario.slice(7),
+        funding: { txid: "ab".repeat(32), vout: 0, value: "50000" },
+      }];
+      if (["local-guard", "unknown-guard", "malformed-guard"].includes(scenario))
+        localStorage.setItem("qsb-funding:" + vault.id, scenario === "malformed-guard" ? "{" : JSON.stringify({txid: scenario === "unknown-guard" ? "" : "ab".repeat(32), amount:"50000"}));
+      if (scenario === "local-guard-during-fetch") w.guardDuringFetch = true;
+    }, scenario);
     await dialog
       .getByRole("button", { name: "Review deposit in Xverse" })
       .click();
+    if (scenario !== "success" && !failAfterBroadcast) {
+      await expect(dialog).toContainText(scenario === "server-read-failure" ? "SERVER_READ_FAILED" : "do not deposit again.");
+      expect(await page.evaluate(() => (window as any).walletCalls)).toBe(0);
+      expect(await page.evaluate(() => (window as any).recordCalls)).toBe(0);
+      if (!scenario.startsWith("server-")) {
+        await expect(dialog.getByRole("button", {name:"Record deposit", exact:true})).toBeVisible();
+        if (["local-guard", "local-guard-during-fetch"].includes(scenario)) {
+          await dialog.getByRole("button", {name:"Record deposit", exact:true}).click();
+          await expect(dialog).toContainText("Deposit submitted:");
+          expect(await page.evaluate(() => (window as any).recordCalls)).toBe(1);
+          expect(await page.evaluate(() => (window as any).walletCalls)).toBe(0);
+        }
+      }
+      return;
+    }
     if (failAfterBroadcast) {
       await expect(dialog).toContainText("POST_BROADCAST_CHECK_FAILED");
       expect(
