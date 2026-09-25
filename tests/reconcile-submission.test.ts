@@ -57,6 +57,7 @@ const run = (d: ReconciliationDecision = decision) =>
     now,
     log: () => {},
     resumePolling,
+    pollingAllowed: () => true,
   });
 beforeEach(async () => {
   store = new MemoryStore();
@@ -162,13 +163,13 @@ it.each(["manifestHash", "stage", "attempt", "kernelCommit", "workRange"])(
     expect(resumePolling).not.toHaveBeenCalled();
   },
 );
-it.each(["missing", "wrong-id", "read-failure"])(
+it.each(["missing", "read-failure"])(
   "rejects incomplete provider evidence: %s",
   async (mode) => {
     lookup.status = vi.fn(async () => {
       if (mode === "read-failure") throw Error("read unavailable");
       return {
-        id: mode === "wrong-id" ? "wrong" : "provider-1",
+        id: "provider-1",
         status: "COMPLETED",
       };
     });
@@ -176,6 +177,22 @@ it.each(["missing", "wrong-id", "read-failure"])(
     expect((await job()).status).toBe("paused");
   },
 );
+it("rejects a wrong live provider id specifically at the identity check", async () => {
+  lookup.status = vi.fn(async () => ({ id: "wrong", status: "IN_PROGRESS" }));
+  await expect(run()).rejects.toThrow("ProviderIdMismatch");
+  expect((await job()).status).toBe("paused");
+  expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(0);
+  expect(resumePolling).not.toHaveBeenCalled();
+});
+it("does not overwrite a different provider id on a searching job", async () => {
+  await change({ status: "searching", runpodId: "other-paid-job" });
+  const before = await job();
+  await expect(run()).rejects.toThrow("UnknownSubmissionRequired");
+  expect(await job()).toEqual(before);
+  expect(lookup.status).not.toHaveBeenCalled();
+  expect(resumePolling).not.toHaveBeenCalled();
+  expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(0);
+});
 it("records an attested non-acceptance once with immutable audit evidence", async () => {
   expect(await run(replacement())).toMatchObject({
     outcome: "not-submitted",
@@ -191,25 +208,50 @@ it("records an attested non-acceptance once with immutable audit evidence", asyn
   expect((await store.list(pk, "RECONCILIATION#")).length).toBe(1);
   expect(resumePolling).not.toHaveBeenCalled();
 });
+it("refuses a second not-submitted decision after resume consumes the flag", async () => {
+  await run(replacement());
+  const granted = await job();
+  await change({
+    status: "queued",
+    revision: granted.revision + 1,
+    oneSubmissionAllowed: undefined,
+    error: undefined,
+  });
+  const resumed = await job();
+  vi.mocked(lookup.health).mockClear();
+  await expect(run(replacement())).rejects.toThrow("UnknownSubmissionRequired");
+  expect(await job()).toEqual(resumed);
+  expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(1);
+  expect(lookup.health).not.toHaveBeenCalled();
+});
 it("accepts a drained expired submission with durable start time", async () => {
   await run(replacement("ttl-expired"));
   expect((await job()).oneSubmissionAllowed).toBe(true);
 });
-it.each([
-  undefined,
-  "invalid",
-  "2026-09-25T00:00:00.000Z",
-  "2026-09-26T00:00:00.000Z",
-])(
-  "refuses ambiguous replacement without elapsed durable TTL: %s",
-  async (submissionStartedAt) => {
-    await change({ submissionStartedAt });
-    await expect(run(replacement("ttl-expired"))).rejects.toThrow(
-      "SubmissionTtlNotExpired",
-    );
-    expect((await job()).oneSubmissionAllowed).toBeUndefined();
-  },
-);
+for (const reason of ["rejected-before-acceptance", "ttl-expired"] as const) {
+  it.each([
+    undefined,
+    "invalid",
+    "2026-09-25T00:00:00.000Z",
+    "2026-09-26T00:00:00.000Z",
+    "2026-09-24T01:00:00.001Z",
+  ])(
+    `refuses ${reason} without elapsed durable TTL: %s`,
+    async (submissionStartedAt) => {
+      await change({ submissionStartedAt });
+      await expect(run(replacement(reason))).rejects.toThrow(
+        "SubmissionTtlNotExpired",
+      );
+      expect((await job()).oneSubmissionAllowed).toBeUndefined();
+      expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(0);
+    },
+  );
+  it(`accepts ${reason} at the exact durable TTL boundary`, async () => {
+    await change({ submissionStartedAt: "2026-09-24T01:00:00.000Z" });
+    await run(replacement(reason));
+    expect((await job()).oneSubmissionAllowed).toBe(true);
+  });
+}
 it.each([
   { inQueue: 1, inProgress: 0 },
   { inQueue: 0, inProgress: 1 },

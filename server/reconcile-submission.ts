@@ -4,6 +4,7 @@ import {
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
 import { z } from "zod";
+import { reconciliationEnvironmentError } from "./reconciliation-environment";
 import { release, type Job, type PublicVault } from "../src/lib/model";
 import { NETWORK_ID } from "../src/lib/network";
 import { assertSolverPin, solverRelease } from "../src/lib/provenance";
@@ -61,6 +62,7 @@ export type ReconciliationResult = {
   resubmitted: false;
   providerId?: string;
   pollingStarted: boolean;
+  reason?: string;
 };
 export function pollingStartAllowed(owner: string): boolean {
   return transactionsEnabled && rehearsalAddressAllowed(owner);
@@ -76,10 +78,14 @@ export async function reconcileUnknownSubmission(input: {
   lookup: SubmissionLookup;
   log: (entry: ReconciliationLog) => void;
   resumePolling: (job: Job) => Promise<PollingStart>;
+  pollingAllowed?: (owner: string) => boolean;
   now?: string;
 }): Promise<ReconciliationResult> {
   const { store, owner, jobId, lookup, log } = input;
   const decision = reconciliationDecisionSchema.parse(input.decision);
+  if (decision.kind === "provider-id" &&
+      !(input.pollingAllowed ?? pollingStartAllowed)(owner))
+    throw new ReconciliationError("PollingNotAllowed");
   const pk = `OWNER#${owner}`,
     sk = `JOB#${jobId}`;
   const row = await store.get(pk, sk),
@@ -165,6 +171,7 @@ export async function reconcileUnknownSubmission(input: {
         providerId: decision.providerId,
         resubmitted: false,
         pollingStarted: polling.started,
+        ...(!polling.started ? { reason: polling.reason ?? "polling-not-started" } : {}),
       };
     }
     job.runpodId = decision.providerId;
@@ -172,19 +179,18 @@ export async function reconcileUnknownSubmission(input: {
     delete job.error;
   } else {
     // A list miss, a timeout or a 5xx alone is not proof of non-acceptance.
-    // The operator must attest rejection before acceptance, or wait the durable
-    // submission's full provider TTL and independently confirm endpoint drain.
+    // Every replacement decision must wait the durable submission's full provider
+    // TTL and independently confirm endpoint drain. The reason is an evidence
+    // label, never permission to shorten that wait.
     const health = await lookup.health();
     if (health.jobs.inQueue !== 0 || health.jobs.inProgress !== 0)
       throw new ReconciliationError("EndpointNotDrained");
-    if (decision.reason === "ttl-expired") {
-      const started = Date.parse(job.submissionStartedAt ?? "");
-      if (
-        !Number.isFinite(started) ||
-        Date.parse(now) < started + RUNPOD_JOB_TTL_MS
-      )
-        throw new ReconciliationError("SubmissionTtlNotExpired");
-    }
+    const started = Date.parse(job.submissionStartedAt ?? "");
+    if (
+      !Number.isFinite(started) ||
+      Date.parse(now) < started + RUNPOD_JOB_TTL_MS
+    )
+      throw new ReconciliationError("SubmissionTtlNotExpired");
     job.oneSubmissionAllowed = true;
   }
   const priorRevision = job.revision;
@@ -223,6 +229,8 @@ export async function reconcileUnknownSubmission(input: {
     outcome: decision.kind,
     resubmitted: false,
     pollingStarted: polling.started,
+    ...(decision.kind === "provider-id" && !polling.started
+      ? { reason: polling.reason ?? "polling-not-started" } : {}),
     ...(decision.kind === "provider-id"
       ? { providerId: decision.providerId }
       : {}),
@@ -276,9 +284,8 @@ async function startPolling(job: Job): Promise<PollingStart> {
 
 export async function reconcileSubmissionCli(args: string[]): Promise<void> {
   try {
-    // Never let an operator command silently select the in-memory store.
-    if (!process.env.TABLE_NAME)
-      throw new ReconciliationError("TableNameRequired");
+    const environmentError = reconciliationEnvironmentError(process.env);
+    if (environmentError) throw new ReconciliationError(environmentError);
     const [owner, jobId, ...flags] = args;
     if (
       !owner ||
@@ -316,6 +323,8 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
       operator: options["--operator"],
       evidence: options["--evidence"],
     });
+    if (decision.kind === "provider-id" && !pollingStartAllowed(owner))
+      throw new ReconciliationError("PollingNotAllowed");
     const endpoint = await openRunpod();
     const result = await reconcileUnknownSubmission({
       store: defaultStore,
@@ -330,6 +339,8 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
       resumePolling: startPolling,
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
+    if (result.outcome === "provider-id" && !result.pollingStarted)
+      process.exitCode = 1;
   } catch (error) {
     const reason =
       error instanceof ReconciliationError

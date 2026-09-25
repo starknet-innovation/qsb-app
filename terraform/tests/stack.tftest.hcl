@@ -30,8 +30,16 @@ run "baseline" {
     error_message = "The default mainnet plan must not deploy the supervised runtime."
   }
   assert {
+    condition     = aws_lambda_function.coordinator.timeout == 90 && jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.TimeoutSeconds > aws_lambda_function.coordinator.timeout
+    error_message = "Workflow timeout must cover the coordinator preflight and paid submission budget."
+  }
+  assert {
     condition     = !can(jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Retry)
     error_message = "Do not add generic automatic retries around billable coordination."
+  }
+  assert {
+    condition     = aws_lambda_function.coordinator.environment[0].variables.RUNPOD_WORKERS_MAX == "1" && aws_lambda_function.coordinator.environment[0].variables.RUNPOD_WORKERS_MIN == "0" && aws_lambda_function.coordinator.environment[0].variables.RUNPOD_EXECUTION_TIMEOUT_MS == tostring(local.gpu_spend.executionTimeoutMs) && aws_lambda_function.coordinator.environment[0].variables.MAX_JOB_GPU_SECONDS == (tostring(local.gpu_spend.maxJobGpuSeconds)) && output.runpod_limits.workersMax == 1 && output.runpod_limits.workersMin == 0 && output.runpod_limits.executionTimeoutMs == local.gpu_spend.executionTimeoutMs
+    error_message = "Deployed configuration must show workersMax=1, workersMin=0, and the execution timeout."
   }
 }
 run "reject_network_mismatch" {

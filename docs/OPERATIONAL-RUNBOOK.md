@@ -11,6 +11,7 @@ The checked-in capability limit is `providerGpuLimit: 1` in `server/mainnet-capa
 - `maxConcurrentSearches`: 1
 - `maxGpuWorkers`: 1
 - `minIdleWorkers`: 0
+- The coordinator path uses `server/gpu-spend.json`: `workersMax` 1, `workersMin` 0, `executionTimeoutMs` 900000, and `maxJobGpuSeconds` 14745600 (4,096 GPU-hours per job, reserved across retries and all stages). A 64-hit output is not credited as a finished range. These checks do not start a worker, evaluate the USD ceiling, or authorize a spend.
 - `costUnit` is `operator-units`. `maxCostUnits` is a positive integer of those units. The operator cost field is not the experimental USD ceiling. A plan that labels the field as USD, or that supplies `vaultUsd`, `feeUsd`, or `gpuUsd` on the runbook, is refused with `CostFieldIsNotUsdCeiling`.
 - The experimental USD limits are vault 10000, fee 1000, and GPU 1000. They are encoded only in `assertExperimentalUsdLimits`. That check cannot run while `release.mainnetEnabled` and `broadcastAuthorized` are false: it throws `UsdLimitCheckClosed` and does not compare amounts. It does not read `maxCostUnits`, approve activation, or authorize a spend.
 - A missing or zero operator cost ceiling is refused. A plan above the concurrency cap is refused. `acceptOperationalRunbook` does not provision workers. `executed`, `provisioned`, and `usdLimitsEvaluated` stay false. `costFieldIsUsdCeiling` stays false.
@@ -52,8 +53,9 @@ Do not put credentials, wallet material, or raw logs in the evidence argument.
 The identifier is an operator assertion; IAM/CloudTrail identifies the caller.
 
 Required environment: `TABLE_NAME` (the CLI refuses MemoryStore), `AWS_REGION`,
-`RUNPOD_SECRET_ARN`, `RUNPOD_ENDPOINT_ID`. `WORKFLOW_ARN` is also required to restart
-polling. The operator role needs GetItem on job/vault records, transactional PutItem
+`RUNPOD_SECRET_ARN`, `RUNPOD_ENDPOINT_ID`, `WORKFLOW_ARN` and `QSB_NETWORK`
+(`mainnet` or `testnet4`). Both modes validate all six before application imports,
+credentials, or database/provider reads and writes. The operator role needs GetItem on job/vault records, transactional PutItem
 on the job and `RECONCILIATION#` audit rows, access to the configured provider
 credential (and its KMS key if applicable), and StartExecution on the configured
 workflow. The agent must not retrieve those credentials; provision them for the
@@ -72,7 +74,10 @@ Completed outputs additionally must match the stored manifest, stage, attempt,
 kernel and exact range. Attachment grants no completion credit: the coordinator
 still validates the output and CPU-checks hits. Existing attached IDs can restart
 polling idempotently. Mainnet switches remain unchanged, and disabled transaction
-routes prevent polling from being started.
+routes refuse provider-ID attachment before any read or write. A polling-start
+refusal prints its reason and exits non-zero; an ID already saved before a workflow
+start failure remains attached for operator reconciliation. Correct the prerequisite
+and rerun the same provider-ID decision; never submit a replacement as a workaround.
 
 To authorize exactly one replacement after proving Runpod rejected the call
 before acceptance (for example a retained definite rejection, not a timeout/5xx):
@@ -81,11 +86,12 @@ before acceptance (for example a retained definite rejection, not a timeout/5xx)
 npx tsx scripts/reconcile-submission.ts OWNER JOB --not-submitted rejected-before-acceptance --operator OPERATOR --evidence audit://incident/rejection
 ```
 
-For an ambiguous call, use `--not-submitted ttl-expired` only after independently
-checking the endpoint and billing/log window. This mode requires the complete
-24-hour provider TTL to have elapsed from `submissionStartedAt`, saved by the
-coordinator before the POST. Legacy jobs without that timestamp cannot use this
-mode. The outcome name denotes replacement permission; TTL expiry does **not**
+Both reasons require the complete 24-hour provider TTL to have elapsed from
+`submissionStartedAt`, saved by the coordinator before the POST. The reason labels
+the evidence; neither reason bypasses that wait. Legacy jobs without that timestamp
+cannot grant replacement permission. For an ambiguous call, use
+`--not-submitted ttl-expired` only after independently checking the endpoint and
+billing/log window. The outcome name denotes replacement permission; TTL expiry does **not**
 prove that the old job was never accepted and can incur duplicate bounded work.
 Both modes require current health to show zero queued/in-progress requests.
 A list miss or an empty queue by itself never authorizes replacement.
@@ -109,3 +115,40 @@ Local builds and source flags are not live-configuration evidence. A clean pushe
 ## Spend authorization
 
 Every proposed mainnet spend requires a separate exact-transaction authorization. The activation decision does not carry the transaction id, amount, or fee, and it does not set `broadcastAuthorized`. An exact spend record is still not a broadcast. This checkout grants neither.
+
+### Coordinator GPU-time allowance
+
+`server/gpu-spend.json` is the bundled source of truth. The user chose
+14,745,600 seconds (4,096 GPU-hours) per job on PR #36. The planning calculation
+uses Config A's upstream honest-work comment of roughly 2^47 candidates
+(`public/qsb/qsb_pipeline.py:255`), divided by the roughly 2^34 candidates per
+subset range in `server/search-ranges.ts`: 8,192 range-equivalents. Reserving
+900 seconds each gives 2,048 GPU-hours; a 100% margin gives 4,096 GPU-hours.
+This is a planning assumption from a code comment, not measured expected runtime
+or a success guarantee; pinning geometry differs. If that estimate is per round
+rather than total, the allowance must be reassessed and raised through review.
+Changing it requires review/build/deploy.
+Before every paid POST, the coordinator atomically saves the greater of cumulative
+reserved seconds and observed compute seconds, plus the submission's timeout
+(currently 900 seconds). It pauses if this would exceed the budget. This permits
+16,384 worst-case reservations from a fresh job; it does not guarantee a solution.
+
+Reservations are permanent: short runs, failed/cancelled/timed-out jobs, unknown
+POST outcomes, stage changes and resume requests do not refund or reset them.
+`computeSeconds` remains observed execution telemetry, not complete billing data.
+Legacy jobs with a recorded submission count reserve 900 seconds per historical
+submission. New jobs explicitly initialize their reservation at creation; missing or invalid
+accounting otherwise pauses for reconciliation (even at range zero). Stage-local `attempt` is only a
+range index. The retained `gpuSubmissions` count is telemetry/migration evidence,
+not the configured cap.
+
+Startup, idle time, storage and provider retry/billing behavior are not an invoice
+cap. No paid run is authorized by changing this configuration.
+
+Before a paid claim, endpoint-limit failures pause with `Runpod limits unconfirmed;
+nothing was submitted` and leave the time reservation unchanged. Fix the endpoint
+permission/configuration, then resume normally. A failure after the paid POST
+boundary remains an unknown submission and must be reconciled, never retried
+blindly. The 90-second coordinator timeout budgets the CPU export (25 seconds),
+endpoint check (20 seconds), paid POST (20 seconds), and persistence overhead;
+it reduces timeout exposure but does not make a POST and database write atomic.
