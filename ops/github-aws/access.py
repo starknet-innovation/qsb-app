@@ -92,7 +92,9 @@ def access(c):
             'batch:DescribeJobs', 'batch:ListJobs', 'batch:ListTagsForResource',
             'scheduler:ListSchedules', 'scheduler:ListScheduleGroups', 'scheduler:GetSchedule',
             'ecr:DescribeImages', 'iam:GetRole', 'iam:GetRolePolicy', 'iam:GetPolicy', 'iam:GetPolicyVersion',
-            'iam:GetInstanceProfile', 'iam:GetUser', 'iam:GetAccessKeyLastUsed',
+            'iam:GetInstanceProfile', 'iam:GetUser', 'iam:GetUserPolicy', 'iam:GetAccessKeyLastUsed',
+            # Resource-policy metadata, to review external-access analyzer findings.
+            'ecr:GetRepositoryPolicy', 's3:GetBucketPolicy', 's3:GetBucketPolicyStatus', 'lambda:GetPolicy',
             'iam:SimulateCustomPolicy', 'iam:SimulatePrincipalPolicy',
             'ce:GetCostAndUsage', 'ce:GetCostForecast', 'access-analyzer:ListAnalyzers',
             'access-analyzer:ListFindings', 'access-analyzer:ListFindingsV2', 'access-analyzer:GetFinding',
@@ -208,7 +210,8 @@ def access(c):
     return {
         'user': {'name': user, 'path': '/qsb/operators/', 'managed': [SIGN_IN_MANAGED], 'inline': user_policy},
         'viewonly': {'name': 'qsb-viewonly', 'path': '/qsb/bootstrap/', 'trust': trust, 'managed': [VIEW_ONLY_MANAGED],
-                     'policies': [viewonly], 'max_session': 14400},
+                     # Sessions assumed from an `aws login` session count as chained: one hour at most.
+                     'policies': [viewonly], 'max_session': 3600},
         'operator': {'name': 'qsb-operator', 'path': '/qsb/bootstrap/', 'trust': trust, 'managed': [],
                      'policies': operator, 'max_session': 3600},
         'gpu_boundary': {'name': 'qsb-gpu-boundary', 'path': '/qsb/bootstrap/', 'document': gpu_boundary_doc},

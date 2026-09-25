@@ -38,17 +38,17 @@ if not remote or remote[0] != commit:
 
 
 def call(*args):
-    """Run one AWS CLI call; return (ok, parsed output, error code). Never prints output."""
+    """Run one AWS CLI call; return (ok, parsed output, error code, error text). Never prints output."""
     r = subprocess.run(['aws', '--profile', a.profile, '--region', c['region'], '--output', 'json', '--no-cli-pager', '--cli-connect-timeout', '10', '--cli-read-timeout', '20', *args],
                        capture_output=True, text=True)
     if r.returncode:
         code = re.search(r'\(([A-Za-z]+)\)', r.stderr)
-        return False, None, code.group(1) if code else 'error'
-    return True, json.loads(r.stdout) if r.stdout.strip() else {}, None
+        return False, None, code.group(1) if code else 'error', r.stderr
+    return True, json.loads(r.stdout) if r.stdout.strip() else {}, None, ''
 
 
 def aws(*args):
-    ok, output, code = call(*args)
+    ok, output, code, _ = call(*args)
     if not ok:
         raise SystemExit(f"{' '.join(args[:2])} failed: {code}; reconcile before retrying")
     return output
@@ -104,6 +104,18 @@ for name in sorted(set(documents) & set(policies)):
     version = aws('iam', 'get-policy-version', '--policy-arn', listed['Arn'], '--version-id', listed['DefaultVersionId'])
     if version['PolicyVersion']['Document'] != documents[name]:
         drift(name, 'differs from the rendered document')
+    # A hidden extra version could be made default later; the bootstrap only ever creates one.
+    if len(aws('iam', 'list-policy-versions', '--policy-arn', listed['Arn'])['Versions']) != 1:
+        drift(name, 'has more than one version')
+    # Attached anywhere but its own role, or used as a boundary outside the GPU roles, means someone else uses it.
+    used = aws('iam', 'list-entities-for-policy', '--policy-arn', listed['Arn'], '--policy-usage-filter', 'PermissionPolicy')
+    owners = {'qsb-viewonly'} if name.startswith('qsb-viewonly-') else {'qsb-operator'} if name.startswith('qsb-operator-') else set()
+    if used['PolicyUsers'] or used['PolicyGroups'] or not {r['RoleName'] for r in used['PolicyRoles']} <= owners:
+        drift(name, 'is attached outside its own role')
+    bounded = aws('iam', 'list-entities-for-policy', '--policy-arn', listed['Arn'], '--policy-usage-filter', 'PermissionsBoundary')
+    allowed = (lambda r: r.startswith('qsb-gpu-')) if name == 'qsb-gpu-boundary' else (lambda r: False)
+    if bounded['PolicyUsers'] or not all(allowed(r['RoleName']) for r in bounded['PolicyRoles']):
+        drift(name, 'is used as a permissions boundary outside the GPU roles')
 if user['name'] in users:
     if users[user['name']].get('Path') != user['path']:
         drift(user['name'], 'is not under ' + user['path'])
@@ -120,6 +132,16 @@ if user['name'] in users:
     user_missing = {'managed': sorted(set(user['managed']) - attached), 'inline': not inline}
     if aws('iam', 'list-access-keys', '--user-name', user['name'])['AccessKeyMetadata']:
         drift(user['name'], 'has access keys')
+    for listing, key, what in (('list-ssh-public-keys', 'SSHPublicKeys', 'SSH keys'),
+                               ('list-service-specific-credentials', 'ServiceSpecificCredentials', 'service credentials'),
+                               ('list-signing-certificates', 'Certificates', 'signing certificates')):
+        if aws('iam', listing, '--user-name', user['name'])[key]:
+            drift(user['name'], 'has ' + what)
+    # A password and MFA are set by root after bootstrap; report them so an unexpected device is noticed.
+    devices = len(aws('iam', 'list-mfa-devices', '--user-name', user['name'])['MFADevices'])
+    login = call('iam', 'get-login-profile', '--user-name', user['name'])[0]
+    print(f"existing user has {devices} MFA device(s) and {'a' if login else 'no'} console password; "
+          'confirm they are yours', flush=True)
     if aws('iam', 'list-groups-for-user', '--user-name', user['name'])['Groups']:
         drift(user['name'], 'is in a group')
 else:
@@ -176,9 +198,9 @@ else:
         '--policy-document', json.dumps(user['inline']))
     print('created user ' + user['path'] + user['name'] + ' (no password, no keys, no MFA yet)', flush=True)
 
-# A trust policy naming a just-created user is rejected as MalformedPolicyDocument until IAM
-# has propagated the new principal. Retry only that error, a bounded number of times.
-ROLE_ATTEMPTS, ROLE_WAIT = 8, 5
+# A trust policy naming a just-created user is rejected as MalformedPolicyDocument ("Invalid
+# principal in policy") until IAM has propagated the new principal. Retry only that, for ~2 minutes.
+ROLE_ATTEMPTS, ROLE_WAIT = 24, 5
 for role, names in (('viewonly', viewonly_names), ('operator', operator_names)):
     spec = out[role]
     if spec['name'] in roles:
@@ -189,13 +211,13 @@ for role, names in (('viewonly', viewonly_names), ('operator', operator_names)):
               flush=True)
         continue
     for attempt in range(ROLE_ATTEMPTS):
-        ok, _, code = call('iam', 'create-role', '--role-name', spec['name'], '--path', spec['path'],
+        ok, _, code, text = call('iam', 'create-role', '--role-name', spec['name'], '--path', spec['path'],
                            '--assume-role-policy-document', json.dumps(spec['trust']),
                            '--max-session-duration', str(spec['max_session']),
                            '--description', f'QSB {role}: assumed by {user["name"]} with MFA', '--tags', tags)
         if ok:
             break
-        if code != 'MalformedPolicyDocument' or attempt + 1 == ROLE_ATTEMPTS:
+        if code != 'MalformedPolicyDocument' or 'Invalid principal' not in text or attempt + 1 == ROLE_ATTEMPTS:
             raise SystemExit(f'iam create-role failed: {code}; reconcile before retrying (use --resume)')
         time.sleep(ROLE_WAIT)
     for policy_arn in list(spec['managed']) + [arns[n] for n in names]:

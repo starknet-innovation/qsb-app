@@ -66,6 +66,7 @@ jobs:
           python3 terraform/gpu/test_watchdog.py
           python3 ops/github-aws/test_access.py
           python3 ops/github-aws/test_bootstrap_access.py
+          python3 ops/github-aws/test_update_installed.py
 
       - name: Test explicitly selected solver deployment identities
         run: |

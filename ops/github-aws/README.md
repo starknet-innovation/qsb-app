@@ -113,8 +113,9 @@ Both roles trust only that user, only with MFA (`aws:MultiFactorAuthPresent`),
 and only when that MFA is under an hour old (`aws:MultiFactorAuthAge`). An older
 sign-in session can't mint role sessions without a fresh code. Neither role can
 assume other roles, so editing a runtime role's trust doesn't let the operator
-become that role. Sessions last at most 1 hour for `qsb-operator` and 4 hours
-for `qsb-viewonly`.
+become that role. Both roles' sessions last at most 1 hour. AWS counts a role
+session assumed from an `aws login` session as role chaining, which caps it at
+1 hour whatever the role's maximum.
 GPU runtime roles (`/qsb/runtime/qsb-gpu-*`) can be created or changed only with
 the new `qsb-gpu-boundary`. It allows the ECS instance agent, pulling the
 `qsb-solver` image, the GPU log streams, reading job inputs, writing job outputs,
@@ -143,7 +144,7 @@ an AWS Budgets alert on the account.
 4. `python3 ops/github-aws/bootstrap_access.py --profile ADMIN --inventory INVENTORY`
    prints the plan (names and policy sizes only). Add `--apply` to create it. It
    refuses to touch an existing identity and never creates a password, key or
-   MFA device. If a call fails midway, don't delete anything or retry blind: rerun with `--apply --resume`. It first checks that every identity that already exists matches what this commit renders: path, policy documents, trust, session length, and no access keys, groups or extra policies. Then it creates or attaches only what's missing, and anything that differs stops it. Role creation retries a `MalformedPolicyDocument` error up to 8 times, 5 seconds apart, because IAM rejects a trust policy that names a just-created user until it has propagated.
+   MFA device. If a call fails midway, don't delete anything or retry blind: rerun with `--apply --resume`. It first checks that every identity that already exists matches what this commit renders: path, policy documents, trust, session length, and no access keys, groups or extra policies. Then it creates or attaches only what's missing, and anything that differs stops it. For each policy that already exists, the check also requires exactly one version, and no attachment or boundary use outside its own role or the GPU roles. The user must have no SSH keys, service credentials or signing certificates, and the script reports its MFA devices and console password. Role creation retries only IAM's `MalformedPolicyDocument` "Invalid principal in policy" error, up to 24 times, 5 seconds apart (about 2 minutes), because IAM rejects a trust policy naming a just-created user until it has propagated.
 5. As root in the console, enable console access and assign a virtual or hardware
    TOTP MFA device: the CLI `mfa_serial` flow needs a six-digit TOTP code. A passkey
    or security key alone supports console role switching, not this CLI flow.
@@ -164,7 +165,7 @@ region = eu-west-1
 role_arn = arn:aws:iam::ACCOUNT:role/qsb/bootstrap/qsb-viewonly
 source_profile = qsb-user
 mfa_serial = arn:aws:iam::ACCOUNT:mfa/DEVICE
-duration_seconds = 14400
+duration_seconds = 3600
 region = eu-west-1
 
 [profile qsb-operator]
@@ -181,6 +182,10 @@ combination after bootstrap as described below before relying on it. Agents such
 session that you started. They never see or type the code. Then:
 
 - confirm with `python3 ops/github-aws/verify_access.py --profile qsb-view --inventory INVENTORY --live`;
+- **Terraform can't use these profiles directly:** it can read neither an `aws login` source nor prompt for MFA. Open the session with the CLI, then export it into the shell for Terraform, without printing it:
+  `aws sts get-caller-identity --profile qsb-operator`, then
+  `eval "$(aws configure export-credentials --profile qsb-operator --format env)" && unset AWS_PROFILE`.
+  The exported credentials expire with the session, after at most 1 hour;
 - **With the Batch deployment installed**, run the #14 reconcile CLI as `qsb-operator`. It covers the records, workflow and Batch calls in that version. The older Runpod CLI requires secret access this role deliberately lacks; do not grant it Secrets Manager access to work around that dependency. The #25 reconcile role stays unreachable from this user and the two bootstrap roles by design: their explicit denies prevent chaining into a runtime role. This does not prevent the operator from granting an outside principal access through runtime trust or bucket policies. Terraform still needs a value for `operator_principal_arns`; set it to the `qsb-operator` role ARN, which `NoRoleChaining` keeps from assuming it, so that role stays dormant;
 - keep root for break-glass only.
 
@@ -232,3 +237,37 @@ not automatic deletion of access.
 References: [Lambda permission conditions](https://docs.aws.amazon.com/lambda/latest/dg/access-control-resource-based.html),
 [Sign-In console actions](https://docs.aws.amazon.com/signin/latest/userguide/console-access-control.html),
 and [AssumeRole MFA token](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html).
+
+## Keep installed IAM in line with `main`
+
+`bootstrap.py` and `bootstrap_access.py` create identities once and never update
+them, so a reviewed change to `render.py` or `access.py` doesn't reach AWS by
+itself. `update_installed.py` compares every installed administrator-managed QSB
+document with what the current clean, pushed commit renders:
+
+- `qsb-github-deploy`'s inline policy and `qsb-runtime-boundary`, from `render.py`;
+- from `access.py`: `qsb-gpu-boundary`, the `qsb-viewonly-N` and `qsb-operator-N` policies, the operator user's inline policy, and the two roles' trust and maximum session.
+
+```sh
+python3 ops/github-aws/update_installed.py --profile qsb-view --inventory INVENTORY
+python3 ops/github-aws/update_installed.py --profile ADMIN --inventory INVENTORY --apply
+```
+
+**Plan mode** can run as `qsb-viewonly`. For each target it prints `identical`, `missing` or `differs`, with the statement IDs added, removed or changed.
+
+**`--apply`** needs an administrator, today root, and makes only the differing updates:
+- a new default version for managed policies;
+- `put-*-policy` for inline ones;
+- `update-assume-role-policy` or `update-role` for the roles.
+
+It then reads back each changed policy. It never creates or deletes an identity, and never deletes a policy version. It refuses before any write in any of these cases:
+- a changed managed policy already has IAM's maximum of five versions;
+- the number of rendered access policies changed;
+- anything is missing;
+- `qsb-github-deploy` has unexpected inline policies.
+
+Afterwards, run `verify.py --role-arn` and `verify_access.py --live`.
+
+Tightening `qsb-github-deploy` to `main` removes grants the parked CDK-era stacks
+used, such as ECR, SQS, EventBridge, and passing roles to EC2, Backup and API
+Gateway. It is intentional, and those stacks can no longer be deployed with that role.
