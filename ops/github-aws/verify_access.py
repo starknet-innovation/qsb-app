@@ -117,9 +117,12 @@ simulate('viewonly', out['viewonly']['policies'], 'qsb-viewonly', viewonly_cases
 simulate('gpu-boundary', [out['gpu_boundary']['document']], None, gpu_cases)
 user_cases = [
     ('assume operator', 'sts:AssumeRole', iam('role/qsb/bootstrap/qsb-operator'), True, []),
-    ('assume reconcile', 'sts:AssumeRole', iam('role/qsb/runtime/' + c['reconcile_role']), True, []),
+    ('assume the reconcile role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-operator-reconcile'),
+     'explicitDeny', []),
     ('assume operator-made runtime role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-api'), 'explicitDeny', []),
-    ('create access key', 'iam:CreateAccessKey', iam('user/qsb/operators/' + c['operator_user']), False, []),
+    ('read records directly', 'dynamodb:GetItem', arn('dynamodb', 'table/qsb-research-records'), 'explicitDeny', []),
+    ('invoke a function directly', 'lambda:InvokeFunction', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
+    ('create access key', 'iam:CreateAccessKey', iam('user/qsb/operators/' + c['operator_user']), 'explicitDeny', []),
 ]
 simulate('user', [out['user']['inline']], None, user_cases)
 total = len(operator_cases) + len(viewonly_cases) + len(gpu_cases) + len(user_cases)

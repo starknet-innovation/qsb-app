@@ -101,12 +101,11 @@ review and apply that administrator-managed policy change separately.
 Day-to-day AWS work (checks, Terraform applies, GPU smoke runs, reconcile) must
 not use the account root. `access.py` renders three administrator-owned
 identities from the same private inventory, plus `operator_user` (the IAM user
-name), `gpu_vpc` (the VPC of the `terraform/gpu` security group) and
-`reconcile_role` (the #25 reconcile role's name under `/qsb/runtime/`):
+name) and `gpu_vpc` (the VPC of the `terraform/gpu` security group):
 
 | Identity | Path | Can | Cannot |
 | --- | --- | --- | --- |
-| IAM user `operator_user` | `/qsb/operators/` | sign in (console or `aws login`), change its password, assume the two roles and the reconcile role | assume any other role, even one whose trust names it; anything else; it has no access keys |
+| IAM user `operator_user` | `/qsb/operators/` | sign in (console or `aws login`), change its password, assume the two roles | assume any other role, even one whose trust names it; any other action, even one a resource policy grants it; it has no access keys |
 | `qsb-viewonly` | `/qsb/bootstrap/` | AWS `ViewOnlyAccess`, plus Batch/Scheduler/IAM describe, IAM simulation and Cost Explorer reads | read data: S3 objects, DynamoDB items, secrets, parameters, KMS decrypt, log events, Lambda code, execution input/output |
 | `qsb-operator` | `/qsb/bootstrap/` | everything `qsb-github-deploy` can, plus the `terraform/gpu` stack and its smoke jobs | ingress rules, `RunInstances`, VPC/gateway creation, users, access keys or MFA devices, editing any `/qsb/bootstrap/` identity or policy, removing a boundary |
 
@@ -137,7 +136,7 @@ an AWS Budgets alert on the account.
 
 ### Create them once, as root
 
-1. Add `operator_user`, `gpu_vpc` and `reconcile_role` to the private inventory (outside Git).
+1. Add `operator_user` and `gpu_vpc` to the private inventory (outside Git).
 2. Check offline: `python3 ops/github-aws/test_access.py`, then
    `python3 ops/github-aws/verify_access.py --profile ADMIN --inventory INVENTORY`.
 3. Commit and push; the checkout must be clean and match its remote branch.
@@ -177,7 +176,7 @@ the role session until it expires. Agents such as Claude or Codex use a cached
 session that you started. They never see or type the code. Then:
 
 - confirm with `python3 ops/github-aws/verify_access.py --profile qsb-view --inventory INVENTORY --live`;
-- add the user's ARN to `operator_principal_arns` so it can assume the reconcile role;
+- run the #14 reconcile CLI as `qsb-operator`. It already covers the records, workflow and Batch calls reconcile makes. The #25 reconcile role stays unreachable from this user by design: the operator can edit runtime roles, so a runtime role must never be a way to skip fresh MFA. Terraform still needs a value for `operator_principal_arns`; set it to the `qsb-operator` role ARN, which `NoRoleChaining` keeps from assuming it, so that role stays dormant;
 - keep root for break-glass only.
 
 **Verify** before relying on these, against current AWS docs:

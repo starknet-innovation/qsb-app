@@ -25,8 +25,7 @@ class HumanAccess(unittest.TestCase):
             account=ACCOUNT, region='eu-west-1', subject='repo:example/qsb:ref:refs/heads/main',
             state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
             origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
-            operator_user='qsb-operator-user', gpu_vpc='vpc-0test',
-            reconcile_role='qsb-research-operator-reconcile'))
+            operator_user='qsb-operator-user', gpu_vpc='vpc-0test'))
         self.operator = [s for d in self.out['operator']['policies'] for s in d['Statement']]
         self.viewonly = [s for d in self.out['viewonly']['policies'] for s in d['Statement']]
 
@@ -53,10 +52,15 @@ class HumanAccess(unittest.TestCase):
         self.assertEqual(user['managed'], ['arn:aws:iam::aws:policy/SignInLocalDevelopmentAccess'])
         guard = self.sid(user['inline']['Statement'], 'OnlyTheseRoles')
         self.assertEqual(guard['Effect'], 'Deny')
-        self.assertIn('sts:AssumeRole', guard['Action'])
+        self.assertEqual(guard['Action'], ['sts:AssumeRole'])
         self.assertEqual(guard['NotResource'], [f'arn:aws:iam::{ACCOUNT}:role/qsb/bootstrap/qsb-viewonly',
-                                                f'arn:aws:iam::{ACCOUNT}:role/qsb/bootstrap/qsb-operator',
-                                                f'arn:aws:iam::{ACCOUNT}:role/qsb/runtime/qsb-research-operator-reconcile'])
+                                                f'arn:aws:iam::{ACCOUNT}:role/qsb/bootstrap/qsb-operator'])
+        # Resource policies or trust written by the operator can't grant the user anything else.
+        rest = self.sid(user['inline']['Statement'], 'NothingElse')
+        self.assertEqual((rest['Effect'], rest['Resource']), ('Deny', ['*']))
+        self.assertEqual(set(rest['NotAction']), {'sts:AssumeRole', 'iam:ChangePassword', 'iam:GetUser',
+                                                  'iam:GetAccountPasswordPolicy', 'signin:AuthorizeOAuth2Access',
+                                                  'signin:CreateOAuth2Token'})
         grants = {a for a, _ in self.allowed(user['inline']['Statement'])}
         self.assertEqual(grants, {'sts:AssumeRole', 'iam:ChangePassword', 'iam:GetUser', 'iam:GetAccountPasswordPolicy'})
         assume = self.sid(user['inline']['Statement'], 'AssumeQsbRoles')
