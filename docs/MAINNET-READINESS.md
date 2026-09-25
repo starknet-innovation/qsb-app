@@ -1,8 +1,15 @@
 # Mainnet readiness checklist
 
+**Current plan of record (25 September 2026):** #8 sequences the path to a first mainnet withdrawal, which is #22. [Validation status](STATUS.md#current-status-25-september-2026) lists the decisions and what is deployed. This checklist predates that plan. It stays as historical context, and for the evidence standards in its last section. Where the two differ, #8 and #22 apply:
+- **§1 and §5 (release and solver review):** the release for the first withdrawal is the optimized candidate in qsb-solver#2, under the gate scope recorded there. This repository's part is enrolling it.
+- **§3 (production execution host) and §4 (storage cutover):** the production path is the Step Functions coordinator with AWS Batch (#25, #54). #25 removed the supervised host, storage and dispatch resources from Terraform. #23 tracks removing the unreachable cutover code.
+- **§6 (fresh optimized end-to-end withdrawal on regtest):** replaced by the no-test-chain decision. The first mainnet withdrawal in #22 is the end-to-end proof, and #20's offline consensus check replaces the regtest rehearsal (#21).
+- **§7 (external miner inclusion):** covered by #20's exact-submit path and steps 7–8 of #22.
+- **§8 (activation):** replaced by the deploy-time switches from #48 and #20, which are turned on only with explicit approval. Every mainnet spend still needs explicit approval of its exact transaction, amount and fee.
+
 **Issue #20 update:** [The coordinator exact-submit path](EXACT-SUBMIT.md) now runs offline Core input verification, persists a transaction intent before its single miner POST, and reconciles by funding outpoint. Its dedicated switch defaults off. Historical parked-supervisor checks below remain separate; no live submit or miner inclusion is certified.
 
-**Status: NOT READY. Mainnet activation and transaction broadcast are not authorized.**
+**Status as of 24 September (historical): NOT READY. Mainnet activation and transaction broadcast were not authorized.**
 
 Updated 24 September 2026. This is the public release checklist, distilled from the local validation record. It intentionally excludes operational identifiers, credentials, wallet material, signed transactions and private evidence locations.
 
