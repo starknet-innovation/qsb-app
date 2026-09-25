@@ -81,3 +81,13 @@ variable "iam_permissions_boundary_arn" {
   type        = string
   default     = null
 }
+
+variable "operator_principal_arns" {
+  description = "Explicit IAM user/role principals allowed to assume the reconciliation role with MFA. No account-root delegation, wildcard or default."
+  type        = set(string)
+  nullable    = false
+  validation {
+    condition     = length(var.operator_principal_arns) > 0 && alltrue([for arn in var.operator_principal_arns : can(regex("^arn:aws(-[a-z]+)?:iam::[0-9]{12}:(user|role)/[A-Za-z0-9+=,.@_/-]+$", arn))])
+    error_message = "Supply at least one exact IAM user or role ARN; root, wildcard and session principals are not accepted."
+  }
+}

@@ -4,7 +4,7 @@ This folder deploys the **single Step Functions application pipeline** into a fr
 
 There is no supervised host, VPC/NAT, EBS/Backup, dispatch queue/DLQ, evidence bucket/table, watchdog, runtime installer or ECR repository in this application stack. Supervised source remains parked for removal under #23. GitHub OIDC deployment bootstrap remains separate and supported. Applying Terraform is not mainnet activation, wallet compatibility certification, or permission to spend funds. See [mainnet readiness](../docs/MAINNET-READINESS.md).
 
-Recorded local evidence: [single-pipeline mock plan inventory](../docs/SINGLE-PIPELINE-PLAN.json). The configured plan has 41 infrastructure resources plus 21 frontend objects for this build, three Lambda functions, four service roles and one table. Counts of frontend objects vary with the build. This is not a live regional plan or deployment.
+Recorded local evidence: [single-pipeline mock plan inventory](../docs/SINGLE-PIPELINE-PLAN.json). The configured plan has 43 infrastructure resources plus 21 frontend objects for this build, three Lambda functions, four service roles, one MFA-required reconciliation role and one table. Counts of frontend objects vary with the build. This is not a live regional plan or deployment.
 
 ## Resources
 
@@ -99,7 +99,7 @@ terraform -chdir=terraform test -json -verbose > /tmp/qsb-terraform-tests.jsonl
 python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-tests.jsonl
 ```
 
-The tests use a mocked AWS provider and plan only. `check-single-pipeline.py` checks both expanded mocked plans (unconfigured preview and configured Runpod) or a saved real plan: exactly three application Lambdas, four service roles, one table, one state machine and one frontend bucket, with no supervised infrastructure or secret-value resources. Counts exclude frontend objects and the separately bootstrapped GitHub OIDC/state infrastructure. They check disabled activation, persistence protection, absence of API provider credentials, no generic paid-work retry, and rejection of network/commit/partial-provider mismatches. They do not call AWS or Runpod and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
+The tests use a mocked AWS provider and plan only. `check-single-pipeline.py` checks both expanded mocked plans (unconfigured preview and configured Runpod) or a saved real plan: exactly three application Lambdas, four service roles, one MFA-required reconciliation role, one table, one state machine and one frontend bucket, with no supervised infrastructure or secret-value resources. Counts exclude frontend objects and the separately bootstrapped GitHub OIDC/state infrastructure. They check disabled activation, persistence protection, absence of API provider credentials, no generic paid-work retry, and rejection of network/commit/partial-provider mismatches. They do not call AWS or Runpod and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
 
 References: [Lambda + HTTP API](https://developer.hashicorp.com/terraform/tutorials/aws/lambda-api-gateway), [fileset build-time semantics](https://developer.hashicorp.com/terraform/language/functions/fileset), [provider resource documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs).
 
@@ -114,3 +114,20 @@ of cost estimates. The 90-second coordinator timeout includes the CPU export,
 limits preflight, POST and database persistence. Applying this configuration does
 not establish a strict physical startup-worker bound: extra INITIALIZING provider
 records and idle/storage billing require separate operational observation.
+
+### Reconciliation operator role
+
+`operator_principal_arns` is required, with no default: supply exact existing IAM
+user or role ARNs in your private tfvars. Account-root delegation and wildcards
+are rejected. The role uses the configured IAM path and permissions boundary;
+its ARN is `operator_reconcile_role_arn`. The MFA condition is mandatory, so a
+federated session that does not provide `aws:MultiFactorAuthPresent` cannot assume
+it. Do not remove the condition to work around that.
+
+See the [operator assume-role procedure](../docs/OPERATIONAL-RUNBOOK.md#assume-the-reconciliation-role).
+The inline policy grants only GetItem/PutItem on present OWNER partitions, one
+coordinator StartExecution, and the configured provider secret. Optional CMK
+decryption is scoped to the configured key through Secrets Manager. A configured
+boundary and the key policy must also allow it; this change does not broaden
+administrator-managed boundaries. A future provider replacement changes the
+provider credential grant, not record or workflow authority.

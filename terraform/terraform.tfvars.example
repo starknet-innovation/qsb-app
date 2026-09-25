@@ -10,3 +10,6 @@ network        = "mainnet" # Network identity only; transactions remain disabled
 # runpod_secret_arn  = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/runpod-EXAMPLE"
 # runpod_secret_kms_key_arn = "arn:aws:kms:eu-west-1:123456789012:key/<key-id>"
 # alarm_actions = ["arn:aws:sns:eu-west-1:123456789012:operations"]
+
+# Required: exact existing IAM principals; assume-role calls must carry MFA.
+operator_principal_arns = ["arn:aws:iam::123456789012:user/qsb-operator"]

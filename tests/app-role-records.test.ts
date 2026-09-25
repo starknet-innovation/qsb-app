@@ -105,11 +105,13 @@ it("restricts coordinator writes including mixed and empty keys", () => {
 // Only the active app roles are deployed; the other model entries are parked.
 import { permissionModel } from "../server/runtime/storage-authority";
 import apiPolicy from "../terraform/policies/app-records.json";
+import operatorPolicy from "../terraform/policies/operator-reconcile-records.json";
 import coordinatorPolicy from "../terraform/policies/coordinator-records.json";
 it("documents the exact active role allow actions from Terraform", () => {
   for (const [role, policy] of [
     ["api", apiPolicy],
     ["coordinator", coordinatorPolicy],
+    ["operator-reconcile", operatorPolicy],
   ] as const) {
     const actions = [
       ...new Set(
@@ -122,5 +124,16 @@ it("documents the exact active role allow actions from Terraform", () => {
   }
   for (const role of Object.values(permissionModel.roles)) {
     expect(role.data).not.toContain("TransactWriteItems");
+  }
+});
+
+it("reconciliation permits only Get/Put on present OWNER keys", () => {
+  expect(operatorPolicy.map(s => s.Action).flat().sort()).toEqual(["dynamodb:GetItem", "dynamodb:PutItem"]);
+  for (const statement of operatorPolicy) {
+    expect(statement.Effect).toBe("Allow");
+    expect(statement.Condition).toEqual({"ForAllValues:StringLike": {"dynamodb:LeadingKeys": ["OWNER#*"]}, Null: {"dynamodb:LeadingKeys": "false"}});
+    for (const key of ["SYSTEM#authority", "OUTPOINT#tx:0"]) {
+      expect(key.startsWith(statement.Condition["ForAllValues:StringLike"]["dynamodb:LeadingKeys"][0].slice(0,-1))).toBe(false);
+    }
   }
 });

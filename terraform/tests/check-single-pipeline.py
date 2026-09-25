@@ -44,7 +44,7 @@ def validate(rows, expanded):
         require(len(selected) == len(names) and {r['name'] for r in selected} == names,
                 f'Expected only {kind}: {sorted(names)}')
     roles = [r for r in rows if r['type'] == 'aws_iam_role']
-    require(len(roles) == (4 if expanded else 2), 'Expected only Lambda and workflow service roles')
+    require(len(roles) == (5 if expanded else 3) and {r['name'] for r in roles} == {'lambda', 'workflow', 'operator_reconcile'}, 'Expected only Lambda/workflow service roles and one reconciliation operator role')
     if expanded:
         funcs = {r['name']: r for r in rows if r['type'] == 'aws_lambda_function'}
         envs = {name: (row.get('values', {}).get('environment') or [{}])[0].get('variables', {})
