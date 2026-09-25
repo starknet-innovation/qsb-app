@@ -4,6 +4,11 @@
 No argument checks declarations; a JSON plan from `terraform show -json` checks
 expanded planned resources, including nested modules. Terraform test -json -verbose
 JSONL checks the baseline and configured-provider mock plans. Bootstrap is separate.
+
+For a real deployment plan add --deploy: every role must sit under /qsb/runtime/ with the
+administrator-owned qsb-runtime-boundary, the stack name must be qsb-* (not qsb-gpu*), and
+the reconcile role must trust only the qsb-operator role, so the scoped roles can manage the
+stack afterwards. Add --first-apply as well for an account's first apply: create-only.
 """
 import json
 from pathlib import Path
@@ -62,6 +67,30 @@ def validate(rows, expanded):
             'frontendObjects': types.get('aws_s3_object', 0), 'resourceTypes': dict(sorted(types.items()))}
 
 
+def deploy_checks(plan, first_apply):
+    """What the scoped deploy and operator roles need in order to manage what an admin first applied."""
+    rows = module_resources(plan['planned_values']['root_module'])
+    roles = [r['values'] for r in rows if r['type'] == 'aws_iam_role']
+    for role in roles:
+        require(role.get('path') == '/qsb/runtime/', f"role {role.get('name')} must use iam_role_path=/qsb/runtime/")
+        require(str(role.get('permissions_boundary') or '').endswith(':policy/qsb/bootstrap/qsb-runtime-boundary'),
+                f"role {role.get('name')} must carry qsb-runtime-boundary (iam_permissions_boundary_arn)")
+    names = [r['values'].get('function_name', '') for r in rows if r['type'] == 'aws_lambda_function']
+    require(names and all(n.startswith('qsb-') and not n.startswith('qsb-gpu') for n in names),
+            'name must start with qsb- and not qsb-gpu, so the scoped roles cover the stack')
+    reconcile = next(r['values'] for r in rows if r['type'] == 'aws_iam_role' and r['name'] == 'operator_reconcile')
+    trust = json.loads(reconcile['assume_role_policy'])
+    principals = [p for s in trust['Statement'] for p in (s['Principal']['AWS'] if isinstance(s['Principal']['AWS'], list)
+                                                         else [s['Principal']['AWS']])]
+    require(principals and all(p.endswith(':role/qsb/bootstrap/qsb-operator') for p in principals),
+            'operator_principal_arns must be exactly the qsb-operator role ARN')
+    if first_apply:
+        actions = {tuple(r['change']['actions']) for r in plan.get('resource_changes', []) if r.get('mode') == 'managed'}
+        require(actions <= {('create',)}, 'first apply must be create-only: the state key must be empty and no '
+                                          'resource may already exist')
+    return {'deployChecks': 'passed', 'roles': len(roles), 'firstApply': first_apply}
+
+
 def module_resources(module):
     rows = [r for r in module.get('resources', []) if r.get('mode') == 'managed']
     for child in module.get('child_modules', []):
@@ -78,8 +107,12 @@ def main():
         result = validate(rows, False)
         result = {'evidence': 'source-declarations-only', 'resourceDeclarations': result['resourcesExcludingFrontendObjects'] + result['frontendObjects'], 'declaredResourceTypes': result['resourceTypes']}
     else:
-        require(len(sys.argv) == 2, 'Usage: check-single-pipeline.py [plan.json]')
-        content = Path(sys.argv[1]).read_text()
+        flags = [a for a in sys.argv[1:] if a.startswith('--')]
+        paths = [a for a in sys.argv[1:] if not a.startswith('--')]
+        require(len(paths) == 1 and set(flags) <= {'--deploy', '--first-apply'} and
+                ('--first-apply' not in flags or '--deploy' in flags),
+                'Usage: check-single-pipeline.py [plan.json [--deploy [--first-apply]]]')
+        content = Path(paths[0]).read_text()
         try:
             plan = json.loads(content)
         except json.JSONDecodeError:
@@ -99,6 +132,8 @@ def main():
         else:
             result = validate(module_resources(plan['planned_values']['root_module']), True)
             result['evidence'] = 'saved-plan-inventory'
+            if '--deploy' in flags:
+                result.update(deploy_checks(plan, '--first-apply' in flags))
     print(json.dumps(result, indent=2))
 
 

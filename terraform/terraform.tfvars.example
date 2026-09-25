@@ -8,8 +8,11 @@ network        = "mainnet" # Network identity only; transactions remain disabled
 # Optional failure notification topic.
 # alarm_actions = ["arn:aws:sns:eu-west-1:123456789012:operations"]
 
-# Required: exact existing IAM principals; assume-role calls must carry MFA.
-operator_principal_arns = ["arn:aws:iam::123456789012:user/qsb-operator"]
+# Required so the scoped deploy and operator roles can manage this stack (see README).
+iam_role_path                = "/qsb/runtime/"
+iam_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary"
+# Reconcile runs as qsb-operator; this keeps the reconcile role dormant.
+operator_principal_arns = ["arn:aws:iam::123456789012:role/qsb/bootstrap/qsb-operator"]
 
 # Requires explicit exact-transaction authorization under #22; no activation here.
 mainnet_enabled = false

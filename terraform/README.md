@@ -46,24 +46,50 @@ node terraform/scripts/build.mjs --network=mainnet
 export TF_VAR_source_commit="$(git rev-parse HEAD)"
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 # Edit terraform.tfvars: intended account, region/name; optional existing AWS Batch references.
-terraform -chdir=terraform init -backend-config="bucket=${QSB_STATE_BUCKET:?Set the bootstrap state bucket}" \
-  -backend-config=key=qsb/main/terraform.tfstate -backend-config=region=eu-west-1 \
-  -backend-config=encrypt=true -backend-config=use_lockfile=true
+terraform -chdir=terraform init -backend-config="bucket=${QSB_STATE_BUCKET:?Set the bootstrap state bucket}"
 terraform -chdir=terraform validate
 terraform -chdir=terraform plan -out=deployment.tfplan
 terraform -chdir=terraform show -json deployment.tfplan > /tmp/qsb-plan.json
-python3 terraform/tests/check-single-pipeline.py /tmp/qsb-plan.json
+python3 terraform/tests/check-single-pipeline.py /tmp/qsb-plan.json --deploy
+# First apply in an account only: also require a create-only plan.
+# python3 terraform/tests/check-single-pipeline.py /tmp/qsb-plan.json --deploy --first-apply
 # Review the complete plan. Verify git status is clean and HEAD is pushed to origin.
 terraform -chdir=terraform apply deployment.tfplan
 terraform -chdir=terraform output app_url
 ```
 
-State is kept in the bootstrap state bucket under `qsb/main/terraform.tfstate`, next to the GPU stack's `qsb/gpu/terraform.tfstate`, with S3 lockfiles. The deploy role and `qsb-operator` can read and write only under `qsb/`, and delete only `.tflock` objects.
+State is kept in the bootstrap state bucket under `qsb/main/terraform.tfstate`, fixed in `versions.tf`, next to the GPU stack's `qsb/gpu/terraform.tfstate`. It uses S3 lockfiles, so Terraform 1.11 or later is required. The deploy role and `qsb-operator` can read and write only under `qsb/` and delete only `.tflock` objects. Confirm this with `ops/github-aws/verify.py` ("state deletion").
 
-**First apply in an account.** It must run as an administrator. The deploy role and `qsb-operator` can manage only CloudFront and API Gateway resources whose IDs are registered in the private inventory. That covers the distribution, origin access control, response-headers policy and HTTP API, and this stack creates new ones. After the first apply:
-1. Add the new IDs from its outputs and state to the inventory (`distributions`, `origin_access_controls`, `response_headers_policies`, `apis`).
-2. Run `ops/github-aws/update_installed.py`: plan, review, then `--apply` with the reviewed plan hash.
-3. From then on, run applies as `qsb-operator`.
+**Settings the scoped roles depend on.** Set these in `terraform.tfvars` for every apply, including the first:
+
+| Variable | Value | Why |
+| --- | --- | --- |
+| `name` | starts with `qsb-`, not `qsb-gpu` (for example `qsb-app`) | the deploy and operator grants match `qsb-*` Lambda, DynamoDB, Step Functions, alarm, log and bucket names; `qsb-gpu-*` roles may carry only the GPU boundary |
+| `iam_role_path` | `/qsb/runtime/` | the scoped roles can read, change and pass only runtime roles there |
+| `iam_permissions_boundary_arn` | the `qsb-runtime-boundary` ARN (`/qsb/bootstrap/`) | they can create or change runtime roles only with that boundary |
+| `operator_principal_arns` | the `qsb-operator` role ARN | reconcile runs as `qsb-operator`; the reconcile role stays dormant |
+| `solver_release_id`, `batch_job_queue`, `batch_job_definition`, `batch_job_bucket` | the enrolled release and the `terraform/gpu` outputs | the served solver and the GPU backend |
+| `mainnet_enabled`, `exact_submit_enabled` | `false` | turned on only under #22 with explicit approval |
+
+Getting the role path wrong on the first apply means replacing the roles later, which needs an administrator again. `check-single-pipeline.py --deploy` refuses a plan that breaks the name, path, boundary or reconcile-principal rule.
+
+**First apply in an account.** It runs once as an administrator, today the account root, as a recorded exception to "no Terraform as root". The deploy role and `qsb-operator` can manage only CloudFront and API Gateway resources whose IDs are registered in the private inventory, and this stack creates new ones. Steps:
+1. Use `qsb-viewonly` to check that nothing named `<name>-*` exists yet. IAM role names are unique across the account.
+2. Check that the state key is empty, so `plan` must be create-only, then run `check-single-pipeline.py --deploy --first-apply`.
+3. Start the apply with a fresh session. CloudFront can take over 15 minutes, and exported credentials last at most an hour. If they expire mid-apply, Terraform writes `errored.tfstate`. In that case:
+   - run `terraform state push errored.tfstate`, and `terraform force-unlock` if a lock remains;
+   - then plan again;
+   - never re-apply blind.
+4. Register the new IDs. Take them from the outputs `cloudfront_distribution_id`, `origin_access_control_id`, `response_headers_policy_id` and `api_id`, and put them in the inventory keys `distributions`, `origin_access_controls`, `response_headers_policies` and `apis`. Put them *in place of* the parked legacy stacks' IDs: those stacks are admin-only until they're torn down, and swapping keeps the rendered policies the same size.
+5. Run `ops/github-aws/update_installed.py`:
+   - plan mode as `qsb-viewonly`;
+   - review it;
+   - then, from a clean `main`, `--apply` as the administrator, confirmed or with `--yes --plan-hash`.
+
+   It refuses if the operator policies would need a different number of documents, or if a changed policy already has five versions. Either way, stop and handle it as a reviewed step.
+6. From then on, run plans and applies as `qsb-operator`.
+
+Replacing any registered resource later (the distribution, origin access control, response-headers policy or API) needs the administrator again. So do changes to the API stage's access-log settings, which need account-wide log-delivery permissions. The API and stage ignore tag changes, so new commits don't need API Gateway tag permissions. **Verify** both behaviours on the first `qsb-operator` apply.
 
 Terraform can't prompt for MFA or read an `aws login` session. Export the CLI session instead, as described in `ops/github-aws/README.md`.
 
@@ -81,9 +107,9 @@ The coordinator Lambda environment and `gpu_limits` output publish `workersMax=1
 
 ### State and configuration
 
-For GitHub OIDC, follow [the separate administrator bootstrap](../ops/github-aws/README.md). Its identity trust and authentication-only workflow remain unchanged. The bounded deployment role cannot create arbitrary CDN/API resources: an administrator must allocate and register those IDs first, then explicitly import the selected resources into the fresh application state before using that role for Terraform. An authenticated administrator with deployment permissions can instead execute the first application plan/apply. This PR performs neither bootstrap, import nor deployment.
+For GitHub OIDC, follow [the separate administrator bootstrap](../ops/github-aws/README.md). Its identity trust and authentication-only workflow remain unchanged. The bounded deployment role cannot create CDN/API resources, so an administrator runs the first apply and registers the resulting IDs (see "First apply in an account" above).
 
-The default Terraform backend is local. State/plans may contain operational metadata; keep them private and encrypted. `.gitignore` excludes state, plans, local tfvars and artifacts. For a team, configure a separately bootstrapped encrypted/locked remote state backend before applying; do not manage its bucket with the same state it stores. No backend credentials belong in source. Commit `.terraform.lock.hcl`.
+State lives in the separately bootstrapped, encrypted and locked S3 backend described above; this stack never manages that bucket. Plans and any local `errored.tfstate` may contain operational metadata: keep them private and outside Git. `.gitignore` excludes state, plans, local tfvars and artifacts. No backend credentials belong in source. Commit `.terraform.lock.hcl`.
 
 ## Updates and rollback
 
