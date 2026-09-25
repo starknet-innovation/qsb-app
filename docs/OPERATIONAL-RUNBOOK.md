@@ -54,7 +54,11 @@ The identifier is an operator assertion; IAM/CloudTrail identifies the caller.
 
 Required environment: `TABLE_NAME` (the CLI refuses MemoryStore), `AWS_REGION`,
 `RUNPOD_SECRET_ARN`, `RUNPOD_ENDPOINT_ID`, `WORKFLOW_ARN` and `QSB_NETWORK`
-(`mainnet` or `testnet4`). Both modes validate all six before application imports,
+(`mainnet` or `testnet4`). On mainnet, also set `QSB_MAINNET_ENABLED` explicitly to
+`"true"` or `"false"`. It must match the deployed value: verify
+`terraform output -raw transactions_enabled` or uncached `GET /api/config`
+(`operationsEnabled`, with `network` equal to `mainnet`). Missing or malformed
+values refuse before application imports. Both modes validate the six base values before application imports,
 credentials, or database/provider reads and writes. The operator role needs GetItem on job/vault records, transactional PutItem
 on the job and `RECONCILIATION#` audit rows, access to the configured provider
 credential (and its KMS key if applicable), and StartExecution on the configured
@@ -73,8 +77,12 @@ job, stage, range, endpoint and submission window using logs/console evidence.
 Completed outputs additionally must match the stored manifest, stage, attempt,
 kernel and exact range. Attachment grants no completion credit: the coordinator
 still validates the output and CPU-checks hits. Existing attached IDs can restart
-polling idempotently. Mainnet switches remain unchanged, and disabled transaction
-routes refuse provider-ID attachment before any read or write. A polling-start
+polling idempotently. The CLI does not change deployment switches. Its explicit
+local mainnet setting gates provider-ID attachment before any read or write;
+`PollingNotAllowed` means that local setting or another polling prerequisite
+refused, not proof of the current Lambda configuration. Verify the deployed value
+before running. If deployment is disabled after that check, the coordinator pauses
+the job with its attached provider ID preserved. A polling-start
 refusal prints its reason and exits non-zero; an ID already saved before a workflow
 start failure remains attached for operator reconciliation. Correct the prerequisite
 and rerun the same provider-ID decision; never submit a replacement as a workaround.
@@ -281,6 +289,8 @@ retry the POST or reset its durable intent.
 
 Both Terraform variables default to `false`; this PR does not enable a deployment.
 `mainnet_enabled` sets `QSB_MAINNET_ENABLED` on **both** the API and coordinator.
+The operator's reconcile CLI also reads this variable and requires an explicit
+mainnet value matching the deployment, as described above.
 Only the exact string `"true"` enables mainnet funding and the normal Step Functions
 search pipeline. The browser reads the same API setting through uncached
 `GET /api/config` (`operationsEnabled`, bound to `network`), and rechecks it before
@@ -302,7 +312,18 @@ route authority. Build artifacts are independent of these deployment values.
 Changing Terraform variables updates Lambda environments using the same clean,
 committed package; API config reports the resulting setting. Turning on a real
 deployment remains issue #22 and requires Adrien's explicit approval. Commit and
-push approved configuration before deployment; verify the deployed commit and
-`/api/config` afterward. Disabling mainnet blocks new funding/search/submission;
-it does not cancel already submitted provider jobs or release reservations. Reconcile
-outstanding jobs using the existing runbook before changing capacity.
+push code before deployment. Record the approved `mainnet_enabled` and
+`exact_submit_enabled` values in the #22 approval/deployment record; never commit
+ignored tfvars, credentials or operator runtime configuration. After apply, verify
+the deployed code commit separately from the runtime settings using
+`terraform output -raw transactions_enabled`,
+`terraform output -raw exact_submit_enabled`, and uncached `GET /api/config`.
+The Git commit alone does not establish deployed switch values.
+
+Disabling mainnet blocks new funding/search/submission and pauses non-terminal
+coordinator jobs with a deployment-disabled error. Provider IDs, uncertain intents,
+spend accounting and reservations remain intact; already submitted GPU jobs are
+not cancelled. After enabling again, resume a paused job to poll its existing
+provider ID. Reconcile uncertain submissions with the existing runbook; never
+reset an intent or submit a replacement solely because the switch was toggled.
+Reconcile outstanding jobs before changing capacity.

@@ -11,15 +11,22 @@ Mainnet job creation uses one pipeline: `createApp`, then `startWorkflow`, then 
 
 Terraform declares only this pipeline, with one records table and one existing Runpod secret reference. Supervised host, dispatch queue, evidence storage and watchdog infrastructure have been removed for the fresh-account deployment; there is no `provision_runtime` switch. See the [deployment instructions](../terraform/README.md).
 
-## Still refused
+## Deployment switches
 
-`release.mainnetEnabled` and the capability `broadcastAuthorized` stay false. This page does not deploy, broadcast, or enable a withdrawal.
+`mainnet_enabled` and `exact_submit_enabled` default to false. Terraform passes
+`QSB_MAINNET_ENABLED` to the API and coordinator; only the exact string `"true"`
+enables mainnet funding, job creation and resume. Exact submission additionally
+requires `QSB_EXACT_SUBMIT_ENABLED="true"` and the exact-spend, offline Core and
+transaction-approval checks. See the [switch matrix](OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches)
+and [exact submission](EXACT-SUBMIT.md).
 
-While those flags are false, this checkout refuses:
+The source metadata `release.mainnetEnabled` and capability `broadcastAuthorized`
+remain false for parked runtime components; they are not the deployed route
+switches. Disabling mainnet pauses non-terminal coordinator jobs while preserving
+provider IDs, submission intents, spend accounting and outpoint reservations.
+It does not cancel already submitted GPU work. Resume requires mainnet to be
+re-enabled; uncertain submissions still require operator reconciliation and must
+never be blindly resubmitted.
 
-- vault funding (`POST /api/vaults/:id/fund`)
-- job creation (`POST /api/jobs`), so `startWorkflow` is not called from a public request
-- job resume (`POST /api/jobs/:id/resume`)
-- job submission (`POST /api/jobs/:id/submit`) by default; #20 adds a separate, default-off `QSB_EXACT_SUBMIT_ENABLED` switch for a solved, exact signed withdrawal. See [EXACT-SUBMIT.md](EXACT-SUBMIT.md).
-
-A refusal does not write a job, start the state machine, or contact a miner. Issue #22 (enable mainnet and complete a withdrawal) is not part of this change.
+Default-off route refusals do not write new jobs, start workflows or contact a
+miner. Enabling a deployment remains issue #22 and requires explicit user approval.

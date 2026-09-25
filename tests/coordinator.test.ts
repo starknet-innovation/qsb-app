@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
+  enabled: true,
   health: vi.fn(),
   run: vi.fn(),
   prepareRun: vi.fn(),
@@ -16,7 +17,7 @@ vi.mock("../server/gpu-spend", async (importOriginal) => {
 });
 vi.mock("../server/network", async (importOriginal) => {
   const actual = await importOriginal<any>();
-  return { ...actual, transactionsEnabled: true };
+  return { ...actual, get transactionsEnabled() { return mocks.enabled; } };
 });
 vi.mock("../server/providers", () => ({
   slipstream: {},
@@ -77,6 +78,7 @@ async function seed(extra: Partial<Job> = {}) {
   });
 }
 beforeEach(() => {
+  mocks.enabled = true;
   (store as MemoryStore).rows.clear();
   vi.clearAllMocks();
   process.env.RUNPOD_SECRET_ARN = "test-arn";
@@ -468,5 +470,91 @@ it("retains the reservation when a verified pin advances to round1", async () =>
     gpuBudgetReservedSeconds: 36000,
   });
   await handler(event);
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it.each(["queued", "searching"] as const)("deployment switch pauses %s without losing paid IDs or resubmitting after resume", async (status) => {
+  const frozen = {
+    status,
+    runpodId: "already-paid",
+    submissionStartedAt: "2026-09-25T00:00:00.000Z",
+    gpuSubmissions: 7,
+    gpuBudgetReservedSeconds: 6300,
+    parameterHashes: { pinning: "c".repeat(64) },
+    attempt: 3,
+  };
+  await seed(frozen);
+  const reservation = {pk:"OUTPOINT#reserved",sk:"RESERVATION",version:0,jobId:event.jobId};
+  await store.put(reservation);
+  const before = (await store.get(pk, sk))!;
+  mocks.enabled = false;
+  expect(await handler(event)).toMatchObject({done:true});
+  const paused = (await store.get(pk, sk))!;
+  expect(paused.job).toEqual({...before.job as Job,status:"paused",error:"Mainnet disabled by deployment."});
+  expect(await store.get(reservation.pk,reservation.sk)).toEqual(reservation);
+  for (const fn of [mocks.prepareRun,mocks.run,mocks.status,mocks.cancel,mocks.cpu]) expect(fn).not.toHaveBeenCalled();
+  // The existing resume route advances revision and changes paused to queued.
+  const resumed = {...paused.job as Job,status:"queued",revision:1,retryRequested:true};
+  delete resumed.error;
+  await store.put({...paused,version:paused.version+1,job:resumed},paused.version);
+  mocks.enabled = true;
+  mocks.status.mockResolvedValue({status:"IN_PROGRESS"});
+  expect(await handler({...event,revision:1})).toMatchObject({done:false});
+  expect(mocks.status).toHaveBeenCalledWith("already-paid");
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.cancel).not.toHaveBeenCalled();
+  expect((await store.get(pk,sk))!.job).toMatchObject({...frozen,status:"queued",revision:1});
+  expect(await store.get(reservation.pk,reservation.sk)).toEqual(reservation);
+});
+it("deployment pause preserves unknown-submission blockers", async () => {
+  await seed({status:"queued",submissionStartedAt:"2026-09-25T00:00:00.000Z",error:"Submission outcome unknown. Reconcile Runpod before resuming."});
+  mocks.enabled = false;
+  await handler(event);
+  const paused = (await store.get(pk,sk))!;
+  expect(paused.job).toMatchObject({status:"paused",submissionStartedAt:"2026-09-25T00:00:00.000Z",error:expect.stringContaining("Submission outcome unknown")});
+  await handler(event);
+  expect((await store.get(pk,sk))!.job).toEqual(paused.job);
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.cancel).not.toHaveBeenCalled();
+});
+
+it("pauses an unstarted queued job and submits it only after an explicit enabled resume", async () => {
+  await seed();
+  mocks.enabled = false;
+  await handler(event);
+  const paused = (await store.get(pk,sk))!;
+  expect(paused.job).toMatchObject({status:"paused",attempt:0,gpuBudgetReservedSeconds:0});
+  expect(paused.job).not.toHaveProperty("submissionStartedAt");
+  expect(paused.job).not.toHaveProperty("runpodId");
+  expect(mocks.run).not.toHaveBeenCalled();
+  mocks.enabled = true;
+  // Re-enabling alone does not start an intentionally paused job.
+  await handler(event);
+  expect(mocks.run).not.toHaveBeenCalled();
+  await store.put({...paused,version:paused.version+1,job:{...paused.job as Job,status:"queued",revision:1,retryRequested:true}},paused.version);
+  await handler({...event,revision:1});
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+  expect((await store.get(pk,sk))!.job).toMatchObject({runpodId:"compute-1",gpuSubmissions:1,gpuBudgetReservedSeconds:900});
+});
+
+it("marks a searching job with a lost POST response unknown before deployment pause", async () => {
+  await seed({status:"searching",submissionStartedAt:"2026-09-25T00:00:00.000Z",gpuSubmissions:7,gpuBudgetReservedSeconds:6300,oneSubmissionAllowed:true});
+  mocks.enabled = false;
+  await handler(event);
+  const paused = (await store.get(pk,sk))!;
+  expect(paused.job).toMatchObject({status:"paused",submissionStartedAt:"2026-09-25T00:00:00.000Z",gpuSubmissions:7,gpuBudgetReservedSeconds:6300,error:expect.stringContaining("Submission outcome unknown")});
+  expect(paused.job).not.toHaveProperty("oneSubmissionAllowed");
+  expect(paused.job).not.toHaveProperty("runpodId");
+  mocks.enabled = true;
+  const { createApp } = await import("../server/app");
+  const { createHash } = await import("node:crypto");
+  const token = "a".repeat(43);
+  await store.put({pk:`SESSION#${createHash("sha256").update(token).digest("hex")}`,sk:"AUTH",version:0,owner:event.owner,network:"mainnet"});
+  const response = await createApp(store).request(`/api/jobs/${event.jobId}/resume`, {method:"POST",headers:{Authorization:`Bearer ${token}`}});
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({error:"Reconcile the unknown Runpod submission before retrying."});
+  await handler(event);
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
   expect(mocks.run).not.toHaveBeenCalled();
 });

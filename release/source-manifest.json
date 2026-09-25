@@ -81,10 +81,10 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "b216bd72005da1cdcb1d5dce1ae14ef1d1c4e48d1a8ff826f58d13fc93ce103f",
+      "api": "e52463e4ff8cdcfb52b55f3158a023a5edc03a17f13f18b97cd05a792d64974e",
       "build-metadata": "e0c1d165fc0789a41a64d9d43bc6487e2a4978c75ca3995f1199c65a53050e23",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
-      "dispatcher": "aa52623e93d5326f68bd158a27a8a89195fc4721204873df2cc56ac7a2ad8f4c",
+      "dispatcher": "44c5dd544c75e9395bdeb27d20761557410414b2c60410d479ade9c614332a12",
       "evidence-reader": "768e7c8098ff9d9b473f5c7a0a77ff272d679b1e9cab801dfd0145832ce88c58",
       "fresh-proof": "7c322f9603a117ad2ad0dd88dc102ec63e57d04082643f24530e9bd9aef115af",
       "historical-pinning": "9e1aba0e8882ba85f46609774844a7a75283cf5358cccd9dcc49abedf80fad48",
@@ -127,7 +127,7 @@
       "value": null
     },
     "sourceFiles": {
-      "AGENTS.md": "302ac626fa8e321d7cea178f95548890d64aac6b1c4b32f95a67fc4468ba5ee1",
+      "AGENTS.md": "37a5c06da39f770217120f54c141b280cffbbaa280521cff28b432c781b3c9f9",
       "README.md": "d476b0cfec3847dd8bcc165beeec2e45d2f3031084de6073d0426ea60c9abfb7",
       "docs/source-build/20260924/solver-build-receipt.json": "1e243370561b16c7d2c1d9be68e756fe39fbea44167f0e70d8507d1a14dfc160",
       "package-lock.json": "8142e980dcb0b81cdd56579992d027d4870cbb4c83e2a5cf236a6377aa2f2a7d",
@@ -171,7 +171,7 @@
       "server/app.ts": "e3e88906fd07330b4781e432d64363bf678086929f162547ec4f3216edbe3478",
       "server/chain.ts": "36c38bd382f0b865f58e951ff9d006cdfb92e358930bec0267f986c1e1707bd2",
       "server/consensus.ts": "2684a00a3a53a942d3cc0815b8f9aa5fd659439f6811ceac465d38cbd08377a8",
-      "server/coordinator.ts": "9805201bbb7d63b685f90de485a217bb196c29d02aa5c2f5e4a928a96f080c4d",
+      "server/coordinator.ts": "6ebb88dc19c964d8bbaab59df87d7ab59c786a77fe1875d5b55d6212ac56d73a",
       "server/exact-submit-permit.ts": "1c98f8a75da77cfbe501c86bcee1c6d1b44adf3d84bd2ab446562a2a6e1509cf",
       "server/gpu-spend.json": "df8fba56d88c1f2c645e3babdcd59b28702938c300a8bef8734a760cfe79ecda",
       "server/gpu-spend.ts": "1dd9c62c06160de89347a8907a1365ef814f5bf1c359fa0428c6a94bbadb0d47",

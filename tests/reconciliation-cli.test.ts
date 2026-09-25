@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Job } from "../src/lib/model";
+import { reconciliationEnvironmentError } from "../server/reconciliation-environment";
 
 const mocks = vi.hoisted(() => ({ secret: vi.fn(), workflow: vi.fn(), allowed: vi.fn(() => true) }));
 vi.mock("@aws-sdk/client-secrets-manager", () => ({
@@ -22,7 +23,7 @@ import { reconcileSubmissionCli, reconcileUnknownSubmission } from "../server/re
 
 const required = {
   TABLE_NAME: "dummy-table", AWS_REGION: "us-east-1", RUNPOD_SECRET_ARN: "dummy-secret",
-  RUNPOD_ENDPOINT_ID: "dummy-endpoint", WORKFLOW_ARN: "dummy-workflow", QSB_NETWORK: "mainnet",
+  RUNPOD_ENDPOINT_ID: "dummy-endpoint", WORKFLOW_ARN: "dummy-workflow", QSB_NETWORK: "mainnet", QSB_MAINNET_ENABLED: "true",
 };
 const args = ["owner", "job", "--provider-id", "provider-1", "--operator", "test", "--evidence", "audit://test"];
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); mocks.allowed.mockReturnValue(true); process.exitCode = undefined; });
@@ -100,4 +101,29 @@ it.each([undefined, "399", "500", "timeout", "400.5"])("CLI refuses invalid reje
   await reconcileSubmissionCli(["owner", "job", "--not-submitted", "rejected-before-acceptance", ...(status === undefined ? [] : ["--http-status", status]), "--operator", "test", "--evidence", "audit://http"]);
   expect(process.exitCode).toBe(1);
   expect(mocks.secret.mock.calls.length).toBe(calls);
+});
+
+
+it.each([undefined, "", " ", "TRUE", "1", "false ", " true", "enabled"])(
+  "mainnet CLI refuses missing or malformed explicit switch %s before initialization",
+  (value) => {
+    const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, ...required, AWS_EC2_METADATA_DISABLED: "true" };
+    if (value === undefined) delete env.QSB_MAINNET_ENABLED;
+    else env.QSB_MAINNET_ENABLED = value;
+    const result = spawnSync(process.execPath, ["--import", "tsx", "scripts/reconcile-submission.ts", ...args], {
+      env, encoding: "utf8", timeout: 10000,
+    });
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stderr)).toEqual({
+      action: "refuse",
+      reason: value?.trim() ? "QsbMainnetEnabledInvalid" : "QsbMainnetEnabledRequired",
+    });
+    expect(result.stdout).toBe("");
+  },
+);
+it.each(["true", "false"])("accepts an explicit mainnet switch %s for later route checks", (value) => {
+  expect(reconciliationEnvironmentError({ ...required, QSB_MAINNET_ENABLED: value })).toBeUndefined();
+});
+it.each([undefined, "true", "false", "invalid"])("preserves testnet preflight semantics with mainnet-only switch %s", (value) => {
+  expect(reconciliationEnvironmentError({ ...required, QSB_NETWORK: "testnet4", QSB_MAINNET_ENABLED: value })).toBeUndefined();
 });

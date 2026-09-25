@@ -5,7 +5,12 @@ import path from "node:path";
 import { Signer } from "bip322-js";
 import * as btc from "@scure/btc-signer";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+// Lifecycle simulations explicitly use the historical enrollment; this is not reenrollment.
+vi.mock("../server/runtime/package-release", async (original) => {
+  const actual = await original<typeof import("../server/runtime/package-release")>();
+  return {...actual, coreSourceDigest: vi.fn(actual.coreSourceDigest)};
+});
 import { createApp } from "../server/app";
 import { createSupervisedCreationApp } from "../supervised/dispatch/routes";
 import { Conflict, MemoryStore, type Store } from "../server/store";
@@ -43,6 +48,7 @@ import {
   type OwnedProcessStart,
 } from "../server/runtime/host-bridge";
 import {
+  coreSourceDigest,
   componentIdentities,
   writePackageTree,
 } from "../server/runtime/package-release";
@@ -131,6 +137,20 @@ function memoryRetention() {
 }
 
 describe("supervised runtime handoff", () => {
+  beforeEach(() => {
+    vi.mocked(coreSourceDigest).mockReturnValue(contract.coreSourceManifest);
+  });
+  it("keeps the real changed source closed under the historical parked enrollment", async () => {
+    const actual = await vi.importActual<typeof import("../server/runtime/package-release")>("../server/runtime/package-release");
+    vi.mocked(coreSourceDigest).mockImplementation(actual.coreSourceDigest);
+    expect(actual.coreSourceDigest(process.cwd())).not.toBe(contract.coreSourceManifest);
+    const store = new MemoryStore();
+    await seedCapability(store);
+    const fixture = simulatedMainnetRequest();
+    await store.put({pk:`OWNER#${address}`,sk:`VAULT#${fixture.vault.id}`,version:0,vault:fixture.vault});
+    await expect(admitSupervisedJob(store,address,"mainnet",fixture.prepared.body,confirmingLedger)).rejects.toThrow("capability is not active");
+    expect([...store.rows.values()].filter(row => String(row.sk).startsWith("JOB#"))).toHaveLength(0);
+  });
   it("keeps the three capability contracts equal", async () => {
     const declared = (source: string) => {
       const match = source.match(
