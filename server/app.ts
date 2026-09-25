@@ -407,8 +407,7 @@ export function createApp(
               ...("blockHash" in onChain && onChain.blockHash
                 ? { blockHash: onChain.blockHash }
                 : {}),
-              ...("blockHeight" in onChain &&
-              onChain.blockHeight !== undefined
+              ...("blockHeight" in onChain && onChain.blockHeight !== undefined
                 ? { blockHeight: onChain.blockHeight }
                 : {}),
               txid: id,
@@ -603,7 +602,10 @@ export function createApp(
     if (!row) return c.json({ error: "Job not found" }, 404);
     const job = row.job as Job;
     if (supervisedServiceJob(job))
-      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
+      return c.json(
+        { error: "Supervised jobs are not controlled by this route." },
+        409,
+      );
     const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
     if (!vaultRow) return c.json({ error: "Vault not found" }, 404);
     if ((vaultRow.vault as PublicVault).network !== NETWORK_ID)
@@ -648,7 +650,10 @@ export function createApp(
     if (!r) return c.json({ error: "Job not found" }, 404);
     const job = r.job as Job;
     if (supervisedServiceJob(job))
-      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
+      return c.json(
+        { error: "Supervised jobs are not controlled by this route." },
+        409,
+      );
     if (!["searching", "queued"].includes(job.status))
       return c.json({ error: "This job cannot be paused." }, 409);
     if (job.status === "searching" && !job.runpodId)
@@ -668,7 +673,10 @@ export function createApp(
     if (!row) return c.json({ error: "Job not found" }, 404);
     const job = row.job as Job;
     if (supervisedServiceJob(job))
-      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
+      return c.json(
+        { error: "Supervised jobs are not controlled by this route." },
+        409,
+      );
     if (job.status !== "paused")
       return c.json({ error: "Only a paused job can be resumed." }, 409);
     const storedLedger = z
@@ -688,7 +696,14 @@ export function createApp(
         { error: "Stopped coverage cannot be resumed on this account." },
         409,
       );
-    if (job.error?.includes("Submission outcome unknown"))
+    if (
+      job.error?.includes("Submission outcome unknown") &&
+      !(
+        job.oneSubmissionAllowed === true &&
+        job.submissionReconciliation?.kind === "not-submitted" &&
+        job.submissionReconciliation.revision === job.revision
+      )
+    )
       return c.json(
         { error: "Reconcile the unknown Runpod submission before retrying." },
         409,
@@ -703,6 +718,7 @@ export function createApp(
     job.revision++;
     job.updatedAt = new Date().toISOString();
     delete job.error;
+    delete job.oneSubmissionAllowed;
     await store.put({ ...row, job, version: row.version + 1 }, row.version);
     await startWorkflow(job);
     return c.json({ job }, 202);
@@ -714,7 +730,10 @@ export function createApp(
     if (!row) return c.json({ error: "Job not found" }, 404);
     const job = row.job as Job;
     if (supervisedServiceJob(job))
-      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
+      return c.json(
+        { error: "Supervised jobs are not controlled by this route." },
+        409,
+      );
     if (!job.txid) return c.json({ job });
     const status = await ledger.status(job.txid),
       vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);

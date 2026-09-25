@@ -45,6 +45,75 @@ Rollback cannot revive legacy writers, release consumed commitments, or duplicat
 
 Treat `unknown`, `timeout`, and `http-ambiguous` as unpaid-or-paid until a provider or invoice record says which. The only action is reconcile. `reconcilePaidOutcome` returns `retry: false`. Requesting retry throws `BlindRetryRefused`. A known success is recorded once and is not submitted again.
 
+## Reconcile an unknown Runpod submission
+
+An unknown POST is never retried automatically. The operator command requires an
+explicit decision with an operator identifier and a public evidence reference.
+Do not put credentials, wallet material, or raw logs in the evidence argument.
+The identifier is an operator assertion; IAM/CloudTrail identifies the caller.
+
+Required environment: `TABLE_NAME` (the CLI refuses MemoryStore), `AWS_REGION`,
+`RUNPOD_SECRET_ARN`, `RUNPOD_ENDPOINT_ID`, `WORKFLOW_ARN` and `QSB_NETWORK`
+(`mainnet` or `testnet4`). Both modes validate all six before application imports,
+credentials, or database/provider reads and writes. The operator role needs GetItem on job/vault records, transactional PutItem
+on the job and `RECONCILIATION#` audit rows, access to the configured provider
+credential (and its KMS key if applicable), and StartExecution on the configured
+workflow. The agent must not retrieve those credentials; provision them for the
+operator runtime. The CLI does not call `/run`, `/cancel` or broadcast.
+
+To attach a known provider ID from Runpod's console and matching operator logs:
+
+```
+npx tsx scripts/reconcile-submission.ts OWNER JOB --provider-id PROVIDER_ID --operator OPERATOR --evidence audit://incident/reference
+```
+
+The command reads documented `/status/ID` fields; no `/requests` response shape or
+echoed `input` is assumed. The operator must bind live/terminal IDs to this exact
+job, stage, range, endpoint and submission window using logs/console evidence.
+Completed outputs additionally must match the stored manifest, stage, attempt,
+kernel and exact range. Attachment grants no completion credit: the coordinator
+still validates the output and CPU-checks hits. Existing attached IDs can restart
+polling idempotently. Mainnet switches remain unchanged, and disabled transaction
+routes refuse provider-ID attachment before any read or write. A polling-start
+refusal prints its reason and exits non-zero; an ID already saved before a workflow
+start failure remains attached for operator reconciliation. Correct the prerequisite
+and rerun the same provider-ID decision; never submit a replacement as a workaround.
+
+To authorize exactly one replacement after proving Runpod rejected the call
+before acceptance with a retained HTTP 400–499 response from the paid `/run` POST
+(not the limits preflight, a timeout, connection error or 5xx):
+
+```
+npx tsx scripts/reconcile-submission.ts OWNER JOB --not-submitted rejected-before-acceptance --http-status 429 --operator OPERATOR --evidence audit://incident/rejection
+```
+
+The immediate path requires `--http-status` to be an integer from 400 through
+499. Missing, malformed, non-HTTP and other status values are refused; the status
+is stored in the job decision and immutable audit row alongside the operator,
+evidence, time and revision. The operator must retain the actual response from
+this job's paid POST. The tool validates the recorded code, not the external
+truth of an operator's evidence reference.
+
+For timeouts, connection errors, 5xx or no recorded HTTP response, use
+`--not-submitted ttl-expired` only after the complete 24-hour provider TTL has
+elapsed from durable `submissionStartedAt`. Legacy jobs without that timestamp
+cannot use TTL expiry. This mode does not accept `--http-status`; it never
+shortens the wait. Independently check the endpoint and billing/log window.
+TTL expiry does **not** prove that the old job was never accepted and can incur
+duplicate bounded work.
+Both modes require current health to show zero queued/in-progress requests.
+A list miss or an empty queue by itself never authorizes replacement.
+
+The decision and job change are one conditional transaction with a permanent
+`RECONCILIATION#JOB#REVISION` audit row. Repeated or racing decisions cannot grant
+multiple allowances. `/resume` requires the matching audited revision and consumes
+the allowance in the same write that advances the revision; the next unknown
+pause has no allowance. Time accounting is never cleared or refunded.
+This is an explicit operator attestation, not automatic verification of the cited
+external evidence. No live provider incident has been exercised for this change.
+
+Provider reference: https://docs.runpod.io/serverless/endpoints/send-requests
+
 ## Commit before deploy
 
 Never deploy code or infrastructure changes before committing them to Git. Verify that deployed source matches the recorded commit and contains no uncommitted changes. Push the commit to the project remote before deployment and report the commit or PR with the deployment target. Never commit secrets or ignored runtime configuration.
