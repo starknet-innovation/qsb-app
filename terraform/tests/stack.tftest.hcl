@@ -3,6 +3,9 @@ mock_provider "aws" {
   mock_data "aws_caller_identity" { defaults = { account_id = "123456789012" } }
 }
 variables {
+  # Use the actual clean build selection. The same suite supports a null or an
+  # enrolled solver without changing artifacts or performing another native build.
+  solver_release_id       = try(jsondecode(file(".build/manifest.json")).identities.solver.id, "")
   operator_principal_arns = ["arn:aws:iam::123456789012:user/reconcile-test"]
   aws_account_id          = "123456789012"
   name                    = "qsb-test"
@@ -251,12 +254,12 @@ run "solver_release_shared_from_build" {
   }
 }
 
-run "solver_release_defaults_unconfigured" {
+run "solver_release_preserves_generated_selection_or_null" {
   command = plan
   variables { network = "mainnet" }
   assert {
-    condition     = aws_lambda_function.api.environment[0].variables.SOLVER_RELEASE_ID == "" && aws_lambda_function.coordinator.environment[0].variables.SOLVER_RELEASE_ID == ""
-    error_message = "A runnable release must never be silently selected by infrastructure defaults."
+    condition     = aws_lambda_function.api.environment[0].variables.SOLVER_RELEASE_ID == try(local.build.identities.solver.id, "") && aws_lambda_function.coordinator.environment[0].variables.SOLVER_RELEASE_ID == try(local.build.identities.solver.id, "")
+    error_message = "The build selection must remain exact, including an empty value for a null solver."
   }
 }
 
@@ -315,4 +318,12 @@ run "reject_provider_bucket_wildcard" {
     batch_job_bucket = "qsb-*"
   }
   expect_failures = [var.batch_job_bucket]
+}
+
+run "reject_changed_solver_selection_including_omission" {
+  command = plan
+  variables {
+    solver_release_id = try(jsondecode(file(".build/manifest.json")).identities.solver.id, "") == "" ? "not-selected-by-build" : ""
+  }
+  expect_failures = [terraform_data.release]
 }

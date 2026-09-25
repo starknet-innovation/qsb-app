@@ -39,7 +39,10 @@ npm ci
 npm run vendor
 npm test
 # Commit and push any source changes before proceeding.
+# No solver selected: valid unconfigured deployment, no new GPU jobs.
 node terraform/scripts/build.mjs --network=mainnet
+# For an explicitly selected solver, instead build with its enrolled ID:
+# node terraform/scripts/build.mjs --network=mainnet --solver-release=RELEASE_ID
 export TF_VAR_source_commit="$(git rev-parse HEAD)"
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 # Edit terraform.tfvars: intended account, region/name; optional existing AWS Batch references.

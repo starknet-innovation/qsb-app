@@ -104,8 +104,7 @@ New job admission requires the explicit deployment `SOLVER_RELEASE_ID` (Terrafor
 `solver_release_id`) shared by API and coordinator. Requests omitting a solver
 select that served release. A mismatched explicit request, missing configuration,
 unbound external descriptor or archived placeholder refuses before reservations.
-Historical pins remain readable. With no runnable schema-v3 release enrolled yet,
-new jobs refuse cleanly instead of reserving funds for an unusable solver.
+Historical pins remain readable. The enrolled AWS release below is available for explicit build/deployment selection. An unconfigured deployment still refuses new jobs before reservations.
 
 ## AWS release enrollment: aws-v0.1.0
 
