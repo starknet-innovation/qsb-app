@@ -5,6 +5,8 @@ export default defineConfig({
   timeout: 120000,
   workers: 1,
   forbidOnly: !!process.env.CI,
+  // Report metadata must not attempt a remote git fetch inside the network guard.
+  captureGitInfo: { commit: false, diff: false },
   maxFailures: process.env.CI ? 1 : 0,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
