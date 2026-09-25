@@ -170,19 +170,14 @@ export async function reconcileUnknownSubmission(input: {
       )
         throw new ReconciliationError("ProviderContextMismatch");
     }
-    if (recorded) {
-      const polling = await input.resumePolling(job);
-      return {
-        outcome: "provider-id",
-        providerId: decision.providerId,
-        resubmitted: false,
-        pollingStarted: polling.started,
-        ...(!polling.started ? { reason: polling.reason ?? "polling-not-started" } : {}),
-      };
+    // Even an already-recorded provider ID needs a fresh polling revision:
+    // STANDARD execution names cannot be reused after the execution closes.
+    // Commit that revision and audit row atomically before starting the workflow.
+    if (!recorded) {
+      job.runpodId = decision.providerId;
+      job.status = "searching";
+      delete job.error;
     }
-    job.runpodId = decision.providerId;
-    job.status = "searching";
-    delete job.error;
   } else {
     // A list miss, a timeout or a 5xx alone is not proof of non-acceptance.
     // Only an explicitly recorded HTTP 4xx may bypass the TTL. All other
@@ -201,7 +196,7 @@ export async function reconcileUnknownSubmission(input: {
   const priorRevision = job.revision;
   job.revision += 1;
   job.updatedAt = now;
-  delete job.retryRequested;
+  if (!recorded) delete job.retryRequested;
   job.submissionReconciliation = {
     ...decision,
     at: now,

@@ -9,7 +9,7 @@ vi.mock("@aws-sdk/client-secrets-manager", () => ({
   SecretsManagerClient: class { send = mocks.secret; },
 }));
 vi.mock("@aws-sdk/client-sfn", () => ({
-  StartExecutionCommand: class {},
+  StartExecutionCommand: class { constructor(public input: { name: string; input: string; stateMachineArn: string }) {} },
   SFNClient: class { send = mocks.workflow; },
 }));
 vi.mock("../server/network", async (original) => ({ ...await original<typeof import("../server/network")>(), transactionsEnabled: true, rehearsalAddressAllowed: mocks.allowed }));
@@ -126,4 +126,47 @@ it.each(["true", "false"])("accepts an explicit mainnet switch %s for later rout
 });
 it.each([undefined, "true", "false", "invalid"])("preserves testnet preflight semantics with mainnet-only switch %s", (value) => {
   expect(reconciliationEnvironmentError({ ...required, QSB_NETWORK: "testnet4", QSB_MAINNET_ENABLED: value })).toBeUndefined();
+});
+
+it("restarts a recorded paid job after its STANDARD execution closes under a new audited name", async () => {
+  for (const [key, value] of Object.entries(required)) vi.stubEnv(key, value);
+  const owner = "recorded-owner", pk = `OWNER#${owner}`;
+  const job = { id: "recorded-job", owner, vaultId: "v", status: "searching", runpodId: "provider-1",
+    stage: "pinning", attempt: 7, revision: 3, computeSeconds: 25, gpuBudgetReservedSeconds: 120,
+    gpuSubmissions: 1, createdAt: "2026-09-25T00:00:00.000Z", updatedAt: "2026-09-25T00:00:00.000Z", manifestHash: "a".repeat(64), manifest: {},
+    submissionStartedAt: "2026-09-25T00:00:00.000Z", retryRequested: true,
+    error: "provider read unavailable" } as Job;
+  await store.put({ pk, sk: "JOB#recorded-job", version: 0, job });
+  await store.put({ pk, sk: "VAULT#v", version: 0, vault: { network: "mainnet" } });
+  const reservation = { pk, sk: "fixture-reservation", version: 0, jobId: job.id };
+  await store.put(reservation);
+  mocks.secret.mockResolvedValue({ SecretString: JSON.stringify({ apiKey: "public-test-placeholder" }) });
+  // AWS Standard semantics: a closed name rejects even identical input.
+  const closedNames = new Set(["recorded-job-r3"]);
+  const starts: { name: string; input: string; stateMachineArn: string }[] = [];
+  mocks.workflow.mockImplementation(async (command) => {
+    if (closedNames.has(command.input.name))
+      throw Object.assign(new Error("closed execution"), { name: "ExecutionAlreadyExists" });
+    starts.push(command.input);
+    return { executionArn: "test-new-execution" };
+  });
+  vi.spyOn(Runpod.prototype, "status").mockResolvedValue({ id: "provider-1", status: "IN_PROGRESS" });
+  const submit = vi.spyOn(Runpod.prototype, "run").mockRejectedValue(new Error("must not submit"));
+  const prepare = vi.spyOn(Runpod.prototype, "prepareRun").mockRejectedValue(new Error("must not prepare paid work"));
+  const cancel = vi.spyOn(Runpod.prototype, "cancel").mockRejectedValue(new Error("must not cancel"));
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  await reconcileSubmissionCli([owner, job.id, ...args.slice(2)]);
+  expect(process.exitCode).toBeUndefined();
+  expect(JSON.parse(stdout.mock.calls[0][0] as string)).toMatchObject({ pollingStarted: true, resubmitted: false });
+  expect(starts).toEqual([{ name: "recorded-job-r4", stateMachineArn: required.WORKFLOW_ARN,
+    input: JSON.stringify({ owner, jobId: job.id, revision: 4 }) }]);
+  const stored = (await store.get(pk, "JOB#recorded-job"))!.job as Job;
+  expect(stored).toEqual({ ...job, revision: 4, updatedAt: expect.any(String),
+    submissionReconciliation: { kind: "provider-id", providerId: "provider-1", operator: "test", evidence: "audit://test", at: expect.any(String), revision: 4 } });
+  expect((await store.get(pk, "RECONCILIATION#recorded-job#3"))?.decision).toEqual(stored.submissionReconciliation);
+  expect(await store.get(pk, reservation.sk)).toEqual(reservation);
+  expect(submit).not.toHaveBeenCalled();
+  expect(prepare).not.toHaveBeenCalled();
+  expect(cancel).not.toHaveBeenCalled();
 });
