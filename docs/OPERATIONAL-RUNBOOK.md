@@ -276,3 +276,33 @@ a timeout after its 30-second integration budget. A caller timeout does not stop
 an already running Lambda or prove the miner never received the POST. Treat it as
 an uncertain withdrawal and follow the TX# observation procedure above. Do not
 retry the POST or reset its durable intent.
+
+## Deploy-time mainnet and submit switches
+
+Both Terraform variables default to `false`; this PR does not enable a deployment.
+`mainnet_enabled` sets `QSB_MAINNET_ENABLED` on **both** the API and coordinator.
+Only the exact string `"true"` enables mainnet funding and the normal Step Functions
+search pipeline. The browser reads the same API setting through uncached
+`GET /api/config` (`operationsEnabled`, bound to `network`), and rechecks it before
+funding/search. No source edit or frontend rebuild is needed to change the switch.
+Absent, malformed and cross-network config stays disabled.
+
+| mainnet_enabled | exact_submit_enabled | Result |
+| --- | --- | --- |
+| false | false | Mainnet funding, search and submission disabled |
+| false | true | Mainnet operations and submission still disabled |
+| true | false | Funding and search allowed; signed backup download allowed; no exact submit |
+| true | true | Exact submit available only after explicit user approval and all exact-spend/Core/intent checks |
+
+The exact submit API and miner transport require **both** switches; a submit flag
+cannot bypass the mainnet gate. Neither switch grants transaction approval or
+resubmits uncertain work. Existing committed source defaults `release.mainnetEnabled`
+and `broadcastAuthorized` stay false; they are research metadata, not the deployed
+route authority. Build artifacts are independent of these deployment values.
+Changing Terraform variables updates Lambda environments using the same clean,
+committed package; API config reports the resulting setting. Turning on a real
+deployment remains issue #22 and requires Adrien's explicit approval. Commit and
+push approved configuration before deployment; verify the deployed commit and
+`/api/config` afterward. Disabling mainnet blocks new funding/search/submission;
+it does not cancel already submitted provider jobs or release reservations. Reconcile
+outstanding jobs using the existing runbook before changing capacity.

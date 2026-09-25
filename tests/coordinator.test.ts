@@ -14,9 +14,9 @@ vi.mock("../server/gpu-spend", async (importOriginal) => {
     gpuSpendLimits: { ...actual.gpuSpendLimits, maxJobGpuSeconds: 36000 },
   };
 });
-vi.mock("../src/lib/model", async (importOriginal) => {
+vi.mock("../server/network", async (importOriginal) => {
   const actual = await importOriginal<any>();
-  return { ...actual, release: { ...actual.release, mainnetEnabled: true } };
+  return { ...actual, transactionsEnabled: true };
 });
 vi.mock("../server/providers", () => ({
   slipstream: {},
