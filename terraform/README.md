@@ -46,7 +46,9 @@ node terraform/scripts/build.mjs --network=mainnet
 export TF_VAR_source_commit="$(git rev-parse HEAD)"
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 # Edit terraform.tfvars: intended account, region/name; optional existing AWS Batch references.
-terraform -chdir=terraform init
+terraform -chdir=terraform init -backend-config="bucket=${QSB_STATE_BUCKET:?Set the bootstrap state bucket}" \
+  -backend-config=key=qsb/main/terraform.tfstate -backend-config=region=eu-west-1 \
+  -backend-config=encrypt=true -backend-config=use_lockfile=true
 terraform -chdir=terraform validate
 terraform -chdir=terraform plan -out=deployment.tfplan
 terraform -chdir=terraform show -json deployment.tfplan > /tmp/qsb-plan.json
@@ -55,6 +57,15 @@ python3 terraform/tests/check-single-pipeline.py /tmp/qsb-plan.json
 terraform -chdir=terraform apply deployment.tfplan
 terraform -chdir=terraform output app_url
 ```
+
+State is kept in the bootstrap state bucket under `qsb/main/terraform.tfstate`, next to the GPU stack's `qsb/gpu/terraform.tfstate`, with S3 lockfiles. The deploy role and `qsb-operator` can read and write only under `qsb/`, and delete only `.tflock` objects.
+
+**First apply in an account.** It must run as an administrator. The deploy role and `qsb-operator` can manage only CloudFront and API Gateway resources whose IDs are registered in the private inventory. That covers the distribution, origin access control, response-headers policy and HTTP API, and this stack creates new ones. After the first apply:
+1. Add the new IDs from its outputs and state to the inventory (`distributions`, `origin_access_controls`, `response_headers_policies`, `apis`).
+2. Run `ops/github-aws/update_installed.py`: plan, review, then `--apply` with the reviewed plan hash.
+3. From then on, run applies as `qsb-operator`.
+
+Terraform can't prompt for MFA or read an `aws login` session. Export the CLI session instead, as described in `ops/github-aws/README.md`.
 
 `build.mjs` runs pinned upstream preparation, typecheck/frontend build, bundles both Node Lambda entrypoints (including SDK dependencies), creates deterministic Lambda ZIPs and records file SHA256s/network/commit. The build is done **before** Terraform parses `fileset`/file hashes. It does not deploy anything. The build packages only frontend assets, API, coordinator and CPU reference; it does not build a supervised dispatcher or host archive. Pass `--network=mainnet` or `--network=testnet4`; an omitted network is refused. The Terraform `network` variable has no default, and `terraform.tfvars.example` sets `mainnet`. The normal builder refuses a dirty tree; `--allow-dirty` permits local inspection only and records `clean:false`, which the Terraform deployment gate rejects.
 
