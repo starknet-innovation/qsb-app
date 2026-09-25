@@ -1,5 +1,3 @@
-import copy
-import math
 import unittest
 from model import ATTEMPT_RANKS, RANGE_SIZES, estimate
 

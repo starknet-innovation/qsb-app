@@ -15,10 +15,38 @@ import uuid
 HERE = Path(__file__).resolve().parent
 BOOT = '''#!/bin/bash
 set -euo pipefail
-# Arm before any setup; failure shuts down immediately. No downloads or secrets.
-/sbin/shutdown -h +55 || { /sbin/shutdown -h now; exit 1; }
+# Arm immediately, then persist the absolute pre-launch deadline across reboots.
+trap '/sbin/shutdown -h now' ERR
+/sbin/shutdown -h +55
+cat > /etc/systemd/system/qsb-benchmark-expire.service <<'UNIT'
+[Unit]
+Description=Terminate the bounded QSB benchmark instance
+[Service]
+Type=oneshot
+ExecStart=/sbin/shutdown -h now
+UNIT
+cat > /etc/systemd/system/qsb-benchmark-expire.timer <<'UNIT'
+[Unit]
+Description=Fixed QSB benchmark deadline, including across reboots
+[Timer]
+OnCalendar=__DEADLINE__
+Persistent=true
+AccuracySec=1s
+Unit=qsb-benchmark-expire.service
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now qsb-benchmark-expire.timer
+systemctl is-active --quiet qsb-benchmark-expire.timer
 touch /run/qsb-shutdown-armed
 '''
+
+
+def boot_script(start):
+    deadline = (start + timedelta(minutes=55)).astimezone(timezone.utc)
+    return BOOT.replace('__DEADLINE__', deadline.strftime('%Y-%m-%d %H:%M:%S UTC'))
+
 
 
 def parse_time(value):
@@ -36,7 +64,7 @@ def schedule_request(instance_id, launch_time, role_arn, name):
                 ActionAfterCompletion='DELETE', Target={
                     'Arn': 'arn:aws:scheduler:::aws-sdk:ec2:terminateInstances', 'RoleArn': role_arn,
                     'Input': json.dumps({'InstanceIds': [instance_id]}),
-                    'RetryPolicy': {'MaximumEventAgeInSeconds': 60, 'MaximumRetryAttempts': 0}})
+                    'RetryPolicy': {'MaximumEventAgeInSeconds': 900, 'MaximumRetryAttempts': 10}})
 
 
 def verify_schedule(actual, expected):
@@ -93,10 +121,12 @@ def launch(config, aws, receipt_path, now=lambda: datetime.now(timezone.utc)):
                    SubnetId=config['subnet'], SecurityGroupIds=[config['securityGroup']],
                    IamInstanceProfile={'Name': config['instanceProfile']}, ClientToken=token,
                    InstanceInitiatedShutdownBehavior='terminate', DisableApiTermination=False,
-                   UserData=base64.b64encode(BOOT.encode()).decode(),
+                   UserData=boot_script(now()),
                    MetadataOptions={'HttpTokens': 'required', 'HttpPutResponseHopLimit': 1},
                    BlockDeviceMappings=[{'DeviceName': image['RootDeviceName'], 'Ebs': {
                        'Encrypted': True, 'DeleteOnTermination': True, 'VolumeSize': 80, 'VolumeType': 'gp3'}}])
+    if not request['UserData'].startswith('#!/bin/bash\n'):
+        raise ValueError('Expected plain boot script for AWS CLI encoding')
     receipt = {'status': 'submission-intent', 'clientToken': token, 'request': request}
     # Persist before the paid call. A transport failure is uncertain, never retried here.
     with receipt_path.open('x') as out:
@@ -112,7 +142,7 @@ def launch(config, aws, receipt_path, now=lambda: datetime.now(timezone.utc)):
             raise ValueError('Cleanup enrollment delayed; terminate before setup')
         behavior = aws('ec2', 'describe-instance-attribute', {'InstanceId': instance_id, 'Attribute': 'instanceInitiatedShutdownBehavior'})
         data = aws('ec2', 'describe-instance-attribute', {'InstanceId': instance_id, 'Attribute': 'userData'})
-        if behavior['InstanceInitiatedShutdownBehavior']['Value'] != 'terminate' or data['UserData']['Value'] != request['UserData']:
+        if behavior['InstanceInitiatedShutdownBehavior']['Value'] != 'terminate' or data['UserData']['Value'] != base64.b64encode(request['UserData'].encode()).decode():
             raise ValueError('Boot termination settings mismatch')
         name = 'qsb-benchmark-' + instance_id
         cleanup_arn = f'arn:aws:iam::{account}:role/{name}'

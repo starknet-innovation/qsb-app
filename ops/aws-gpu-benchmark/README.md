@@ -5,15 +5,21 @@ on A10G and measures fixed-range wall-clock throughput. It does not activate the
 application, submit a transaction, enroll a solver release, or establish the cost
 of a complete search/withdrawal.
 
-The source is verified against a benchmark manifest generated from a clean Git
-checkout by `manifest.py`. The receipt records the commit and deviations from
-the historical `worker/optimized/source-lock.json`; current main includes ranked
-range failure checks absent from that lock. Build flags come from the historical
-lock, with only the CUDA target changed from sm89 to sm86. The production
-Dockerfile, lock, descriptors and solver flags remain unchanged. The resulting
-binary has its own receipt and `BENCHMARK_ONLY` status. Build on native Linux
-without a GPU using `aws-gpu-benchmark-build.yml` (no AWS credentials). The same
-recipe supports CUDA_ARCH=89 for a later matched comparison.
+The optimized source is fetched from immutable `starknet-innovation/qsb-solver`
+commit `05bcf849f04a513aa19d6872c1f5f197622eb085`, recorded in
+`solver-source.json`. `manifest.py` verifies the archive SHA256 and exact per-file
+closure before staging anything. It rejects extra/missing files, links and hash
+mismatches. Nothing reads this application's `research/optimized-subset` or
+`worker/optimized/source-lock.json`; the recipe remains valid after #47 deletes
+them. Only the pinned solver's subset sources and compiler flag lock are staged.
+The clean app commit and external solver commit/hash are recorded separately.
+
+Flags come from that verified external historical lock, with only the CUDA target
+changed from sm89 to sm86. Current source deviations from that lock are explicitly
+recorded, not silently certified by it. The production Dockerfile, descriptors and
+solver flags remain unchanged. The binary has its own `BENCHMARK_ONLY` receipt.
+Build on native Linux without a GPU using `aws-gpu-benchmark-build.yml` (no AWS
+credentials). The recipe also supports CUDA_ARCH=89 for a matched comparison.
 
 The fixture uses public deterministic seed 20260925, invented funding outpoints,
 and no funded wallet. Private intermediate setup material is confined to a
@@ -47,7 +53,8 @@ No observed candidates would mean candidate verification was not exercised.
 - Four G/VT vCPUs are sufficient; wait for the approved quota and recheck the
   effective quota before attempting a launch.
 - Maximum one instance; target termination within 60 minutes including setup.
-  Boot shutdown is armed for 55 minutes after boot. An independent schedule
+  The boot timer has an absolute deadline 55 minutes after the launch intent,
+  persisted across reboots; it is never reset to a fresh 55 minutes. An independent schedule
   requests termination during minute 59 after launch. AWS scheduling, guest boot
   and termination latency mean this is **not a guaranteed hard billing ceiling**.
 - Launch requires current price verification, clean pushed source, a matching
@@ -95,7 +102,10 @@ no presigned credential URLs or cloud credentials enter the container.
 
    It persists a client-token intent before the single `run-instances` request,
    sets `InstanceInitiatedShutdownBehavior=terminate`, and supplies boot user data
-   whose first action is `shutdown -h +55` (immediate shutdown if arming fails).
+   as a plain script (the CLI base64-encodes it once). The script first arms
+   `shutdown -h +55`, then enables a persistent systemd calendar timer with an
+   absolute UTC deadline computed **before** the paid launch. An overdue timer
+   fires on startup after reboot; arming failure requests immediate shutdown.
    IMDSv2 is required with hop limit 1. There is no setup in user data.
    A failed/uncertain launch is not retried: reconcile the persisted client token.
 3. Immediately after receiving the exact instance ID, the same controller checks
@@ -104,16 +114,21 @@ no presigned credential URLs or cloud credentials enter the container.
    policy back. Trust is restricted to Scheduler in this account/default group.
    It creates `at(launch+59 minutes)` rounded down to the minute, UTC, window OFF,
    target `arn:aws:scheduler:::aws-sdk:ec2:terminateInstances`, input containing
-   only that instance ID, no retries, and delete-after-completion. It reads and
+   only that instance ID, up to 10 retries over a 900-second event age, and
+   delete-after-completion. Retrying termination is safe; launching is never retried. It reads and
    compares time, state, window, target, role and input. Enrollment taking more
    than two minutes or any mismatch/error triggers immediate exact-instance
    termination and fails before setup. AWS subprocess calls are bounded to 20s.
    If termination fails too, the receipt retains the ID for urgent reconciliation.
 4. Only after `cleanup-enrolled`, use SSM to verify
-   `test -f /run/qsb-shutdown-armed` and `shutdown --show` on the host. If either
+   `test -f /run/qsb-shutdown-armed`, `shutdown --show`, and
+   `systemctl list-timers qsb-benchmark-expire.timer --all` on the host. Compare
+   its fixed UTC deadline to the receipt user data, and check `systemctl is-enabled
+   qsb-benchmark-expire.timer`. If any check
    fails, immediately terminate from the independent operator session. The
    launcher does not claim that checking user data proves the boot script ran.
-   Then load the verified image and run under the host timeout:
+   Then transfer/load the verified image using the SSM-only procedure below and
+   run under the host timeout:
 
    ```sh
    timeout --signal=TERM --kill-after=10s 30m docker run --rm --gpus all \
@@ -145,6 +160,7 @@ Verified against official AWS documentation on 25 September 2026:
 [Scheduler universal targets](https://docs.aws.amazon.com/scheduler/latest/UserGuide/managing-targets-universal.html),
 [one-time schedules and 60-second precision](https://docs.aws.amazon.com/scheduler/latest/UserGuide/schedule-types.html),
 [CreateSchedule](https://docs.aws.amazon.com/cli/latest/reference/scheduler/create-schedule.html),
+[Scheduler retry limits](https://docs.aws.amazon.com/scheduler/latest/APIReference/API_RetryPolicy.html),
 [Scheduler role trust](https://docs.aws.amazon.com/scheduler/latest/UserGuide/cross-service-confused-deputy-prevention.html),
 and [Session Manager instance permissions](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-getting-started-instance-profile.html).
 
@@ -160,3 +176,63 @@ Runpod using identical public fixtures, ranges and source, while recording the
 architecture-specific binary identities. Include startup, storage and transfer
 costs when estimating economics. Do not compare an A10G subset microbenchmark to
 an unrelated historical GPU's end-to-end latency.
+
+
+## Concrete image and result transfer over SSM
+
+Use AWS's documented [SSH/SCP over Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-getting-started-enable-ssh-connections.html).
+The operator machine needs AWS CLI, Session Manager plugin, OpenSSH and the
+reviewed artifact. The selected AMI must already have sshd and a current SSM agent;
+verify these before launch, not by experimenting on paid hosts. The operator's
+SSM policy must allow `AWS-StartSSHSession` on this one instance. This is an
+operator permission, not an extra permission on the SSM-only instance role.
+No inbound security-group port is opened; SSH packets travel inside SSM channels.
+
+1. On the operator machine create a disposable SSH key outside the repository:
+   `ssh-keygen -t ed25519 -f /private/path/qsb-benchmark-key -N ''`.
+   Keep the private key on that machine. In an authenticated **standard SSM**
+   shell, install only its `.pub` line in the AMI user's `~/.ssh/authorized_keys`
+   (directory 0700, file 0600). Record the sshd host public key/fingerprint through
+   that same SSM shell and enroll it in a dedicated local known-hosts file for
+   the instance ID. Never disable host-key checking or transfer private keys.
+2. Add this temporary operator SSH configuration, substituting the verified ID,
+   AMI login user, absolute key path and known-hosts path:
+
+   ```sshconfig
+   Host i-0123456789abcdef0
+     HostName i-0123456789abcdef0
+     User ubuntu
+     IdentityFile /private/path/qsb-benchmark-key
+     IdentitiesOnly yes
+     StrictHostKeyChecking yes
+     UserKnownHostsFile /private/path/qsb-benchmark-known-hosts
+     ProxyCommand aws --profile snf --region eu-west-1 ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p
+   ```
+3. Create an empty `~/benchmark-artifacts` through SSM, then on the operator:
+
+   ```sh
+   (cd benchmark-artifacts && sha256sum -c SHA256SUMS)
+   scp -F /private/path/qsb-benchmark-ssh-config benchmark-artifacts/{image.tar.gz,build-receipt.json,fixture.json,source-commit.txt,SHA256SUMS} i-0123456789abcdef0:benchmark-artifacts/
+   ```
+
+   On the host, verify the copied checksum file against the operator's trusted
+   artifact (compare its SHA256 out-of-band in the SSM shell), then:
+
+   ```sh
+   cd ~/benchmark-artifacts
+   sha256sum -c SHA256SUMS
+   set -o pipefail
+   gzip -dc image.tar.gz | sudo docker load
+   ```
+
+   Never execute a partially transferred or mismatching image. Confirm the loaded
+   image identity matches `image.json` on the operator machine before running.
+4. Copy only `/results` public outputs back using the same `scp -r` route after
+   giving the AMI user read access. Remove the disposable authorized-key line and
+   local private key once transfer is finished. Session Manager cannot log the
+   encrypted SSH payload: retain checksum receipts and benchmark logs separately.
+   Then explicitly terminate and verify instance/volume deletion as above.
+
+No S3 grant, registry token, GitHub credential or presigned URL is needed on the
+host. Transfer/setup time counts against the same absolute deadline. If it does
+not fit, terminate; do not reset the deadline or relaunch automatically.
