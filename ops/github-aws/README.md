@@ -144,8 +144,12 @@ an AWS Budgets alert on the account.
    prints the plan (names and policy sizes only). Add `--apply` to create it. It
    refuses to touch an existing identity and never creates a password, key or
    MFA device. If a call fails midway, reconcile the partial identities; don't retry blind.
-5. As root in the console, enable console access for the user and assign an MFA
-   device. Nobody else handles the password or MFA secret.
+5. As root in the console, enable console access and assign a virtual or hardware
+   TOTP MFA device: the CLI `mfa_serial` flow needs a six-digit TOTP code. A passkey
+   or security key alone supports console role switching, not this CLI flow.
+   Nobody else handles the password or MFA secret. Adding, resyncing or replacing
+   the device requires root; this user has no MFA self-service. Confirm console
+   sign-in works once after bootstrap, including the first-login password change.
 
 ### Use them
 
@@ -171,15 +175,41 @@ duration_seconds = 3600
 region = eu-west-1
 ```
 
-The first call on each role profile asks for an MFA code, then the CLI caches
-the role session until it expires. Agents such as Claude or Codex use a cached
+The intended flow is that the first call on each role profile asks for an MFA
+code, then the CLI caches the role session until it expires. Verify this profile
+combination after bootstrap as described below before relying on it. Agents such as Claude or Codex use a cached
 session that you started. They never see or type the code. Then:
 
 - confirm with `python3 ops/github-aws/verify_access.py --profile qsb-view --inventory INVENTORY --live`;
-- run the #14 reconcile CLI as `qsb-operator`. It already covers the records, workflow and Batch calls reconcile makes. The #25 reconcile role stays unreachable from this user by design: the operator can edit runtime roles, so a runtime role must never be a way to skip fresh MFA. Terraform still needs a value for `operator_principal_arns`; set it to the `qsb-operator` role ARN, which `NoRoleChaining` keeps from assuming it, so that role stays dormant;
+- **After #54 merges and the Batch deployment is installed**, run the #14 reconcile CLI as `qsb-operator`. It covers the records, workflow and Batch calls in that version. The older Runpod CLI requires secret access this role deliberately lacks; do not grant it Secrets Manager access to work around that dependency. The #25 reconcile role stays unreachable from this user and the two bootstrap roles by design: their explicit denies prevent chaining into a runtime role. This does not prevent the operator from granting an outside principal access through runtime trust or bucket policies. Terraform still needs a value for `operator_principal_arns`; set it to the `qsb-operator` role ARN, which `NoRoleChaining` keeps from assuming it, so that role stays dormant;
 - keep root for break-glass only.
 
 **Verify** before relying on these, against current AWS docs:
-- whether `aws login` sessions carry MFA context. The `mfa_serial` profiles don't depend on it, and the age limit stops an older login's MFA from assuming the roles;
+- `aws login` MFA context, credential-refresh age and whether a `login_session` profile works as `source_profile` remain unverified. [AWS documents 15-minute refreshes for up to 12 hours](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html), not the MFA-age semantics of those refreshed credentials. More than one hour after login, attempt `aws sts assume-role --profile qsb-user --role-arn arn:aws:iam::ACCOUNT:role/qsb/bootstrap/qsb-operator --role-session-name age-check` without `--serial-number`: it must be denied. Then, after any cached operator session expires, `aws sts get-caller-identity --profile qsb-operator` must prompt the human for a fresh TOTP code and succeed. Do not print successful AssumeRole credentials or share the login cache. If either check fails, stop relying on this CLI profile flow and have root review it; do not weaken the trust policy;
 - Batch's `PassRole` service names for compute-environment instance roles;
 - whether the Terraform AWS provider sends `default_tags` as create-time tags for security groups and launch templates.
+
+### Persistent external access: remaining operator responsibility
+
+The operator explicitly denies function URL creation/updates, DynamoDB resource
+policy writes and ECR repository policy writes. Lambda AddPermission is limited
+to API Gateway and EventBridge principals; keep their SourceArn/SourceAccount
+bindings in the reviewed Terraform. These restrictions do not inspect runtime
+role trust, S3 bucket policy contents or cross-account log subscriptions. An
+operator can still grant persistent outside access through those remaining
+surfaces, including frontend content access. MFA on the original operator session
+does not make those downstream grants expire.
+
+After bootstrap, root should create an IAM Access Analyzer external-access
+analyzer and route its findings to an independently controlled alert destination.
+Also alert on CloudTrail CreateRole, UpdateAssumeRolePolicy, PutBucketPolicy and
+PutSubscriptionFilter calls by qsb-operator, and review Lambda service-principal
+permission changes. Keep alert rules outside `qsb-gpu-*`, and their roles,
+policies and destinations outside all QSB deploy resource patterns, so the
+operator cannot disable them. Configure and test delivery as root; this PR does
+not create an analyzer or monitoring resources. Findings require human review,
+not automatic deletion of access.
+
+References: [Lambda permission conditions](https://docs.aws.amazon.com/lambda/latest/dg/access-control-resource-based.html),
+[Sign-In console actions](https://docs.aws.amazon.com/signin/latest/userguide/console-access-control.html),
+and [AssumeRole MFA token](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html).

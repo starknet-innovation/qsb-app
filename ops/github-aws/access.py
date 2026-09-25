@@ -70,14 +70,14 @@ def access(c):
     trust = {'Version': '2012-10-17', 'Statement': [{
         'Effect': 'Allow', 'Principal': {'AWS': user_arn}, 'Action': 'sts:AssumeRole',
         'Condition': {'Bool': {'aws:MultiFactorAuthPresent': 'true'},
-                      # A fresh MFA code per role session; an older sign-in's MFA context is not enough.
+                      # Require recent MFA context when supplied; aws login refresh semantics need live verification.
                       'NumericLessThanIfExists': {'aws:MultiFactorAuthAge': '3600'}}}]}
 
     # The user can sign in (console, `aws login`) and assume the two bootstrap roles, which the
     # operator cannot edit; nothing else. The explicit denies also override any resource policy
     # or runtime-role trust the operator might write naming this user. Reconcile runs as qsb-operator.
     user_actions = ['sts:AssumeRole', 'iam:ChangePassword', 'iam:GetUser', 'iam:GetAccountPasswordPolicy',
-                    'signin:AuthorizeOAuth2Access', 'signin:CreateOAuth2Token']
+                    'signin:Authenticate', 'signin:AuthorizeOAuth2Access', 'signin:CreateOAuth2Token']
     user_policy = {'Version': '2012-10-17', 'Statement': [
         allow('AssumeQsbRoles', ['sts:AssumeRole'], [viewonly_role, operator_role]),
         dict(Sid='OnlyTheseRoles', Effect='Deny', Action=['sts:AssumeRole'], NotResource=[viewonly_role, operator_role]),
@@ -153,6 +153,12 @@ def access(c):
               {'StringEquals': {'iam:AWSServiceName': ['batch.amazonaws.com', 'ecs.amazonaws.com']}}),
     ]
     guards = [
+        dict(Sid='OnlyRequiredLambdaPrincipals', Effect='Deny', Action=['lambda:AddPermission'],
+             Resource=['*'], Condition={'StringNotEquals': {
+                 'lambda:Principal': ['apigateway.amazonaws.com', 'events.amazonaws.com']}}),
+        deny('NoFunctionUrlsOrExternalResourcePolicies', [
+            'lambda:CreateFunctionUrlConfig', 'lambda:UpdateFunctionUrlConfig',
+            'dynamodb:PutResourcePolicy', 'ecr:SetRepositoryPolicy'], ['*']),
         deny('ProtectBootstrapIdentities', ['iam:*'], [iam('role/qsb/bootstrap/*'), iam('policy/qsb/bootstrap/*'),
                                                         iam('user/qsb/*')]),
         deny('NeverRemoveBoundaries', ['iam:DeleteRolePermissionsBoundary'], [iam('role/qsb/runtime/*')]),

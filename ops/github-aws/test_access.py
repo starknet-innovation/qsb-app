@@ -59,7 +59,7 @@ class HumanAccess(unittest.TestCase):
         rest = self.sid(user['inline']['Statement'], 'NothingElse')
         self.assertEqual((rest['Effect'], rest['Resource']), ('Deny', ['*']))
         self.assertEqual(set(rest['NotAction']), {'sts:AssumeRole', 'iam:ChangePassword', 'iam:GetUser',
-                                                  'iam:GetAccountPasswordPolicy', 'signin:AuthorizeOAuth2Access',
+                                                  'iam:GetAccountPasswordPolicy', 'signin:Authenticate', 'signin:AuthorizeOAuth2Access',
                                                   'signin:CreateOAuth2Token'})
         grants = {a for a, _ in self.allowed(user['inline']['Statement'])}
         self.assertEqual(grants, {'sts:AssumeRole', 'iam:ChangePassword', 'iam:GetUser', 'iam:GetAccountPasswordPolicy'})
@@ -184,6 +184,17 @@ class HumanAccess(unittest.TestCase):
             self.assertFalse(matches(action, granted), action)
         inputs = self.sid(boundary, 'JobInputs')
         self.assertEqual(inputs['Resource'], [f'arn:aws:s3:::qsb-gpu-{ACCOUNT}-eu-west-1-jobs/inputs/*'])
+
+    def test_operator_cannot_add_external_resource_grants(self):
+        guard = self.sid(self.operator, 'OnlyRequiredLambdaPrincipals')
+        self.assertEqual((guard['Effect'], guard['Action'], guard['Resource']),
+                         ('Deny', ['lambda:AddPermission'], ['*']))
+        self.assertEqual(guard['Condition'], {'StringNotEquals': {
+            'lambda:Principal': ['apigateway.amazonaws.com', 'events.amazonaws.com']}})
+        guard = self.sid(self.operator, 'NoFunctionUrlsOrExternalResourcePolicies')
+        self.assertEqual((guard['Effect'], guard['Resource']), ('Deny', ['*']))
+        self.assertEqual(set(guard['Action']), {'lambda:CreateFunctionUrlConfig',
+            'lambda:UpdateFunctionUrlConfig', 'dynamodb:PutResourcePolicy', 'ecr:SetRepositoryPolicy'})
 
     def test_policies_fit_iam_limits(self):
         for role in ('viewonly', 'operator'):

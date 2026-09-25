@@ -31,6 +31,19 @@ gpu_role = iam('role/qsb/runtime/qsb-gpu-job')
 queue = arn('batch', 'job-queue/qsb-gpu')
 
 operator_cases = [
+    ('allow api invocation permission', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), True,
+     [ctx('lambda:Principal', 'apigateway.amazonaws.com')]),
+    ('allow watchdog invocation permission', 'lambda:AddPermission', arn('lambda', 'function:qsb-gpu-watchdog'), True,
+     [ctx('lambda:Principal', 'events.amazonaws.com')]),
+    ('deny external lambda principal', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), 'explicitDeny',
+     [ctx('lambda:Principal', '999999999999')]),
+    ('deny missing lambda principal', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
+    ('deny public lambda principal', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), 'explicitDeny',
+     [ctx('lambda:Principal', '*')]),
+    ('deny function url creation', 'lambda:CreateFunctionUrlConfig', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
+    ('deny function url updates', 'lambda:UpdateFunctionUrlConfig', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
+    ('deny table resource policy', 'dynamodb:PutResourcePolicy', arn('dynamodb', 'table/qsb-records'), 'explicitDeny', []),
+    ('deny registry resource policy', 'ecr:SetRepositoryPolicy', arn('ecr', 'repository/qsb-solver'), 'explicitDeny', []),
     ('submit smoke job', 'batch:SubmitJob', queue, True, []),
     ('submit to other queue', 'batch:SubmitJob', arn('batch', 'job-queue/other'), False, []),
     ('update compute environment', 'batch:UpdateComputeEnvironment', arn('batch', 'compute-environment/qsb-gpu'), True, []),
