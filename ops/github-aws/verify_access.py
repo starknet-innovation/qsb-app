@@ -47,9 +47,11 @@ operator_cases = [
     ('other rule', 'events:PutRule', arn('events', 'rule/other'), False, []),
     ('bounded gpu role', 'iam:CreateRole', gpu_role, True, gpu_bound),
     ('unbounded gpu role', 'iam:CreateRole', gpu_role, False, []),
-    ('gpu role with runtime boundary', 'iam:CreateRole', gpu_role, False,
+    ('gpu role with runtime boundary', 'iam:CreateRole', gpu_role, 'explicitDeny',
      [ctx('iam:PermissionsBoundary', iam('policy/qsb/bootstrap/qsb-runtime-boundary'))]),
-    ('assume a runtime role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-api'), False, []),
+    ('assume a runtime role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-api'), 'explicitDeny', []),
+    ('pass non-gpu role to tasks', 'iam:PassRole', iam('role/qsb/runtime/qsb-research-api'), False,
+     [ctx('iam:PassedToService', 'ecs-tasks.amazonaws.com')]),
     ('terminate job with other tag', 'batch:TerminateJob', arn('batch', 'job/abc'), False,
      [ctx('aws:ResourceTag/Project', 'other')]),
     ('pass gpu role to lambda', 'iam:PassRole', gpu_role, True, [ctx('iam:PassedToService', 'lambda.amazonaws.com')]),
@@ -78,8 +80,8 @@ viewonly_cases = [
     ('read logs', 'logs:GetLogEvents', arn('logs', 'log-group:any:*'), False, []),
     ('submit job', 'batch:SubmitJob', queue, False, []),
     ('read object version', 's3:GetObjectVersion', 'arn:aws:s3:::any/x', False, []),
-    ('read stack template', 'cloudformation:GetTemplate', arn('cloudformation', 'stack/any/*'), False, []),
-    ('assume any role', 'sts:AssumeRole', iam('role/any'), False, []),
+    ('read stack template', 'cloudformation:GetTemplate', arn('cloudformation', 'stack/any/*'), 'explicitDeny', []),
+    ('assume any role', 'sts:AssumeRole', iam('role/any'), 'explicitDeny', []),
 ]
 gpu_cases = [
     ('boundary: job input read', 's3:GetObject', f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/inputs/x', True, []),
@@ -104,11 +106,21 @@ def simulate(label, documents, role, cases):
         if r.returncode:
             raise SystemExit(f'{label}/{name}: simulator call failed')
         decision = json.loads(r.stdout)['EvaluationResults'][0]['EvalDecision']
-        assert (decision == 'allowed') == allowed, (label, name, decision)
+        # A string expectation names the exact decision, so a guard deny can't pass as an implicit one.
+        ok = decision == allowed if isinstance(allowed, str) else (decision == 'allowed') == allowed
+        assert ok, (label, name, decision)
         print(f'{label}: {name}: {decision}', flush=True)
 
 
 simulate('operator', out['operator']['policies'], 'qsb-operator', operator_cases)
 simulate('viewonly', out['viewonly']['policies'], 'qsb-viewonly', viewonly_cases)
 simulate('gpu-boundary', [out['gpu_boundary']['document']], None, gpu_cases)
-print(f'Passed {len(operator_cases) + len(viewonly_cases) + len(gpu_cases)} IAM simulations.', flush=True)
+user_cases = [
+    ('assume operator', 'sts:AssumeRole', iam('role/qsb/bootstrap/qsb-operator'), True, []),
+    ('assume reconcile', 'sts:AssumeRole', iam('role/qsb/runtime/' + c['reconcile_role']), True, []),
+    ('assume operator-made runtime role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-api'), 'explicitDeny', []),
+    ('create access key', 'iam:CreateAccessKey', iam('user/qsb/operators/' + c['operator_user']), False, []),
+]
+simulate('user', [out['user']['inline']], None, user_cases)
+total = len(operator_cases) + len(viewonly_cases) + len(gpu_cases) + len(user_cases)
+print(f'Passed {total} IAM simulations.', flush=True)

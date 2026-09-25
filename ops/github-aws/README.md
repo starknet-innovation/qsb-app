@@ -101,11 +101,12 @@ review and apply that administrator-managed policy change separately.
 Day-to-day AWS work (checks, Terraform applies, GPU smoke runs, reconcile) must
 not use the account root. `access.py` renders three administrator-owned
 identities from the same private inventory, plus `operator_user` (the IAM user
-name) and `gpu_vpc` (the VPC of the `terraform/gpu` security group):
+name), `gpu_vpc` (the VPC of the `terraform/gpu` security group) and
+`reconcile_role` (the #25 reconcile role's name under `/qsb/runtime/`):
 
 | Identity | Path | Can | Cannot |
 | --- | --- | --- | --- |
-| IAM user `operator_user` | `/qsb/operators/` | sign in (console or `aws login`), change its password, assume the two roles | anything else; it has no access keys |
+| IAM user `operator_user` | `/qsb/operators/` | sign in (console or `aws login`), change its password, assume the two roles and the reconcile role | assume any other role, even one whose trust names it; anything else; it has no access keys |
 | `qsb-viewonly` | `/qsb/bootstrap/` | AWS `ViewOnlyAccess`, plus Batch/Scheduler/IAM describe, IAM simulation and Cost Explorer reads | read data: S3 objects, DynamoDB items, secrets, parameters, KMS decrypt, log events, Lambda code, execution input/output |
 | `qsb-operator` | `/qsb/bootstrap/` | everything `qsb-github-deploy` can, plus the `terraform/gpu` stack and its smoke jobs | ingress rules, `RunInstances`, VPC/gateway creation, users, access keys or MFA devices, editing any `/qsb/bootstrap/` identity or policy, removing a boundary |
 
@@ -128,13 +129,15 @@ boundary, including `qsb-runtime-boundary`.
 the coordinator submits. The operator can submit smoke jobs to the `qsb-gpu`
 queue directly. It can also change the compute environment: raise max vCPUs,
 switch the AMI or launch template version, attach an existing security group,
-or disable the watchdog rule. The effective hard cap is the account's EC2
-G-instance vCPU quota (4 vCPUs, one `g5.xlarge`, today). Keep that quota at 4,
-and set an AWS Budgets alert on the account.
+or disable the watchdog rule. It can also rebuild the compute environment with
+other instance families or Spot capacity, so the effective caps are the
+account's EC2 vCPU quotas for every family (Standard, G and VT, P, and Spot),
+not just the G quota. Keep those quotas as low as the account needs, and set
+an AWS Budgets alert on the account.
 
 ### Create them once, as root
 
-1. Add `operator_user` and `gpu_vpc` to the private inventory (outside Git).
+1. Add `operator_user`, `gpu_vpc` and `reconcile_role` to the private inventory (outside Git).
 2. Check offline: `python3 ops/github-aws/test_access.py`, then
    `python3 ops/github-aws/verify_access.py --profile ADMIN --inventory INVENTORY`.
 3. Commit and push; the checkout must be clean and match its remote branch.

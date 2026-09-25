@@ -2,8 +2,9 @@
 """Render the human access identities for the QSB account from the private inventory.
 
 No AWS mutations. Uses the render.py inventory plus `operator_user`, the name of
-the one IAM user (path /qsb/operators/) that may assume these roles with MFA, and
-`gpu_vpc`, the VPC the GPU stack's security group lives in:
+the one IAM user (path /qsb/operators/) that may assume these roles with MFA,
+`gpu_vpc`, the VPC the GPU stack's security group lives in, and `reconcile_role`,
+the name of the #25 reconcile role under /qsb/runtime/ (the only other role the user may assume):
 
 - qsb-viewonly: AWS ViewOnlyAccess plus the Batch/Scheduler/IAM describe calls it
   lacks, with an explicit deny on reading data (objects, items, secrets, logs, code).
@@ -50,6 +51,7 @@ def access(c):
     in_region = {'StringEquals': {'aws:RequestedRegion': region}}
     user_arn = iam('user/qsb/operators/' + user)
     viewonly_role, operator_role = iam('role/qsb/bootstrap/qsb-viewonly'), iam('role/qsb/bootstrap/qsb-operator')
+    reconcile_role = iam('role/qsb/runtime/' + c['reconcile_role'])
     gpu_boundary = iam('policy/qsb/bootstrap/qsb-gpu-boundary')
     runtime_boundary = iam('policy/qsb/bootstrap/qsb-runtime-boundary')
     gpu_roles = iam('role/qsb/runtime/qsb-gpu-*')
@@ -73,9 +75,14 @@ def access(c):
                       # A fresh MFA code per role session; an older sign-in's MFA context is not enough.
                       'NumericLessThanIfExists': {'aws:MultiFactorAuthAge': '3600'}}}]}
 
-    # The user can sign in (console, `aws login`) and assume the two roles; nothing else.
+    # The user can sign in (console, `aws login`) and assume the two roles and the reconcile
+    # role; nothing else. Same-account trust alone would let it assume any role that names it,
+    # such as a runtime role the operator created without an MFA condition, so deny all others.
     user_policy = {'Version': '2012-10-17', 'Statement': [
-        allow('AssumeQsbRoles', ['sts:AssumeRole'], [viewonly_role, operator_role]),
+        allow('AssumeQsbRoles', ['sts:AssumeRole'], [viewonly_role, operator_role, reconcile_role]),
+        dict(Sid='OnlyTheseRoles', Effect='Deny', Action=['sts:AssumeRole', 'sts:AssumeRoleWithWebIdentity',
+                                                           'sts:AssumeRoleWithSAML'],
+             NotResource=[viewonly_role, operator_role, reconcile_role]),
         allow('OwnPassword', ['iam:ChangePassword', 'iam:GetUser'], [user_arn]),
         allow('PasswordPolicy', ['iam:GetAccountPasswordPolicy'], ['*']),
     ]}
