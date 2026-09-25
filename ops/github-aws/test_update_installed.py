@@ -76,6 +76,8 @@ class UpdateInstalled(unittest.TestCase):
                 iam['deploy'] = json.loads(opt('--policy-document'))
                 out = {}
             elif operation == 'get-user-policy':
+                if iam.get('user_denied'):
+                    return subprocess.CompletedProcess(command, 254, '', 'An error occurred (AccessDenied) when calling')
                 out = {'PolicyDocument': iam['user']}
             elif operation == 'put-user-policy':
                 iam['user'] = json.loads(opt('--policy-document'))
@@ -162,6 +164,16 @@ class UpdateInstalled(unittest.TestCase):
         iam = self.installed()
         del iam['policies']['qsb-gpu-boundary']
         with self.assertRaisesRegex(SystemExit, 'run the bootstrap first'):
+            self.run_update(iam)
+        self.assertEqual(self.writes(), [])
+
+    def test_plan_mode_reports_an_unreadable_user_policy(self):
+        iam = self.installed()
+        iam['user_denied'] = True
+        with self.assertRaises(SystemExit):
+            self.run_update(iam, apply=False)
+        self.assertIn('unreadable', self.status('qsb-operator-user/assume-qsb-roles')['status'])
+        with self.assertRaisesRegex(SystemExit, 'get-user-policy failed: AccessDenied'):
             self.run_update(iam)
         self.assertEqual(self.writes(), [])
 

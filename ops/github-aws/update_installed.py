@@ -41,12 +41,16 @@ if not remote or remote[0] != commit:
     raise SystemExit('Commit is not pushed to the matching remote branch')
 
 
-def aws(*args):
+def aws(*args, readable=False):
+    """One AWS CLI call. With readable=True in plan mode, an AccessDenied read returns None instead of stopping."""
     r = subprocess.run(['aws', '--profile', a.profile, '--region', c['region'], '--output', 'json', '--no-cli-pager',
                         '--cli-connect-timeout', '10', '--cli-read-timeout', '20', *args], capture_output=True, text=True)
     if r.returncode:
         code = re.search(r'\(([A-Za-z]+)\)', r.stderr)
-        raise SystemExit(f"{' '.join(args[:2])} failed: {code.group(1) if code else 'error'}; nothing after it ran")
+        code = code.group(1) if code else 'error'
+        if readable and not a.apply and code in ('AccessDenied', 'AccessDeniedException'):
+            return None
+        raise SystemExit(f"{' '.join(args[:2])} failed: {code}; nothing after it ran")
     return json.loads(r.stdout) if r.stdout.strip() else {}
 
 
@@ -70,6 +74,7 @@ for role in ('viewonly', 'operator'):
                          'installed; adding or removing access policies needs a separately reviewed step')
 
 targets = []  # (label, kind, installed document or value, rendered, apply function)
+UNREADABLE = object()  # plan mode only: this profile may not read the target
 blockers = []  # refusals found while planning; checked before any write
 
 
@@ -116,7 +121,8 @@ def update_deploy():
 targets.append(('qsb-github-deploy/qsb-terraform-deployment', 'policy', live_deploy, rendered['deploy'], update_deploy))
 
 user = human['user']
-live_user = aws('iam', 'get-user-policy', '--user-name', user['name'], '--policy-name', 'assume-qsb-roles')['PolicyDocument']
+live_user = aws('iam', 'get-user-policy', '--user-name', user['name'], '--policy-name', 'assume-qsb-roles', readable=True)
+live_user = UNREADABLE if live_user is None else live_user['PolicyDocument']
 
 
 def update_user():
@@ -140,6 +146,8 @@ plan = []
 for label, kind, installed, wanted, _ in targets:
     if kind == 'missing':
         plan.append({'target': label, 'status': 'missing (create it with the bootstrap, not here)'})
+    elif installed is UNREADABLE:
+        plan.append({'target': label, 'status': 'unreadable with this profile (checked again by --apply)'})
     elif installed == wanted:
         plan.append({'target': label, 'status': 'identical'})
     elif kind == 'value':
