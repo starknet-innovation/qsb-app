@@ -70,3 +70,14 @@ variable "alarm_actions" {
   type        = list(string)
   default     = []
 }
+
+variable "iam_role_path" {
+  description = "Use /qsb/runtime/ for the dedicated GitHub deployment identity."
+  type        = string
+  default     = "/"
+}
+variable "iam_permissions_boundary_arn" {
+  description = "Administrator-managed boundary required for GitHub-created runtime roles."
+  type        = string
+  default     = null
+}
