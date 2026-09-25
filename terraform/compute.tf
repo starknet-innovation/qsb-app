@@ -4,19 +4,40 @@ resource "aws_cloudwatch_log_group" "lambda" {
   retention_in_days = 30
 }
 resource "aws_iam_role" "lambda" {
-  for_each           = local.functions
-  name               = "${var.name}-${each.key}"
-  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "lambda.amazonaws.com" }, Action = "sts:AssumeRole" }] })
+  path                 = var.iam_role_path
+  permissions_boundary = var.iam_permissions_boundary_arn
+  for_each             = local.functions
+  name                 = "${var.name}-${each.key}"
+  assume_role_policy   = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "lambda.amazonaws.com" }, Action = "sts:AssumeRole" }] })
 }
 resource "aws_iam_role_policy" "logs" {
   for_each = local.functions
   role     = aws_iam_role.lambda[each.key].id
   policy   = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = ["logs:CreateLogStream", "logs:PutLogEvents"], Resource = "${aws_cloudwatch_log_group.lambda[each.key].arn}:*" }] })
 }
+# API reservations remain conditional creates; coordinator writes only OWNER rows.
 resource "aws_iam_role_policy" "records" {
-  for_each = toset(["api", "coordinator"])
+  for_each = toset(["api"])
   role     = aws_iam_role.lambda[each.key].id
-  policy   = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:ConditionCheckItem"], Resource = aws_dynamodb_table.records.arn }] })
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      for statement in jsondecode(file("${path.module}/policies/app-records.json")) : merge(statement, {
+        Resource = "arn:${data.aws_partition.current.partition}:dynamodb:${var.region}:${var.aws_account_id}:table/${aws_dynamodb_table.records.name}"
+      })
+    ]
+  })
+}
+resource "aws_iam_role_policy" "coordinator_records" {
+  role = aws_iam_role.lambda["coordinator"].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      for statement in jsondecode(file("${path.module}/policies/coordinator-records.json")) : merge(statement, {
+        Resource = "arn:${data.aws_partition.current.partition}:dynamodb:${var.region}:${var.aws_account_id}:table/${aws_dynamodb_table.records.name}"
+      })
+    ]
+  })
 }
 resource "aws_iam_role_policy" "runpod" {
   count = local.runpod ? 1 : 0
@@ -61,7 +82,7 @@ resource "aws_lambda_function" "coordinator" {
   environment {
     variables = merge({ TABLE_NAME = aws_dynamodb_table.records.name, QSB_NETWORK = var.network, QSB_REHEARSAL_ENABLED = "false", REFERENCE_FUNCTION = aws_lambda_function.reference.function_name }, local.gpu_limit_env, local.runpod ? { RUNPOD_ENDPOINT_ID = var.runpod_endpoint_id, RUNPOD_SECRET_ARN = var.runpod_secret_arn } : {})
   }
-  depends_on = [terraform_data.release, aws_iam_role_policy.logs, aws_iam_role_policy.records, aws_iam_role_policy.reference, aws_iam_role_policy.runpod]
+  depends_on = [terraform_data.release, aws_iam_role_policy.logs, aws_iam_role_policy.coordinator_records, aws_iam_role_policy.reference, aws_iam_role_policy.runpod]
 }
 resource "aws_lambda_function" "api" {
   function_name                  = "${var.name}-api"

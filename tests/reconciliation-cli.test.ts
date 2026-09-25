@@ -75,3 +75,29 @@ it("prints the polling refusal reason, exits nonzero and preserves the attached 
   expect(JSON.parse(stdout.mock.calls[0][0] as string)).toMatchObject({ pollingStarted: false, reason: "execution-already-exists", providerId: "provider-1" });
   expect((await store.get("OWNER#owner", "JOB#job"))?.job).toMatchObject({ runpodId: "provider-1", status: "searching" });
 });
+
+it.each(["400", "499"])("CLI records immediate HTTP %s recovery without waiting TTL", async (status) => {
+  for (const [key, value] of Object.entries(required)) vi.stubEnv(key, value);
+  const owner = `http-${status}`, pk = `OWNER#${owner}`;
+  const job = { id: "job", owner, vaultId: "v", status: "paused", stage: "pinning", attempt: 0, revision: 3, computeSeconds: 0, manifestHash: "a".repeat(64), manifest: {}, submissionStartedAt: new Date().toISOString(), error: "Submission outcome unknown" } as Job;
+  await store.put({ pk, sk: "JOB#job", version: 0, job });
+  await store.put({ pk, sk: "VAULT#v", version: 0, vault: { network: "mainnet" } });
+  mocks.secret.mockResolvedValue({ SecretString: JSON.stringify({ apiKey: "public-test-placeholder" }) });
+  vi.spyOn(Runpod.prototype, "health").mockResolvedValue({ jobs: { inQueue: 0, inProgress: 0 }, workers: {} } as any);
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  await reconcileSubmissionCli([owner, "job", "--not-submitted", "rejected-before-acceptance", "--http-status", status, "--operator", "test", "--evidence", "audit://http"]);
+  expect(process.exitCode).toBeUndefined();
+  const stored = (await store.get(pk, "JOB#job"))!.job as Job;
+  expect(stored.oneSubmissionAllowed).toBe(true);
+  expect(stored.submissionReconciliation?.httpStatus).toBe(Number(status));
+  expect((await store.list(pk, "RECONCILIATION#"))[0]!.decision).toEqual(stored.submissionReconciliation);
+});
+it.each([undefined, "399", "500", "timeout", "400.5"])("CLI refuses invalid rejection status %s before credential access", async (status) => {
+  for (const [key, value] of Object.entries(required)) vi.stubEnv(key, value);
+  const calls = mocks.secret.mock.calls.length;
+  vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  await reconcileSubmissionCli(["owner", "job", "--not-submitted", "rejected-before-acceptance", ...(status === undefined ? [] : ["--http-status", status]), "--operator", "test", "--evidence", "audit://http"]);
+  expect(process.exitCode).toBe(1);
+  expect(mocks.secret.mock.calls.length).toBe(calls);
+});

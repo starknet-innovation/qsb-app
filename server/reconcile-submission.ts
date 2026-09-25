@@ -37,10 +37,17 @@ export const reconciliationDecisionSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("not-submitted"),
       reason: z.enum(["rejected-before-acceptance", "ttl-expired"]),
+      httpStatus: z.number().int().min(400).max(499).optional(),
       operator: evidence,
       evidence,
     })
-    .strict(),
+    .strict()
+    .superRefine((decision, ctx) => {
+      if (decision.reason === "rejected-before-acceptance" && decision.httpStatus === undefined)
+        ctx.addIssue({ code: "custom", path: ["httpStatus"], message: "Recorded HTTP 4xx required" });
+      if (decision.reason === "ttl-expired" && decision.httpStatus !== undefined)
+        ctx.addIssue({ code: "custom", path: ["httpStatus"], message: "HTTP status is only valid for rejected-before-acceptance" });
+    }),
 ]);
 export type ReconciliationDecision = z.infer<
   typeof reconciliationDecisionSchema
@@ -179,16 +186,15 @@ export async function reconcileUnknownSubmission(input: {
     delete job.error;
   } else {
     // A list miss, a timeout or a 5xx alone is not proof of non-acceptance.
-    // Every replacement decision must wait the durable submission's full provider
-    // TTL and independently confirm endpoint drain. The reason is an evidence
-    // label, never permission to shorten that wait.
+    // Only an explicitly recorded HTTP 4xx may bypass the TTL. All other
+    // outcomes require the durable full TTL; both paths still require drain.
     const health = await lookup.health();
     if (health.jobs.inQueue !== 0 || health.jobs.inProgress !== 0)
       throw new ReconciliationError("EndpointNotDrained");
     const started = Date.parse(job.submissionStartedAt ?? "");
     if (
-      !Number.isFinite(started) ||
-      Date.parse(now) < started + RUNPOD_JOB_TTL_MS
+      decision.reason === "ttl-expired" &&
+      (!Number.isFinite(started) || Date.parse(now) < started + RUNPOD_JOB_TTL_MS)
     )
       throw new ReconciliationError("SubmissionTtlNotExpired");
     job.oneSubmissionAllowed = true;
@@ -306,6 +312,7 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
           "--not-submitted",
           "--operator",
           "--evidence",
+          "--http-status",
         ].includes(key) ||
         key in options
       )
@@ -320,6 +327,9 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
       ...(options["--provider-id"]
         ? { kind: "provider-id", providerId: options["--provider-id"] }
         : { kind: "not-submitted", reason: options["--not-submitted"] }),
+      ...(options["--http-status"] !== undefined
+        ? { httpStatus: /^\d{3}$/.test(options["--http-status"]) ? Number(options["--http-status"]) : NaN }
+        : {}),
       operator: options["--operator"],
       evidence: options["--evidence"],
     });

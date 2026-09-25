@@ -3,8 +3,10 @@ resource "aws_cloudwatch_log_group" "workflow" {
   retention_in_days = 30
 }
 resource "aws_iam_role" "workflow" {
-  name               = "${var.name}-workflow"
-  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "states.amazonaws.com" }, Action = "sts:AssumeRole" }] })
+  path                 = var.iam_role_path
+  permissions_boundary = var.iam_permissions_boundary_arn
+  name                 = "${var.name}-workflow"
+  assume_role_policy   = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "states.amazonaws.com" }, Action = "sts:AssumeRole" }] })
 }
 resource "aws_iam_role_policy" "workflow" {
   role = aws_iam_role.workflow.id

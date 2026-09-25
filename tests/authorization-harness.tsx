@@ -1,14 +1,18 @@
 // UI-only fixture: QSB assembly is stubbed by Playwright, never a consensus proof.
 import { createRoot } from "react-dom/client";
 import * as btc from "@scure/btc-signer";
-import { hex } from "@scure/base";
+import { base64, hex } from "@scure/base";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 import TransactionDialog from "../src/TransactionDialog";
 import { encryptRecovery, bindRecoveryAssembly } from "../src/lib/backup";
 import type { Recovery, Job, PublicVault, Withdrawal } from "../src/lib/model";
+import { coordinatorPublicSolvedResult } from "../src/mainnet/coordinatorResult";
 const password = "browser authorization passphrase";
-export async function mount(changedSolution = false) {
-  const publicKey =
-    "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+export async function mount(changedSolution = false, localSolved = false) {
+  const signingKey = new Uint8Array(32).fill(1);
+  const publicKey = localSolved
+    ? hex.encode(secp256k1.getPublicKey(signingKey))
+    : "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
   const address = btc.p2wpkh(hex.decode(publicKey)).address!;
   const options = { allowUnknownInputs: true, allowUnknownOutputs: true };
   const previous = new btc.Transaction(options);
@@ -100,6 +104,13 @@ export async function mount(changedSolution = false) {
   Object.assign(window, {
     authorizationFixture: { scriptHash: vault.scriptHash, assembly },
     walletCalls: 0,
+    signSolvedPsbt: (psbt: string) => {
+      const tx = btc.Transaction.fromPSBT(base64.decode(psbt), options);
+      if (tx.getInput(0).sighashType !== 1)
+        throw new Error("SIGHASH_ALL was not requested");
+      if (!tx.signIdx(signingKey, 0)) throw new Error("local signature failed");
+      return base64.encode(tx.toPSBT());
+    },
   });
   const el = document.createElement("div");
   document.body.append(el);
@@ -109,6 +120,9 @@ export async function mount(changedSolution = false) {
       vault={vault}
       wallet={{ address, publicKey, type: "p2wpkh" }}
       job={job}
+      solvedResult={
+        localSolved ? coordinatorPublicSolvedResult(job) : undefined
+      }
       onClose={() => root.unmount()}
       onUpdated={() => {}}
     />,

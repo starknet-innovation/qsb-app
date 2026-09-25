@@ -22,9 +22,10 @@ const decision: ReconciliationDecision = {
 const replacement = (
   reason:
     "rejected-before-acceptance" | "ttl-expired" = "rejected-before-acceptance",
-): ReconciliationDecision => ({
+): Extract<ReconciliationDecision, { kind: "not-submitted" }> => ({
   kind: "not-submitted",
   reason,
+  ...(reason === "rejected-before-acceptance" ? { httpStatus: 429 } : {}),
   operator: "operator@example",
   evidence: "audit://incident/1",
 });
@@ -228,7 +229,7 @@ it("accepts a drained expired submission with durable start time", async () => {
   await run(replacement("ttl-expired"));
   expect((await job()).oneSubmissionAllowed).toBe(true);
 });
-for (const reason of ["rejected-before-acceptance", "ttl-expired"] as const) {
+for (const reason of ["ttl-expired"] as const) {
   it.each([
     undefined,
     "invalid",
@@ -300,4 +301,27 @@ it("requires a durable table before opening credentials in the CLI", async () =>
     if (old === undefined) delete process.env.TABLE_NAME;
     else process.env.TABLE_NAME = old;
   }
+});
+
+it.each([400, 429, 499])("grants immediately for recorded HTTP %s and audits the status", async (httpStatus) => {
+  await change({ submissionStartedAt: now });
+  await run({ ...replacement(), httpStatus });
+  expect((await job()).oneSubmissionAllowed).toBe(true);
+  expect((await job()).submissionReconciliation).toMatchObject({ httpStatus, operator: "operator@example", evidence: "audit://incident/1", at: now, revision: 4 });
+  const audit = await store.list(pk, "RECONCILIATION#");
+  expect(audit).toHaveLength(1);
+  expect(audit[0]!.decision).toEqual((await job()).submissionReconciliation);
+});
+it.each([399, 500, undefined, 400.5, "timeout", "ECONNRESET"])("refuses immediate recovery with invalid/missing status %s", async (httpStatus) => {
+  await change({ submissionStartedAt: now });
+  const before = await job();
+  await expect(run({ ...replacement(), httpStatus } as ReconciliationDecision)).rejects.toThrow();
+  expect(await job()).toEqual(before);
+  expect(lookup.health).not.toHaveBeenCalled();
+  expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(0);
+});
+it("does not let a 4xx field bypass the TTL-expired mode", async () => {
+  await change({ submissionStartedAt: now });
+  await expect(run({ ...replacement("ttl-expired"), httpStatus: 400 })).rejects.toThrow();
+  expect((await job()).oneSubmissionAllowed).toBeUndefined();
 });

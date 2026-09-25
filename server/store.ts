@@ -254,6 +254,21 @@ export class DynamoStore implements Store {
       const reasons = (
         e as { CancellationReasons?: { Code?: string }[] }
       ).CancellationReasons;
+      // Do not disguise authorization, capacity, validation or unknown failures as
+      // optimistic concurrency. A mixed cancellation must preserve its real error.
+      const conflictCodes = new Set([
+        "ConditionalCheckFailed",
+        "TransactionConflict",
+      ]);
+      if (
+        (e as Error).name !== "TransactionCanceledException" ||
+        !reasons?.some((reason) => conflictCodes.has(reason.Code ?? "")) ||
+        reasons.some(
+          (reason) =>
+            reason.Code !== "None" && !conflictCodes.has(reason.Code ?? ""),
+        )
+      )
+        throw e;
       const authorityIndex = steps.findIndex(
         (step) =>
           step.kind === "authority-absent" ||

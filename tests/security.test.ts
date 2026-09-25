@@ -192,6 +192,7 @@ describe("transaction invariants", () => {
       hex.encode(previous.toBytes(true, true)),
     );
     expect(hex.encode(expected.getInput(1).finalScriptSig!)).toBe("0101");
+    expect(expected.getInput(0).sighashType).toBe(1);
     expect(() => verifySignedPsbt(expected, expected.toPSBT())).not.toThrow();
     const altered = expected.clone();
     altered.updateInput(1, { finalScriptSig: hex.decode("0102") }, true);
@@ -200,6 +201,28 @@ describe("transaction invariants", () => {
     );
     expect(() => verifySignedPsbt(expected, altered.toPSBT())).toThrow(
       "QSB authorization",
+    );
+  });
+  it("rejects a helper signed with a sighash other than SIGHASH_ALL", () => {
+    const { helper, previous, spend } = withdrawal();
+    const expected = helperPsbt(
+      hex.encode(spend.toBytes(true, true)),
+      helper,
+      hex.encode(previous.toBytes(true, true)),
+    );
+    const signed = expected.clone();
+    if (!signed.signIdx(privateKey, 0)) throw new Error("missing helper signature");
+    const input = signed.getInput(0);
+    const signature = input.partialSig?.[0]?.[1];
+    if (!signature) throw new Error("missing helper signature");
+    const anyoneCanPay = Uint8Array.from(signature);
+    anyoneCanPay[anyoneCanPay.length - 1] = 0x82;
+    const bad = expected.clone();
+    bad.updateInput(0, {
+      partialSig: [[input.partialSig![0][0], anyoneCanPay]],
+    });
+    expect(() => verifySignedPsbt(expected, bad.toPSBT())).toThrow(
+      "SIGHASH_ALL",
     );
   });
   it("rejects a helper public key that does not control the quoted payment address", () => {

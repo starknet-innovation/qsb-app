@@ -91,9 +91,11 @@ resource "aws_backup_vault" "evidence" {
   lifecycle { prevent_destroy = true }
 }
 resource "aws_iam_role" "backup" {
-  count              = local.runtime_count
-  name               = "${var.name}-backup"
-  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "backup.amazonaws.com" }, Action = "sts:AssumeRole" }] })
+  path                 = var.iam_role_path
+  permissions_boundary = var.iam_permissions_boundary_arn
+  count                = local.runtime_count
+  name                 = "${var.name}-backup"
+  assume_role_policy   = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "backup.amazonaws.com" }, Action = "sts:AssumeRole" }] })
 }
 resource "aws_iam_role_policy_attachment" "backup" {
   count      = local.runtime_count

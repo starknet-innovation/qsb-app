@@ -8,6 +8,34 @@ variables {
   name           = "qsb-test"
   network        = "mainnet"
 }
+run "app_role_record_denies" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition = alltrue([
+      for role in ["api"] :
+      length([
+        for statement in jsondecode(aws_iam_role_policy.records[role].policy).Statement : statement
+        if statement.Sid == "DenyOutpointDelete" && statement.Effect == "Deny" && contains(statement.Action, "dynamodb:DeleteItem") && contains(try(statement.Condition["ForAnyValue:StringLike"]["dynamodb:LeadingKeys"], []), "OUTPOINT#*") && !contains(statement.Action, "dynamodb:PutItem")
+        ]) == 1 && length([
+        for statement in jsondecode(aws_iam_role_policy.records[role].policy).Statement : statement
+        if statement.Sid == "DenySystemRowWrites" && statement.Effect == "Deny" && contains(statement.Action, "dynamodb:PutItem") && contains(statement.Action, "dynamodb:DeleteItem") && contains(try(statement.Condition["ForAnyValue:StringLike"]["dynamodb:LeadingKeys"], []), "SYSTEM#*")
+        ]) == 1 && length([
+        for statement in jsondecode(aws_iam_role_policy.records[role].policy).Statement : statement
+        if statement.Sid == "TableDataAccess" && statement.Effect == "Allow" && contains(statement.Action, "dynamodb:PutItem") && contains(statement.Action, "dynamodb:ConditionCheckItem") && !contains(keys(statement), "Condition")
+      ]) == 1
+    ])
+    error_message = "App roles must be able to create a reservation, must deny deleting one, and must deny system-row writes."
+  }
+}
+run "coordinator_least_privilege" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition = jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[0].Action == ["dynamodb:GetItem"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Action == ["dynamodb:PutItem"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Condition["ForAllValues:StringLike"]["dynamodb:LeadingKeys"] == ["OWNER#*"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Condition.Null["dynamodb:LeadingKeys"] == "false" && length(jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement) == 2 && !contains(keys(aws_iam_role_policy.records), "coordinator")
+    error_message = "Coordinator may only GetItem and PutItem on present OWNER keys."
+  }
+}
 run "baseline" {
   command = plan
   variables {
@@ -76,4 +104,17 @@ run "reject_mainnet_supervised_runtime" {
     cleanup_endpoints         = { disposabletest1 = { delete_after = "2026-09-24T20:00:00Z" } }
   }
   expect_failures = [terraform_data.release]
+}
+
+run "ci_runtime_roles_are_bounded" {
+  command = plan
+  variables {
+    network                      = "mainnet"
+    iam_role_path                = "/qsb/runtime/"
+    iam_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary"
+  }
+  assert {
+    condition     = alltrue([for role in aws_iam_role.lambda : role.path == "/qsb/runtime/" && role.permissions_boundary == var.iam_permissions_boundary_arn]) && aws_iam_role.workflow.path == "/qsb/runtime/" && aws_iam_role.workflow.permissions_boundary == var.iam_permissions_boundary_arn
+    error_message = "CI-created Lambda and workflow roles must keep the required path and boundary."
+  }
 }

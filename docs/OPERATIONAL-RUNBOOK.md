@@ -80,19 +80,27 @@ start failure remains attached for operator reconciliation. Correct the prerequi
 and rerun the same provider-ID decision; never submit a replacement as a workaround.
 
 To authorize exactly one replacement after proving Runpod rejected the call
-before acceptance (for example a retained definite rejection, not a timeout/5xx):
+before acceptance with a retained HTTP 400–499 response from the paid `/run` POST
+(not the limits preflight, a timeout, connection error or 5xx):
 
 ```
-npx tsx scripts/reconcile-submission.ts OWNER JOB --not-submitted rejected-before-acceptance --operator OPERATOR --evidence audit://incident/rejection
+npx tsx scripts/reconcile-submission.ts OWNER JOB --not-submitted rejected-before-acceptance --http-status 429 --operator OPERATOR --evidence audit://incident/rejection
 ```
 
-Both reasons require the complete 24-hour provider TTL to have elapsed from
-`submissionStartedAt`, saved by the coordinator before the POST. The reason labels
-the evidence; neither reason bypasses that wait. Legacy jobs without that timestamp
-cannot grant replacement permission. For an ambiguous call, use
-`--not-submitted ttl-expired` only after independently checking the endpoint and
-billing/log window. The outcome name denotes replacement permission; TTL expiry does **not**
-prove that the old job was never accepted and can incur duplicate bounded work.
+The immediate path requires `--http-status` to be an integer from 400 through
+499. Missing, malformed, non-HTTP and other status values are refused; the status
+is stored in the job decision and immutable audit row alongside the operator,
+evidence, time and revision. The operator must retain the actual response from
+this job's paid POST. The tool validates the recorded code, not the external
+truth of an operator's evidence reference.
+
+For timeouts, connection errors, 5xx or no recorded HTTP response, use
+`--not-submitted ttl-expired` only after the complete 24-hour provider TTL has
+elapsed from durable `submissionStartedAt`. Legacy jobs without that timestamp
+cannot use TTL expiry. This mode does not accept `--http-status`; it never
+shortens the wait. Independently check the endpoint and billing/log window.
+TTL expiry does **not** prove that the old job was never accepted and can incur
+duplicate bounded work.
 Both modes require current health to show zero queued/in-progress requests.
 A list miss or an empty queue by itself never authorizes replacement.
 
@@ -152,3 +160,10 @@ boundary remains an unknown submission and must be reconciled, never retried
 blindly. The 90-second coordinator timeout budgets the CPU export (25 seconds),
 endpoint check (20 seconds), paid POST (20 seconds), and persistence overhead;
 it reduces timeout exposure but does not make a POST and database write atomic.
+
+### App-role IAM merge gate
+
+See [APP-ROLE-SANDBOX.md](APP-ROLE-SANDBOX.md) for the reproducible 60-decision
+read-only simulation and exact regional transaction/batch requests, expected
+responses and consistent-read checks. The live sandbox portion remains pending
+operator confirmation; simulator output alone does not release the merge hold.

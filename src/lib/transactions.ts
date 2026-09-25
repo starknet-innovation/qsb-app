@@ -74,6 +74,18 @@ export function fundingPsbt(
   if (change > 0n) tx.addOutputAddress(changeAddress, change, BITCOIN_NETWORK);
   return tx;
 }
+function assertSighashAll(input: ReturnType<btc.Transaction["getInput"]>) {
+  // SIGHASH_ALL is 0x01. NONE|ANYONECANPAY (0x82) and every other type are refused.
+  if (input.sighashType !== undefined && input.sighashType !== 1)
+    throw new Error("Wallet used a sighash other than SIGHASH_ALL.");
+  const signatures = (input.partialSig ?? []).map(([, signature]) => signature);
+  if (input.finalScriptWitness?.length === 2)
+    signatures.push(input.finalScriptWitness[0]);
+  for (const signature of signatures) {
+    if (signature.length < 9 || signature[signature.length - 1] !== 1)
+      throw new Error("Wallet used a sighash other than SIGHASH_ALL.");
+  }
+}
 export function verifySignedPsbt(
   expected: btc.Transaction,
   returned: Uint8Array,
@@ -98,6 +110,7 @@ export function verifySignedPsbt(
         hex.encode(a.finalScriptSig) !== hex.encode(e.finalScriptSig))
     )
       throw new Error("Wallet changed the QSB authorization.");
+    assertSighashAll(a);
   }
   return actual;
 }
@@ -144,6 +157,7 @@ export function helperPsbt(
   tx.updateInput(
     0,
     {
+      sighashType: 1,
       nonWitnessUtxo: hex.decode(helper.previousTxHex),
       witnessUtxo: { amount: helper.value, script },
       ...(helper.address === btc.p2sh(wpkh, BITCOIN_NETWORK).address

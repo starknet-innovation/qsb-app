@@ -115,6 +115,7 @@ export type Job = {
     revision: number;
     providerId?: string;
     reason?: "rejected-before-acceptance" | "ttl-expired";
+    httpStatus?: number;
   };
   error?: string;
   computeSeconds: number;
