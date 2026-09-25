@@ -268,7 +268,7 @@ resource "aws_batch_compute_environment" "gpu" {
     }
     launch_template {
       launch_template_id = aws_launch_template.gpu.id
-      version            = aws_launch_template.gpu.latest_version
+      version            = "1" # Immutable reviewed host template; changing metadata must not replace the compute environment.
     }
     tags = {
       Project = "qsb-gpu", SourceCommit = var.source_commit
