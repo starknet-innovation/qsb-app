@@ -1,0 +1,44 @@
+name: Build isolated AWS GPU benchmark
+on:
+  workflow_dispatch:
+  push:
+    branches: [ops/aws-gpu-benchmark]
+    paths:
+      - ops/aws-gpu-benchmark/**
+      - .github/workflows/aws-gpu-benchmark-build.yml
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Check synthetic fixture
+        run: python3 -m unittest discover -s ops/aws-gpu-benchmark -p 'test_*.py'
+      - name: Record clean benchmark source
+        run: python3 ops/aws-gpu-benchmark/manifest.py ops/aws-gpu-benchmark/.build/source-manifest.json
+      - name: Build sm86 benchmark only
+        run: docker build --platform linux/amd64 --build-arg CUDA_ARCH=86 -f ops/aws-gpu-benchmark/Dockerfile -t qsb-aws-benchmark:sm86 .
+      - name: Export image and build identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-artifacts
+          cp ops/aws-gpu-benchmark/.build/source-manifest.json benchmark-artifacts/
+          docker image inspect qsb-aws-benchmark:sm86 > benchmark-artifacts/image.json
+          container=$(docker create qsb-aws-benchmark:sm86)
+          docker cp "$container:/opt/qsb-benchmark/build-receipt.json" benchmark-artifacts/build-receipt.json
+          docker cp "$container:/opt/qsb-benchmark/fixture/fixture.json" benchmark-artifacts/fixture.json
+          docker rm "$container"
+          git rev-parse HEAD > benchmark-artifacts/source-commit.txt
+          docker save qsb-aws-benchmark:sm86 | gzip -1 > benchmark-artifacts/image.tar.gz
+          (cd benchmark-artifacts && sha256sum image.tar.gz build-receipt.json fixture.json source-commit.txt > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qsb-aws-benchmark-sm86
+          path: benchmark-artifacts/
+          compression-level: 0
+          retention-days: 3
