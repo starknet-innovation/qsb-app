@@ -167,3 +167,65 @@ See [APP-ROLE-SANDBOX.md](APP-ROLE-SANDBOX.md) for the reproducible 60-decision
 read-only simulation and exact regional transaction/batch requests, expected
 responses and consistent-read checks. The live sandbox portion remains pending
 operator confirmation; simulator output alone does not release the merge hold.
+
+### Assume the reconciliation role
+
+Terraform now exports `operator_reconcile_role_arn`. Only the exact IAM principals
+in the required `operator_principal_arns` variable may assume it, and AWS must
+see MFA. This role is separate from the parked reservation-authority operator.
+It cannot access SYSTEM or OUTPOINT partitions, Query/Scan, Update/Delete/BatchWrite,
+or alter reservation authority. Its GetItem and PutItem permissions use
+`ForAllValues:StringLike` on `dynamodb:LeadingKeys = OWNER#*` and require the key
+with `Null: false`. IAM authorizes transaction puts via `dynamodb:PutItem`, not a
+fictitious `dynamodb:TransactWriteItems` action. Conditions restrict partition keys,
+not sort keys; the CLI enforces the job/audit shapes and conditional versions.
+
+Before invoking the CLI, the operator configures an MFA-capable source profile
+and a role profile in their local AWS config (replace these public placeholders):
+
+```ini
+[profile qsb-reconcile-mfa]
+role_arn = arn:aws:iam::123456789012:role/qsb/runtime/qsb-app-operator-reconcile
+source_profile = your-approved-iam-user-profile
+mfa_serial = arn:aws:iam::123456789012:mfa/your-device
+region = eu-west-1
+```
+
+Use the actual Terraform output ARN, including its configured path. The source
+identity also needs permission to assume that role. IAM Identity Center/federated
+MFA does not automatically supply this condition; use an approved MFA-capable
+identity, never weaken the trust policy. AWS CLI prompts for MFA and caches the
+short-lived role credentials. Run inside a subshell so session credentials do
+not remain in the parent shell; disable tracing and never print or share them:
+
+```sh
+(
+  set +x
+  set -e
+  aws sts get-caller-identity --profile qsb-reconcile-mfa
+  session_exports="$(aws configure export-credentials --profile qsb-reconcile-mfa --format env)" || exit 1
+  eval "$session_exports"
+  unset session_exports
+  unset AWS_PROFILE AWS_DEFAULT_PROFILE
+  # Verify the assumed-role ARN before proceeding; this prints no credentials.
+  aws sts get-caller-identity
+  export TABLE_NAME='your-records-table'
+  export AWS_REGION='eu-west-1'
+  export RUNPOD_SECRET_ARN='arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb-vault/runpod-EXAMPLE'
+  export RUNPOD_ENDPOINT_ID='yourendpointid'
+  export WORKFLOW_ARN='arn:aws:states:eu-west-1:123456789012:stateMachine:qsb-app-withdrawal'
+  export QSB_NETWORK='mainnet'
+  npx tsx scripts/reconcile-submission.ts OWNER JOB --provider-id PROVIDER_ID --operator OPERATOR --evidence audit://incident/reference
+)
+```
+
+The six environment values must come from the intended deployment. Do not put a
+provider key into any of them or manually fetch a secret value: the CLI obtains
+the configured credential at runtime. The example attaches an already-known ID;
+it is not permission to attest non-submission or spend again. Use the separate
+reconciliation procedure and evidence requirements above for those decisions.
+The role grants no broadcast permission and changes no mainnet activation flag.
+
+Policy references: [DynamoDB LeadingKeys](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/specifying-conditions.html)
+and [AWS MFA-protected API access](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_configure-api-require.html).
+Local policy/plan tests do not prove a live assumed-role session or regional IAM enforcement.

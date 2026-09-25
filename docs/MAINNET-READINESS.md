@@ -46,7 +46,7 @@ The repository is a curated research snapshot. Some integration work and evidenc
 
 **Acceptance evidence:** joined success and failure/restart scenarios against the actual packaged components and durable backend. Label simulated chain/provider/solver facts explicitly. A process acknowledgement must never count as search success, and a verified hit must never count as whole-range coverage.
 
-Terraform now defines a dormant supervised host and supporting storage, queue, IAM, backup and cleanup resources; see [runtime infrastructure](../terraform/runtime/README.md). Definition of those resources does not close the installation, application-connection or actual-host validation gates below.
+Issue #25 removes supervised host, storage, dispatch queue, backup and cleanup resources from Terraform. The fresh-account application stack contains only the [Step Functions pipeline](../terraform/README.md). The historical supervised installation and host evidence below is parked research context, not a prerequisite to deploy the selected mainnet pipeline; removing supervised source is tracked separately in #23. Mainnet activation and exact-transaction authorization remain required under #22.
 
 The source package and in-process handoff in this branch are reproducible from this checkout. They do not freeze a native release, enroll the optimized supervisor, or authorize mainnet. Do not build `worker/Dockerfile` as the experimental runtime. The experimental build paths are `npm run build:optimized` and `npm run build:runtime`. `broadcastAuthorized` and `release.mainnetEnabled` stay false.
 

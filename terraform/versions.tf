@@ -9,5 +9,4 @@ provider "aws" {
   allowed_account_ids = [var.aws_account_id]
   default_tags { tags = { Project = var.name, ManagedBy = "Terraform", SourceCommit = var.source_commit } }
 }
-data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}

@@ -14,3 +14,4 @@ output "runpod_limits" {
     executionTimeoutMs = local.gpu_spend.executionTimeoutMs
   }
 }
+output "operator_reconcile_role_arn" { value = aws_iam_role.operator_reconcile.arn }

@@ -23,6 +23,14 @@ boundary=f'arn:aws:iam::{account}:policy/qsb/bootstrap/qsb-runtime-boundary'
 role=f'arn:aws:iam::{account}:role/qsb/runtime/qsb-research-api'
 ctx=[{'ContextKeyName':'iam:PermissionsBoundary','ContextKeyValues':[boundary],'ContextKeyType':'string'}]
 cases=[
+ ('removed queue','sqs:CreateQueue',f'arn:aws:sqs:{region}:{account}:qsb-research-dispatch',False,[]),
+ ('removed registry','ecr:CreateRepository',f'arn:aws:ecr:{region}:{account}:repository/qsb-research-runtime',False,[]),
+ ('removed schedule','events:PutRule',f'arn:aws:events:{region}:{account}:rule/qsb-research-cleanup',False,[]),
+ ('removed image auth','ecr:GetAuthorizationToken','*',False,[]),
+ ('removed network discovery','ec2:DescribeVpcs','*',False,[]),
+ ('pass removed host','iam:PassRole',role,False,[{'ContextKeyName':'iam:PassedToService','ContextKeyValues':['ec2.amazonaws.com'],'ContextKeyType':'string'}]),
+ ('pass removed backup','iam:PassRole',role,False,[{'ContextKeyName':'iam:PassedToService','ContextKeyValues':['backup.amazonaws.com'],'ContextKeyType':'string'}]),
+ ('pass workflow','iam:PassRole',role,True,[{'ContextKeyName':'iam:PassedToService','ContextKeyValues':['states.amazonaws.com'],'ContextKeyType':'string'}]),
  ('qsb function','lambda:UpdateFunctionCode',f'arn:aws:lambda:{region}:{account}:function:qsb-research-api',True,[]),
  ('other function','lambda:UpdateFunctionCode',f'arn:aws:lambda:{region}:{account}:function:unrelated-api',False,[]),
  ('qsb table','dynamodb:CreateTable',f'arn:aws:dynamodb:{region}:{account}:table/qsb-research-records',True,[]),

@@ -14,7 +14,7 @@ or wildcard. Environment-bound jobs have different subjects and are not trusted.
 ## Access scope
 
 The deployment role has Terraform control of QSB-named Lambda, DynamoDB,
-Step Functions, ECR, SQS, EventBridge, alarms, logs and frontend buckets in the
+Step Functions, alarms, logs and frontend buckets in the
 configured account/region. The runtime role path is `/qsb/runtime/qsb-*`;
 creating/changing runtime policies requires the fixed administrator-owned
 boundary. It cannot modify its own identity, the boundary, other projects'
@@ -25,13 +25,14 @@ APIs are restricted to explicitly registered QSB IDs. These identifiers do not
 encode project ownership, and some CloudFront resources cannot be protected
 with tags. **New CDN/API resources must first be allocated and registered by an
 administrator.** The role can fully manage registered infrastructure, but cannot
-create arbitrary new CDN/API resources or EC2/VPC/backup infrastructure. The
-parked supervised EC2 stack is not included in this deployment role.
+create arbitrary new CDN/API resources or EC2/VPC/backup infrastructure. The removed supervised host, queue, watchdog and evidence stack has no
+deployment or runtime grants. Roles can be passed only to Lambda and Step
+Functions. The GitHub OIDC trust and authentication-only workflow are unchanged.
 
 The runtime boundary allows QSB data access and the QSB Runpod secret. Workflow
 log-delivery control APIs require regional wildcard resources; these are the
-one runtime control-plane exception. Image authentication and regional
-metadata discovery also require wildcard resources. KMS customer keys require
+one runtime control-plane exception. Regional metadata discovery also requires
+wildcard resources. Runtime identities have no S3, SQS or ECR grants. KMS customer keys require
 separately reviewed grants. This is a project deployment role, not a read-only
 role: deploying code also confers the runtime capabilities of that code.
 
@@ -84,3 +85,13 @@ check, not an IAM enforcement mechanism. It does not restrict direct AWS API
 calls made by another authorized workflow on `main`.
 
 See [GitHub's AWS OIDC guidance](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws).
+
+## Local regression checks
+
+Run `python3 -m unittest discover -s ops/github-aws -p "test_*.py"` to check
+that the removed services stay absent while exact OIDC trust, state protection,
+registered edge/API resources and required pipeline grants remain. These are
+structural policy checks, not a live AWS authorization test. `verify.py` also
+includes explicit denied-service and PassRole cases for a later IAM simulation.
+Changing the renderer does not update already installed roles or boundaries;
+review and apply that administrator-managed policy change separately.
