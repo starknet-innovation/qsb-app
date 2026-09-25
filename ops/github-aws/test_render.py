@@ -83,17 +83,30 @@ class SinglePipelinePolicies(unittest.TestCase):
         self.assertEqual(lock['Action'], ['s3:DeleteObject'])
         self.assertEqual(lock['Resource'], ['arn:aws:s3:::qsb-test-state/qsb/*.tflock'])
 
-    def test_boundary_covers_every_dynamodb_action_the_runtime_policies_allow(self):
+    def test_boundary_covers_every_action_the_runtime_policies_allow(self):
         # A boundary gap is an implicit deny the role policy can't override; this caught ConditionCheckItem.
+        # All three files attach to /qsb/runtime/ roles under the boundary (compute.tf, operator.tf).
         root = Path(__file__).resolve().parents[2]
-        records = self.statement('boundary', 'Records')['Action']
-        for policy in sorted((root / 'terraform/policies').glob('*.json')):
+        policies = sorted((root / 'terraform/policies').glob('*.json'))
+        self.assertEqual({p.name for p in policies},
+                         {'app-records.json', 'coordinator-records.json', 'operator-reconcile-records.json'})
+        allowed = [a.lower() for s in self.policies['boundary']['Statement'] if s['Effect'] == 'Allow'
+                   for a in s['Action']]
+        for policy in policies:
             for statement in json.loads(policy.read_text()):
                 if statement['Effect'] != 'Allow':
                     continue
-                for action in statement['Action']:
-                    if action.startswith('dynamodb:'):
-                        self.assertIn(action, records, f'{policy.name}: {action} is outside qsb-runtime-boundary')
+                actions = statement['Action']
+                for action in [actions] if isinstance(actions, str) else actions:
+                    self.assertTrue(any(fnmatch.fnmatchcase(action.lower(), a) for a in allowed),
+                                    f'{policy.name}: {action} is outside qsb-runtime-boundary')
+
+    def test_cloudfront_discovery_covers_the_managed_policy_lookups(self):
+        # terraform/web.tf resolves the managed policies at plan time; without these grants every plan fails.
+        discovery = self.statement('deploy', 'CloudFrontDiscovery')
+        for action in ('cloudfront:ListCachePolicies', 'cloudfront:GetCachePolicy', 'cloudfront:GetOriginRequestPolicy'):
+            self.assertIn(action, discovery['Action'])
+        self.assertEqual(discovery['Resource'], ['*'])
 
     def test_retained_pipeline_and_boundary_grants(self):
         for service in ('Lambda', 'Dynamodb', 'States', 'Cloudwatch'):

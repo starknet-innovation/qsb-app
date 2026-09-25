@@ -71,6 +71,12 @@ resource "aws_cloudfront_response_headers_policy" "security" {
     }
   }
 }
+# AWS managed policies, resolved at plan time: a wrong name or ID now fails `terraform plan` instead of
+# CreateDistribution mid-apply, as a mistyped hard-coded ID once did. The deploy roles may list and get cache
+# policies but only get origin request policies, so AllViewerExceptHostHeader is looked up by its ID.
+data "aws_cloudfront_cache_policy" "caching_optimized" { name = "Managed-CachingOptimized" }
+data "aws_cloudfront_cache_policy" "caching_disabled" { name = "Managed-CachingDisabled" }
+data "aws_cloudfront_origin_request_policy" "all_viewer_except_host_header" { id = "b689b0a8-53d0-40ab-baf2-68738e2966ac" }
 resource "aws_cloudfront_distribution" "web" {
   enabled             = true
   default_root_object = "index.html"
@@ -98,7 +104,7 @@ resource "aws_cloudfront_distribution" "web" {
     cached_methods         = ["GET", "HEAD"]
     compress               = true
     # AWS managed CachingOptimized.
-    cache_policy_id            = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_optimized.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
   }
   ordered_cache_behavior {
@@ -108,10 +114,8 @@ resource "aws_cloudfront_distribution" "web" {
     allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods         = ["GET", "HEAD"]
     # Managed CachingDisabled and AllViewerExceptHostHeader: preserve auth/cookies/query.
-    # IDs checked against `aws cloudfront list-cache-policies --type managed` (and origin request
-    # policies) on 2026-09-25; a wrong ID fails CreateDistribution with NoSuchCachePolicy.
-    cache_policy_id            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
-    origin_request_policy_id   = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
   }
   restrictions {
