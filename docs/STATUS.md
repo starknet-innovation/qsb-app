@@ -18,9 +18,16 @@ The plan of record is #8, and the first mainnet run is #22. Where this section a
 
 **Solver:**
 - The optimized sm86 candidate is qsb-solver#2. Its release gate is the native sm86 A10G checks of the repaired pinning (pinning, exceptions, curve and memory), plus a matched A10G performance check against `aws-v0.1.0`. The fresh regtest proof search is not required.
-- Measured so far, on the same sm89 GPU (qsb-solver#2): about 76–81% higher round-one and 3–4% higher round-two subset throughput. Pinning is unchanged. Matched A10G numbers are pending.
-- After it merges, the steps are a release from the tested image without rebuilding, enrollment in this repository, and a new job definition. Each needs explicit approval.
-- A vault binds only its QSB configuration, and a withdrawal job pins the solver release that is deployed when the job is created (`src/lib/provenance.ts`). So a deposit can be made at any time, but create the withdrawal only after the optimized release is enrolled.
+- Measured so far (qsb-solver#2): on one sm89 GPU, the earlier sm89 candidate's subset kernel had about 76–81% higher round-one and 3–4% higher round-two throughput than the published `v0.1.0`. These figures are for the subset component only, not a whole-withdrawal estimate, and pinning wasn't benchmarked. The matched A10G check, which covers pinning too, is pending. The 77% and 4–5% figures in the snapshot below are from an earlier 23 September measurement.
+- After it merges, the steps are:
+  1. a release from the tested image, without rebuilding;
+  2. enrollment in this repository;
+  3. copying the image into the `qsb-solver` ECR repository;
+  4. a new `terraform/gpu` job definition revision;
+  5. an app-stack apply that points `batch_job_definition` and `solver_release_id` at them.
+
+  Each step needs explicit approval.
+- A vault binds only its QSB configuration. A withdrawal job pins the release the app is serving when the job is created, which is the deployed `SOLVER_RELEASE_ID` (`src/lib/provenance.ts`, `server/solver-deployment.ts`). So a deposit can be made at any time. Create the withdrawal only once an uncached `GET /api/config` reports the optimized release's `solverReleaseId`. Enrolling the release isn't enough.
 
 **Remaining for #22:**
 - the deposit;
