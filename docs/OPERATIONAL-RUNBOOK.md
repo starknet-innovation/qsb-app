@@ -11,7 +11,7 @@ The checked-in capability limit is `providerGpuLimit: 1` in `server/mainnet-capa
 - `maxConcurrentSearches`: 1
 - `maxGpuWorkers`: 1
 - `minIdleWorkers`: 0
-- The coordinator path uses `server/gpu-spend.json`: `workersMax` 1, `workersMin` 0, `executionTimeoutMs` 900000, and `maxJobGpuSeconds` 172800 (48 GPU-hours per job, reserved across retries and all stages). A 64-hit output is not credited as a finished range. These checks do not start a worker, evaluate the USD ceiling, or authorize a spend.
+- The coordinator path uses `server/gpu-spend.json`: `workersMax` 1, `workersMin` 0, `executionTimeoutMs` 900000, and `maxJobGpuSeconds` 14745600 (4,096 GPU-hours per job, reserved across retries and all stages). A 64-hit output is not credited as a finished range. These checks do not start a worker, evaluate the USD ceiling, or authorize a spend.
 - `costUnit` is `operator-units`. `maxCostUnits` is a positive integer of those units. The operator cost field is not the experimental USD ceiling. A plan that labels the field as USD, or that supplies `vaultUsd`, `feeUsd`, or `gpuUsd` on the runbook, is refused with `CostFieldIsNotUsdCeiling`.
 - The experimental USD limits are vault 10000, fee 1000, and GPU 1000. They are encoded only in `assertExperimentalUsdLimits`. That check cannot run while `release.mainnetEnabled` and `broadcastAuthorized` are false: it throws `UsdLimitCheckClosed` and does not compare amounts. It does not read `maxCostUnits`, approve activation, or authorize a spend.
 - A missing or zero operator cost ceiling is refused. A plan above the concurrency cap is refused. `acceptOperationalRunbook` does not provision workers. `executed`, `provisioned`, and `usdLimitsEvaluated` stay false. `costFieldIsUsdCeiling` stays false.
@@ -58,11 +58,11 @@ Every proposed mainnet spend requires a separate exact-transaction authorization
 ### Coordinator GPU-time allowance
 
 `server/gpu-spend.json` is the bundled source of truth. The selected budget is
-172,800 seconds (48 GPU-hours) per job. Changing it requires review/build/deploy.
+14,745,600 seconds (4,096 GPU-hours) per job. Changing it requires review/build/deploy.
 Before every paid POST, the coordinator atomically saves the greater of cumulative
 reserved seconds and observed compute seconds, plus the submission's timeout
 (currently 900 seconds). It pauses if this would exceed the budget. This permits
-192 worst-case reservations from a fresh job; it does not guarantee a solution.
+16,384 worst-case reservations from a fresh job; it does not guarantee a solution.
 
 Reservations are permanent: short runs, failed/cancelled/timed-out jobs, unknown
 POST outcomes, stage changes and resume requests do not refund or reset them.

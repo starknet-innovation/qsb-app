@@ -50,7 +50,6 @@ import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
-import { gpuSpendLimits } from "../server/gpu-spend";
 const event = { owner: "test", jobId: "test-job", revision: 0 };
 const pk = "OWNER#test",
   sk = "JOB#test-job";
