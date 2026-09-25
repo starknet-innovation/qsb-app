@@ -22,7 +22,7 @@ def main():
     os.close(w);key=b''
     if r!=3:os.dup2(r,3);os.close(r)
     os.set_inheritable(3,True)
-    env={'PATH':'/usr/local/bin:/usr/bin:/bin','LANG':'C.UTF-8','AWS_REGION':'eu-west-1','PYTHONDONTWRITEBYTECODE':'1'}
+    env={'PATH':'/usr/local/bin:/usr/bin:/bin','LANG':'C.UTF-8','AWS_REGION':'eu-west-1','QSB_NETWORK':'mainnet','PYTHONDONTWRITEBYTECODE':'1'}
     if len(sys.argv)==1:
         command=['node','/opt/qsb/dispatcher/dispatcher.cjs']
     elif len(sys.argv)==3 and sys.argv[1]=='watchdog' and re.fullmatch('[a-z0-9]{8,32}',sys.argv[2]):

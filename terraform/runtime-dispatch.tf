@@ -15,7 +15,7 @@ resource "aws_iam_role_policy" "dispatch" {
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = ["logs:CreateLogStream", "logs:PutLogEvents"], Resource = "${aws_cloudwatch_log_group.dispatch[0].arn}:*" },
     { Effect = "Allow", Action = ["dynamodb:GetItem", "dynamodb:Query"], Resource = aws_dynamodb_table.records.arn },
-    { Effect = "Allow", Action = ["dynamodb:PutItem", "dynamodb:DeleteItem"], Resource = aws_dynamodb_table.records.arn, Condition = { "ForAllValues:StringEquals" = { "dynamodb:LeadingKeys" = ["OUTBOX#QSB_DISPATCH"] } } },
+    { Effect = "Allow", Action = ["dynamodb:PutItem", "dynamodb:DeleteItem"], Resource = aws_dynamodb_table.records.arn, Condition = { "ForAllValues:StringEquals" = { "dynamodb:LeadingKeys" = ["SYSTEM#QSB_DISPATCH_OUTBOX"] } } },
     { Effect = "Allow", Action = "sqs:SendMessage", Resource = aws_sqs_queue.dispatch[0].arn }
   ] })
 }
@@ -31,7 +31,7 @@ resource "aws_lambda_function" "dispatch" {
   timeout                        = 60
   memory_size                    = 256
   reserved_concurrent_executions = 1
-  environment { variables = { TABLE_NAME = aws_dynamodb_table.records.name, SUPERVISED_DISPATCH_QUEUE_URL = aws_sqs_queue.dispatch[0].url, SUPERVISED_EXECUTION_ENABLED = "false" } }
+  environment { variables = { TABLE_NAME = aws_dynamodb_table.records.name, QSB_NETWORK = var.network, SUPERVISED_DISPATCH_QUEUE_URL = aws_sqs_queue.dispatch[0].url, SUPERVISED_EXECUTION_ENABLED = "false" } }
   depends_on = [terraform_data.release, aws_iam_role_policy.dispatch]
 }
 resource "aws_cloudwatch_event_rule" "dispatch" {

@@ -37,10 +37,7 @@ export function installSupervisedCreation(
           throw Error("Unexpected delete");
         },
         atomicPut: async (w) =>
-          store.atomicPut([
-            ...w,
-            { row: cap, expected: cap.version, conditionOnly: true },
-          ]),
+          store.atomicPut([...w, { row: cap, expected: cap.version }]),
       };
       const result = await createExplicitJob(
         withCreationOutbox(guarded),

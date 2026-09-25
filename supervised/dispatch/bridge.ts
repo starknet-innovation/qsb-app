@@ -3,7 +3,7 @@ import type { Store, Row } from "../../server/store";
 import { fingerprint } from "../../src/lib/provenance";
 import { dispatchExplicitJob } from "../archive/entry";
 import type { Launcher } from "../archive/work/yukon-mainnet-service-enrollment-20260923/dispatch";
-export const OUTBOX = "OUTBOX#QSB_DISPATCH";
+export const OUTBOX = "SYSTEM#QSB_DISPATCH_OUTBOX";
 export type Ticket = {
   format: "qsb-dispatch-ticket-v1";
   owner: string;
@@ -157,7 +157,7 @@ export async function consumeTicket(
               automaticRelaunchAllowed: false,
             },
           },
-          { row: prior, expected: prior.version, conditionOnly: true },
+          { row: prior, expected: prior.version },
         ]);
       } catch (e) {
         if (!(await store.get(key.pk, key.sk))) throw e;
@@ -194,7 +194,7 @@ export async function consumeTicket(
       if (!inv) throw Error("Unexpected dispatch transaction");
       await store.atomicPut([
         ...writes,
-        { row: enrollment, expected: enrollment.version, conditionOnly: true },
+        { row: enrollment, expected: enrollment.version },
         {
           row: {
             pk,

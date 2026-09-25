@@ -118,7 +118,6 @@ export async function claimHost(store: Store, input: LaunchRequest) {
     ...[job, inv, admission, vault, registry, enrolled.capability].map((row) => ({
       row,
       expected: row.version,
-      conditionOnly: true,
     })),
     {
       row: reserved.authority,
@@ -158,7 +157,7 @@ export async function preserveHostEvidence(
   }
   await store.atomicPut([
     { row: record },
-    { row: current, expected: current.version, conditionOnly: true },
+    { row: current, expected: current.version },
   ]);
   return record;
 }

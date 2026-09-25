@@ -27,7 +27,7 @@ export async function admitInvocation(store:Store,authenticatedOwner:string,inpu
  const reserved=await signingReservations(store,authenticatedOwner,job);
  const enrollment=await enrolledMainnet(store,authenticatedOwner,job,receipt,vaultRow.vault);
  const admission={pk,sk:key,version:0,requestHash:fingerprint(r),request:r,status:'admitted',mainnetRequestHash:job.mainnetRequestHash,runtimeConfigHash:receipt.runtimeConfigHash,capabilityHash:receipt.capabilityHash,jobVersion:jobRow.version+1,executionHash:r.executionHash};
- try{await store.atomicPut([...reserved.reservations.map(reservation=>({row:reservation,expected:reservation.version,conditionOnly:true})),{row:enrollment.capability,expected:enrollment.capability.version,conditionOnly:true},{row:authority,expected:authority.version,conditionOnly:true},{row:admission},{row:{...jobRow,version:jobRow.version+1,job:{...job,status:'starting'}},expected:jobRow.version},{row:receipt,expected:receipt.version,conditionOnly:true},{row:vaultRow,expected:vaultRow.version,conditionOnly:true}]);}
+ try{await store.atomicPut([...reserved.reservations.map(reservation=>({row:reservation,expected:reservation.version,conditionOnly:true})),{row:enrollment.capability,expected:enrollment.capability.version},{row:authority,expected:authority.version,conditionOnly:true},{row:admission},{row:{...jobRow,version:jobRow.version+1,job:{...job,status:'starting'}},expected:jobRow.version},{row:receipt,expected:receipt.version},{row:vaultRow,expected:vaultRow.version}]);}
  catch(e){if(!(e instanceof Conflict))throw e;const raced=await store.get(pk,key);if(!raced||raced.requestHash!==admission.requestHash)throw e;return {created:false,admission:raced};}
  return {created:true,admission};
 }

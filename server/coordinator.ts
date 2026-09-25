@@ -132,7 +132,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
   const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
   if (!vaultRow) throw new Error("VaultNotFound");
   const vault = vaultRow.vault as PublicVault;
-  if ((vault.network ?? "mainnet") !== NETWORK_ID)
+  if (vault.network !== NETWORK_ID)
     throw new Error("VaultNetworkMismatch");
   await chain.assertNetwork();
   if (vault.configuration && !job.solver) throw new Error("SolverPinRequired");

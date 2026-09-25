@@ -6,6 +6,7 @@ mock_provider "aws" {
 variables {
   aws_account_id = "123456789012"
   name           = "qsb-test"
+  network        = "mainnet"
 }
 run "app_role_record_denies" {
   command = plan
@@ -28,6 +29,9 @@ run "app_role_record_denies" {
 }
 run "baseline" {
   command = plan
+  variables {
+    network = "mainnet"
+  }
   assert {
     condition     = output.transactions_enabled == false && output.runpod_configured == false
     error_message = "Baseline must not activate transactions or configure paid compute."
@@ -56,17 +60,24 @@ run "reject_network_mismatch" {
 }
 run "reject_partial_compute_config" {
   command = plan
-  variables { runpod_endpoint_id = "exampleendpoint" }
+  variables {
+    network            = "mainnet"
+    runpod_endpoint_id = "exampleendpoint"
+  }
   expect_failures = [terraform_data.release]
 }
 run "reject_wrong_commit" {
   command = plan
-  variables { source_commit = "0000000000000000000000000000000000000000" }
+  variables {
+    network       = "mainnet"
+    source_commit = "0000000000000000000000000000000000000000"
+  }
   expect_failures = [terraform_data.release]
 }
 run "reject_mainnet_supervised_runtime" {
   command = plan
   variables {
+    network                   = "mainnet"
     provision_runtime         = true
     runtime_ami_id            = "ami-0123456789abcdef0"
     runtime_ami_owner         = "123456789012"

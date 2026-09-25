@@ -278,7 +278,7 @@ export async function admitSupervisedJob(
           vout: point.vout,
         })),
       )),
-      { row: capability, expected: capability.version, conditionOnly: true },
+      { row: capability, expected: capability.version },
     ]);
   } catch (error) {
     const rejected = guardRejection(error);
@@ -381,9 +381,9 @@ export async function claimAdmittedLaunch(
       atomicPut: (writes) =>
         store.atomicPut([
           ...writes,
-          { row: capability, expected: capability.version, conditionOnly: true },
+          { row: capability, expected: capability.version },
           { row: authority, expected: authority.version, conditionOnly: true },
-          { row: vaultRow, expected: vaultRow.version, conditionOnly: true },
+          { row: vaultRow, expected: vaultRow.version },
           {
             row: fundingReservation,
             expected: fundingReservation.version,

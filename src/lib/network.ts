@@ -2,12 +2,12 @@ import * as btc from "@scure/btc-signer";
 
 export type NetworkId = "mainnet" | "testnet4";
 export function parseNetwork(value: string | undefined): NetworkId {
-  if (value === undefined || value === "mainnet") return "mainnet";
-  if (value === "testnet4") return "testnet4";
+  if (value === "mainnet" || value === "testnet4") return value;
   throw new Error("Unsupported QSB network configuration");
 }
 // Vite replaces the browser environment at build time. Lambda uses only its
 // explicit process environment; neither accepts a network supplied by a request.
+// An omitted value throws. Callers set mainnet or testnet4 explicitly.
 const configured = import.meta.env?.VITE_QSB_NETWORK ??
   (typeof process !== "undefined" ? process.env.QSB_NETWORK : undefined);
 export const NETWORK_ID = parseNetwork(configured);

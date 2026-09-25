@@ -22,7 +22,7 @@ export async function createExplicitJob(store:Store,owner:string,body:unknown,va
  if(manifest.helper.txid.toLowerCase()===manifest.funding.txid.toLowerCase()&&manifest.helper.vout===manifest.funding.vout)throw Error('Duplicate outpoint');
  await validate(owner,structuredClone(vault),structuredClone(manifest));
  const now=new Date().toISOString(),job={id:manifest.idempotencyKey,owner,vaultId:manifest.vaultId,manifest,manifestHash,execution,mainnetRequest,mainnetRequestHash,reservationAuthorityGeneration:authorityGeneration,createdAt:now,updatedAt:now,status:'queued',stage:'pinning',attempt:0,computeSeconds:0,revision:0};
- try{await store.atomicPut([{row:{pk,sk,version:0,job}},...(await canonicalReservationWrites(store,['funding','helper'].map(key=>{const point=manifest[key as 'funding'|'helper'];return{owner,jobId:job.id,txid:point.txid,vout:point.vout};}))),{row:vaultRow,expected:vaultRow.version,conditionOnly:true}]);}
+ try{await store.atomicPut([{row:{pk,sk,version:0,job}},...(await canonicalReservationWrites(store,['funding','helper'].map(key=>{const point=manifest[key as 'funding'|'helper'];return{owner,jobId:job.id,txid:point.txid,vout:point.vout};}))),{row:vaultRow,expected:vaultRow.version}]);}
  catch(error){if(!(error instanceof Conflict))throw error;const raced=await store.get(pk,sk);if(raced&&(raced.job as any).reservationAuthorityGeneration===authorityGeneration&&(raced.job as any).mainnetRequestHash===mainnetRequestHash&&(raced.job as any).manifestHash===manifestHash&&fingerprint((raced.job as any).execution)===fingerprint(execution)){routeStoredJob(raced.job as any,vault);return{created:false,job:raced.job};}throw error;}
  return{created:true,job};
 }
@@ -44,7 +44,7 @@ export async function dispatchExplicitJob(store:Store,owner:string,jobId:string,
  if(prior){if(!matches(prior))throw Error('Invocation binding differs');return {receipt:prior,launched:false};}
  const invocationId=hash(pk+':'+jobKey+':'+executionHash),request={owner,jobId,jobRowVersion:row.version+1,executionHash,invocationId};
  const claim:Row={pk,sk:receiptKey,version:1,status:'dispatching',capabilityHash:fingerprint(cap),runtimeConfig:configured,runtimeConfigHash:fingerprint(configured),mainnetRequestHash:job.mainnetRequestHash,owner,jobId,executionHash,invocationId,request:JSON.stringify(request)};
- try{await store.atomicPut([{row:{...row,version:row.version+1},expected:row.version},{row:vaultRow,expected:vaultRow.version,conditionOnly:true},{row:authority,expected:authority.version,conditionOnly:true},{row:cap,expected:cap.version,conditionOnly:true},...reserved.reservations.map(reservation=>({row:reservation,expected:reservation.version,conditionOnly:true})),{row:claim}]);}
+ try{await store.atomicPut([{row:{...row,version:row.version+1},expected:row.version},{row:vaultRow,expected:vaultRow.version},{row:authority,expected:authority.version,conditionOnly:true},{row:cap,expected:cap.version},...reserved.reservations.map(reservation=>({row:reservation,expected:reservation.version,conditionOnly:true})),{row:claim}]);}
  catch(error){if(!(error instanceof Conflict))throw error;const raced=await store.get(pk,receiptKey);if(!raced||!matches(raced))throw error;return{receipt:raced,launched:false};}
  let acknowledgement;
  try{acknowledgement=await launch(structuredClone(request));if(acknowledgement?.accepted!==true||acknowledgement.invocationId!==invocationId||acknowledgement.executionHash!==executionHash)throw Error('Unbound launch acknowledgement');}
