@@ -248,6 +248,7 @@ run "reject_solver_release_not_selected_by_build" {
 }
 run "solver_release_shared_from_build" {
   command = plan
+  variables { network = "mainnet" }
   assert {
     condition     = aws_lambda_function.api.environment[0].variables.SOLVER_RELEASE_ID == local.solver_release_id && aws_lambda_function.coordinator.environment[0].variables.SOLVER_RELEASE_ID == local.solver_release_id
     error_message = "API admission and coordinator must consume the same generated build identity."
@@ -323,6 +324,7 @@ run "reject_provider_bucket_wildcard" {
 run "reject_changed_solver_selection_including_omission" {
   command = plan
   variables {
+    network           = "mainnet"
     solver_release_id = try(jsondecode(file(".build/manifest.json")).identities.solver.id, "") == "" ? "not-selected-by-build" : ""
   }
   expect_failures = [terraform_data.release]
