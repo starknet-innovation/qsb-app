@@ -2,6 +2,7 @@
 
 These inspect policy structure; use verify.py for AWS IAM simulation.
 """
+import json
 import unittest
 import fnmatch
 import re
@@ -81,6 +82,18 @@ class SinglePipelinePolicies(unittest.TestCase):
         lock = self.statement('deploy', 'StateLocks')
         self.assertEqual(lock['Action'], ['s3:DeleteObject'])
         self.assertEqual(lock['Resource'], ['arn:aws:s3:::qsb-test-state/qsb/*.tflock'])
+
+    def test_boundary_covers_every_dynamodb_action_the_runtime_policies_allow(self):
+        # A boundary gap is an implicit deny the role policy can't override; this caught ConditionCheckItem.
+        root = Path(__file__).resolve().parents[2]
+        records = self.statement('boundary', 'Records')['Action']
+        for policy in sorted((root / 'terraform/policies').glob('*.json')):
+            for statement in json.loads(policy.read_text()):
+                if statement['Effect'] != 'Allow':
+                    continue
+                for action in statement['Action']:
+                    if action.startswith('dynamodb:'):
+                        self.assertIn(action, records, f'{policy.name}: {action} is outside qsb-runtime-boundary')
 
     def test_retained_pipeline_and_boundary_grants(self):
         for service in ('Lambda', 'Dynamodb', 'States', 'Cloudwatch'):
