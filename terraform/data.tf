@@ -5,7 +5,8 @@ variable "build_manifest_path" {
 }
 locals {
   artifacts         = "${path.module}/.build"
-  build             = jsondecode(file(var.build_manifest_path != null ? var.build_manifest_path : "${local.artifacts}/manifest.json"))
+  build             = jsondecode(file("${local.artifacts}/manifest.json"))
+  checked_build     = var.build_manifest_path != null ? jsondecode(file(var.build_manifest_path)) : local.build
   workflow_arn      = "arn:${data.aws_partition.current.partition}:states:${var.region}:${var.aws_account_id}:stateMachine:${var.name}-withdrawal"
   solver_release_id = try(local.build.identities.solver.id, "")
   compute           = var.batch_job_queue != "" && var.batch_job_definition != "" && var.batch_job_bucket != ""
@@ -31,7 +32,7 @@ resource "terraform_data" "release" {
       error_message = "Rebuild from the requested clean commit and matching network before deployment."
     }
     precondition {
-      condition     = var.solver_release_id == local.solver_release_id && try(local.build.identities.reference.appCommit == var.source_commit && local.build.identities.reference.artifact == "reference.zip" && local.build.identities.reference.sha256 == local.build.files["reference.zip"], false)
+      condition     = var.solver_release_id == local.solver_release_id && try(local.checked_build.commit == local.build.commit && local.checked_build.identities.solver == local.build.identities.solver && local.checked_build.identities.reference.appCommit == var.source_commit && local.checked_build.identities.reference.artifact == "reference.zip" && local.checked_build.identities.reference.sha256 == local.build.files["reference.zip"], false)
       error_message = "Rebuild with the selected --solver-release and matching CPU artifact; deployment identities must come from that build."
     }
     precondition {

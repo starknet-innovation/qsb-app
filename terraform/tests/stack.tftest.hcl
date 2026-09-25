@@ -338,3 +338,12 @@ run "reject_reference_identity_mismatch" {
   }
   expect_failures = [terraform_data.release]
 }
+
+run "reject_manifest_solver_override" {
+  command = plan
+  variables {
+    network = "mainnet"
+    build_manifest_path = ".build/test-bad-solver.json"
+  }
+  expect_failures = [terraform_data.release]
+}

@@ -51,10 +51,10 @@ jobs:
           terraform_wrapper: false
       - name: Validate single-pipeline Terraform without AWS credentials
         run: |
-          terraform -chdir=terraform init -backend=false -input=false
+          terraform -chdir=terraform init -backend=false -input=false -lockfile=readonly
           terraform -chdir=terraform fmt -check
           terraform -chdir=terraform validate
-          terraform -chdir=terraform/gpu init -backend=false -input=false
+          terraform -chdir=terraform/gpu init -backend=false -input=false -lockfile=readonly
           terraform -chdir=terraform/gpu validate
           terraform -chdir=terraform/gpu fmt -check
           node --import tsx terraform/scripts/review-fixtures.mjs
@@ -68,6 +68,8 @@ jobs:
 
       - name: Test explicitly selected solver deployment identities
         run: |
+          git status --porcelain
+          test -z "$(git status --porcelain)"
           node terraform/scripts/build.mjs --network=mainnet --solver-release="$(node -p 'require("./src/lib/releases/qsb-solver-aws-v0-1-0.json").id')"
           node --import tsx terraform/scripts/review-fixtures.mjs
           terraform -chdir=terraform test -json -verbose -var="source_commit=$(git rev-parse HEAD)" > /tmp/qsb-terraform-selected-test.jsonl

@@ -10,6 +10,9 @@ const descriptor = JSON.parse(readFileSync(new URL('../../src/lib/releases/qsb-s
 const badReference = structuredClone(build);
 badReference.identities.reference.sha256 = '0'.repeat(64);
 save('test-bad-reference.json', badReference);
+const badSolver = structuredClone(build);
+badSolver.identities.solver = { id: 'override-must-not-select-a-solver' };
+save('test-bad-solver.json', badSolver);
 const gpu = structuredClone(build);
 gpu.testFixtureOnly = 'Mock plan input; not deployment evidence';
 gpu.identities = buildIdentities(descriptor.id, build.commit, build.files['reference.zip']);
