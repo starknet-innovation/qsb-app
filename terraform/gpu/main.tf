@@ -46,6 +46,30 @@ variable "image" {
   }
 
 }
+variable "release_manifest_path" {
+  type        = string
+  description = "Path to the generated app terraform/.build/manifest.json; never a hand-edited deployment identity."
+}
+locals {
+  release_build = jsondecode(file(var.release_manifest_path))
+}
+resource "terraform_data" "release_identity" {
+  input = local.release_build
+  lifecycle {
+    precondition {
+      condition     = try(local.release_build.clean && local.release_build.commit == var.source_commit && local.release_build.identities.reference.appCommit == var.source_commit, false)
+      error_message = "Use a generated clean app build matching source_commit."
+    }
+    precondition {
+      condition = try(
+        can(regex("^ghcr\\.io/starknet-innovation/qsb-solver@sha256:[a-f0-9]{64}$", local.release_build.identities.solver.image)) &&
+        var.image == "${var.aws_account_id}.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", local.release_build.identities.solver.image)[1]}",
+        false
+      )
+      error_message = "GPU image must preserve the enrolled producer manifest digest from the app build."
+    }
+  }
+}
 variable "gpu_ami" {
   type        = string
   default     = "ami-05db4db06e751ab89"
@@ -309,6 +333,7 @@ resource "aws_batch_job_queue" "gpu" {
 
 }
 resource "aws_batch_job_definition" "solver" {
+  depends_on = [terraform_data.release_identity]
 
   name                  = "qsb-gpu-solver"
   type                  = "container"

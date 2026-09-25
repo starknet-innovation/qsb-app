@@ -2,6 +2,7 @@ mock_provider "aws" {}
 mock_provider "archive" {}
 
 variables {
+  release_manifest_path        = "tests/fixtures/build-identities.json"
   aws_account_id               = "123456789012"
   gpu_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-gpu-boundary"
   source_commit                = "0000000000000000000000000000000000000000"
@@ -43,4 +44,15 @@ run "reject_other_policy_path" {
   command = plan
   variables { gpu_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb-gpu-boundary" }
   expect_failures = [var.gpu_permissions_boundary_arn]
+}
+
+run "reject_solver_digest_mismatch" {
+  command = plan
+  variables { image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@sha256:1111111111111111111111111111111111111111111111111111111111111111" }
+  expect_failures = [terraform_data.release_identity]
+}
+run "reject_app_source_mismatch" {
+  command = plan
+  variables { source_commit = "1111111111111111111111111111111111111111" }
+  expect_failures = [terraform_data.release_identity]
 }

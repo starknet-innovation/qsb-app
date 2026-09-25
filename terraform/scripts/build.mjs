@@ -9,6 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 process.chdir(root);
 const network = process.argv.find(x=>x.startsWith('--network='))?.split('=')[1];
 if (network !== 'mainnet' && network !== 'testnet4') throw Error('Set --network=mainnet or --network=testnet4');
+const solverId = process.argv.find(x=>x.startsWith('--solver-release='))?.slice('--solver-release='.length) || '';
 const commit = execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
 const clean = !execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim();
 if (!clean && !process.argv.includes('--allow-dirty')) throw Error('Commit changes first; --allow-dirty is for local validation only and cannot pass the Terraform release gate.');
@@ -27,14 +28,20 @@ for (const [name,entry] of [['api','server/lambda.ts'],['coordinator','server/co
 execFileSync('node',[path.join(root,'consensus/build.mjs'),path.join(out,'api/native')],{stdio:'inherit'});
 execFileSync('node',[path.join(root,'consensus/test-linux.mjs'),path.join(out,'api/native')],{stdio:'inherit'});
 mkdirSync(path.join(out,'reference'));
-for (const name of readdirSync('worker/cpu').filter(n=>n.endsWith('.py') || n==='LICENSE')) cpSync(path.join('worker/cpu',name),path.join(out,'reference',name));
+const referenceFiles = JSON.parse(execFileSync(process.execPath, ['--import','tsx','--input-type=module','-e',
+  'import { referenceFiles } from "./server/build-identities.ts"; process.stdout.write(JSON.stringify(referenceFiles(process.cwd())));'
+], {encoding:'utf8'}));
+for (const source of referenceFiles) cpSync(source,path.join(out,'reference',path.basename(source)));
 execFileSync('python3',[path.join(root,'terraform/scripts/zip.py'),out],{stdio:'inherit'});
 const walk=(dir,prefix='')=>readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(dir,e.name),prefix+e.name+'/'):[prefix+e.name]);
 const frontendFiles=walk(path.join(out,'frontend')).sort();
 const files={};
 for(const n of ['api.zip','coordinator.zip','reference.zip',...frontendFiles.map(n=>'frontend/'+n)]) files[n]=createHash('sha256').update(readFileSync(path.join(out,n))).digest('hex');
+const identities = JSON.parse(execFileSync(process.execPath, ['--import','tsx','--input-type=module','-e',
+  'import { buildIdentities } from "./server/build-identities.ts"; process.stdout.write(JSON.stringify(buildIdentities(...JSON.parse(process.env.QSB_BUILD_IDENTITIES_INPUT))));'
+], {encoding:'utf8', env:{...process.env,QSB_BUILD_IDENTITIES_INPUT:JSON.stringify([solverId,commit,files['reference.zip']])}}));
 const after=execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim();
 // Dependency preparation must not silently modify tracked source.
 if(clean && after) throw Error('Build changed tracked source; review and rebuild from a clean commit');
-writeFileSync(path.join(out,'manifest.json'),JSON.stringify({commit,clean,network,mainnetEnabledDefault:false,files,frontend_files:frontendFiles},null,2)+'\n');
+writeFileSync(path.join(out,'manifest.json'),JSON.stringify({commit,clean,network,mainnetEnabledDefault:false,identities,files,frontend_files:frontendFiles},null,2)+'\n');
 console.log(`Prepared ${network} artifacts for ${commit}; clean=${clean}. No cloud changes.`);

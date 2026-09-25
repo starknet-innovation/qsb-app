@@ -235,15 +235,19 @@ run "exact_submit_reject_testnet" {
   expect_failures = [var.exact_submit_enabled, terraform_data.release]
 }
 
-run "solver_release_shared_by_api_and_coordinator" {
+run "reject_solver_release_not_selected_by_build" {
   command = plan
   variables {
     solver_release_id = "qsb-reviewed-release"
     network           = "mainnet"
   }
+  expect_failures = [terraform_data.release]
+}
+run "solver_release_shared_from_build" {
+  command = plan
   assert {
-    condition     = aws_lambda_function.api.environment[0].variables.SOLVER_RELEASE_ID == "qsb-reviewed-release" && aws_lambda_function.coordinator.environment[0].variables.SOLVER_RELEASE_ID == "qsb-reviewed-release"
-    error_message = "API admission and coordinator must use the same deployment release."
+    condition     = aws_lambda_function.api.environment[0].variables.SOLVER_RELEASE_ID == local.solver_release_id && aws_lambda_function.coordinator.environment[0].variables.SOLVER_RELEASE_ID == local.solver_release_id
+    error_message = "API admission and coordinator must consume the same generated build identity."
   }
 }
 

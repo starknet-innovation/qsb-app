@@ -1,0 +1,14 @@
+{
+  "testFixtureOnly": "Synthetic mocked plan identity; not an attestation or deployment build",
+  "commit": "0000000000000000000000000000000000000000",
+  "clean": true,
+  "identities": {
+    "solver": {
+      "id": "test-only-release",
+      "image": "ghcr.io/starknet-innovation/qsb-solver@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "reference": {
+      "appCommit": "0000000000000000000000000000000000000000"
+    }
+  }
+}

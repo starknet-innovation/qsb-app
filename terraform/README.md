@@ -134,8 +134,9 @@ provider credential grant, not record or workflow authority.
 
 ### Served solver release
 
-Set `solver_release_id` only to an enrolled schema-v3 descriptor matching the
-endpoint's immutable image. Terraform passes the same `SOLVER_RELEASE_ID` to API
+Build with `node terraform/scripts/build.mjs --network=mainnet --solver-release=RELEASE_ID`, using the enrolled schema-v3 producer descriptor. The existing generated `.build/manifest.json` records its canonical image digest, solver repository commit and descriptor hash alongside the actual CPU `reference.zip` digest and app commit. These are two repository commits after the solver split; they are not claimed to be one source tree. Without `--solver-release`, the generated selection is null and no solver is served.
+
+Set `solver_release_id` to that exact generated ID (or leave it empty for an unconfigured build). Terraform rejects a selection different from the build and verifies the CPU artifact identity. It reads the same generated `SOLVER_RELEASE_ID` for API
 and coordinator. Empty, unsupported, unbound or mismatched releases refuse new
 job admission before outpoint reservations. Omitted request IDs select this
 deployment release, not the archived placeholder. The coordinator rechecks the
