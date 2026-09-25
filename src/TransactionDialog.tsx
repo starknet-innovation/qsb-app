@@ -224,26 +224,35 @@ export default function TransactionDialog({
           wallet.address,
         );
         check();
-        const funded = await fundFromXverse(
-          wallet.address,
-          base64.encode(expected.toPSBT()),
-          inputs.map((_, i) => i),
-          (txid) => rememberFunding({ txid: txid ?? "", amount: amountSats.toString() }),
-        );
-        check();
-        const signed = verifySignedPsbt(expected, base64.decode(funded.psbt));
-        for (let i = 0; i < signed.inputsLength; i++) {
-          const input = signed.getInput(i);
-          if (!input.finalScriptWitness?.length && !input.finalScriptSig?.length) signed.finalizeIdx(i);
+        let broadcastReported = false;
+        try {
+          const funded = await fundFromXverse(
+            wallet.address,
+            base64.encode(expected.toPSBT()),
+            inputs.map((_, i) => i),
+            (txid) => {
+              broadcastReported = true;
+              rememberFunding({ txid: txid ?? "", amount: amountSats.toString() });
+            },
+          );
+          check();
+          const signed = verifySignedPsbt(expected, base64.decode(funded.psbt));
+          for (let i = 0; i < signed.inputsLength; i++) {
+            const input = signed.getInput(i);
+            if (!input.finalScriptWitness?.length && !input.finalScriptSig?.length) signed.finalizeIdx(i);
+          }
+          if (signed.id !== funded.txid.toLowerCase())
+            throw Error("Xverse reported a different funding transaction.");
+          const broadcast = {
+            txid: signed.id,
+            amount: amountSats.toString(),
+          };
+          await recordFunding(broadcast.txid, broadcast.amount);
+        } catch (error) {
+          if (!broadcastReported) throw error;
+          const detail = error instanceof Error ? error.message.replace(" No transaction was submitted.", "") : "Verification or recording failed.";
+          throw Error(`Deposit sent, not verified or recorded. Do not deposit again. ${detail}`);
         }
-        if (signed.id !== funded.txid.toLowerCase())
-          throw Error("Xverse reported a different funding transaction.");
-        const broadcast = {
-          txid: signed.id,
-          amount: amountSats.toString(),
-        };
-        rememberFunding(broadcast);
-        await recordFunding(broadcast.txid, broadcast.amount);
       },
     );
   }
