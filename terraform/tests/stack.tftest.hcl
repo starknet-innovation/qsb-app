@@ -77,3 +77,15 @@ run "reject_mainnet_supervised_runtime" {
   }
   expect_failures = [terraform_data.release]
 }
+
+run "ci_runtime_roles_are_bounded" {
+  command = plan
+  variables {
+    iam_role_path                = "/qsb/runtime/"
+    iam_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary"
+  }
+  assert {
+    condition     = alltrue([for role in aws_iam_role.lambda : role.path == "/qsb/runtime/" && role.permissions_boundary == var.iam_permissions_boundary_arn]) && aws_iam_role.workflow.path == "/qsb/runtime/" && aws_iam_role.workflow.permissions_boundary == var.iam_permissions_boundary_arn
+    error_message = "CI-created Lambda and workflow roles must keep the required path and boundary."
+  }
+}

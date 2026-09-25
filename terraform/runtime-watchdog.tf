@@ -1,7 +1,9 @@
 resource "aws_iam_role" "watchdog" {
-  count              = local.runtime_count
-  name               = "${var.name}-cleanup-watchdog"
-  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "lambda.amazonaws.com" }, Action = "sts:AssumeRole" }] })
+  path                 = var.iam_role_path
+  permissions_boundary = var.iam_permissions_boundary_arn
+  count                = local.runtime_count
+  name                 = "${var.name}-cleanup-watchdog"
+  assume_role_policy   = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "lambda.amazonaws.com" }, Action = "sts:AssumeRole" }] })
 }
 resource "aws_cloudwatch_log_group" "watchdog" {
   count             = local.runtime_count
