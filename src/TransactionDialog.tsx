@@ -90,6 +90,7 @@ export default function TransactionDialog({
     [amount, setAmount] = useState(""),
     [fee, setFee] = useState(""),
     [destination, setDestination] = useState(wallet.address),
+    [solverId, setSolverId] = useState<string | null>(null),
     [accepted, setAccepted] = useState(false),
     [file, setFile] = useState(""),
     [pass, setPass] = useState(""),
@@ -188,6 +189,13 @@ export default function TransactionDialog({
     generation.current++;
     dialog.current?.showModal();
     setPendingFunding(readFundingGuard());
+    if (!job && !supervisedSearch && !deposit) {
+      const active = generation.current;
+      api<{solverReleaseId?: string | null}>("/config").then(config => {
+        if (active === generation.current)
+          setSolverId(typeof config.solverReleaseId === "string" ? config.solverReleaseId : null);
+      }).catch(() => { if (active === generation.current) setSolverId(null); });
+    }
     if (!job)
       api<{ utxos: Point[] }>("/payment-utxos")
         .then((x) => setPoints(x.utxos))
@@ -352,6 +360,16 @@ export default function TransactionDialog({
             JSON.parse(unlocked.authorization.manifestJson),
           )
         : undefined;
+      let selectedSolver = previousIntent?.solverReleaseId;
+      if (!supervisedSearch) {
+        const config = await api<{solverReleaseId?: string | null}>("/config");
+        check();
+        if (!config.solverReleaseId || config.solverReleaseId !== solverId)
+          throw Error("The deployment solver is unavailable or changed. Reopen the withdrawal before saving an intent.");
+        if (previousIntent && previousIntent.solverReleaseId !== config.solverReleaseId)
+          throw Error("The saved intent uses a different solver. Keep its backup and contact the operator; do not create a new intent.");
+        selectedSolver = config.solverReleaseId;
+      }
       const manifest: Withdrawal = {
         vaultId: vault.id,
         funding,
@@ -362,6 +380,7 @@ export default function TransactionDialog({
         fee: feeSats.toString(),
         idempotencyKey: previousIntent?.idempotencyKey || crypto.randomUUID(),
         costAccepted: true,
+        ...(!supervisedSearch && selectedSolver ? { solverReleaseId: selectedSolver } : {}),
       };
       const manifestJson = JSON.stringify(withdrawalSchema.parse(manifest)),
         manifestHash = await digest(manifestJson),
@@ -704,6 +723,12 @@ export default function TransactionDialog({
                       value={destination}
                       onChange={(e) => setDestination(e.target.value)}
                     />
+                  </label>
+                )}
+                {!deposit && !supervisedSearch && (
+                  <label>
+                    Solver release
+                    <input value={solverId || "No runnable solver is configured"} readOnly />
                   </label>
                 )}
                 <label>

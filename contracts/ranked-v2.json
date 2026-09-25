@@ -1,0 +1,199 @@
+{
+  "searchVersion": "ranked-v2",
+  "cases": [
+    {
+      "stage": "pinning",
+      "attempt": 0,
+      "range": {
+        "version": "ranked-v2",
+        "start": "0",
+        "count": 19913600000,
+        "sequence": 2147483648,
+        "sequenceCount": 16,
+        "locktime": 500000000
+      }
+    },
+    {
+      "stage": "pinning",
+      "attempt": 1,
+      "range": {
+        "version": "ranked-v2",
+        "start": "19913600000",
+        "count": 19913600000,
+        "sequence": 2147483664,
+        "sequenceCount": 16,
+        "locktime": 500000000
+      }
+    },
+    {
+      "stage": "pinning",
+      "attempt": 73,
+      "range": {
+        "version": "ranked-v2",
+        "start": "1453692800000",
+        "count": 19913600000,
+        "sequence": 2147484816,
+        "sequenceCount": 16,
+        "locktime": 500000000
+      }
+    },
+    {
+      "stage": "pinning",
+      "attempt": 74,
+      "range": {
+        "version": "ranked-v2",
+        "start": "1473606400000",
+        "count": 19913600000,
+        "sequence": 2147484832,
+        "sequenceCount": 16,
+        "locktime": 500000000
+      }
+    },
+    {
+      "stage": "pinning",
+      "attempt": 75,
+      "range": {
+        "version": "ranked-v2",
+        "start": "1493520000000",
+        "count": 19913600000,
+        "sequence": 2147484848,
+        "sequenceCount": 16,
+        "locktime": 500000000
+      }
+    },
+    {
+      "stage": "pinning",
+      "attempt": 76,
+      "range": {
+        "version": "ranked-v2",
+        "start": "1513433600000",
+        "count": 19913600000,
+        "sequence": 2147484864,
+        "sequenceCount": 16,
+        "locktime": 500000000
+      }
+    },
+    {
+      "stage": "pinning",
+      "attempt": 134217726,
+      "range": {
+        "version": "ranked-v2",
+        "start": "2672758108473600000",
+        "count": 19913600000,
+        "sequence": 4294967264,
+        "sequenceCount": 16,
+        "locktime": 500000000
+      }
+    },
+    {
+      "stage": "pinning",
+      "attempt": 134217727,
+      "range": {
+        "version": "ranked-v2",
+        "start": "2672758128387200000",
+        "count": 19913600000,
+        "sequence": 4294967280,
+        "sequenceCount": 16,
+        "locktime": 500000000
+      }
+    },
+    {
+      "stage": "round1",
+      "attempt": 0,
+      "range": {
+        "version": "ranked-v2",
+        "start": "0",
+        "count": 17179869184
+      }
+    },
+    {
+      "stage": "round1",
+      "attempt": 1,
+      "range": {
+        "version": "ranked-v2",
+        "start": "17179869184",
+        "count": 17179869184
+      }
+    },
+    {
+      "stage": "round1",
+      "attempt": 4827,
+      "range": {
+        "version": "ranked-v2",
+        "start": "82927228551168",
+        "count": 17179869184
+      }
+    },
+    {
+      "stage": "round1",
+      "attempt": 4828,
+      "range": {
+        "version": "ranked-v2",
+        "start": "82944408420352",
+        "count": 2704928748
+      }
+    },
+    {
+      "stage": "round2",
+      "attempt": 0,
+      "range": {
+        "version": "ranked-v2",
+        "start": "0",
+        "count": 17179869184
+      }
+    },
+    {
+      "stage": "round2",
+      "attempt": 1,
+      "range": {
+        "version": "ranked-v2",
+        "start": "17179869184",
+        "count": 17179869184
+      }
+    },
+    {
+      "stage": "round2",
+      "attempt": 4827,
+      "range": {
+        "version": "ranked-v2",
+        "start": "82927228551168",
+        "count": 17179869184
+      }
+    },
+    {
+      "stage": "round2",
+      "attempt": 4828,
+      "range": {
+        "version": "ranked-v2",
+        "start": "82944408420352",
+        "count": 2704928748
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "stage": "pinning",
+      "attempt": 134217728
+    },
+    {
+      "stage": "round1",
+      "attempt": 4829
+    },
+    {
+      "stage": "round2",
+      "attempt": 4829
+    },
+    {
+      "stage": "other",
+      "attempt": 0
+    },
+    {
+      "stage": "round1",
+      "attempt": -1
+    },
+    {
+      "stage": "round1",
+      "attempt": 1.5
+    }
+  ]
+}

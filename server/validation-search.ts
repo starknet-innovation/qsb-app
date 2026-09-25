@@ -1,4 +1,4 @@
-import { assertSolverPin, solverRelease } from "../src/lib/provenance";
+import { assertPaidSolverContract, assertSolverPin, solverRelease } from "../src/lib/provenance";
 /** Operator-created regtest jobs only. No browser/API route can create these records. */
 import { z } from "zod";
 import type { Row, Store } from "./store";
@@ -113,7 +113,6 @@ export async function validationTick(
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
   if (
     selected.searchVersion !== searchVersion ||
-    selected.kernelCommit !== release.kernelCommit ||
     selected.generatorCommit !== release.qsbCommit
   )
     throw new Error("SolverRuntimeMismatch");
@@ -149,7 +148,7 @@ export async function validationTick(
         stage: z.string(),
         manifestHash: z.string(),
         attempt: z.number().int(),
-        kernelCommit: z.literal(release.kernelCommit),
+        kernelCommit: z.literal(selected.kernelCommit),
         checkpoint: z.string(),
         candidates: z.array(z.string().max(16384)).max(32),
         workRange: z.record(z.string(), z.unknown()),
@@ -334,7 +333,7 @@ export async function validationTick(
   job.attempt = state.nextAttempt;
   await save();
   if (state.active.length >= state.slots) return finish(false);
-  const retryAttempt = state.retry.shift();
+  const retryAttempt = state.retry[0];
   let attempt: number;
   if (retryAttempt !== undefined) {
     attempt = retryAttempt;
@@ -382,12 +381,15 @@ export async function validationTick(
       .parse(await cpu({ ...input, action: "export" }));
     await save();
   }
+  assertPaidSolverContract(selected);
+  const submit = await runpod.prepareRun(selected.image);
   if (retryAttempt === undefined) state.nextAttempt++;
+  else state.retry.shift();
   const unit: { attempt: number; id?: string } = { attempt };
   state.active.push(unit);
   job.status = "searching";
   await save(); // A crash after this point pauses; it never duplicates paid work.
-  const response = await runpod.run({
+  const response = await submit({
     protocol: selected.protocol,
     kernelCommit: selected.kernelCommit,
     manifestHash: job.manifestHash,

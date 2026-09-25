@@ -8,6 +8,10 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   cpu: vi.fn(),
 }));
+vi.mock("../src/lib/releases/registry.generated", async () => {
+  const { servedFixture, otherFixture } = await import("./solver-fixture");
+  return {default:[servedFixture,otherFixture]};
+});
 vi.mock("../server/gpu-spend", async (importOriginal) => {
   const actual = await importOriginal<any>();
   return {
@@ -47,6 +51,9 @@ vi.mock("@aws-sdk/client-lambda", () => ({
     constructor(public input: any) {}
   },
 }));
+import { createHash } from "node:crypto";
+import { fixtureVault } from "./solver-fixture";
+import { pinSolver } from "../src/lib/provenance";
 import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job } from "../src/lib/model";
@@ -67,6 +74,7 @@ async function seed(extra: Partial<Job> = {}) {
     gpuBudgetReservedSeconds: 0,
     manifestHash: "a".repeat(64),
     manifest: {},
+    solver: pinSolver(fixtureVault, "served-test"),
     ...extra,
   } as Job;
   await store.put({ pk, sk, version: 0, job });
@@ -74,13 +82,14 @@ async function seed(extra: Partial<Job> = {}) {
     pk,
     sk: "VAULT#v",
     version: 0,
-    vault: { publicStateJson: "{}", network: "mainnet" },
+    vault: fixtureVault,
   });
 }
 beforeEach(() => {
   mocks.enabled = true;
   (store as MemoryStore).rows.clear();
   vi.clearAllMocks();
+  process.env.SOLVER_RELEASE_ID = "served-test";
   process.env.RUNPOD_SECRET_ARN = "test-arn";
   process.env.RUNPOD_ENDPOINT_ID = "test-endpoint";
   process.env.REFERENCE_FUNCTION = "test-reference";
@@ -111,11 +120,16 @@ it("does not submit a paused unknown job that already has one later submission a
   });
 });
 it("consumes a one-submission allowance before the paid call and does not replay it", async () => {
-  await seed({ oneSubmissionAllowed: true, gpuSubmissions: 7, gpuBudgetReservedSeconds: 6300 });
+  await seed({
+    oneSubmissionAllowed: true,
+    gpuSubmissions: 7,
+    gpuBudgetReservedSeconds: 6300,
+  });
   mocks.run.mockRejectedValue(Error("timeout"));
   await expect(handler(event)).rejects.toThrow("timeout");
   expect((await store.get(pk, sk))?.job).toMatchObject({
-    gpuSubmissions: 8, gpuBudgetReservedSeconds: 7200,
+    gpuSubmissions: 8,
+    gpuBudgetReservedSeconds: 7200,
     submissionStartedAt: expect.any(String),
   });
   expect(
@@ -126,7 +140,8 @@ it("consumes a one-submission allowance before the paid call and does not replay
   expect((await store.get(pk, sk))?.job).toMatchObject({
     status: "paused",
     error: expect.stringContaining("outcome unknown"),
-    gpuSubmissions: 8, gpuBudgetReservedSeconds: 7200,
+    gpuSubmissions: 8,
+    gpuBudgetReservedSeconds: 7200,
   });
   expect(
     ((await store.get(pk, sk))?.job as Job).oneSubmissionAllowed,
@@ -266,6 +281,7 @@ it("keeps polling a paused provider request until cancellation is confirmed", as
 it.each([
   new Error("403"),
   new Error("ProviderLimitsUnconfirmed"),
+  new Error("ProviderImageUnconfirmed"),
   new Error("AbortError"),
 ])(
   "pauses a failed limits preflight without a paid claim: %s",
@@ -471,6 +487,100 @@ it("retains the reservation when a verified pin advances to round1", async () =>
   });
   await handler(event);
   expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it("routes an external descriptor through submission and CPU verification without CUDA pins", async () => {
+  process.env.SOLVER_RELEASE_ID = "external-test";
+  const vault = {
+    network: "mainnet",
+    config: "A",
+    scriptHex: "51",
+    scriptHash: createHash("sha256")
+      .update(Buffer.from("51", "hex"))
+      .digest("hex"),
+    publicStateJson: "{}",
+  };
+  const pin = pinSolver(vault, "external-test");
+  expect(pin.descriptor).not.toHaveProperty("sourceHashes");
+  await seed({ solver: pin });
+  await store.put({ pk, sk: "VAULT#v", version: 1, vault }, 0);
+  await handler(event);
+  expect(mocks.prepareRun).toHaveBeenCalledWith(pin.descriptor.image);
+  expect(mocks.run).toHaveBeenCalledWith(
+    expect.objectContaining({
+      kernelCommit: "b".repeat(40),
+      searchVersion: "ranked-v2",
+    }),
+  );
+  mocks.status.mockResolvedValue({
+    status: "COMPLETED",
+    executionTime: 1000,
+    output: {
+      status: "completed",
+      stage: "pinning",
+      manifestHash: "a".repeat(64),
+      attempt: 0,
+      candidates: ["public-hit"],
+      kernelCommit: "b".repeat(40),
+      checkpoint: "range-complete",
+      workRange: workRange("pinning", 0),
+    },
+  });
+  mocks.cpu.mockResolvedValue({
+    Payload: Buffer.from(
+      JSON.stringify({
+        valid: true,
+        sequence: 2147483648,
+        locktime: 500000000,
+      }),
+    ),
+  });
+  await handler(event);
+  expect(
+    JSON.parse(mocks.cpu.mock.calls.at(-1)![0].input.Payload.toString()),
+  ).toMatchObject({ action: "verify", candidates: ["public-hit"] });
+  expect((await store.get(pk, sk))?.job).toMatchObject({
+    stage: "round1",
+    solution: { sequence: 2147483648, locktime: 500000000 },
+  });
+});
+it("rejects worker identity mismatch before invoking the CPU verifier", async () => {
+  await seed({ status: "searching", runpodId: "compute-1" });
+  mocks.status.mockResolvedValue({
+    status: "COMPLETED",
+    output: {
+      status: "completed",
+      stage: "pinning",
+      manifestHash: "a".repeat(64),
+      attempt: 0,
+      candidates: [],
+      kernelCommit: "b".repeat(40),
+      checkpoint: "range-complete",
+      workRange: workRange("pinning", 0),
+    },
+  });
+  await expect(handler(event)).rejects.toThrow("CandidateContextMismatch");
+  expect(mocks.cpu).not.toHaveBeenCalled();
+});
+
+it("rejects a deployment release mismatch before reserving paid time", async () => {
+  await seed();
+  process.env.SOLVER_RELEASE_ID = "external-test";
+  await handler(event);
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect((await store.get(pk,sk))!.job).toMatchObject({status:"paused",gpuBudgetReservedSeconds:0});
+});
+it("still polls a paid job after the served release changes", async () => {
+  await seed({status:"searching",runpodId:"paid-existing"});
+  process.env.SOLVER_RELEASE_ID = "external-test";
+  mocks.status.mockResolvedValue({status:"IN_PROGRESS"});
+  await handler(event);
+  expect(mocks.status).toHaveBeenCalledWith("paid-existing");
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
+  expect(mocks.cancel).not.toHaveBeenCalled();
+  expect((await store.get(pk,sk))!.job).toMatchObject({status:"searching",runpodId:"paid-existing"});
 });
 
 it.each(["queued", "searching"] as const)("deployment switch pauses %s without losing paid IDs or resubmitting after resume", async (status) => {

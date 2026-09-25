@@ -20,6 +20,25 @@ jobs:
           node-version: 22.23.2
       - run: npm ci --ignore-scripts
       - run: npm run vendor
+      - name: Verify app vendoring excludes solver sources
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import pathlib
+          import subprocess
+          root = pathlib.Path('.')
+          assert not (root / 'vendor/challenge').exists(), 'Challenge sources belong in qsb-solver'
+          assert not (root / 'research/optimized-subset').exists(), 'Optimized CUDA belongs in qsb-solver'
+          source = root / 'vendor/qsb'
+          scope = json.loads((source / '.scope').read_text())
+          expected = set(scope['files']) | {'.commit', '.scope'}
+          actual = {str(p.relative_to(source)) for p in source.rglob('*') if p.is_file()}
+          assert actual == expected, f'Unexpected vendored files: {actual ^ expected}'
+          assert all(p == 'LICENSE' or p.endswith('.py') for p in scope['files']), 'Only generator/reference Python and license may be fetched'
+          tracked_cuda = subprocess.check_output(['git', 'ls-files', '*.cu', '*.cuh'], text=True)
+          assert not tracked_cuda.strip(), f'CUDA source remains in app: {tracked_cuda}'
+          assert (root / 'worker/cpu/verify_hit.py').is_file(), 'Independent CPU verification must remain'
+          PYTHON
       - name: Fail if vendoring changed tracked files
         run: git diff --exit-code
       - run: npm run typecheck

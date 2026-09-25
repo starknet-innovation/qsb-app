@@ -132,4 +132,16 @@ boundary and the key policy must also allow it; this change does not broaden
 administrator-managed boundaries. A future provider replacement changes the
 provider credential grant, not record or workflow authority.
 
+### Served solver release
+
+Set `solver_release_id` only to an enrolled schema-v3 descriptor matching the
+endpoint's immutable image. Terraform passes the same `SOLVER_RELEASE_ID` to API
+and coordinator. Empty, unsupported, unbound or mismatched releases refuse new
+job admission before outpoint reservations. Omitted request IDs select this
+deployment release, not the archived placeholder. The coordinator rechecks the
+selection before paid work and still verifies the endpoint image before each POST.
+Do not change the served release while pinned jobs remain active. Existing
+historical descriptors remain available for inspection. Publication/enrollment
+and live endpoint-response verification remain prerequisites before #22.
+
 Mainnet funding/search is controlled by `mainnet_enabled` (default false), wired identically to API and coordinator. Exact submission additionally needs `exact_submit_enabled` (default false). Enablement requires explicit issue #22 approval; no source toggle or frontend rebuild is needed. See [switch matrix and deployment checks](../docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches).

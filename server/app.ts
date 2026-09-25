@@ -1,3 +1,4 @@
+import { deployedSolver, deployedSolverId } from "./solver-deployment";
 import { observeWithdrawal } from "./withdrawal-status";
 import { submitExact, SubmitDisabled } from "./submit-exact";
 import {
@@ -163,6 +164,7 @@ export function createApp(
       network: NETWORK_ID,
       mainnetEnabled: NETWORK_ID === "mainnet" && enabled,
       operationsEnabled: enabled,
+      solverReleaseId: deployedSolverId(),
       exactSubmitEnabled: dependencies.exactSubmit ?? exactSubmitEnabled(),
       billing: "not_configured",
       awsRegion: process.env.AWS_REGION || "local",
@@ -532,8 +534,14 @@ export function createApp(
           { error: "Idempotency key already belongs to another withdrawal." },
           409,
         );
-      if ((existing.job as Job).status === "queued")
-        await startWorkflow(existing.job as Job);
+      const storedJob = existing.job as Job;
+      if (storedJob.status === "queued") {
+        let runnable = Boolean(storedJob.runpodId); // Existing paid IDs still need polling.
+        if (!runnable && storedJob.solver) {
+          try { deployedSolver(storedJob.solver.descriptor.id); runnable = true; } catch {}
+        }
+        if (runnable) await startWorkflow(storedJob);
+      }
       return c.json({ job: existing.job });
     }
     const vault = await store.get(pk, `VAULT#${manifest.vaultId}`);
@@ -567,6 +575,11 @@ export function createApp(
       BigInt(manifest.outputValue) + BigInt(manifest.fee)
     )
       return c.json({ error: "Transaction amounts do not balance." }, 400);
+    let selectedSolver: ReturnType<typeof deployedSolver>;
+    try { selectedSolver = deployedSolver(manifest.solverReleaseId); }
+    catch {
+      return c.json({error:"The requested solver is not served by this deployment. No withdrawal was reserved."}, 503);
+    }
     await ledger.unspent(manifest.funding, v.scriptHex);
     await ledger.unspent(manifest.helper, hex.encode(outputScript(owner)));
     const now = new Date().toISOString();
@@ -576,7 +589,7 @@ export function createApp(
       vaultId: manifest.vaultId,
       manifest,
       manifestHash: hash(JSON.stringify(manifest)),
-      solver: pinSolver(v),
+      solver: pinSolver(v, selectedSolver.id),
       createdAt: now,
       updatedAt: now,
       status: "queued",

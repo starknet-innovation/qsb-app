@@ -106,6 +106,16 @@ variable "exact_submit_enabled" {
   }
 }
 
+variable "solver_release_id" {
+  description = "Enrolled schema-v3 solver release served by the configured endpoint. Empty refuses new jobs."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.solver_release_id == "" || can(regex("^[a-z0-9][a-z0-9-]{0,127}$", var.solver_release_id))
+    error_message = "solver_release_id must be an enrolled release ID, not an image/tag or URL."
+  }
+}
+
 variable "mainnet_enabled" {
   description = "Enable mainnet funding/search routes and coordinator. Requires explicit approval for issue #22; exact submission has a separate switch."
   type        = bool

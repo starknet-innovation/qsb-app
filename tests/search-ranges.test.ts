@@ -1,34 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
+import vectors from "../contracts/ranked-v2.json";
 import { workRange, subsetRank } from "../server/search-ranges";
 
 describe("GPU work partitioning", () => {
-  it("matches Python exactly at sequence transitions, final ranges and large ranks", () => {
-    const samples = [0, 1, 73, 74, 75, 76, 134217726, 134217727]
-      .map((a) => ["pinning", a] as const)
-      .concat([]);
-    const cases: [string, number][] = [
-      ...samples.map(([s, a]) => [s, a] as [string, number]),
-      ...[0, 1, 4827, 4828].flatMap(
-        (a) =>
-          [
-            ["round1", a],
-            ["round2", a],
-          ] as [string, number][],
-      ),
-    ];
-    const python = JSON.parse(
-      execFileSync(
-        "python3",
-        [
-          "-c",
-          "import sys,json;sys.path.insert(0,'worker');from search_ranges import work_range;print(json.dumps([work_range(*x) for x in json.loads(sys.argv[1])]))",
-          JSON.stringify(cases),
-        ],
-        { encoding: "utf8" },
-      ),
-    );
-    expect(cases.map(([s, a]) => workRange(s, a))).toEqual(python);
+  it("matches the published ranked-v2 solver release contract", () => {
+    expect(vectors.searchVersion).toBe("ranked-v2");
+    for (const { stage, attempt, range } of vectors.cases)
+      expect(workRange(stage, attempt)).toEqual(range);
+    for (const { stage, attempt } of vectors.invalid)
+      expect(() => workRange(stage, attempt)).toThrow();
   });
   it("has contiguous non-overlapping ranges and covers both terminal boundaries", () => {
     for (const [stage, attempts] of [

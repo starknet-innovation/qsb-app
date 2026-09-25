@@ -74,6 +74,7 @@ export const withdrawalSchema = z
     fee: sats,
     idempotencyKey: z.string().uuid(),
     costAccepted: z.literal(true),
+    solverReleaseId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/).optional(),
   })
   .strict();
 export type Withdrawal = z.infer<typeof withdrawalSchema>;

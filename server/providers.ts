@@ -169,6 +169,7 @@ export class Slipstream {
 }
 const endpointLimitSchema = z.object({
   id: z.string(),
+  image: z.string().optional(),
   workers: z.object({
     min: z.number().int().nonnegative(),
     max: z.number().int().nonnegative(),
@@ -246,7 +247,9 @@ export class Runpod {
       })
       .parse(await this.request("health"));
   }
-  private async applyEndpointLimits() {
+  private async applyEndpointLimits(expectedImage: string) {
+    if (!/^[^\s@]+@sha256:[a-f0-9]{64}$/.test(expectedImage))
+      throw new Error("ProviderImageUnconfirmed");
     // Confirm workersMax=1, workersMin=0, and the execution timeout before
     // any paid submission. A missing confirmation does not start a job.
     const response = await fetch(
@@ -292,11 +295,13 @@ export class Runpod {
       confirmed.data.timeout !== gpuSpendLimits.executionTimeoutMs
     )
       throw new Error("ProviderLimitsUnconfirmed");
+    if (confirmed.data.image !== expectedImage)
+      throw new Error("ProviderImageUnconfirmed");
   }
   // Complete control-plane preflight before the caller journals a paid attempt.
   // The returned closure is single-use, including when the POST outcome is unknown.
-  async prepareRun() {
-    await this.applyEndpointLimits();
+  async prepareRun(expectedImage: string) {
+    await this.applyEndpointLimits(expectedImage);
     let consumed = false;
     return async (input: unknown) => {
       if (consumed) throw new Error("SubmissionAlreadyAttempted");
@@ -312,8 +317,8 @@ export class Runpod {
       );
     };
   }
-  async run(input: unknown) {
-    const submit = await this.prepareRun();
+  async run(input: unknown, expectedImage: string) {
+    const submit = await this.prepareRun(expectedImage);
     return submit(input);
   }
   async status(id: string) {

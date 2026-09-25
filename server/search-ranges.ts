@@ -1,4 +1,5 @@
-// Must match worker/search_ranges.py; exact decimal ranks survive JSON/DynamoDB.
+// ranked-v2 contract: contracts/ranked-v2.json, also published by qsb-solver.
+// Exact decimal ranks survive JSON/DynamoDB; solver CI checks the same vectors.
 export const searchVersion = "ranked-v2";
 export const chunkSize = 2 ** 34;
 const ltSpan = 1744600000 - 500000000;
