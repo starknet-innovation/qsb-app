@@ -1,6 +1,9 @@
 resource "aws_apigatewayv2_api" "api" {
   name          = "${var.name}-api"
   protocol_type = "HTTP"
+  # API Gateway tags use /tags/* resources the scoped operator role isn't granted; the SourceCommit
+  # default tag would otherwise change on every commit. Tags are set once by the first (admin) apply.
+  lifecycle { ignore_changes = [tags, tags_all] }
 }
 resource "aws_apigatewayv2_integration" "api" {
   api_id                 = aws_apigatewayv2_api.api.id
@@ -22,6 +25,7 @@ resource "aws_apigatewayv2_stage" "api" {
   api_id      = aws_apigatewayv2_api.api.id
   name        = "$default"
   auto_deploy = true
+  lifecycle { ignore_changes = [tags, tags_all] }
   default_route_settings {
     throttling_burst_limit = 30
     throttling_rate_limit  = 10

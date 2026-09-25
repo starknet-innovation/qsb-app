@@ -62,6 +62,7 @@ jobs:
           terraform -chdir=terraform test -json -verbose -var="source_commit=$(git rev-parse HEAD)" > /tmp/qsb-terraform-test.jsonl
           python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-test.jsonl
           python3 terraform/tests/check-single-pipeline.py
+          python3 terraform/tests/test_check_single_pipeline.py
           python3 ops/github-aws/test_render.py
           python3 terraform/gpu/test_watchdog.py
           python3 ops/github-aws/test_access.py
