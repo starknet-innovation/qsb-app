@@ -245,28 +245,28 @@ them, so a reviewed change to `render.py` or `access.py` doesn't reach AWS by
 itself. `update_installed.py` compares every installed administrator-managed QSB
 document with what the current clean, pushed commit renders:
 
-- `qsb-github-deploy`'s inline policy and `qsb-runtime-boundary`, from `render.py`;
-- from `access.py`: `qsb-gpu-boundary`, the `qsb-viewonly-N` and `qsb-operator-N` policies, the operator user's inline policy, and the two roles' trust and maximum session.
+- from `render.py`: `qsb-github-deploy`'s inline policy and its GitHub OIDC trust, and `qsb-runtime-boundary`;
+- from `access.py`: `qsb-gpu-boundary`, the `qsb-viewonly-N` and `qsb-operator-N` policies, the operator user's inline policy, and both roles' trust and maximum session.
 
 ```sh
 python3 ops/github-aws/update_installed.py --profile qsb-view --inventory INVENTORY
 python3 ops/github-aws/update_installed.py --profile ADMIN --inventory INVENTORY --apply
 ```
 
-**Plan mode** can run as `qsb-viewonly`. For each target it prints `identical`, `missing` or `differs`, with the statement IDs added, removed or changed.
+**Plan mode** can run as `qsb-viewonly` on any pushed branch. For each target it prints `identical`, `missing` or `differs`. For a changed statement it also shows the exact actions, resources, principals and conditions that differ, with account numbers masked. The inventory feeds these documents as much as the code does, so compare that detail with the reviewed diff: a principal or resource you don't recognise means the inventory, not the code, changed it.
 
-**`--apply`** needs an administrator, today root, and makes only the differing updates:
+**`--apply`** runs only from a clean `main` that matches `origin`, with an administrator profile, today root. It shows the plan, then asks you to type `apply`. Pass `--yes` only after reviewing that exact plan, for example when an agent runs it with your OK. It updates only what differs:
 - a new default version for managed policies;
 - `put-*-policy` for inline ones;
 - `update-assume-role-policy` or `update-role` for the roles.
 
-It then reads back each changed policy. It never creates or deletes an identity, and never deletes a policy version. It refuses before any write in any of these cases:
+It reads back every change. It never creates or deletes an identity, never attaches or detaches a policy, and never deletes a policy version. It refuses before any write in any of these cases:
 - a changed managed policy already has IAM's maximum of five versions;
 - the number of rendered access policies changed;
-- anything is missing;
-- `qsb-github-deploy` has unexpected inline policies.
+- anything is missing, including all of a role's access policies;
+- any of the three roles carries a policy this commit doesn't render.
 
-Afterwards, run `verify.py --role-arn` and `verify_access.py --live`.
+Afterwards, run `verify.py --role-arn` and `verify_access.py --live`. Old policy versions stay stored but inactive. An administrator can delete them once verification passes.
 
 Tightening `qsb-github-deploy` to `main` removes grants the parked CDK-era stacks
 used, such as ECR, SQS, EventBridge, and passing roles to EC2, Backup and API
