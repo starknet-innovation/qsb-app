@@ -2,12 +2,13 @@
 
 Preparation for #22 only. No deployment, IAM sandbox execution, wallet funding,
 GPU search or miner submission is performed by the files on this branch.
-At preparation time, #15 and AWS migration PR #54 are open. Their completion,
-review and merged artifacts must precede #22 execution. The AWS release descriptor
-is deliberately not enrolled until the attested release path in qsb-solver PR #5
-is merged and a release tag is published; a deployment smoke image or an earlier
-PR description is not enrollment evidence. Older Runpod-specific
-preflight comments are superseded by #22's current AWS Batch scope.
+Refreshed against app main `a9c4540` on 25 September 2026: AWS migration PR #54
+and solver PR #5 are merged, and solver release `aws-v0.1.0` exists. **#15 is
+still open**, and main's generated registry still contains only the historical
+schema-2 `qsb-solver-v0-1-0` descriptor. The new release's existence is not app
+enrollment or deployment evidence. Wait for #15 before #22 execution; refresh
+these observations before use. Older Runpod preflight comments are superseded by
+#22's current AWS Batch scope.
 
 ## 1. Record the reviewed starting point
 
@@ -49,7 +50,11 @@ python3 -m unittest discover -s tests/predeposit -v
 ```
 
 `manifest.json` records request hashes and the source policy hash, not a live IAM
-attestation. Protect operational evidence outside Git. Follow sandbox steps 2
+attestation. `observations.template.json` starts at `NOT_RUN` with every observed
+result blank and deposit authorization false. Copy it to a private observations
+record and fill actual principal/policy identities, timestamps, service errors,
+response/read files and their hashes only after execution. Expected row presence
+is separate from observed presence; never copy expected values into observed fields. Protect operational evidence outside Git. Follow sandbox steps 2
 and 3 using those files only after the sandbox execution is separately authorized:
 
 | Order | Test-role operation / file | Required observed result |
@@ -73,8 +78,8 @@ sandbox resources after evidence is retained; do not alter application records.
 
 ## 3. Verify the enrolled release and AWS Batch definition
 
-After #15/#54 merge, check the release using the **merged app's parser and
-registry**, not a private descriptor that the deployed app cannot select:
+After #15 closes with reviewed enrollment merged, check the release using the
+**merged app's parser and registry**, not a private descriptor that the deployed app cannot select:
 
 - Schema 3 includes `searchContract` equal to the canonical SHA256 of
   `contracts/ranked-v2.json`; the app's actual range-vector tests pass.
@@ -88,10 +93,10 @@ registry**, not a private descriptor that the deployed app cannot select:
 - Verify the **exact active Batch definition ARN including revision**, not a name
   that can resolve to another revision. Its ECR image must bind to the canonical
   GHCR release through the same verified digest and the final reviewed mirror
-  mapping. **Pending integration:** PR #54 currently compares image strings for
-  equality, so it cannot yet consume a canonical GHCR descriptor with a distinct
-  ECR mirror URI. Close and test that integration before enrollment or deposit;
-  follow the final merged implementation rather than assuming a mapping exists.
+  mapping. Merged #54 implements `batchImageMatches`: matching digest plus the
+  configured queue's account/region and `qsb-solver` repository are required.
+  Validate that behavior and the exact mirror against the final enrolled release;
+  the mapping implementation does not itself enroll or authenticate a release.
 
 Example read-only definition capture (no submission):
 
@@ -137,3 +142,40 @@ Once prerequisites and IAM evidence are accepted:
 
 A passing request-generation test, IAM simulator, infrastructure smoke or this
 checklist does not satisfy #22's on-chain inclusion acceptance criterion.
+
+## Operator inputs still needed before regional execution
+
+- Reviewed final app enrollment from #15, its deployment commit and immutable
+  solver release descriptor. The currently published release must be verified,
+  enrolled and mirrored; do not select the legacy schema-2 entry.
+- Intended AWS account/region and authenticated profiles for a disposable
+  sandbox administrator and the exact-policy API test role. Identify table and
+  role ARNs; supply references only, never credential values. Provisioning these
+  resources is a separate authorized action, not part of this generator.
+- Exact deployed Batch queue/definition ARN, application output/config endpoint
+  and GPU role boundary ARN. Check all four GPU roles use the same-account
+  `policy/qsb/bootstrap/qsb-gpu-boundary` and that its live policy is the reviewed
+  bootstrap document. A Terraform source declaration does not attest live IAM.
+- Authorization to execute the sandbox operations, followed by review of actual
+  results. This is distinct from deployment activation approval and the later
+  wallet deposit/transaction approval. No deposit amount has been assumed.
+
+For each sandbox operation, save the response and exit code without pipelines
+that replace AWS's exit code. Example after selecting the disposable resources
+and receiving execution authorization (not executed by preparation):
+
+```sh
+aws --profile "$QSB_IAM_TEST_PROFILE" --region "$QSB_AWS_REGION" \
+  dynamodb transact-write-items \
+  --cli-input-json file:///private/tmp/qsb-predeposit-iam-requests/denied-transaction.json \
+  > /private/tmp/denied-transaction.stdout.json 2> /private/tmp/denied-transaction.stderr.txt
+qsb_iam_exit=$?
+# Record qsb_iam_exit and the actual error in the private observation record.
+# Then perform the required consistent administrator reads from the table above.
+```
+
+Run commands individually: an expected denial exits nonzero, so a blanket
+`set -e` script would stop before the required post-state reads. Conversely,
+`|| true` without recording the original exit status would erase evidence.
+Store evidence privately and sanitize any public #22 record; do not commit
+account credentials, raw policy inventories or operator configuration.

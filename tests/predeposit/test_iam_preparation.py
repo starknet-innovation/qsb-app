@@ -32,6 +32,20 @@ class Preparation(unittest.TestCase):
             for name, digest in manifest['requestSha256'].items():
                 self.assertEqual(hashlib.sha256((target / name).read_bytes()).hexdigest(), digest)
             self.assertIs(manifest['awsCallsPerformed'], False)
+            observations = read('observations.template')
+            self.assertEqual(observations['status'], 'NOT_RUN')
+            self.assertIs(observations['depositAuthorized'], False)
+            self.assertEqual(observations['nonce'], manifest['nonce'])
+            self.assertEqual(observations['requestManifestSha256'], hashlib.sha256((target / 'manifest.json').read_bytes()).hexdigest())
+            self.assertEqual(observations['steps']['allowed-transaction']['expectedItemPresence'],
+                             {'owner': True, 'system': False, 'outpoint': True})
+            self.assertEqual(observations['steps']['denied-batch']['expectedItemPresence'],
+                             {'owner': False, 'system': False, 'outpoint': True})
+            for step in observations['steps'].values():
+                self.assertIsNone(step['observedItemPresence'])
+                self.assertIsNone(step['exitCode'])
+                self.assertIsNone(step['serviceErrorCode'])
+                self.assertEqual(step['evidenceFileSha256'], {})
 
     def test_refuses_existing_directory(self):
         with tempfile.TemporaryDirectory() as tmp:

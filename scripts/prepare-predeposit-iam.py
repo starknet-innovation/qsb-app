@@ -46,6 +46,33 @@ def prepare(table_arn: str, role_arn: str, destination: Path):
                                   for name in requests},
                 'awsCallsPerformed': False}
     (destination / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    # Blank observations are deliberately not success evidence. Operators retain
+    # actual service responses and consistent reads alongside this local form.
+    expected = {
+        'initial-reads': {'owner': False, 'system': False, 'outpoint': False},
+        'denied-transaction': {'owner': False, 'system': False, 'outpoint': False},
+        'allowed-transaction': {'owner': True, 'system': False, 'outpoint': True},
+        'duplicate-outpoint': {'outpoint': True},
+        'delete-outpoint': {'outpoint': True},
+        'remove-inert-owner-before-batch': {'owner': False, 'system': False, 'outpoint': True},
+        'denied-batch': {'owner': False, 'system': False, 'outpoint': True},
+    }
+    observations = {
+        'schemaVersion': 1, 'status': 'NOT_RUN', 'nonce': nonce,
+        'requestManifestSha256': hashlib.sha256((destination / 'manifest.json').read_bytes()).hexdigest(),
+        'appCommit': None, 'awsAccount': table[2], 'region': table[1],
+        'testPrincipalArnObserved': None, 'administratorPrincipalArnObserved': None,
+        'rolePolicyDocumentSha256Observed': None,
+        'permissionsBoundaryDocumentSha256Observed': None,
+        'scpAndResourcePolicyReviewReference': None,
+        'steps': {name: {'expectedItemPresence': presence, 'observedItemPresence': None,
+                         'observedAtUtc': None, 'exitCode': None, 'serviceErrorCode': None,
+                         'cancellationReasons': None, 'responseFile': None,
+                         'consistentReadFiles': [], 'evidenceFileSha256': {}}
+                  for name, presence in expected.items()},
+        'operatorReviewReference': None, 'depositAuthorized': False,
+    }
+    (destination / 'observations.template.json').write_text(json.dumps(observations, indent=2) + '\n')
     return manifest
 
 
