@@ -1,5 +1,4 @@
 """Offline checks for check-single-pipeline.py --deploy/--first-apply on synthetic saved plans."""
-import copy
 import json
 from pathlib import Path
 import subprocess
@@ -25,7 +24,8 @@ def plan():
     rows += [{'type': 'aws_lambda_function', 'name': f, 'mode': 'managed',
               'values': {'function_name': f'qsb-app-{f}', 'environment': [{'variables': {'TABLE_NAME': 't'}}]}}
              for f in ('api', 'coordinator', 'reference')]
-    # The validator expects five role rows in an expanded plan (lambda and workflow appear twice in mocks).
+    # The validator expects five aws_iam_role rows in an expanded plan (a real plan has three `lambda`
+    # roles, one `workflow` and one `operator_reconcile`); any five with those names satisfy it.
     rows += [role('lambda'), role('workflow'), role('operator_reconcile'), role('lambda'), role('workflow')]
     return {'planned_values': {'root_module': {'resources': rows}},
             'resource_changes': [{'mode': 'managed', 'change': {'actions': ['create']}}]}
