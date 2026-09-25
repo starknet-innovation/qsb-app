@@ -20,7 +20,7 @@ APP_DENY = {'ok': False, 'code': 'AccessDeniedException', 'denial': 'explicit-de
 
 class SandboxRunner(unittest.TestCase):
     def run_sandbox(self, behaviour=None, fail=None, keep=False, function_error=None, propagation=0,
-                    delete_fails=(), leaky=(), interrupt=None):
+                    delete_fails=(), leaky=(), interrupt=None, cleanup_interrupt=None):
         """behaviour maps a step to the Lambda's result; defaults model the documented AWS evaluation.
         The mock table applies each step's effect, so the runner's row reads see what really happened."""
         self.calls, self.gets, self.deleted_names, rows = [], [], [], set()
@@ -46,7 +46,7 @@ class SandboxRunner(unittest.TestCase):
             args = command[command.index('--no-cli-pager') + 1:]
             service, operation = args[:2]
             self.calls.append((service, operation))
-            if (service, operation) == interrupt:
+            if (service, operation) in (interrupt, cleanup_interrupt):
                 raise KeyboardInterrupt
             if (service, operation) == fail:
                 return error(command, 'AccessDeniedException')
@@ -214,6 +214,13 @@ class SandboxRunner(unittest.TestCase):
         self.assertEqual(self.report['outcome'], 'aborted')
         self.assertTrue(self.report['cleanupComplete'])
         self.assertEqual(set(self.report['cleanup']), {'function', 'role-policy', 'role', 'table'})
+        # The cause is printed before cleanup, so a failure there can't lose it.
+        self.assertLess(self.output.index('aborting: KeyboardInterrupt'), self.output.index('cleanup:'))
+
+    def test_cause_is_printed_even_if_cleanup_then_fails(self):
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_sandbox(interrupt=('dynamodb', 'get-item'), cleanup_interrupt=('iam', 'delete-role'))
+        self.assertIn('aborting: KeyboardInterrupt; cleaning up', self.output)
 
     def test_role_propagation_is_retried_then_bounded(self):
         self.run_sandbox(propagation=3)

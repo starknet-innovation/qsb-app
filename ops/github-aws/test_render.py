@@ -101,6 +101,13 @@ class SinglePipelinePolicies(unittest.TestCase):
                     self.assertTrue(any(fnmatch.fnmatchcase(action.lower(), a) for a in allowed),
                                     f'{policy.name}: {action} is outside qsb-runtime-boundary')
 
+    def test_cloudfront_discovery_covers_the_managed_policy_lookups(self):
+        # terraform/web.tf resolves the managed policies at plan time; without these grants every plan fails.
+        discovery = self.statement('deploy', 'CloudFrontDiscovery')
+        for action in ('cloudfront:ListCachePolicies', 'cloudfront:GetCachePolicy', 'cloudfront:GetOriginRequestPolicy'):
+            self.assertIn(action, discovery['Action'])
+        self.assertEqual(discovery['Resource'], ['*'])
+
     def test_retained_pipeline_and_boundary_grants(self):
         for service in ('Lambda', 'Dynamodb', 'States', 'Cloudwatch'):
             self.assertEqual(self.statement('deploy', service + 'Qsb')['Effect'], 'Allow')

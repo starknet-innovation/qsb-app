@@ -186,6 +186,8 @@ def main(a):
         report['completed'] = True
     except BaseException as e:  # held so cleanup, the evidence and the ABORTED message below still happen
         cause = e
+        # Printed now, so the cause survives even if cleanup or the evidence write then fails.
+        print(f'aborting: {str(cause) or type(cause).__name__}; cleaning up', flush=True)
     finally:
         if a.keep:
             print(f'kept sandbox resources named {name}', flush=True)
