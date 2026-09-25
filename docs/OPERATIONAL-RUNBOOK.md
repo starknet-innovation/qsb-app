@@ -121,6 +121,50 @@ external evidence. No live provider incident has been exercised for this change.
 
 Provider references: [AWS Batch SubmitJob](https://docs.aws.amazon.com/batch/latest/APIReference/API_SubmitJob.html) and [ListJobs](https://docs.aws.amazon.com/batch/latest/APIReference/API_ListJobs.html). Discovery uses the saved exact job name and follows every results page. `JOB_NAME` filtering includes all job statuses; absence from the list is not evidence that the paid request was rejected.
 
+### Job-definition revision changes and recovery
+
+Do not change `batch_job_definition` or its container properties while any withdrawal
+is `searching`, has an attached nonterminal provider job, or is paused with an
+unknown submission. Keep admission/resume quiescent during the change; reconcile
+outstanding intents and confirm all provider jobs are terminal and the queue is
+drained first. A paused unknown request is outstanding even when the queue is empty.
+
+The current adapter deliberately requires the configured revision to match the
+saved `batchSubmission.definition` for discovery and polling. Updating container
+properties creates a new revision; Terraform deregisters the previous revision by
+default. [Terraform documents this revision behavior](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/batch_job_definition.html).
+[AWS JobDetail](https://docs.aws.amazon.com/batch/latest/APIReference/API_JobDetail.html)
+returns the definition ARN used by the job. Changing the configured ARN does not
+migrate existing requests to the new revision.
+
+If configuration already advanced, recover using the original binding:
+
+1. Read the affected job's durable `batchSubmission` through the scoped operator
+   role. Preserve its exact `definition`, `queue`, job name, input key/hash and
+   provider ID; never edit them to match the new deployment.
+2. Set `AWS_BATCH_JOB_DEFINITION` in the reconciliation CLI environment to that
+   recorded revisioned ARN, and use the original queue and output bucket. This
+   applies to explicit IDs, `--provider-id discover`, and
+   `--not-submitted batch-window-elapsed`, including after seven days. The existing
+   elapsed-window, exact-name discovery, queue-drain and one-replacement checks
+   still apply; a revision mismatch is not evidence of rejection.
+3. Before any command that restarts polling, restore the coordinator's
+   `batch_job_definition` to the same recorded ARN through the reviewed deployment
+   procedure below, and verify the live `AWS_BATCH_JOB_DEFINITION`. Changing only
+   the CLI environment does not change Lambda. Keep new admissions/resumes
+   quiescent and handle different outstanding revisions separately.
+4. Reconcile and finish the original provider request before switching forward.
+   A deregistered old definition is not eligible for new submissions: `prepareRun`
+   requires `ACTIVE`. Do not resume a replacement against an inactive revision or
+   re-register/re-submit the original paid request as a recovery shortcut. If more
+   search work is needed, select an active, image-compatible reviewed definition
+   only after the original request is terminal or its unknown outcome has been
+   explicitly reconciled. Preserve reservations and all recorded GPU time.
+
+This is an operator recovery procedure, not automatic revision migration or
+permission to deploy. Image/release compatibility remains a separate admission
+check. The documentation change has not exercised a live revision rollback.
+
 ## Commit before deploy
 
 Never deploy code or infrastructure changes before committing them to Git. Verify that deployed source matches the recorded commit and contains no uncommitted changes. Push the commit to the project remote before deployment and report the commit or PR with the deployment target. Never commit secrets or ignored runtime configuration.
