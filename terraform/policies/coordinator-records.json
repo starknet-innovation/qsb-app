@@ -1,0 +1,26 @@
+[
+  {
+    "Sid": "ReadRecords",
+    "Effect": "Allow",
+    "Action": [
+      "dynamodb:GetItem"
+    ]
+  },
+  {
+    "Sid": "WriteOwnedJobs",
+    "Effect": "Allow",
+    "Action": [
+      "dynamodb:PutItem"
+    ],
+    "Condition": {
+      "ForAllValues:StringLike": {
+        "dynamodb:LeadingKeys": [
+          "OWNER#*"
+        ]
+      },
+      "Null": {
+        "dynamodb:LeadingKeys": "false"
+      }
+    }
+  }
+]

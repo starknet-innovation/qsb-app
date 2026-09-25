@@ -28,6 +28,11 @@ import {
 } from "./lib/backup";
 import { assembleQsb, validateRecovery, lockQsb } from "./lib/qsb";
 import {
+  rebuildWithdrawalFromSolvedResult,
+  signedCoordinatorResult,
+} from "./mainnet/localSignature";
+import type { CoordinatorSignedResult } from "./mainnet/coordinatorResult";
+import {
   parseBtc,
   formatBtc,
   withdrawalSchema,
@@ -44,10 +49,23 @@ const digest = async (text: string) =>
       await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)),
     ),
   );
+function downloadPublicResult(text: string, jobId: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(jobId))
+    throw new Error("Invalid solved result.");
+  const url = URL.createObjectURL(
+    new Blob([text], { type: "application/json" }),
+  );
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `qsb-coordinator-public-signed-result-${jobId}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 export default function TransactionDialog({
   vault,
   wallet,
   job,
+  solvedResult,
   onClose,
   onUpdated,
   supervisedSearch,
@@ -55,6 +73,7 @@ export default function TransactionDialog({
   vault: PublicVault;
   wallet: Wallet;
   job?: Job;
+  solvedResult?: unknown;
   onClose: () => void;
   onUpdated: () => void;
   supervisedSearch?: SupervisedSearch;
@@ -62,7 +81,7 @@ export default function TransactionDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   const generation = useRef(0);
   const submission = useRef<ReturnType<typeof retainedMainnetSubmission>|undefined>(undefined);
-  const lifetimeKey=fingerprint({vault,wallet,job:job?.id,supervisedSearch});
+  const lifetimeKey=fingerprint({vault,wallet,job:job?.id,supervisedSearch,solved:solvedResult??null});
   const lifetime=useRef(lifetimeKey);
   if(lifetime.current!==lifetimeKey){lifetime.current=lifetimeKey;generation.current++;}
 
@@ -100,7 +119,7 @@ export default function TransactionDialog({
         const parsed = JSON.parse(saved) as { txid?: unknown; amount?: unknown };
         if (
           typeof parsed.txid === "string" &&
-          /^[a-f0-9]{64}$/i.test(parsed.txid) &&
+          (parsed.txid === "" || /^[a-f0-9]{64}$/i.test(parsed.txid)) &&
           typeof parsed.amount === "string" &&
           /^(0|[1-9][0-9]*)$/.test(parsed.amount)
         )
@@ -171,7 +190,7 @@ export default function TransactionDialog({
     );
     rememberFunding(undefined);
     setResult(
-      `confirmed: ${recorded.vault.funding?.txid}. Wait for confirmation before withdrawing.`,
+      `Deposit ${recorded.vault.status}: ${recorded.vault.funding?.txid}. Wait for confirmation before withdrawing.`,
     );
     onUpdated();
   }
@@ -179,7 +198,7 @@ export default function TransactionDialog({
     if(supervisedSearch){setError("Supervised search cannot deposit or broadcast.");return;}
     await act(
       pendingFunding
-        ? "Recording the confirmed deposit"
+        ? "Recording the deposit"
         : "Review and sign the deposit in Xverse",
       async (check) => {
         if (!unlocked || !accepted)
@@ -187,6 +206,7 @@ export default function TransactionDialog({
         await assertOperations();
         check();
         if (pendingFunding) {
+          if (!pendingFunding.txid) throw Error("Xverse reported a broadcast without a valid txid. Reconcile it in your wallet before continuing; do not deposit again.");
           await recordFunding(pendingFunding.txid, pendingFunding.amount);
           return;
         }
@@ -208,10 +228,14 @@ export default function TransactionDialog({
           wallet.address,
           base64.encode(expected.toPSBT()),
           inputs.map((_, i) => i),
+          (txid) => rememberFunding({ txid: txid ?? "", amount: amountSats.toString() }),
         );
         check();
         const signed = verifySignedPsbt(expected, base64.decode(funded.psbt));
-        signed.finalize();
+        for (let i = 0; i < signed.inputsLength; i++) {
+          const input = signed.getInput(i);
+          if (!input.finalScriptWitness?.length && !input.finalScriptSig?.length) signed.finalizeIdx(i);
+        }
         if (signed.id !== funded.txid.toLowerCase())
           throw Error("Xverse reported a different funding transaction.");
         const broadcast = {
@@ -346,13 +370,22 @@ export default function TransactionDialog({
           `/vaults/${vault.id}/funding`,
         );
         const helper = await input(job.manifest.helper);
-        const raw = await assembleQsb(
+        const local = solvedResult !== undefined ? await rebuildWithdrawalFromSolvedResult({
+          solved: solvedResult,
+          job,
+          stateJson: unlocked.stateJson,
+          helper,
+          fundingPreviousTxHex: previousTxHex,
+          assemble: assembleQsb,
+        }) : undefined;
+        const raw = local ? local.raw : await assembleQsb(
           unlocked.stateJson,
           job.manifest,
           job.solution,
         );
-        verifyWithdrawalCommitment(raw, job.manifest, job.solution);
-        const bound = await bindRecoveryAssembly(unlocked, job.solution, raw);
+        if (!local) verifyWithdrawalCommitment(raw, job.manifest, job.solution);
+        const solution = local ? local.solved.solution : job.solution;
+        const bound = await bindRecoveryAssembly(unlocked, solution, raw);
         const assemblyKey = `qsb-assembly:${vault.scriptHash}`;
         const rememberedAssembly = localStorage.getItem(assemblyKey);
         if (
@@ -375,10 +408,12 @@ export default function TransactionDialog({
           downloadBackup(backup, `${vault.id}-signing`);
           return;
         }
-        await assertRecoveryAssembly(unlocked, job.solution, raw);
-        const expected = helperPsbt(raw, helper, previousTxHex);
+        await assertRecoveryAssembly(unlocked, solution, raw);
+        const expected = local
+          ? local.transaction
+          : helperPsbt(raw, helper, previousTxHex);
         check();
-        await assertOperations();
+        if (!local) await assertOperations();
       check();
       const returned = await signPsbt(
           wallet.address,
@@ -386,6 +421,19 @@ export default function TransactionDialog({
           [0],
         );
         check();
+        if (local) {
+          const published: CoordinatorSignedResult = signedCoordinatorResult(
+            local.solved,
+            expected,
+            base64.decode(returned),
+            wallet,
+          );
+          downloadPublicResult(JSON.stringify(published), published.jobId);
+          setResult(
+            `Signed locally in Xverse: ${published.txid}. Nothing was broadcast. QSB consensus and chain inclusion are not established here.`,
+          );
+          return;
+        }
         const signed = verifySignedPsbt(expected, base64.decode(returned));
         signed.finalize();
         const r = await api<{ submission: { txid: string; status: string } }>(
@@ -452,6 +500,13 @@ export default function TransactionDialog({
               : "Prepare withdrawal"}
         </h2>
         <p>{vault.name}</p>
+        {job && solvedResult !== undefined && (
+          <p>
+            The solved result is public. Xverse signs the helper on this
+            device. The recovery backup stays in this browser, and nothing is
+            broadcast.
+          </p>
+        )}
         {result ? (
           <>
             <p role="status">{result}</p>
@@ -578,8 +633,8 @@ export default function TransactionDialog({
             )}
             {deposit && pendingFunding && (
               <p role="status">
-                Xverse broadcast {pendingFunding.txid.slice(0, 12)}…. Record
-                the deposit after that transaction confirms.
+                Xverse reported a broadcast {pendingFunding.txid ? pendingFunding.txid.slice(0, 12) + "…" : "without a valid txid"}. Do not deposit again. Record
+                the deposit once it is visible on the network; withdrawal waits for confirmation.
               </p>
             )}
             <CostDisclosure feeBtc={job ? formatBtc(job.manifest.fee) : fee || undefined} job={job} />
@@ -648,7 +703,7 @@ export default function TransactionDialog({
                     : "Save signing backup"
                   : deposit
                     ? pendingFunding
-                      ? "Record confirmed deposit"
+                      ? "Record deposit"
                       : "Review deposit in Xverse"
                     : "Save intent and start search")}
             </button>

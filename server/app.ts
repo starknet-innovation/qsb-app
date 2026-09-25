@@ -28,6 +28,7 @@ import { slipstream, MinerAuthenticationError } from "./providers";
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { chain, ChainError, type Esplora } from "./chain";
 import { matchVaultFunding } from "./transaction-checks";
+import { coordinatorPublicSolvedResult } from "../src/mainnet/coordinatorResult";
 import { outputScript } from "../src/lib/transactions";
 import { hex } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
@@ -53,6 +54,7 @@ import {
   reportEsploraInclusion,
   transactionId,
 } from "./runtime/miner-inclusion";
+import { assertStoredJobSpend } from "./job-spend-record";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -337,7 +339,7 @@ export function createApp(
     assertVaultConfiguration(vault);
     // Xverse already broadcast this deposit. Read it from the chain provider
     // and record vault.funding only when output 0 pays this vault the expected
-    // amount and the transaction is confirmed. Do not submit it again.
+    // amount. Keep unconfirmed payments submitted. Do not submit it again.
     // The 10000 USD vault ceiling stays policy; it does not enable mainnet
     // or authorize a broadcast.
     const watched = await ledger.raw(body.txid);
@@ -347,14 +349,12 @@ export function createApp(
       BigInt(body.amount),
     );
     const chainStatus = await ledger.status(watched.tx.id);
-    if (!chainStatus.confirmed)
-      throw new ChainError("Funding transaction is not confirmed.");
     vault.funding = {
       txid: watched.tx.id,
       vout: payment.vout,
       value: payment.value,
     };
-    vault.status = "confirmed";
+    vault.status = chainStatus.confirmed ? "confirmed" : "submitted";
     await store.put({ ...row, vault, version: row.version + 1 }, row.version);
     return c.json({ vault }, 201);
   });
@@ -403,8 +403,7 @@ export function createApp(
               ...("blockHash" in onChain && onChain.blockHash
                 ? { blockHash: onChain.blockHash }
                 : {}),
-              ...("blockHeight" in onChain &&
-              onChain.blockHeight !== undefined
+              ...("blockHeight" in onChain && onChain.blockHeight !== undefined
                 ? { blockHeight: onChain.blockHeight }
                 : {}),
               txid: id,
@@ -472,6 +471,35 @@ export function createApp(
       ),
     }),
   );
+  app.get("/api/jobs/:id/solved-result", async (c) => {
+    c.header("Cache-Control", "no-store");
+    if (NETWORK_ID !== "mainnet")
+      return c.json(
+        { error: "Solved results are delivered on Bitcoin mainnet." },
+        404,
+      );
+    const row = await store.get(
+      `OWNER#${c.get("owner")}`,
+      `JOB#${c.req.param("id")}`,
+    );
+    if (!row) return c.json({ error: "Job not found" }, 404);
+    const job = row.job as Job;
+    if (job.owner !== c.get("owner"))
+      return c.json({ error: "Job not found" }, 404);
+    if (supervisedServiceJob(job))
+      return c.json(
+        {
+          error:
+            "Supervised jobs are not delivered by the coordinator result.",
+        },
+        409,
+      );
+    try {
+      return c.json(coordinatorPublicSolvedResult(job));
+    } catch {
+      return c.json({ error: "Solved result is not available." }, 404);
+    }
+  });
   app.post("/api/jobs", async (c) => {
     const manifest = withdrawalSchema.parse(await c.req.json());
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
@@ -504,6 +532,8 @@ export function createApp(
         { error: "Vault belongs to a different Bitcoin network." },
         409,
       );
+    if (v.status !== "confirmed")
+      return c.json({ error: "Vault funding is not confirmed." }, 409);
     if (
       !v.funding ||
       (["txid", "vout", "value"] as const).some(
@@ -541,6 +571,7 @@ export function createApp(
       stage: "pinning",
       attempt: 0,
       computeSeconds: 0,
+      gpuBudgetReservedSeconds: 0,
       revision: 0,
     };
     await store.atomicPut([
@@ -575,7 +606,10 @@ export function createApp(
     if (!row) return c.json({ error: "Job not found" }, 404);
     const job = row.job as Job;
     if (supervisedServiceJob(job))
-      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
+      return c.json(
+        { error: "Supervised jobs are not controlled by this route." },
+        409,
+      );
     const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
     if (!vaultRow) return c.json({ error: "Vault not found" }, 404);
     if ((vaultRow.vault as PublicVault).network !== NETWORK_ID)
@@ -587,7 +621,9 @@ export function createApp(
     const feeSats = job.manifest?.fee;
     if (typeof amountSats !== "string" || typeof feeSats !== "string")
       throw new MinerInclusionError("ExactSpendMismatch");
-    // The requester cannot supply exactSpend, so this route cannot satisfy 7.3.
+    // The signed withdrawal is bound to the stored manifest and verified solution.
+    // This route still does not accept a caller exactSpend record, so it cannot satisfy 7.3.
+    assertStoredJobSpend(job, rawTxHex);
     const permit = authorizeConfiguredSpend({
       chain: NETWORK_ID,
       chainBaseUrl: chainBase,
@@ -601,7 +637,7 @@ export function createApp(
       release,
       walletApp: "xverse",
     });
-    // Same refusal as funding: no chain read, no miner preflight, and no
+    // Withdrawal transport refusal: no chain read, no miner preflight, and no
     // submitted job or transaction intent.
     assertMainnetTransportClosed(permit, minerBase);
     await callMinerSubmit({
@@ -618,7 +654,10 @@ export function createApp(
     if (!r) return c.json({ error: "Job not found" }, 404);
     const job = r.job as Job;
     if (supervisedServiceJob(job))
-      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
+      return c.json(
+        { error: "Supervised jobs are not controlled by this route." },
+        409,
+      );
     if (!["searching", "queued"].includes(job.status))
       return c.json({ error: "This job cannot be paused." }, 409);
     if (job.status === "searching" && !job.runpodId)
@@ -638,7 +677,10 @@ export function createApp(
     if (!row) return c.json({ error: "Job not found" }, 404);
     const job = row.job as Job;
     if (supervisedServiceJob(job))
-      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
+      return c.json(
+        { error: "Supervised jobs are not controlled by this route." },
+        409,
+      );
     if (job.status !== "paused")
       return c.json({ error: "Only a paused job can be resumed." }, 409);
     const storedLedger = z
@@ -658,7 +700,14 @@ export function createApp(
         { error: "Stopped coverage cannot be resumed on this account." },
         409,
       );
-    if (job.error?.includes("Submission outcome unknown"))
+    if (
+      job.error?.includes("Submission outcome unknown") &&
+      !(
+        job.oneSubmissionAllowed === true &&
+        job.submissionReconciliation?.kind === "not-submitted" &&
+        job.submissionReconciliation.revision === job.revision
+      )
+    )
       return c.json(
         { error: "Reconcile the unknown Runpod submission before retrying." },
         409,
@@ -673,6 +722,7 @@ export function createApp(
     job.revision++;
     job.updatedAt = new Date().toISOString();
     delete job.error;
+    delete job.oneSubmissionAllowed;
     await store.put({ ...row, job, version: row.version + 1 }, row.version);
     await startWorkflow(job);
     return c.json({ job }, 202);
@@ -684,7 +734,10 @@ export function createApp(
     if (!row) return c.json({ error: "Job not found" }, 404);
     const job = row.job as Job;
     if (supervisedServiceJob(job))
-      return c.json({ error: "Supervised jobs are not controlled by this route." }, 409);
+      return c.json(
+        { error: "Supervised jobs are not controlled by this route." },
+        409,
+      );
     if (!job.txid) return c.json({ job });
     const status = await ledger.status(job.txid),
       vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);

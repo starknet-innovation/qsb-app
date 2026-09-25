@@ -80,6 +80,7 @@ export default function App() {
   const [transaction, setTransaction] = useState<{
     vault: PublicVault;
     job?: Job;
+    solvedResult?: unknown;
   }>();
   const conflictingCreation = !!transaction && !transaction.job && jobs.some((job) => job.vaultId === transaction.vault.id);
   useEffect(() => {
@@ -662,6 +663,15 @@ export default function App() {
                             return;
                           }
                           const vault = vaults.find((v) => v.id === j.vaultId);
+                          if (NETWORK_ID === "mainnet" && vault) {
+                            void action("Loading the solved result", async () => {
+                              const solvedResult = await api(
+                                `/jobs/${j.id}/solved-result`,
+                              );
+                              setTransaction({ vault, job: j, solvedResult });
+                            });
+                            return;
+                          }
                           if (vault && operationsAllowed(config))
                             setTransaction({ vault, job: j });
                           else setModal("readiness");
@@ -1162,6 +1172,7 @@ export default function App() {
           vault={transaction.vault}
           wallet={wallet}
           job={transaction.job}
+          solvedResult={transaction.solvedResult}
           supervisedSearch={supervisedSearchEnabled && !transaction.job && !conflictingCreation && transaction.vault.status === "confirmed" && transaction.vault.funding ? { releaseId: MAINNET_SEARCH_PROFILE, sessionEpoch: readSessionEpoch() } : undefined}
           onClose={() => setTransaction(undefined)}
           onUpdated={() => {

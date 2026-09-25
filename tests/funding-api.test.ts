@@ -240,7 +240,7 @@ it("does not submit a withdrawal without an exact spend record", async () => {
   );
   expect(response.status).toBe(409);
   expect(await response.json()).toMatchObject({
-    error: "SpendAuthorizationRequired",
+    error: "ExactSpendMismatch",
   });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();

@@ -18,7 +18,7 @@ it("always disables wallet broadcasting and restricts requested input indices", 
       signInputs: { "payment-address": [0] },
       broadcast: false,
     },
-      undefined,
+    undefined,
   );
 });
 it("asks Xverse to send the deposit and returns its txid", async () => {
@@ -27,7 +27,7 @@ it("asks Xverse to send the deposit and returns its txid", async () => {
     result: { psbt: "signed", txid: "ab".repeat(32) },
   });
   await expect(
-    fundFromXverse("payment-address", "unsigned", [0, 1]),
+    fundFromXverse("payment-address", "unsigned", [0, 1], vi.fn()),
   ).resolves.toEqual({ psbt: "signed", txid: "ab".repeat(32) });
   expect(request).toHaveBeenCalledWith(
     "signPsbt",
@@ -38,4 +38,24 @@ it("asks Xverse to send the deposit and returns its txid", async () => {
     },
     undefined,
   );
+});
+
+it("retains broadcast identity before rejecting a malformed signed result", async () => {
+  request.mockResolvedValue({
+    status: "success",
+    result: { txid: "ab".repeat(32) },
+  });
+  const remember = vi.fn();
+  await expect(
+    fundFromXverse("payment-address", "unsigned", [0], remember),
+  ).rejects.toThrow();
+  expect(remember).toHaveBeenCalledWith("ab".repeat(32));
+});
+it("retains an unknown broadcast guard when the success receipt has no txid", async () => {
+  request.mockResolvedValue({ status: "success", result: { psbt: "signed" } });
+  const remember = vi.fn();
+  await expect(
+    fundFromXverse("payment-address", "unsigned", [0], remember),
+  ).rejects.toThrow();
+  expect(remember).toHaveBeenCalledWith(undefined);
 });

@@ -1,0 +1,20 @@
+name: Verify QSB AWS identity
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
+        with:
+          role-to-assume: ${{ vars.QSB_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.QSB_AWS_REGION }}
+          allowed-account-ids: ${{ vars.QSB_AWS_ACCOUNT_ID }}
+          role-duration-seconds: 900
+          role-session-name: qsb-auth-${{ github.run_id }}
+      - run: aws sts get-caller-identity

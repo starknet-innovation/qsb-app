@@ -97,9 +97,26 @@ export type Job = {
   solver?: SolverPin;
   parameterHashes?: Record<string, string>;
   attempt: number;
+  /** Historical paid submission count; not the time budget. */
+  gpuSubmissions?: number;
+  /** Durable worst-case GPU seconds reserved before paid POSTs; never refunded. */
+  gpuBudgetReservedSeconds?: number;
   runpodId?: string;
   txid?: string;
   retryRequested?: boolean;
+  /** Audited operator decision allows one replacement, consumed atomically by resume. */
+  oneSubmissionAllowed?: true;
+  submissionStartedAt?: string;
+  submissionReconciliation?: {
+    kind: "provider-id" | "not-submitted";
+    operator: string;
+    evidence: string;
+    at: string;
+    revision: number;
+    providerId?: string;
+    reason?: "rejected-before-acceptance" | "ttl-expired";
+    httpStatus?: number;
+  };
   error?: string;
   computeSeconds: number;
   solution?: {

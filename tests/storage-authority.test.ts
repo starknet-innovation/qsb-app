@@ -148,7 +148,7 @@ describe("durable storage authority rehearsal", () => {
         productionIamReviewed: true,
       }),
     ).toThrow(/LiveIamNotReviewed/);
-    expect(permissionModel.roles.operator.data).toContain("TransactWriteItems");
+    expect(permissionModel.roles.operator.data).toContain("ConditionCheckItem");
     expect(permissionModel.roles.operator.data).toContain("Scan");
     expect(permissionModel.roles.operator.data).not.toContain("PutItem");
     expect(permissionModel.roles.operator.data).not.toContain("DeleteItem");
@@ -165,7 +165,7 @@ describe("durable storage authority rehearsal", () => {
           },
         },
       }),
-    ).toThrow(/OperatorAuthorityMutationRequiresTransaction/);
+    ).toThrow(/OperatorAuthorityRequiresConditionCheck/);
     expect(() =>
       assertPermissionSeparation({
         ...permissionModel,
@@ -173,7 +173,7 @@ describe("durable storage authority rehearsal", () => {
           ...permissionModel.roles,
           operator: {
             ...permissionModel.roles.operator,
-            data: ["GetItem", "Query", "Scan", "PutItem", "TransactWriteItems"],
+            data: ["GetItem", "Query", "Scan", "PutItem", "ConditionCheckItem"],
           },
         },
       }),

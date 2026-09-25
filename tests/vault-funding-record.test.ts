@@ -141,8 +141,7 @@ async function harness(confirmed = true) {
 }
 async function stored(store: MemoryStore, id: string) {
   return (await store.get("OWNER#" + address, "VAULT#" + id))?.vault as
-    | PublicVault
-    | undefined;
+    PublicVault | undefined;
 }
 const body = (txid: string, amount = "50000") => ({
   txid,
@@ -187,11 +186,7 @@ it("records vault funding when the confirmed payment matches", async () => {
 it("does not record a payment to the wrong script", async () => {
   const h = await harness();
   const response = await h.app.request(
-    post(
-      "/vaults/" + h.vault.id + "/fund",
-      body(h.otherScript.txid),
-      h.token,
-    ),
+    post("/vaults/" + h.vault.id + "/fund", body(h.otherScript.txid), h.token),
   );
   expect(response.status).toBe(409);
   expect(await response.json()).toMatchObject({
@@ -222,20 +217,55 @@ it("does not record a payment of the wrong amount", async () => {
   expect(h.submit).not.toHaveBeenCalled();
 });
 
-it("does not record an unconfirmed transaction", async () => {
+it("records unconfirmed deposits immediately and promotes them after confirmation", async () => {
   const h = await harness(false);
-  const put = vi.spyOn(h.store, "put");
   const response = await h.app.request(
     post("/vaults/" + h.vault.id + "/fund", body(h.payment.txid), h.token),
   );
-  expect(response.status).toBe(409);
-  expect(await response.json()).toMatchObject({
-    error: "Funding transaction is not confirmed.",
+  expect(response.status).toBe(201);
+  expect(await stored(h.store, h.vault.id)).toMatchObject({
+    status: "submitted",
+    funding: { txid: h.payment.txid },
   });
-  expect(put).not.toHaveBeenCalled();
-  const vault = await stored(h.store, h.vault.id);
-  expect(vault?.status).toBe("unfunded");
-  expect(vault?.funding).toBeUndefined();
+  const second = await h.app.request(
+    post("/vaults/" + h.vault.id + "/fund", body(h.otherScript.txid), h.token),
+  );
+  expect(second.status).toBe(409);
+  const job = await h.app.request(
+    post(
+      "/jobs",
+      {
+        vaultId: h.vault.id,
+        funding: { txid: h.payment.txid, vout: 0, value: "50000" },
+        helper: { txid: "44".repeat(32), vout: 0, value: "20000" },
+        destination: address,
+        outputScript: hex.encode(btc.p2wpkh(pub).script),
+        outputValue: "60000",
+        fee: "10000",
+        idempotencyKey: crypto.randomUUID(),
+        costAccepted: true,
+      },
+      h.token,
+    ),
+  );
+  expect(job.status).toBe(409);
+  expect(await job.json()).toMatchObject({
+    error: "Vault funding is not confirmed.",
+  });
+  h.status.mockResolvedValue({
+    confirmed: true,
+    confirmations: 1,
+    blockHash: "22".repeat(32),
+    blockHeight: 100,
+  });
+  const observed = await h.app.request(
+    get("/vaults/" + h.vault.id + "/funding", h.token),
+  );
+  expect(observed.status).toBe(200);
+  expect(await stored(h.store, h.vault.id)).toMatchObject({
+    status: "confirmed",
+    funding: { txid: h.payment.txid },
+  });
   expect(h.submit).not.toHaveBeenCalled();
 });
 
@@ -248,11 +278,7 @@ it("refuses a second funding txid", async () => {
   h.raw.mockClear();
   h.status.mockClear();
   const second = await h.app.request(
-    post(
-      "/vaults/" + h.vault.id + "/fund",
-      body(h.otherScript.txid),
-      h.token,
-    ),
+    post("/vaults/" + h.vault.id + "/fund", body(h.otherScript.txid), h.token),
   );
   expect(second.status).toBe(409);
   expect(await second.json()).toMatchObject({

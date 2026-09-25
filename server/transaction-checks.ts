@@ -1,10 +1,13 @@
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import type { PublicVault, Job } from "../src/lib/model";
+import { withdrawalSchema, type PublicVault, type Job } from "../src/lib/model";
 import { outputScript } from "../src/lib/transactions";
 import { ChainError, type Esplora } from "./chain";
+import { MinerInclusionError } from "./runtime/miner-inclusion";
 
 const options = { allowUnknownInputs: true, allowUnknownOutputs: true };
+const HELPER_SEQUENCE = 0xfffffffe;
+
 function parse(raw: string) {
   if (!/^(?:[a-f0-9]{2})+$/i.test(raw) || raw.length > 150000)
     throw new ChainError("Invalid transaction encoding or size.");
@@ -55,6 +58,79 @@ export function matchVaultFunding(
     throw new ChainError("Funding amount does not match.");
   return { vout: 0, value: amount.toString() };
 }
+
+function helperSighashAll(input: ReturnType<btc.Transaction["getInput"]>): void {
+  const signature = input.finalScriptWitness?.[0];
+  if (!signature?.length || signature[signature.length - 1] !== 0x01)
+    throw new ChainError("Withdrawal authorization or wallet signature missing.");
+}
+
+/** Local withdrawal spend check shared by the submit route and checkWithdrawal. */
+export function assertWithdrawalSpendAgainstJob(job: Job, raw: string): void {
+  const parsed = withdrawalSchema.safeParse(job.manifest);
+  if (!parsed.success) throw new MinerInclusionError("ExactSpendMismatch");
+  const m = parsed.data;
+  const hit = job.solution;
+  if (!hit) throw new MinerInclusionError("ExactSpendMismatch");
+  let tx: btc.Transaction;
+  try {
+    tx = parse(raw);
+  } catch {
+    throw new MinerInclusionError("ExactSpendMismatch");
+  }
+  try {
+    if (
+      tx.version !== 1 ||
+      tx.lockTime !== hit.locktime ||
+      tx.inputsLength !== 2 ||
+      tx.outputsLength !== 1
+    )
+      throw new ChainError("Withdrawal layout or locktime changed.");
+    for (const [index, point, sequence] of [
+      [0, m.helper, HELPER_SEQUENCE],
+      [1, m.funding, hit.sequence],
+    ] as const) {
+      const input = tx.getInput(index);
+      if (
+        hex.encode(input.txid!) !== point.txid ||
+        input.index !== point.vout ||
+        input.sequence !== sequence
+      )
+        throw new ChainError("Withdrawal input changed.");
+    }
+    if (
+      !tx.getInput(1).finalScriptSig?.length ||
+      !tx.getInput(0).finalScriptWitness?.length
+    )
+      throw new ChainError(
+        "Withdrawal authorization or wallet signature missing.",
+      );
+    helperSighashAll(tx.getInput(0));
+    assertOutput(tx, 0, BigInt(m.outputValue), m.outputScript);
+    let outputTotal = 0n;
+    for (let index = 0; index < tx.outputsLength; index += 1) {
+      const amount = tx.getOutput(index).amount;
+      if (amount === undefined)
+        throw new ChainError("Withdrawal destination or fee mismatch.");
+      outputTotal += amount;
+    }
+    const txFee =
+      BigInt(m.funding.value) + BigInt(m.helper.value) - outputTotal;
+    if (txFee !== BigInt(m.fee))
+      throw new ChainError("Withdrawal destination or fee mismatch.");
+    if (
+      hex.encode(outputScript(m.destination)) !== m.outputScript ||
+      BigInt(m.outputValue) + BigInt(m.fee) !==
+        BigInt(m.funding.value) + BigInt(m.helper.value)
+    )
+      throw new ChainError("Withdrawal destination or fee mismatch.");
+  } catch (error) {
+    if (error instanceof ChainError)
+      throw new MinerInclusionError("ExactSpendMismatch");
+    throw error;
+  }
+}
+
 export async function checkFunding(
   raw: string,
   vault: PublicVault,
@@ -101,43 +177,10 @@ export async function checkWithdrawal(
 ) {
   if (!job.solution || job.status !== "awaiting_authorization")
     throw new ChainError("Withdrawal is not ready for authorization.");
-  const tx = parse(raw),
-    m = job.manifest,
-    hit = job.solution;
-  if (
-    tx.version !== 1 ||
-    tx.lockTime !== hit.locktime ||
-    tx.inputsLength !== 2 ||
-    tx.outputsLength !== 1
-  )
-    throw new ChainError("Withdrawal layout or locktime changed.");
-  for (const [index, point, sequence] of [
-    [0, m.helper, 0xfffffffe],
-    [1, m.funding, hit.sequence],
-  ] as const) {
-    const input = tx.getInput(index);
-    if (
-      hex.encode(input.txid!) !== point.txid ||
-      input.index !== point.vout ||
-      input.sequence !== sequence
-    )
-      throw new ChainError("Withdrawal input changed.");
-  }
-  if (
-    !tx.getInput(1).finalScriptSig?.length ||
-    !tx.getInput(0).finalScriptWitness?.length
-  )
-    throw new ChainError(
-      "Withdrawal authorization or wallet signature missing.",
-    );
-  assertOutput(tx, 0, BigInt(m.outputValue), m.outputScript);
-  if (
-    hex.encode(outputScript(m.destination)) !== m.outputScript ||
-    BigInt(m.outputValue) + BigInt(m.fee) !==
-      BigInt(m.funding.value) + BigInt(m.helper.value)
-  )
-    throw new ChainError("Withdrawal destination or fee mismatch.");
+  assertWithdrawalSpendAgainstJob(job, raw);
+  const m = withdrawalSchema.parse(job.manifest);
   await chain.unspent(m.funding, vault.scriptHex);
   await chain.unspent(m.helper, hex.encode(outputScript(vault.paymentAddress)));
+  const tx = parse(raw);
   return { txid: tx.id };
 }

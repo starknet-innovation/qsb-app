@@ -3,6 +3,7 @@ import {
   SecretsManagerClient,
   GetSecretValueCommand,
 } from "@aws-sdk/client-secrets-manager";
+import { gpuSpendLimits } from "./gpu-spend";
 import { minerBase } from "./network";
 import {
   assertBroadcastPermit,
@@ -141,6 +142,31 @@ export class Slipstream {
     throw new MinerInclusionError("LiveMinerTransportRefused");
   }
 }
+const endpointLimitSchema = z.object({
+  id: z.string(),
+  workers: z.object({
+    min: z.number().int().nonnegative(),
+    max: z.number().int().nonnegative(),
+  }),
+  timeout: z.number().int().positive(),
+});
+async function readBoundedJson(response: Response, maxBytes = 1_000_000) {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("ProviderLimitsUnconfirmed");
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  for (;;) {
+    const next = await reader.read();
+    if (next.done) break;
+    bytes += next.value.byteLength;
+    if (bytes > maxBytes) {
+      await reader.cancel();
+      throw new Error("ProviderLimitsUnconfirmed");
+    }
+    chunks.push(next.value);
+  }
+  return JSON.parse(new TextDecoder().decode(Buffer.concat(chunks)));
+}
 export const runpodStatusSchema = z.object({
   id: z.string(),
   status: z.enum([
@@ -155,6 +181,7 @@ export const runpodStatusSchema = z.object({
   output: z.unknown().optional(),
   error: z.string().optional(),
 });
+export const RUNPOD_JOB_TTL_MS = 86400000;
 export class Runpod {
   constructor(
     private endpoint: string,
@@ -194,13 +221,75 @@ export class Runpod {
       })
       .parse(await this.request("health"));
   }
-  async run(input: unknown) {
-    return z.object({ id: z.string() }).parse(
-      await this.request("run", {
-        input,
-        policy: { executionTimeout: 900000, ttl: 86400000 },
-      }),
+  private async applyEndpointLimits() {
+    // Confirm workersMax=1, workersMin=0, and the execution timeout before
+    // any paid submission. A missing confirmation does not start a job.
+    const response = await fetch(
+      `https://api.runpod.io/v2/serverless/${this.endpoint}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${this.key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          workers: {
+            min: gpuSpendLimits.workersMin,
+            max: gpuSpendLimits.workersMax,
+          },
+          timeout: gpuSpendLimits.executionTimeoutMs,
+        }),
+        redirect: "error",
+        signal: AbortSignal.timeout(20000),
+      },
     );
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`Provider request failed (${response.status})`);
+    }
+    let parsed: unknown;
+    try {
+      parsed = await readBoundedJson(response);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === "ProviderLimitsUnconfirmed"
+      )
+        throw error;
+      throw new Error("ProviderLimitsUnconfirmed");
+    }
+    const confirmed = endpointLimitSchema.safeParse(parsed);
+    if (
+      !confirmed.success ||
+      confirmed.data.id !== this.endpoint ||
+      confirmed.data.workers.min !== gpuSpendLimits.workersMin ||
+      confirmed.data.workers.max !== gpuSpendLimits.workersMax ||
+      confirmed.data.timeout !== gpuSpendLimits.executionTimeoutMs
+    )
+      throw new Error("ProviderLimitsUnconfirmed");
+  }
+  // Complete control-plane preflight before the caller journals a paid attempt.
+  // The returned closure is single-use, including when the POST outcome is unknown.
+  async prepareRun() {
+    await this.applyEndpointLimits();
+    let consumed = false;
+    return async (input: unknown) => {
+      if (consumed) throw new Error("SubmissionAlreadyAttempted");
+      consumed = true;
+      return z.object({ id: z.string().min(1) }).parse(
+        await this.request("run", {
+          input,
+          policy: {
+            executionTimeout: gpuSpendLimits.executionTimeoutMs,
+            ttl: RUNPOD_JOB_TTL_MS,
+          },
+        }),
+      );
+    };
+  }
+  async run(input: unknown) {
+    const submit = await this.prepareRun();
+    return submit(input);
   }
   async status(id: string) {
     if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error("Invalid job id");
@@ -218,13 +307,14 @@ export class Runpod {
           redirect: "error",
         },
       );
-      if (response.ok)
-        return runpodStatusSchema.parse(await response.json());
+      if (response.ok) return runpodStatusSchema.parse(await response.json());
       const retryable = [429, 500, 502, 503, 504].includes(response.status);
       if (!retryable || attempt >= 2)
         throw new Error(`Provider request failed (${response.status})`);
       await response.body?.cancel();
-      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 250 : 750));
+      await new Promise((resolve) =>
+        setTimeout(resolve, attempt === 0 ? 250 : 750),
+      );
     }
   }
   cancel(id: string) {

@@ -25,6 +25,7 @@ async function fixture(page: Page, changedSolution = false) {
   `,
     }),
   );
+  await page.route("**/api/config", (route) => route.fulfill({ json: { network: "mainnet", operationsEnabled: true } }));
   let previousTxHex = "";
   await page.route("**/api/vaults/*/funding", (route) =>
     route.fulfill({ json: { previousTxHex } }),
