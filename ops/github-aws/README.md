@@ -253,9 +253,13 @@ python3 ops/github-aws/update_installed.py --profile qsb-view --inventory INVENT
 python3 ops/github-aws/update_installed.py --profile ADMIN --inventory INVENTORY --apply
 ```
 
-**Plan mode** can run as `qsb-viewonly` on any pushed branch. For each target it prints `identical`, `missing` or `differs`. For a changed statement it also shows the exact actions, resources, principals and conditions that differ, with account numbers masked. The inventory feeds these documents as much as the code does, so compare that detail with the reviewed diff: a principal or resource you don't recognise means the inventory, not the code, changed it.
+**Plan mode** can run as `qsb-viewonly` on any pushed branch. For each target it prints `identical`, `missing` or `differs`. For a changed statement it also shows the exact actions, resources, principals and conditions that differ, with account numbers masked. The inventory feeds these documents as much as the code does, so compare that detail with the reviewed diff: a principal or resource you don't recognise means the inventory, not the code, changed it. Masking covers account numbers only: the plan still shows VPC, CloudFront and API IDs, the state bucket and the operator user's name. Keep plan output out of this public repository.
 
-**`--apply`** runs only from a clean `main` that matches `origin`, with an administrator profile, today root. It shows the plan, then asks you to type `apply`. Pass `--yes` only after reviewing that exact plan, for example when an agent runs it with your OK. It updates only what differs:
+**`--apply`** runs only from a clean `main` that matches `origin`, with an administrator profile, today root. It shows the plan, then asks you to type `apply`.
+
+Every plan prints a `plan_hash`, a digest of the commit and everything it read and would write. To apply without the prompt, for example when an agent runs it with your OK, pass `--yes --plan-hash HASH` using the hash from a plan-mode run you reviewed. If anything differs from that run, it refuses, including a target that plan mode couldn't read. A plan reviewed as `qsb-viewonly` therefore authorises only what that plan actually showed.
+
+The updater never changes who a role trusts. A trust update that would move a principal, or the GitHub OIDC `sub`/`aud`, is refused, because those values come from the inventory and need a separately reviewed step. It updates only what differs:
 - a new default version for managed policies;
 - `put-*-policy` for inline ones;
 - `update-assume-role-policy` or `update-role` for the roles.

@@ -197,15 +197,17 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
         docs = {'qsb-gpu-boundary': out['gpu_boundary']['document'],
                 'qsb-viewonly-1': out['viewonly']['policies'][0],
                 **{f'qsb-operator-{i}': d for i, d in enumerate(out['operator']['policies'], 1)}}
+        # Defaults differ per policy, so a check that always reads v1 fails.
+        default = {n: ('v2' if n == 'qsb-operator-2' else 'v1') for n in docs}
         listed = [{'PolicyName': 'qsb-runtime-boundary', 'Path': '/qsb/bootstrap/'}] + [
             {'PolicyName': n, 'Path': drift.get('path', '/qsb/bootstrap/'),
-             'Arn': f'arn:aws:iam::{ACCOUNT}:policy/qsb/bootstrap/{n}', 'DefaultVersionId': 'v1'} for n in docs]
+             'Arn': f'arn:aws:iam::{ACCOUNT}:policy/qsb/bootstrap/{n}', 'DefaultVersionId': default[n]} for n in docs]
         by_arn = {f'arn:aws:iam::{ACCOUNT}:policy/qsb/bootstrap/{n}': d for n, d in docs.items()}
         opt = lambda args, flag: args[args.index(flag) + 1]
 
         def versions(args):
             # Only the listed default version exists; any other --version-id is a test failure.
-            self.assertEqual(opt(args, '--version-id'), 'v1')
+            self.assertEqual(opt(args, '--version-id'), default[opt(args, '--policy-arn').rsplit('/', 1)[-1]])
             return {'PolicyVersion': {'Document': drift.get('document', by_arn[opt(args, '--policy-arn')])}}
 
         def entities(args):
@@ -215,14 +217,15 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
             return {'PolicyUsers': [], 'PolicyGroups': [], 'PolicyRoles': [{'RoleName': r} for r in roles]}
         return {
             ('iam', 'list-policies'): {'Policies': listed},
-            ('iam', 'list-users'): {'Users': [{'UserName': 'qsb-operator-user', 'Path': '/qsb/operators/'}]},
+            ('iam', 'list-users'): {'Users': [{'UserName': 'qsb-operator-user', 'Path': drift.get('user_path', '/qsb/operators/')}]},
             ('iam', 'get-policy-version'): versions,
             ('iam', 'list-attached-user-policies'): {'AttachedPolicies': [{'PolicyArn': a} for a in out['user']['managed']]},
             ('iam', 'list-user-policies'): {'PolicyNames': drift.get('user_policies', ['assume-qsb-roles'])},
             ('iam', 'get-user-policy'): {'PolicyDocument': drift.get('user_inline', out['user']['inline'])},
             ('iam', 'list-access-keys'): {'AccessKeyMetadata': drift.get('keys', [])},
             ('iam', 'list-groups-for-user'): {'Groups': drift.get('groups', [])},
-            ('iam', 'list-policy-versions'): {'Versions': drift.get('versions', [{'VersionId': 'v1'}])},
+            ('iam', 'list-policy-versions'): (lambda args: {'Versions': drift.get('versions', [
+                {'VersionId': default[opt(args, '--policy-arn').rsplit('/', 1)[-1]]}])}),
             ('iam', 'list-entities-for-policy'): entities,
             ('iam', 'list-ssh-public-keys'): {'SSHPublicKeys': drift.get('ssh', [])},
             ('iam', 'list-service-specific-credentials'): {'ServiceSpecificCredentials': drift.get('service', [])},
@@ -248,7 +251,8 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
                           operator_user='qsb-operator-user', gpu_vpc='vpc-0test'))
         spec = out['viewonly']
         responses[('iam', 'list-roles')] = {'Roles': [{'RoleName': 'qsb-viewonly', 'Path': '/qsb/bootstrap/'}]}
-        responses[('iam', 'get-role')] = {'Role': {'Path': '/qsb/bootstrap/', 'MaxSessionDuration': spec['max_session'],
+        responses[('iam', 'get-role')] = {'Role': {'Path': role.get('path', '/qsb/bootstrap/'),
+                                                   'MaxSessionDuration': role.get('max', spec['max_session']),
                                                    'AssumeRolePolicyDocument': role.get('trust', spec['trust'])}}
         attached = role.get('attached', [spec['managed'][0], f'arn:aws:iam::{ACCOUNT}:policy/qsb/bootstrap/qsb-viewonly-1'])
         responses[('iam', 'list-attached-role-policies')] = {'AttachedPolicies': [{'PolicyArn': x} for x in attached]}
@@ -277,6 +281,8 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
     def test_resume_refuses_role_drift(self):
         other = {'Version': '2012-10-17', 'Statement': [{'Effect': 'Allow', 'Principal': {'AWS': '*'}, 'Action': 'sts:AssumeRole'}]}
         for role, message in (({'trust': other}, 'differs in path, trust or session length'),
+                              ({'path': '/elsewhere/'}, 'differs in path, trust or session length'),
+                              ({'max': 43200}, 'differs in path, trust or session length'),
                               ({'attached': ['arn:aws:iam::aws:policy/AdministratorAccess']}, 'policies this commit does not render'),
                               ({'inline': ['extra']}, 'policies this commit does not render')):
             with self.subTest(role=list(role)), self.assertRaisesRegex(SystemExit, message):
@@ -297,7 +303,8 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
                                ({'certs': [{'CertificateId': 'CERT'}]}, 'has signing certificates'),
                                ({'ssh': [{'SSHPublicKeyId': 'APKAEXAMPLE'}]}, 'has SSH keys'),
                                ({'groups': [{'GroupName': 'admins'}]}, 'is in a group'),
-                               ({'user_inline': {'Version': '2012-10-17', 'Statement': []}}, 'different inline policy')):
+                               ({'user_inline': {'Version': '2012-10-17', 'Statement': []}}, 'different inline policy'),
+                               ({'user_path': '/elsewhere/'}, 'is not under /qsb/operators/')):
             with self.subTest(drift=list(drift)), self.assertRaisesRegex(SystemExit, message):
                 self.bootstrap([{'status': 'ACTIVE'}], resume=True, responses_override=self.partial_run(**drift))
             self.assert_no_iam_mutations()

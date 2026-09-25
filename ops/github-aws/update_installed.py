@@ -20,6 +20,7 @@ changed managed policy already has IAM's five versions, the number of rendered a
 policies changed, something is missing, or a role carries policies this commit doesn't render.
 """
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -33,7 +34,8 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--profile', required=True)
 p.add_argument('--inventory', type=Path, required=True)
 p.add_argument('--apply', action='store_true')
-p.add_argument('--yes', action='store_true', help='skip the typed confirmation; only after reviewing this exact plan')
+p.add_argument('--yes', action='store_true', help='skip the typed confirmation; requires --plan-hash')
+p.add_argument('--plan-hash', help='with --yes: the plan_hash printed by a plan-mode run whose plan you reviewed')
 a = p.parse_args()
 c = json.loads(a.inventory.read_text())
 root = Path(__file__).resolve().parents[2]
@@ -62,7 +64,18 @@ def aws(*args, readable=False):
 
 
 def mask(value):
-    return json.loads(re.sub(r'\d{12}', '<ACCOUNT>', json.dumps(value)))
+    """Replace 12-digit account numbers, in strings or as JSON numbers, with <ACCOUNT>."""
+    if isinstance(value, str):
+        return re.sub(r'\d{12}', '<ACCOUNT>', value)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and len(str(abs(value))) == 12:
+        return '<ACCOUNT>'
+    if isinstance(value, list):
+        return [mask(v) for v in value]
+    if isinstance(value, dict):
+        return {mask(k): mask(v) for k, v in value.items()}
+    return value
 
 
 def listed_set(value):
@@ -87,11 +100,24 @@ def statement_diff(installed, rendered):
             before, after = listed_set(old[k].get(field)), listed_set(new[k].get(field))
             if before != after:
                 detail[field] = {'added': mask(sorted(after - before)), 'removed': mask(sorted(before - after))}
-        for field in ('Effect', 'Principal', 'Condition'):
+        compared = {'Sid', 'Action', 'NotAction', 'Resource', 'NotResource'}
+        # Every other field (Effect, Principal, NotPrincipal, Condition, anything new) is shown whole.
+        for field in sorted((set(old[k]) | set(new[k])) - compared):
             if old[k].get(field) != new[k].get(field):
                 detail[field] = {'installed': mask(old[k].get(field)), 'rendered': mask(new[k].get(field))}
         changed[k] = detail or 'reordered only'
     return {'added': sorted(set(new) - set(old)), 'removed': sorted(set(old) - set(new)), 'changed': changed}
+
+
+def trusted(document):
+    """Who a trust policy lets in: each statement's principal, and any OIDC audience/subject it pins."""
+    out = []
+    for s in (document or {}).get('Statement', []):
+        pinned = {k: v for k, v in (s.get('Condition', {}).get('StringEquals', {})).items()
+                  if k.endswith((':sub', ':aud'))}
+        out.append(json.dumps({'Principal': s.get('Principal'), 'NotPrincipal': s.get('NotPrincipal'),
+                               'pinned': pinned}, sort_keys=True))
+    return sorted(out)
 
 
 def read_back(label, read, wanted):
@@ -216,6 +242,13 @@ for role in ('viewonly', 'operator'):
     targets.append((f"{spec['name']} max session", 'value', live['MaxSessionDuration'], spec['max_session'],
                     lambda spec=spec: update_session(spec)))
 
+# The updater corrects documents; it never moves who a role trusts. That comes from the inventory
+# (operator_user, subject) and needs its own reviewed step.
+for label, kind, installed, wanted, _ in targets:
+    if label.endswith(' trust') and installed is not UNREADABLE and installed != wanted \
+            and trusted(installed) != trusted(wanted):
+        blockers.append(f'{label}: the trusted principal would change; do that as a separately reviewed step')
+
 plan = []
 for label, kind, installed, wanted, _ in targets:
     if kind == 'missing':
@@ -228,7 +261,13 @@ for label, kind, installed, wanted, _ in targets:
         plan.append({'target': label, 'status': 'differs', 'installed': installed, 'rendered': wanted})
     else:
         plan.append({'target': label, 'status': 'differs', **statement_diff(installed, wanted)})
-print(json.dumps({'commit': commit, 'apply': a.apply, 'plan': plan}, indent=2), flush=True)
+# A digest of everything this run would compare and write. --yes must quote the digest of a plan-mode run
+# that was reviewed; an unreadable target changes it, so nothing is written that the reviewer didn't see.
+plan_hash = hashlib.sha256(json.dumps(
+    {'commit': commit, 'targets': [[label, kind, '<unreadable>' if installed is UNREADABLE else installed, wanted]
+                                   for label, kind, installed, wanted, _ in targets]},
+    sort_keys=True, default=str).encode()).hexdigest()[:16]
+print(json.dumps({'commit': commit, 'apply': a.apply, 'plan_hash': plan_hash, 'plan': plan}, indent=2), flush=True)
 if any(t[1] == 'missing' for t in targets):
     raise SystemExit('Some identities are missing; run the bootstrap first')
 if blockers:
@@ -236,6 +275,9 @@ if blockers:
 if not a.apply:
     raise SystemExit()
 changes = [t for t in targets if t[2] != t[3]]
+if a.yes and a.plan_hash != plan_hash:
+    raise SystemExit('--yes needs --plan-hash from a reviewed plan-mode run of this exact state; '
+                     f'this plan is {plan_hash}. Nothing was changed')
 if changes and not a.yes:
     if not sys.stdin.isatty():
         raise SystemExit('Review the plan above, then confirm interactively or rerun with --yes; nothing was changed')
