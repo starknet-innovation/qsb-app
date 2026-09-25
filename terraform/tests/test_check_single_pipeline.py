@@ -119,13 +119,30 @@ class DeployChecks(unittest.TestCase):
                                                    'after_unknown': {'environment': [{'variables': True}]}}})
         self.refused(doc, 'only the API environment is expected')
 
-    def test_partly_or_wholly_unknown_environments_count_as_unknown(self):
-        for shape in (True, [{'variables': {'WORKFLOW_ARN': True}}]):
-            doc = self.unknown_api_env()
-            doc['resource_changes'].append({'type': 'aws_lambda_function', 'name': 'reference', 'mode': 'managed',
-                                            'change': {'actions': ['create'], 'after_unknown': {'environment': shape}}})
+    def with_unknown(self, doc, name, variables):
+        doc['resource_changes'].append({'type': 'aws_lambda_function', 'name': name, 'mode': 'managed',
+                                        'change': {'actions': ['create'], 'after_unknown': {'environment': variables}}})
+        return doc
+
+    def test_partly_unknown_api_environment_is_checked_by_key(self):
+        # The CI mock-plan shape: every key is named, only APP_ORIGIN's value is unknown; no configuration needed.
+        doc = self.with_unknown(plan(), 'api', [{'variables': {'APP_ORIGIN': True}}])
+        self.assertEqual(self.run_check(doc, '--deploy')[0], 0)
+        doc = self.with_unknown(plan(), 'api', [{'variables': {'AWS_BATCH_JOB_QUEUE': True}}])
+        self.refused(doc, 'Only coordinator may receive')
+        doc = self.with_unknown(plan(), 'api', [{'variables': {'SUPERVISED_ROUTE': True}}])
+        self.refused(doc, 'No supervised routing')
+        doc = plan()
+        for r in doc['planned_values']['root_module']['resources']:
+            if r['type'] == 'aws_lambda_function' and r['name'] == 'api':
+                r['values']['environment'][0]['variables'].pop('TABLE_NAME')
+        self.refused(self.with_unknown(doc, 'api', [{'variables': {'TABLE_NAME': True}}]), 'TABLE_NAME must be known')
+
+    def test_only_the_api_environment_may_be_wholly_unknown(self):
+        for shape in (True, [True], [{'variables': True}]):
             with self.subTest(shape=shape):
-                self.refused(doc, 'only the API environment is expected')
+                self.refused(self.with_unknown(self.unknown_api_env(), 'reference', shape), 'only the API environment')
+        self.refused(self.with_unknown(plan(), 'api', [{'variables': {'X': 'odd'}}]), 'unrecognised after_unknown shape')
 
     def test_known_coordinator_table_is_checked_while_the_api_is_unknown(self):
         doc = self.unknown_api_env()
