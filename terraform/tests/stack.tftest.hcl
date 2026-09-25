@@ -136,9 +136,9 @@ run "operator_reconcile_scope" {
     iam_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary"
   }
   assert {
-    condition = length(jsondecode(aws_iam_role.operator_reconcile.assume_role_policy).Statement) == 1 && jsondecode(aws_iam_role.operator_reconcile.assume_role_policy).Statement[0] == {
+    condition = length(jsondecode(aws_iam_role.operator_reconcile.assume_role_policy).Statement) == 1 && jsonencode(jsondecode(aws_iam_role.operator_reconcile.assume_role_policy).Statement[0]) == jsonencode({
       Effect = "Allow", Principal = { AWS = sort(tolist(var.operator_principal_arns)) }, Action = "sts:AssumeRole", Condition = { Bool = { "aws:MultiFactorAuthPresent" = "true" } }
-    }
+    })
     error_message = "Only the explicit principals with MFA may assume the role."
   }
   assert {
@@ -159,7 +159,7 @@ run "operator_reconcile_scope" {
     error_message = "No UpdateItem, DeleteItem, BatchWriteItem, Query, Scan, wildcard or other actions may be granted."
   }
   assert {
-    condition     = jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement[2].Resource == local.workflow_arn && jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement[3].Resource == var.runpod_secret_arn && jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement[4].Resource == var.runpod_secret_kms_key_arn && jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement[4].Condition.StringEquals["kms:ViaService"] == "secretsmanager.${var.region}.amazonaws.com"
+    condition     = jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement[2].Action == ["states:StartExecution"] && jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement[3].Action == ["secretsmanager:GetSecretValue"] && jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement[4].Action == ["kms:Decrypt"] && jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement[2].Resource == local.workflow_arn && jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement[3].Resource == var.runpod_secret_arn && jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement[4].Resource == var.runpod_secret_kms_key_arn && jsondecode(aws_iam_role_policy.operator_reconcile.policy).Statement[4].Condition.StringEquals["kms:ViaService"] == "secretsmanager.${var.region}.amazonaws.com"
     error_message = "Workflow, secret and optional decryption must each target exactly the configured resource."
   }
 }

@@ -201,8 +201,11 @@ not remain in the parent shell; disable tracing and never print or share them:
 ```sh
 (
   set +x
+  set -e
   aws sts get-caller-identity --profile qsb-reconcile-mfa
-  eval "$(aws configure export-credentials --profile qsb-reconcile-mfa --format env)"
+  session_exports="$(aws configure export-credentials --profile qsb-reconcile-mfa --format env)" || exit 1
+  eval "$session_exports"
+  unset session_exports
   unset AWS_PROFILE AWS_DEFAULT_PROFILE
   # Verify the assumed-role ARN before proceeding; this prints no credentials.
   aws sts get-caller-identity
