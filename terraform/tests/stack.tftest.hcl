@@ -111,7 +111,7 @@ run "configured_single_pipeline" {
     runpod_secret_arn  = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/runpod-Example"
   }
   assert {
-    condition     = output.runpod_configured && output.transactions_enabled == false && length(aws_iam_role_policy.runpod) == 1 && jsondecode(aws_iam_role_policy.runpod[0].policy).Statement == [{ Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = var.runpod_secret_arn }]
+    condition     = output.runpod_configured && output.transactions_enabled == false && length(aws_iam_role_policy.runpod) == 1 && length(jsondecode(aws_iam_role_policy.runpod[0].policy).Statement) == 1 && jsondecode(aws_iam_role_policy.runpod[0].policy).Statement[0].Effect == "Allow" && jsondecode(aws_iam_role_policy.runpod[0].policy).Statement[0].Resource == var.runpod_secret_arn && toset(try(tolist(jsondecode(aws_iam_role_policy.runpod[0].policy).Statement[0].Action), [jsondecode(aws_iam_role_policy.runpod[0].policy).Statement[0].Action])) == toset(["secretsmanager:GetSecretValue"])
     error_message = "Only one provider-key reference may be enrolled; configuration must not activate transactions."
   }
   assert {
