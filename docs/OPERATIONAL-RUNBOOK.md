@@ -76,8 +76,18 @@ echoed `input` is assumed. The operator must bind live/terminal IDs to this exac
 job, stage, range, endpoint and submission window using logs/console evidence.
 Completed outputs additionally must match the stored manifest, stage, attempt,
 kernel and exact range. Attachment grants no completion credit: the coordinator
-still validates the output and CPU-checks hits. Existing attached IDs can restart
-polling idempotently. The CLI does not change deployment switches. Its explicit
+still validates the output and CPU-checks hits. For an already-recorded ID on a `searching` job, reconciliation atomically increments
+its revision and writes `RECONCILIATION#<jobId>#<priorRevision>` before restarting
+polling as `<jobId>-r<newRevision>`. The provider ID, submission intent, spend
+accounting and reservations are preserved; no paid request is submitted or cancelled.
+Concurrent changes to the job reject the transaction, without starting polling.
+An old execution exits on its next coordinator revision check.
+
+This new name is necessary because [AWS Standard StartExecution semantics](https://docs.aws.amazon.com/step-functions/latest/apireference/API_StartExecution.html)
+reject reuse of a closed execution's name with `ExecutionAlreadyExists` for 90 days.
+Same-name idempotency only applies while the execution is running with identical input.
+Each successful reconciliation, including rerunning after a workflow-start failure,
+creates a fresh audited revision rather than reusing a possibly closed execution name. The CLI does not change deployment switches. Its explicit
 local mainnet setting gates provider-ID attachment before any read or write;
 `PollingNotAllowed` means that local setting or another polling prerequisite
 refused, not proof of the current Lambda configuration. Verify the deployed value
