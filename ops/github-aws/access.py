@@ -94,7 +94,9 @@ def access(c):
             'ecr:DescribeImages', 'iam:GetRole', 'iam:GetRolePolicy', 'iam:GetPolicy', 'iam:GetPolicyVersion',
             'iam:GetInstanceProfile', 'iam:GetUser', 'iam:GetAccessKeyLastUsed',
             'iam:SimulateCustomPolicy', 'iam:SimulatePrincipalPolicy',
-            'ce:GetCostAndUsage', 'ce:GetCostForecast'], ['*']),
+            'ce:GetCostAndUsage', 'ce:GetCostForecast', 'access-analyzer:ListAnalyzers',
+            'access-analyzer:ListFindings', 'access-analyzer:ListFindingsV2', 'access-analyzer:GetFinding',
+            'access-analyzer:GetFindingV2'], ['*']),
         # ViewOnlyAccess is metadata-only today; keep data reads denied even if AWS widens it.
         deny('NoDataReads', [
             's3:GetObject*', 'athena:GetQueryResults', 'cloudformation:GetTemplate', 'ec2:GetConsoleOutput',
@@ -159,6 +161,8 @@ def access(c):
         deny('NoFunctionUrlsOrExternalResourcePolicies', [
             'lambda:CreateFunctionUrlConfig', 'lambda:UpdateFunctionUrlConfig',
             'dynamodb:PutResourcePolicy', 'ecr:SetRepositoryPolicy'], ['*']),
+        # The external-access analyzer is the check on role trust and bucket policies; keep it out of reach.
+        deny('ProtectAccessAnalyzer', ['access-analyzer:*'], ['*']),
         deny('ProtectBootstrapIdentities', ['iam:*'], [iam('role/qsb/bootstrap/*'), iam('policy/qsb/bootstrap/*'),
                                                         iam('user/qsb/*')]),
         deny('NeverRemoveBoundaries', ['iam:DeleteRolePermissionsBoundary'], [iam('role/qsb/runtime/*')]),

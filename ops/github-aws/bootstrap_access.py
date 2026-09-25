@@ -50,6 +50,7 @@ plan = {
     'user': out['user']['path'] + out['user']['name'],
     'roles': {'qsb-viewonly': ['ViewOnlyAccess', *viewonly_names], 'qsb-operator': operator_names},
     'gpu_boundary': 'qsb-gpu-boundary',
+    'external_access_analyzer': 'qsb-external-access (created only if the account has none)',
     'policy_sizes': {n: size(d) for n, d in zip(viewonly_names + operator_names,
                                                 out['viewonly']['policies'] + out['operator']['policies'])},
 }
@@ -103,4 +104,12 @@ for role in ('viewonly', 'operator'):
     for policy_arn in attached[role]:
         aws('iam', 'attach-role-policy', '--role-name', spec['name'], '--policy-arn', policy_arn)
     print(f"created role {spec['name']} with {len(attached[role])} managed policies", flush=True)
-print(json.dumps({'done': True, 'commit': commit, 'next': 'set console password and MFA for the user as root'}), flush=True)
+# Role trust and S3 bucket policies can name outside principals; flag any such access.
+if not aws('accessanalyzer', 'list-analyzers', '--type', 'ACCOUNT')['analyzers']:
+    aws('accessanalyzer', 'create-analyzer', '--analyzer-name', 'qsb-external-access', '--type', 'ACCOUNT',
+        '--tags', json.dumps({'Application': 'qsb-vault', 'SourceCommit': commit}))
+    print('created external-access analyzer qsb-external-access', flush=True)
+else:
+    print('an external-access analyzer already exists; kept it', flush=True)
+print(json.dumps({'done': True, 'commit': commit, 'next': 'set console password and TOTP MFA for the user as root'}),
+      flush=True)

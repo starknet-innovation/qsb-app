@@ -200,14 +200,16 @@ operator can still grant persistent outside access through those remaining
 surfaces, including frontend content access. MFA on the original operator session
 does not make those downstream grants expire.
 
-After bootstrap, root should create an IAM Access Analyzer external-access
-analyzer and route its findings to an independently controlled alert destination.
+`bootstrap_access.py` creates an IAM Access Analyzer external-access analyzer,
+`qsb-external-access`, if the account has none. The operator is denied every
+Access Analyzer action, and `qsb-viewonly` can list findings. After bootstrap,
+root should route its findings to an independently controlled alert destination.
 Also alert on CloudTrail CreateRole, UpdateAssumeRolePolicy, PutBucketPolicy and
 PutSubscriptionFilter calls by qsb-operator, and review Lambda service-principal
 permission changes. Keep alert rules outside `qsb-gpu-*`, and their roles,
 policies and destinations outside all QSB deploy resource patterns, so the
-operator cannot disable them. Configure and test delivery as root; this PR does
-not create an analyzer or monitoring resources. Findings require human review,
+operator cannot disable them. Configure and test delivery as root; the bootstrap
+creates only the analyzer, not alert or monitoring resources. Findings require human review,
 not automatic deletion of access.
 
 References: [Lambda permission conditions](https://docs.aws.amazon.com/lambda/latest/dg/access-control-resource-based.html),

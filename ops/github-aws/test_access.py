@@ -196,6 +196,12 @@ class HumanAccess(unittest.TestCase):
         self.assertEqual(set(guard['Action']), {'lambda:CreateFunctionUrlConfig',
             'lambda:UpdateFunctionUrlConfig', 'dynamodb:PutResourcePolicy', 'ecr:SetRepositoryPolicy'})
 
+    def test_access_analyzer_is_readable_but_out_of_operator_reach(self):
+        guard = self.sid(self.operator, 'ProtectAccessAnalyzer')
+        self.assertEqual((guard['Effect'], guard['Action'], guard['Resource']), ('Deny', ['access-analyzer:*'], ['*']))
+        granted = {a for a, _ in self.allowed(self.viewonly)}
+        self.assertTrue({'access-analyzer:ListAnalyzers', 'access-analyzer:ListFindingsV2'} <= granted)
+
     def test_policies_fit_iam_limits(self):
         for role in ('viewonly', 'operator'):
             docs = self.out[role]['policies']
