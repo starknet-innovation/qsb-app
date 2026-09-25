@@ -137,8 +137,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
   const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
   if (!vaultRow) throw new Error("VaultNotFound");
   const vault = vaultRow.vault as PublicVault;
-  if ((vault.network ?? "mainnet") !== NETWORK_ID)
-    throw new Error("VaultNetworkMismatch");
+  if (vault.network !== NETWORK_ID) throw new Error("VaultNetworkMismatch");
   await chain.assertNetwork();
   if (vault.configuration && !job.solver) throw new Error("SolverPinRequired");
   // Legacy jobs retain the historical release explicitly, never the current default.
@@ -168,13 +167,19 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       await save();
       return { ...event, done: true };
     }
-    if (
-      job.attempt >= gpuSpendLimits.maxJobAttempts ||
-      (job.gpuSubmissions ?? 0) >= gpuSpendLimits.maxJobAttempts
-    ) {
+    if ((job.gpuSubmissions ?? 0) >= gpuSpendLimits.maxJobAttempts) {
       job.status = "paused";
       job.error =
         "Attempt cap reached. Further GPU work on this job needs a reviewed limit change.";
+      await save();
+      return { ...event, done: true };
+    }
+    // Reject exhausted/invalid stage ranges before reserving paid work.
+    try {
+      workRange(job.stage, job.attempt);
+    } catch {
+      job.status = "paused";
+      job.error = "Search range exhausted; a reviewed new range is required.";
       await save();
       return { ...event, done: true };
     }
@@ -194,11 +199,21 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       ...job.parameterHashes,
       [key]: parameters.parameterSha256,
     };
+    let submit: (input: unknown) => Promise<{ id: string }>;
+    try {
+      submit = await runpod.prepareRun();
+    } catch {
+      job.status = "paused";
+      job.error =
+        "Runpod limits unconfirmed; nothing was submitted. Resume after correcting provider configuration.";
+      await save();
+      return { ...event, done: true };
+    }
     job.gpuSubmissions = (job.gpuSubmissions ?? 0) + 1;
     job.status = "searching";
     delete job.retryRequested;
     await save();
-    const result = await runpod.run({
+    const result = await submit({
       protocol: selected.protocol,
       kernelCommit: selected.kernelCommit,
       manifestHash: job.manifestHash,
@@ -273,7 +288,9 @@ export async function handler(event: Event | { action: "providerHealth" }) {
                 .number()
                 .int()
                 .min(expectedRange.sequence!)
-                .max(expectedRange.sequence! + expectedRange.sequenceCount! - 1),
+                .max(
+                  expectedRange.sequence! + expectedRange.sequenceCount! - 1,
+                ),
               locktime: z
                 .number()
                 .int()
@@ -318,7 +335,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
         delete job.retryRequested;
         job.attempt++;
         delete job.runpodId;
-        if (job.attempt >= gpuSpendLimits.maxJobAttempts) {
+        if ((job.gpuSubmissions ?? 0) >= gpuSpendLimits.maxJobAttempts) {
           job.status = "paused";
           job.error =
             "Attempt cap reached. Further GPU work on this job needs a reviewed limit change.";

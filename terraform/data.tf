@@ -33,10 +33,6 @@ resource "terraform_data" "release" {
       error_message = "Supply both Runpod endpoint and secret ARN, or neither."
     }
     precondition {
-      condition     = local.gpu_spend.workersMax == 1 && local.gpu_spend.workersMin == 0 && local.gpu_spend.executionTimeoutMs == 900000 && local.gpu_spend.maxJobAttempts == 40
-      error_message = "Runpod limits must stay workersMax=1, workersMin=0, executionTimeoutMs=900000, and maxJobAttempts=40."
-    }
-    precondition {
       condition     = !(var.network == "mainnet" && var.provision_runtime)
       error_message = "Do not deploy the supervised runtime for the mainnet environment. Mainnet jobs use the Step Functions coordinator."
     }

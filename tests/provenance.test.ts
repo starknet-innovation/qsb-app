@@ -42,6 +42,12 @@ describe("immutable vault and solver provenance", () => {
     v.scriptHex = "52";
     expect(() => assertSolverPin(p, v)).toThrow("VaultScriptHashMismatch");
   });
+  it("rejects a vault that omits its network", () => {
+    const { network: _network, ...v } = vault();
+    expect(() => vaultConfiguration(v)).toThrow(
+      "Unsupported QSB network configuration",
+    );
+  });
   it("rejects changed network", () => {
     const v = vault();
     const p = pinSolver(v);

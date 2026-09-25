@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   health: vi.fn(),
   run: vi.fn(),
+  prepareRun: vi.fn(),
   status: vi.fn(),
   cancel: vi.fn(),
   cpu: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock("../server/providers", () => ({
   Runpod: class {
     health = mocks.health;
     run = mocks.run;
+    prepareRun = mocks.prepareRun;
     status = mocks.status;
     cancel = mocks.cancel;
   },
@@ -63,7 +65,7 @@ async function seed(extra: Partial<Job> = {}) {
     pk,
     sk: "VAULT#v",
     version: 0,
-    vault: { publicStateJson: "{}" },
+    vault: { publicStateJson: "{}", network: "mainnet" },
   });
 }
 beforeEach(() => {
@@ -82,6 +84,17 @@ beforeEach(() => {
     ),
   }));
   mocks.run.mockResolvedValue({ id: "compute-1" });
+  mocks.prepareRun.mockResolvedValue(mocks.run);
+});
+it("rejects a vault that omits its network before any paid request", async () => {
+  await seed();
+  const row = await store.get(pk, "VAULT#v");
+  await store.put(
+    { ...row!, vault: { publicStateJson: "{}" }, version: row!.version + 1 },
+    row!.version,
+  );
+  await expect(handler(event)).rejects.toThrow("VaultNetworkMismatch");
+  expect(mocks.run).not.toHaveBeenCalled();
 });
 it("stops a stale workflow revision before any paid request", async () => {
   await seed({ revision: 1 });
@@ -174,12 +187,16 @@ function completedOutput(attempt: number, candidates: string[]) {
 }
 
 it("does not start another GPU attempt once the job reaches the attempt cap", async () => {
-  await seed({ status: "queued", attempt: gpuSpendLimits.maxJobAttempts });
+  await seed({
+    status: "queued",
+    attempt: 0,
+    gpuSubmissions: gpuSpendLimits.maxJobAttempts,
+  });
   expect(await handler(event)).toMatchObject({ done: true });
   expect(mocks.run).not.toHaveBeenCalled();
   expect(mocks.cpu).not.toHaveBeenCalled();
   expect((await store.get(pk, sk))?.job).toMatchObject({
-    attempt: gpuSpendLimits.maxJobAttempts,
+    attempt: 0,
     status: "paused",
     error: expect.stringContaining("Attempt cap reached"),
   });
@@ -204,7 +221,12 @@ it("does not retry a job once its counted GPU submissions reach the cap", async 
 
 it("pauses after the last in-cap range instead of queueing another paid attempt", async () => {
   const attempt = gpuSpendLimits.maxJobAttempts - 1;
-  await seed({ status: "searching", runpodId: "compute-1", attempt });
+  await seed({
+    status: "searching",
+    runpodId: "compute-1",
+    attempt,
+    gpuSubmissions: gpuSpendLimits.maxJobAttempts,
+  });
   mocks.status.mockResolvedValue(completedOutput(attempt, []));
   expect(await handler(event)).toMatchObject({ done: true });
   expect(mocks.run).not.toHaveBeenCalled();
@@ -218,7 +240,9 @@ it("pauses after the last in-cap range instead of queueing another paid attempt"
 it("does not credit a 64-hit output as a finished range", async () => {
   await seed({ status: "searching", runpodId: "compute-1", attempt: 3 });
   mocks.status.mockResolvedValue(
-    completedOutput(3, ["sequence=2147483648\nlocktime=500000000\n".repeat(64)]),
+    completedOutput(3, [
+      "sequence=2147483648\nlocktime=500000000\n".repeat(64),
+    ]),
   );
   expect(await handler(event)).toMatchObject({ done: true });
   expect(mocks.cpu).not.toHaveBeenCalled();
@@ -242,4 +266,64 @@ it("keeps polling a paused provider request until cancellation is confirmed", as
   mocks.status.mockResolvedValue({ status: "CANCELLED" });
   expect(await handler(event)).toMatchObject({ done: true });
   expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it.each([
+  new Error("403"),
+  new Error("ProviderLimitsUnconfirmed"),
+  new Error("AbortError"),
+])(
+  "pauses a failed limits preflight without a paid claim: %s",
+  async (error) => {
+    await seed({ gpuSubmissions: 7 });
+    mocks.prepareRun.mockRejectedValueOnce(error);
+    expect(await handler(event)).toMatchObject({ done: true });
+    expect(mocks.run).not.toHaveBeenCalled();
+    const row = (await store.get(pk, sk))!;
+    expect(row.job).toMatchObject({
+      status: "paused",
+      gpuSubmissions: 7,
+      attempt: 0,
+      error: expect.stringContaining("nothing was submitted"),
+    });
+    expect((row.job as Job).runpodId).toBeUndefined();
+    await store.put(
+      {
+        ...row,
+        version: row.version + 1,
+        job: { ...(row.job as Job), status: "queued" },
+      },
+      row.version,
+    );
+    expect(await handler(event)).toMatchObject({ done: false });
+    expect(mocks.run).toHaveBeenCalledTimes(1);
+    expect((await store.get(pk, sk))!.job).toMatchObject({
+      gpuSubmissions: 8,
+      runpodId: "compute-1",
+    });
+  },
+);
+it("allows the final subset range after many previous-stage submissions", async () => {
+  await seed({ stage: "round2", attempt: 4828, gpuSubmissions: 12000 });
+  expect(await handler(event)).toMatchObject({ done: false });
+  expect(mocks.run).toHaveBeenCalledOnce();
+  expect((await store.get(pk, sk))!.job).toMatchObject({
+    gpuSubmissions: 12001,
+    attempt: 4828,
+  });
+});
+it("counts a failed paid POST as uncertain and never resubmits it", async () => {
+  await seed({ gpuSubmissions: 7 });
+  mocks.run.mockRejectedValueOnce(new Error("lost response"));
+  await expect(handler(event)).rejects.toThrow("lost response");
+  expect((await store.get(pk, sk))!.job).toMatchObject({
+    status: "searching",
+    gpuSubmissions: 8,
+  });
+  await handler(event);
+  expect(mocks.run).toHaveBeenCalledOnce();
+  expect((await store.get(pk, sk))!.job).toMatchObject({
+    status: "paused",
+    error: expect.stringContaining("outcome unknown"),
+  });
 });

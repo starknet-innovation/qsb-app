@@ -6,9 +6,13 @@ mock_provider "aws" {
 variables {
   aws_account_id = "123456789012"
   name           = "qsb-test"
+  network        = "mainnet"
 }
 run "baseline" {
   command = plan
+  variables {
+    network = "mainnet"
+  }
   assert {
     condition     = output.transactions_enabled == false && output.runpod_configured == false
     error_message = "Baseline must not activate transactions or configure paid compute."
@@ -30,7 +34,7 @@ run "baseline" {
     error_message = "Do not add generic automatic retries around billable coordination."
   }
   assert {
-    condition     = aws_lambda_function.coordinator.environment[0].variables.RUNPOD_WORKERS_MAX == "1" && aws_lambda_function.coordinator.environment[0].variables.RUNPOD_WORKERS_MIN == "0" && aws_lambda_function.coordinator.environment[0].variables.RUNPOD_EXECUTION_TIMEOUT_MS == "900000" && aws_lambda_function.coordinator.environment[0].variables.MAX_JOB_ATTEMPTS == "40" && output.runpod_limits.workersMax == 1 && output.runpod_limits.workersMin == 0 && output.runpod_limits.executionTimeoutMs == 900000
+    condition     = aws_lambda_function.coordinator.environment[0].variables.RUNPOD_WORKERS_MAX == "1" && aws_lambda_function.coordinator.environment[0].variables.RUNPOD_WORKERS_MIN == "0" && aws_lambda_function.coordinator.environment[0].variables.RUNPOD_EXECUTION_TIMEOUT_MS == tostring(local.gpu_spend.executionTimeoutMs) && aws_lambda_function.coordinator.environment[0].variables.MAX_JOB_ATTEMPTS == tostring(local.gpu_spend.maxJobAttempts) && output.runpod_limits.workersMax == 1 && output.runpod_limits.workersMin == 0 && output.runpod_limits.executionTimeoutMs == local.gpu_spend.executionTimeoutMs
     error_message = "Deployed configuration must show workersMax=1, workersMin=0, and the execution timeout."
   }
 }
@@ -41,17 +45,24 @@ run "reject_network_mismatch" {
 }
 run "reject_partial_compute_config" {
   command = plan
-  variables { runpod_endpoint_id = "exampleendpoint" }
+  variables {
+    network            = "mainnet"
+    runpod_endpoint_id = "exampleendpoint"
+  }
   expect_failures = [terraform_data.release]
 }
 run "reject_wrong_commit" {
   command = plan
-  variables { source_commit = "0000000000000000000000000000000000000000" }
+  variables {
+    network       = "mainnet"
+    source_commit = "0000000000000000000000000000000000000000"
+  }
   expect_failures = [terraform_data.release]
 }
 run "reject_mainnet_supervised_runtime" {
   command = plan
   variables {
+    network                   = "mainnet"
     provision_runtime         = true
     runtime_ami_id            = "ami-0123456789abcdef0"
     runtime_ami_owner         = "123456789012"

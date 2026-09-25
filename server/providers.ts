@@ -267,17 +267,28 @@ export class Runpod {
     )
       throw new Error("ProviderLimitsUnconfirmed");
   }
-  async run(input: unknown) {
+  // Complete control-plane preflight before the caller journals a paid attempt.
+  // The returned closure is single-use, including when the POST outcome is unknown.
+  async prepareRun() {
     await this.applyEndpointLimits();
-    return z.object({ id: z.string() }).parse(
-      await this.request("run", {
-        input,
-        policy: {
-          executionTimeout: gpuSpendLimits.executionTimeoutMs,
-          ttl: 86400000,
-        },
-      }),
-    );
+    let consumed = false;
+    return async (input: unknown) => {
+      if (consumed) throw new Error("SubmissionAlreadyAttempted");
+      consumed = true;
+      return z.object({ id: z.string().min(1) }).parse(
+        await this.request("run", {
+          input,
+          policy: {
+            executionTimeout: gpuSpendLimits.executionTimeoutMs,
+            ttl: 86400000,
+          },
+        }),
+      );
+    };
+  }
+  async run(input: unknown) {
+    const submit = await this.prepareRun();
+    return submit(input);
   }
   async status(id: string) {
     if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error("Invalid job id");
@@ -295,13 +306,14 @@ export class Runpod {
           redirect: "error",
         },
       );
-      if (response.ok)
-        return runpodStatusSchema.parse(await response.json());
+      if (response.ok) return runpodStatusSchema.parse(await response.json());
       const retryable = [429, 500, 502, 503, 504].includes(response.status);
       if (!retryable || attempt >= 2)
         throw new Error(`Provider request failed (${response.status})`);
       await response.body?.cancel();
-      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 250 : 750));
+      await new Promise((resolve) =>
+        setTimeout(resolve, attempt === 0 ? 250 : 750),
+      );
     }
   }
   cancel(id: string) {

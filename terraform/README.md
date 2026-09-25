@@ -49,7 +49,7 @@ terraform -chdir=terraform apply deployment.tfplan
 terraform -chdir=terraform output app_url
 ```
 
-`build.mjs` runs pinned upstream preparation, typecheck/frontend build, bundles both Node Lambda entrypoints (including SDK dependencies), creates deterministic Lambda ZIPs and records file SHA256s/network/commit. The build is done **before** Terraform parses `fileset`/file hashes. It does not deploy anything. The normal builder refuses a dirty tree; `--allow-dirty` permits local inspection only and records `clean:false`, which the Terraform deployment gate rejects.
+`build.mjs` runs pinned upstream preparation, typecheck/frontend build, bundles both Node Lambda entrypoints (including SDK dependencies), creates deterministic Lambda ZIPs and records file SHA256s/network/commit. The build is done **before** Terraform parses `fileset`/file hashes. It does not deploy anything. Pass `--network=mainnet` or `--network=testnet4`; an omitted network is refused. The Terraform `network` variable has no default, and `terraform.tfvars.example` sets `mainnet`. The normal builder refuses a dirty tree; `--allow-dirty` permits local inspection only and records `clean:false`, which the Terraform deployment gate rejects.
 
 Choose `--network=testnet4` and `network="testnet4"` together for a Testnet4-identity preview. Both mainnet operations and Testnet4 rehearsal remain disabled; this does not assert that the installed Xverse supports Testnet4. There is intentionally no `enable_mainnet` or rehearsal activation variable.
 
@@ -59,7 +59,7 @@ Artifacts must remain in `terraform/.build` through plan/apply. Terraform reject
 
 Optionally supply both `runpod_endpoint_id` and `runpod_secret_arn`. The existing secret must contain JSON shaped as `{"apiKey":"<privately provisioned value>"}`. Provision its value privately outside Terraform; do not send it to an assistant or commit it. Terraform neither creates a secret version nor reads its value. Only the coordinator gets the exact secret read permission. Add the exact customer-managed KMS key ARN only when needed; cross-account/key policies need separate review.
 
-The coordinator Lambda environment and `runpod_limits` output publish `workersMax=1`, `workersMin=0`, and `executionTimeoutMs=900000` from `server/gpu-spend.json`, plus `MAX_JOB_ATTEMPTS=40`. Before each paid submission the coordinator sets those endpoint limits and does not submit unless the provider confirms them. It also stops the job when the attempt index or the submission count reaches that maximum, and it does not credit a 64-hit output as a finished range. Applying Terraform does not call Runpod, start a workflow, or authorize spend. `release.mainnetEnabled` and `broadcastAuthorized` stay false. AWS Lambda concurrency is **not** a GPU spending cap. The experimental GPU USD ceiling stays unevaluated. IAM-authorized direct validation invocations can use paid compute even while public transaction routes are gated: restrict operator access accordingly.
+The coordinator Lambda environment and `runpod_limits` output publish `workersMax=1`, `workersMin=0`, and `executionTimeoutMs=900000` from `server/gpu-spend.json`, plus `MAX_JOB_ATTEMPTS=32768`. Before each paid submission the coordinator sets those endpoint limits and does not submit unless the provider confirms them. It also stops the job when the lifetime submission count (including retries and all stages) reaches that maximum, and it does not credit a 64-hit output as a finished range. Applying Terraform does not call Runpod, start a workflow, or authorize spend. `release.mainnetEnabled` and `broadcastAuthorized` stay false. AWS Lambda concurrency is **not** a GPU spending cap. The experimental GPU USD ceiling stays unevaluated. IAM-authorized direct validation invocations can use paid compute even while public transaction routes are gated: restrict operator access accordingly.
 
 ### State and configuration
 
@@ -95,3 +95,15 @@ terraform -chdir=terraform test
 The tests use a mocked AWS provider and plan only. They check disabled activation, persistence protection, absence of API provider credentials, no generic paid-work retry, and rejection of network/commit/partial-provider mismatches. They do not call AWS or Runpod and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
 
 References: [Lambda + HTTP API](https://developer.hashicorp.com/terraform/tutorials/aws/lambda-api-gateway), [fileset build-time semantics](https://developer.hashicorp.com/terraform/language/functions/fileset), [provider resource documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs).
+
+The coordinator Runpod credential must have permission to **update the configured
+endpoint** as well as submit/status/cancel jobs. The control-plane PATCH happens
+before a paid attempt is journaled. A failed check produces a resumable pause
+without consuming a submission; successful confirmation yields a single-use POST.
+The JSON file is the source of the reported limits; Terraform does not duplicate
+its attempt/timeout literals. The bundled application schema validates its bounds.
+See the operational runbook for sizing, worst-case execution allowance and limits
+of cost estimates. The 90-second coordinator timeout includes the CPU export,
+limits preflight, POST and database persistence. Applying this configuration does
+not establish a strict physical startup-worker bound: extra INITIALIZING provider
+records and idle/storage billing require separate operational observation.

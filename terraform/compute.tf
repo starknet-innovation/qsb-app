@@ -55,7 +55,7 @@ resource "aws_lambda_function" "coordinator" {
   handler                        = "index.handler"
   filename                       = "${local.artifacts}/coordinator.zip"
   source_code_hash               = filebase64sha256("${local.artifacts}/coordinator.zip")
-  timeout                        = 30
+  timeout                        = 90
   memory_size                    = 512
   reserved_concurrent_executions = var.lambda_concurrency
   environment {

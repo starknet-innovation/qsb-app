@@ -357,8 +357,8 @@ describe("proof runner selection", () => {
         "  enrolled,",
         "});",
         'if (selected.chain !== "regtest") throw new Error("chain");',
-        "if (selected.mainnetEnabled !== false || selected.broadcastAuthorized !== false) throw new Error(\"activation\");",
-        "if (selected.liveRunnerContacted !== false || selected.nativeBinariesEnrolled !== false) throw new Error(\"runner\");",
+        'if (selected.mainnetEnabled !== false || selected.broadcastAuthorized !== false) throw new Error("activation");',
+        'if (selected.liveRunnerContacted !== false || selected.nativeBinariesEnrolled !== false) throw new Error("runner");',
         "console.log(selected.sourceManifestSha256);",
         "const core = loadCoreBinaryEnrollment();",
         'if (core.enrolled !== false || core.bitcoindSha256 !== null) throw new Error("core-enrollment");',
@@ -498,9 +498,7 @@ describe("freshness and disposable requests", () => {
       requestInput({
         amountSats: supply,
         feeSats: "1",
-        outputs: [
-          { role: "withdrawal", scriptHex: "0014", valueSats: supply },
-        ],
+        outputs: [{ role: "withdrawal", scriptHex: "0014", valueSats: supply }],
       }),
     );
     expect(atSupply.amountSats).toBe(supply);
@@ -575,7 +573,9 @@ describe("signing bundle binding", () => {
     expect(
       fingerprint({
         ...request,
-        outputs: [{ role: "withdrawal", scriptHex: "001411", valueSats: "90000" }],
+        outputs: [
+          { role: "withdrawal", scriptHex: "001411", valueSats: "90000" },
+        ],
       }),
     ).not.toBe(bundle.requestHash);
     expect(bundle.vaultId).toBe(vaultId);
@@ -793,44 +793,56 @@ describe("sibling drain and bounded compute", () => {
     expect(plan.mainnetEnabled).toBe(false);
     expect(plan.broadcastAuthorized).toBe(false);
     expect(() =>
-      assessBoundedCompute({
-        explicitlyAuthorized: true,
-        minIdleWorkers: 1,
-        maxCostUnits: "25",
-        deadline: "2026-09-25T00:00:00.000Z",
-        workerId: "worker-a",
-        cleanupWatchdogs: [{ id: "watchdog-a", independentOfWorker: true }],
-      }),
+      assessBoundedCompute(
+        {
+          explicitlyAuthorized: true,
+          minIdleWorkers: 1,
+          maxCostUnits: "25",
+          deadline: "2026-09-25T00:00:00.000Z",
+          workerId: "worker-a",
+          cleanupWatchdogs: [{ id: "watchdog-a", independentOfWorker: true }],
+        },
+        now,
+      ),
     ).toThrow(/BoundedComputeRefused/);
     expect(() =>
-      assessBoundedCompute({
-        explicitlyAuthorized: false,
-        minIdleWorkers: 0,
-        maxCostUnits: "25",
-        deadline: "2026-09-25T00:00:00.000Z",
-        workerId: "worker-a",
-        cleanupWatchdogs: [{ id: "watchdog-a", independentOfWorker: true }],
-      }),
+      assessBoundedCompute(
+        {
+          explicitlyAuthorized: false,
+          minIdleWorkers: 0,
+          maxCostUnits: "25",
+          deadline: "2026-09-25T00:00:00.000Z",
+          workerId: "worker-a",
+          cleanupWatchdogs: [{ id: "watchdog-a", independentOfWorker: true }],
+        },
+        now,
+      ),
     ).toThrow(/BoundedComputeRefused/);
     expect(() =>
-      assessBoundedCompute({
-        explicitlyAuthorized: true,
-        minIdleWorkers: 0,
-        maxCostUnits: "25",
-        deadline: "2026-09-25T00:00:00.000Z",
-        workerId: "worker-a",
-        cleanupWatchdogs: [{ id: "worker-a", independentOfWorker: true }],
-      }),
+      assessBoundedCompute(
+        {
+          explicitlyAuthorized: true,
+          minIdleWorkers: 0,
+          maxCostUnits: "25",
+          deadline: "2026-09-25T00:00:00.000Z",
+          workerId: "worker-a",
+          cleanupWatchdogs: [{ id: "worker-a", independentOfWorker: true }],
+        },
+        now,
+      ),
     ).toThrow(/BoundedComputeRefused/);
     expect(() =>
-      assessBoundedCompute({
-        explicitlyAuthorized: true,
-        minIdleWorkers: 0,
-        maxCostUnits: "25",
-        deadline: "2026-09-25T00:00:00.000Z",
-        workerId: "worker-a",
-        cleanupWatchdogs: [{ id: "watchdog-a", independentOfWorker: false }],
-      }),
+      assessBoundedCompute(
+        {
+          explicitlyAuthorized: true,
+          minIdleWorkers: 0,
+          maxCostUnits: "25",
+          deadline: "2026-09-25T00:00:00.000Z",
+          workerId: "worker-a",
+          cleanupWatchdogs: [{ id: "watchdog-a", independentOfWorker: false }],
+        },
+        now,
+      ),
     ).toThrow(/BoundedComputeRefused/);
     expect(() =>
       assessBoundedCompute(
@@ -1074,7 +1086,10 @@ describe("core harness judgment", () => {
     );
     expect(named.harnessRan).toBe(false);
     expect(named.reason).toContain("not harness evidence");
-    const script = readFileSync(path.join(root, "scripts/test-core.sh"), "utf8");
+    const script = readFileSync(
+      path.join(root, "scripts/test-core.sh"),
+      "utf8",
+    );
     expect(script).toContain('"${ROOT}/server/runtime/core-binary.json"');
     expect(script).toContain("HEAD:./release/source-manifest.json");
     expect(script).not.toContain('"${ROOT}/release/source-manifest.json"');
@@ -1199,7 +1214,10 @@ describe("core harness judgment", () => {
       paired,
       "server/runtime/core-binary.json",
     );
-    writeFileSync(pairedEnrollmentPath, `${JSON.stringify(pairedEnrollment)}\n`);
+    writeFileSync(
+      pairedEnrollmentPath,
+      `${JSON.stringify(pairedEnrollment)}\n`,
+    );
     const pairedManifest = JSON.parse(
       readFileSync(path.join(paired, "release/source-manifest.json"), "utf8"),
     );
@@ -1322,7 +1340,7 @@ describe("core harness judgment", () => {
         "python3",
         [
           "-c",
-          "import json,sys; from tests.core_regtest import core_binary_digests; print(json.dumps(core_binary_digests(sys.argv[1], sys.argv[2])))",
+          'import json,sys,runpy; core_binary_digests=runpy.run_path("tests/core_regtest.py")["core_binary_digests"]; print(json.dumps(core_binary_digests(sys.argv[1], sys.argv[2])))',
           bitcoindPath,
           bitcoinCliPath,
         ],
@@ -1335,7 +1353,10 @@ describe("core harness judgment", () => {
     expect(recorded.bitcoinCliSha256).toBe(
       createHash("sha256").update("bitcoin-cli-bytes").digest("hex"),
     );
-    const source = readFileSync(path.join(root, "tests/core_regtest.py"), "utf8");
+    const source = readFileSync(
+      path.join(root, "tests/core_regtest.py"),
+      "utf8",
+    );
     expect(source).toContain("'coreBinaries': core_binary_digests");
     expect(requiredReleasePaths).not.toContain("scripts/test-core.sh");
     expect(requiredReleasePaths).not.toContain("tests/core_regtest.py");

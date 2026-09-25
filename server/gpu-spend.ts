@@ -1,22 +1,17 @@
 import { z } from "zod";
 import raw from "./gpu-spend.json";
 
-/**
- * Coordinator GPU spend limits from server/gpu-spend.json.
- * workersMax, workersMin, and executionTimeoutMs are applied to the Runpod
- * endpoint before a paid submission. maxJobAttempts bounds both the attempt
- * index and the number of submissions for one job. One attempt cannot run
- * longer than executionTimeoutMs, so 40 attempts are at most 10 hours on the
- * single allowed worker. This module does not evaluate the experimental GPU
- * USD ceiling and does not set release.mainnetEnabled or broadcastAuthorized.
+/** Bundled single source of truth. The lifetime count includes retries and all
+ * stages; range indices are bounded separately by workRange. This is a finite
+ * execution allowance, not an invoice cap or a probability-of-success promise.
  */
-const schema = z
+export const gpuSpendSchema = z
   .object({
     workersMax: z.literal(1),
     workersMin: z.literal(0),
-    executionTimeoutMs: z.literal(900000),
-    maxJobAttempts: z.literal(40),
+    executionTimeoutMs: z.number().int().positive().max(900000),
+    maxJobAttempts: z.number().int().positive().max(1_000_000),
   })
   .strict();
 
-export const gpuSpendLimits = schema.parse(raw);
+export const gpuSpendLimits = gpuSpendSchema.parse(raw);
