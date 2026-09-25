@@ -219,7 +219,6 @@ describe("transaction invariants", () => {
     anyoneCanPay[anyoneCanPay.length - 1] = 0x82;
     const bad = expected.clone();
     bad.updateInput(0, {
-      sighashType: 0x82,
       partialSig: [[input.partialSig![0][0], anyoneCanPay]],
     });
     expect(() => verifySignedPsbt(expected, bad.toPSBT())).toThrow(

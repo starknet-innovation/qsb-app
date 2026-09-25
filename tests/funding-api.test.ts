@@ -52,6 +52,7 @@ async function setup(reject = false) {
       .update(Buffer.from("51".repeat(100), "hex"))
       .digest("hex"),
     paymentAddress: address,
+    network: "mainnet",
     status: "unfunded",
   } as PublicVault;
   await store.put({

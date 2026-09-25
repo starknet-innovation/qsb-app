@@ -41,7 +41,7 @@ export function prepareApprovedMainnetPsbt(input:unknown,approval:unknown){
  const {contract:c,intentHash}=validateMainnetIntent(input),a=approvalSchema.parse(approval);
  requireThat(a.intentHash===intentHash,'Exact approval binding mismatch');
  const tx=btc.Transaction.fromRaw(hex.decode(c.assembledTxHex),opts),pub=hex.decode(c.helperPublicKey),w=btc.p2wpkh(pub,btc.NETWORK);
- tx.updateInput(0,{sighashType:1,nonWitnessUtxo:hex.decode(c.helperPreviousTxHex),witnessUtxo:{amount:BigInt(c.manifest.helper.value),script:btc.OutScript.encode(btc.Address(btc.NETWORK).decode(c.helperAddress))},...(c.helperAddress===btc.p2sh(w,btc.NETWORK).address?{redeemScript:w.script}:{})},true);
+ tx.updateInput(0,{nonWitnessUtxo:hex.decode(c.helperPreviousTxHex),witnessUtxo:{amount:BigInt(c.manifest.helper.value),script:btc.OutScript.encode(btc.Address(btc.NETWORK).decode(c.helperAddress))},...(c.helperAddress===btc.p2sh(w,btc.NETWORK).address?{redeemScript:w.script}:{})},true);
  tx.updateInput(1,{nonWitnessUtxo:hex.decode(c.fundingPreviousTxHex)},true);
  return {psbt:tx.toPSBT(),intentHash,broadcastAuthorized:false as const};
 }

@@ -116,9 +116,5 @@ export function signedCoordinatorResult(
     txid: verified.txid,
     helperSighash: "SIGHASH_ALL",
     helperSignatureVerified: true,
-    qsbConsensusProven: false,
-    chainInclusionProven: false,
-    mainnetEnabled: false,
-    broadcastAuthorized: false,
   });
 }

@@ -26,8 +26,6 @@ export const coordinatorSolvedResultSchema = z
         round2: subset,
       })
       .strict(),
-    mainnetEnabled: z.literal(false),
-    broadcastAuthorized: z.literal(false),
   })
   .strict();
 
@@ -46,10 +44,6 @@ export const coordinatorSignedResultSchema = z
     txid: z.string().regex(/^[a-f0-9]{64}$/),
     helperSighash: z.literal("SIGHASH_ALL"),
     helperSignatureVerified: z.literal(true),
-    qsbConsensusProven: z.literal(false),
-    chainInclusionProven: z.literal(false),
-    mainnetEnabled: z.literal(false),
-    broadcastAuthorized: z.literal(false),
   })
   .strict();
 
@@ -92,7 +86,5 @@ export function coordinatorPublicSolvedResult(
       round1: job.solution.round1,
       round2: job.solution.round2,
     },
-    mainnetEnabled: false,
-    broadcastAuthorized: false,
   });
 }

@@ -145,14 +145,10 @@ it("delivers the coordinator solved result and signs it locally without exportin
   expect(response.status).toBe(200);
   const solved = await response.json();
   expect(solved).toEqual(coordinatorPublicSolvedResult(fixture.job));
-  expect(solved.mainnetEnabled).toBe(false);
-  expect(solved.broadcastAuthorized).toBe(false);
   expect(JSON.stringify(solved)).not.toContain(secretState);
   expect(Object.keys(solved).sort()).toEqual([
-    "broadcastAuthorized",
     "format",
     "jobId",
-    "mainnetEnabled",
     "manifest",
     "manifestHash",
     "network",
@@ -202,9 +198,6 @@ it("delivers the coordinator solved result and signs it locally without exportin
     { address, publicKey, type: "p2wpkh" },
   );
   expect(signed.helperSighash).toBe("SIGHASH_ALL");
-  expect(signed.broadcastAuthorized).toBe(false);
-  expect(signed.mainnetEnabled).toBe(false);
-  expect(signed.qsbConsensusProven).toBe(false);
   expect(JSON.stringify(signed)).not.toContain(secretState);
   const extracted = btc.Transaction.fromRaw(hex.decode(signed.rawTxHex), options);
   const witness = extracted.getInput(0).finalScriptWitness;
@@ -218,7 +211,6 @@ it("delivers the coordinator solved result and signs it locally without exportin
   reused[reused.length - 1] = 0x82;
   const replaced = btc.Transaction.fromPSBT(honest.toPSBT(), options);
   replaced.updateInput(0, {
-    sighashType: 0x82,
     partialSig: [[input.partialSig![0][0], reused]],
   });
   expect(() =>

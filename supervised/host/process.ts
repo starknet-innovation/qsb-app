@@ -135,6 +135,7 @@ export function createHostLauncher(store: Store, credentialFd: number) {
             LANG: "C.UTF-8",
             AWS_REGION: "eu-west-1",
             AWS_DEFAULT_REGION: "eu-west-1",
+            QSB_NETWORK: "mainnet",
             PYTHONDONTWRITEBYTECODE: "1",
           },
         },
