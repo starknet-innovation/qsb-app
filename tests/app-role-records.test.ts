@@ -101,3 +101,26 @@ it("restricts coordinator writes including mixed and empty keys", () => {
       ),
     ).toBe("deny");
 });
+
+// Only the active app roles are deployed; the other model entries are parked.
+import { permissionModel } from "../server/runtime/storage-authority";
+import apiPolicy from "../terraform/policies/app-records.json";
+import coordinatorPolicy from "../terraform/policies/coordinator-records.json";
+it("documents the exact active role allow actions from Terraform", () => {
+  for (const [role, policy] of [
+    ["api", apiPolicy],
+    ["coordinator", coordinatorPolicy],
+  ] as const) {
+    const actions = [
+      ...new Set(
+        policy.filter((s) => s.Effect === "Allow").flatMap((s) => s.Action),
+      ),
+    ]
+      .map((s) => s.replace("dynamodb:", ""))
+      .sort();
+    expect([...permissionModel.roles[role].data].sort()).toEqual(actions);
+  }
+  for (const role of Object.values(permissionModel.roles)) {
+    expect(role.data).not.toContain("TransactWriteItems");
+  }
+});

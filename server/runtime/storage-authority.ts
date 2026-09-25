@@ -15,21 +15,28 @@ export const permissionModel = {
   reservationWritesRequireTransaction: true,
   roles: {
     api: {
-      data: ["GetItem", "PutItem", "DeleteItem", "Query", "TransactWriteItems"],
+      data: ["GetItem", "PutItem", "DeleteItem", "Query", "ConditionCheckItem"],
       secrets: [],
       evidence: "read-admitted-terminal-evidence",
       mayChangeReservationAuthority: false,
       mayBroadcast: false,
     },
+    coordinator: {
+      data: ["GetItem", "PutItem"],
+      secrets: ["GetSecretValue"],
+      evidence: "cpu-verify-provider-results",
+      mayChangeReservationAuthority: false,
+      mayBroadcast: false,
+    },
     runtime: {
-      data: ["GetItem", "PutItem", "Query", "TransactWriteItems"],
+      data: ["GetItem", "PutItem", "Query", "ConditionCheckItem"],
       secrets: ["GetSecretValue"],
       evidence: "write-terminal-evidence",
       mayChangeReservationAuthority: false,
       mayBroadcast: false,
     },
     operator: {
-      data: ["GetItem", "Query", "Scan", "TransactWriteItems"],
+      data: ["GetItem", "Query", "Scan", "ConditionCheckItem"],
       secrets: [],
       evidence: "read-terminal-evidence",
       mayChangeReservationAuthority: true,
@@ -47,6 +54,7 @@ type PermissionModel = {
   reservationWritesRequireTransaction: boolean;
   roles: {
     api: RolePermissions;
+    coordinator: RolePermissions;
     runtime: RolePermissions & { evidence: string };
     operator: RolePermissions & {
       maySetMainnetEnabled: boolean;
@@ -73,12 +81,13 @@ export function assertPermissionSeparation(
   if (model.roles.api.evidence === model.roles.runtime.evidence)
     throw new Error("EvidenceAccessMustDiffer");
   if (
+    model.roles.coordinator.mayChangeReservationAuthority ||
     model.roles.api.mayChangeReservationAuthority ||
     model.roles.runtime.mayChangeReservationAuthority ||
     !model.roles.operator.mayChangeReservationAuthority
   )
     throw new Error("OnlyOperatorMayChangeReservationAuthority");
-  for (const role of [model.roles.api, model.roles.runtime, model.roles.operator]) {
+  for (const role of [model.roles.api, model.roles.coordinator, model.roles.runtime, model.roles.operator]) {
     if (role.mayBroadcast) throw new Error("BroadcastRefused");
   }
   if (
@@ -90,8 +99,8 @@ export function assertPermissionSeparation(
     throw new Error("ReservationTransactionRequired");
   if (model.productionIamReviewed || model.livePermissionsVerified)
     throw new Error("LiveIamNotReviewed");
-  if (!model.roles.operator.data.includes("TransactWriteItems"))
-    throw new Error("OperatorAuthorityMutationRequiresTransaction");
+  if (!model.roles.operator.data.includes("ConditionCheckItem"))
+    throw new Error("OperatorAuthorityRequiresConditionCheck");
   if (model.roles.operator.data.includes("PutItem"))
     throw new Error("OperatorPutItemIsNotAuthorityScoped");
   if (model.roles.operator.data.includes("DeleteItem"))

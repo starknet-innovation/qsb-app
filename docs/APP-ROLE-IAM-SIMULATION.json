@@ -1,6 +1,8 @@
 {
   "kind": "AWS IAM custom-policy simulation; not live DynamoDB calls",
   "resource": "arn:aws:dynamodb:us-east-1:123456789012:table/qsb-policy-simulation",
+  "command": "python3 scripts/simulate-app-role-iam.py",
+  "method": "Exact committed statements with a dummy table Resource; SimulateCustomPolicy only. No role, table or credential mutations.",
   "cases": [
     {
       "role": "api",
@@ -12,7 +14,9 @@
         "dynamodb:GetItem": "allowed",
         "dynamodb:PutItem": "allowed",
         "dynamodb:DeleteItem": "allowed",
-        "dynamodb:ConditionCheckItem": "allowed"
+        "dynamodb:ConditionCheckItem": "allowed",
+        "dynamodb:UpdateItem": "implicitDeny",
+        "dynamodb:BatchWriteItem": "implicitDeny"
       }
     },
     {
@@ -25,7 +29,9 @@
         "dynamodb:GetItem": "allowed",
         "dynamodb:PutItem": "allowed",
         "dynamodb:DeleteItem": "explicitDeny",
-        "dynamodb:ConditionCheckItem": "allowed"
+        "dynamodb:ConditionCheckItem": "allowed",
+        "dynamodb:UpdateItem": "explicitDeny",
+        "dynamodb:BatchWriteItem": "explicitDeny"
       }
     },
     {
@@ -38,7 +44,9 @@
         "dynamodb:GetItem": "allowed",
         "dynamodb:PutItem": "explicitDeny",
         "dynamodb:DeleteItem": "explicitDeny",
-        "dynamodb:ConditionCheckItem": "allowed"
+        "dynamodb:ConditionCheckItem": "allowed",
+        "dynamodb:UpdateItem": "explicitDeny",
+        "dynamodb:BatchWriteItem": "explicitDeny"
       }
     },
     {
@@ -46,13 +54,15 @@
       "policySha256": "fb58fcc09502e1643f79f1ba2c25a9fc858b4bd0cc2bf9de47747950d4d76aaa",
       "keys": [
         "OWNER#dummy",
-        "OUTPOINT#dummy"
+        "SYSTEM#dummy"
       ],
       "decisions": {
         "dynamodb:GetItem": "allowed",
-        "dynamodb:PutItem": "allowed",
+        "dynamodb:PutItem": "explicitDeny",
         "dynamodb:DeleteItem": "explicitDeny",
-        "dynamodb:ConditionCheckItem": "allowed"
+        "dynamodb:ConditionCheckItem": "allowed",
+        "dynamodb:UpdateItem": "explicitDeny",
+        "dynamodb:BatchWriteItem": "explicitDeny"
       }
     },
     {
@@ -63,7 +73,9 @@
         "dynamodb:GetItem": "allowed",
         "dynamodb:PutItem": "allowed",
         "dynamodb:DeleteItem": "allowed",
-        "dynamodb:ConditionCheckItem": "allowed"
+        "dynamodb:ConditionCheckItem": "allowed",
+        "dynamodb:UpdateItem": "implicitDeny",
+        "dynamodb:BatchWriteItem": "implicitDeny"
       }
     },
     {
@@ -76,7 +88,9 @@
         "dynamodb:GetItem": "allowed",
         "dynamodb:PutItem": "allowed",
         "dynamodb:DeleteItem": "implicitDeny",
-        "dynamodb:ConditionCheckItem": "implicitDeny"
+        "dynamodb:ConditionCheckItem": "implicitDeny",
+        "dynamodb:UpdateItem": "implicitDeny",
+        "dynamodb:BatchWriteItem": "implicitDeny"
       }
     },
     {
@@ -89,7 +103,9 @@
         "dynamodb:GetItem": "allowed",
         "dynamodb:PutItem": "implicitDeny",
         "dynamodb:DeleteItem": "implicitDeny",
-        "dynamodb:ConditionCheckItem": "implicitDeny"
+        "dynamodb:ConditionCheckItem": "implicitDeny",
+        "dynamodb:UpdateItem": "implicitDeny",
+        "dynamodb:BatchWriteItem": "implicitDeny"
       }
     },
     {
@@ -102,7 +118,9 @@
         "dynamodb:GetItem": "allowed",
         "dynamodb:PutItem": "implicitDeny",
         "dynamodb:DeleteItem": "implicitDeny",
-        "dynamodb:ConditionCheckItem": "implicitDeny"
+        "dynamodb:ConditionCheckItem": "implicitDeny",
+        "dynamodb:UpdateItem": "implicitDeny",
+        "dynamodb:BatchWriteItem": "implicitDeny"
       }
     },
     {
@@ -110,13 +128,15 @@
       "policySha256": "6a8992d3dd3c293b8cbe408efa0bf974ef3a041f85138297bc76d1ab52abdce6",
       "keys": [
         "OWNER#dummy",
-        "OUTPOINT#dummy"
+        "SYSTEM#dummy"
       ],
       "decisions": {
         "dynamodb:GetItem": "allowed",
         "dynamodb:PutItem": "implicitDeny",
         "dynamodb:DeleteItem": "implicitDeny",
-        "dynamodb:ConditionCheckItem": "implicitDeny"
+        "dynamodb:ConditionCheckItem": "implicitDeny",
+        "dynamodb:UpdateItem": "implicitDeny",
+        "dynamodb:BatchWriteItem": "implicitDeny"
       }
     },
     {
@@ -127,7 +147,9 @@
         "dynamodb:GetItem": "allowed",
         "dynamodb:PutItem": "implicitDeny",
         "dynamodb:DeleteItem": "implicitDeny",
-        "dynamodb:ConditionCheckItem": "implicitDeny"
+        "dynamodb:ConditionCheckItem": "implicitDeny",
+        "dynamodb:UpdateItem": "implicitDeny",
+        "dynamodb:BatchWriteItem": "implicitDeny"
       }
     }
   ]
