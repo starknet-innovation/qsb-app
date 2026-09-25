@@ -8,7 +8,9 @@ not reuse an existing server and rejects focused (`test.only`) tests.
 
 The suite includes local signing and backup reimport, deposit guards, recovery,
 and the exact-transaction confirmation dialog. Wallet, provider and submission
-calls use local stubs. The CI command additionally blocks new outbound IPv4 and
+calls use local stubs. Chromium uses a non-listening loopback proxy for external
+origins (bypassing localhost), so optional fonts fail promptly without DNS
+timeouts. The CI command additionally blocks new outbound IPv4 and
 IPv6 connections, from both Chromium and the API server, while keeping loopback
 available. It restores the rules before uploading failure artifacts. It receives
 no secrets and never exercises a real miner or funded transaction.
@@ -31,7 +33,7 @@ CI=1 npm run test:e2e
 ```
 
 Use a free localhost port 5173. The outbound firewall is a Linux CI safeguard;
-local reproduction relies on the tests' stubs.
+local reproduction also has the browser proxy guard and the tests' stubs.
 
 ## Mutation evidence (2026-09-25)
 
