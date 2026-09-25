@@ -63,6 +63,20 @@ export async function reconcileWithdrawal(input: {
     throw new WithdrawalReconciliationError("IntentBindingMismatch");
   const observation = await observeWithdrawal(intent, chain, miner);
   const now = input.now ?? new Date().toISOString();
+  if (observation.chainUnavailable) {
+    await store.put(
+      { ...intent, version: intent.version + 1, checkedAt: now },
+      intent.version,
+    );
+    return {
+      txid: job.txid,
+      status: observation.status,
+      resubmitted: false as const,
+      alert: observation.alert,
+      includedTxid: observation.includedTxid,
+      chainUnavailable: true,
+    };
+  }
   const receipt = {
     operator,
     evidence,
@@ -76,6 +90,7 @@ export async function reconcileWithdrawal(input: {
         ...intent,
         version: intent.version + 1,
         status: observation.status,
+        alert: observation.alert ?? null,
         observation: receipt,
         includedTxid: observation.includedTxid,
       },

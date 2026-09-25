@@ -23,6 +23,33 @@ export async function observeWithdrawal(
     chainResult.reason instanceof WithdrawalConflict
       ? chainResult.reason.message
       : undefined;
+  if (chainResult.status === "rejected" && !alert) {
+    const terminal =
+      intent.status === "confirmed" || intent.status === "conflict";
+    const saved = intent.observation as
+      { alert?: string; includedTxid?: string } | undefined;
+    return {
+      status: terminal
+        ? (intent.status as string)
+        : intent.postAcknowledged === true
+          ? "submitted"
+          : "uncertain",
+      chain: null,
+      miner: inMiner,
+      chainUnavailable: true as const,
+      alert: terminal
+        ? typeof intent.alert === "string"
+          ? intent.alert
+          : saved?.alert
+        : undefined,
+      includedTxid:
+        intent.status === "confirmed"
+          ? typeof intent.includedTxid === "string"
+            ? intent.includedTxid
+            : saved?.includedTxid
+          : undefined,
+    };
+  }
   const matched =
     onChain !== null &&
     (!exact ||

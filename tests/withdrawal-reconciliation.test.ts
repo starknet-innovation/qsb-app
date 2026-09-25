@@ -263,3 +263,35 @@ it("downgrades prior confirmation after reorg without replacing transaction or c
   expect(updated).toMatchObject({ status: "uncertain", rawTxHex: f.raw });
   expect(updated?.includedTxid).toBeUndefined();
 });
+
+it.each(["conflict", "confirmed"])(
+  "an outage after %s only updates the last checked time",
+  async (status) => {
+    const f = await fixture();
+    const row = (await f.store.get(f.pk, "TX#" + f.job.txid))!;
+    const saved = {
+      ...row,
+      status,
+      version: 1,
+      alert: "retained evidence",
+      observation: { evidence: "original" },
+    };
+    await f.store.put(saved, 0);
+    const jobBefore = await f.store.get(f.pk, "JOB#" + f.job.id);
+    vi.mocked(observeWithdrawal).mockResolvedValue({
+      status,
+      chain: null,
+      miner: null,
+      chainUnavailable: true,
+      alert: saved.alert,
+      includedTxid: undefined,
+    });
+    await reconcileWithdrawal(f.input);
+    expect(await f.store.get(f.pk, saved.sk)).toEqual({
+      ...saved,
+      version: 2,
+      checkedAt: f.input.now,
+    });
+    expect(await f.store.get(f.pk, "JOB#" + f.job.id)).toEqual(jobBefore);
+  },
+);

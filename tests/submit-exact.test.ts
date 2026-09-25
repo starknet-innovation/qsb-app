@@ -330,8 +330,50 @@ describe("authenticated exact submit route", () => {
         },
         body: JSON.stringify({ rawTxHex: f.raw }),
       });
-    return { ...f, post };
+    return { ...f, post, app, token, routeMiner: miner };
   }
+  it.each(["conflict", "confirmed"])(
+    "both status routes retain %s during a chain outage",
+    async (status) => {
+      const f = await route(true);
+      await f.post();
+      const intent = (await f.store.get(f.pk, `TX#${f.id}`))!;
+      const saved = {
+        ...intent,
+        version: intent.version + 1,
+        status,
+        alert: "saved evidence",
+        includedTxid: f.id,
+      };
+      await f.store.put(saved, intent.version);
+      const jobBefore = await f.store.get(f.pk, `JOB#${f.stored.id}`);
+      vi.spyOn(f.deps.chain, "withdrawalInclusion").mockRejectedValue(
+        new Error("HTTP429"),
+      );
+      vi.spyOn(f.routeMiner, "status").mockRejectedValue(new Error("HTTP404"));
+      for (const path of [
+        `/api/transactions/${f.id}/status`,
+        `/api/jobs/${f.stored.id}/status`,
+      ]) {
+        const response = await f.app.request(path, {
+          headers: { authorization: `Bearer ${f.token}` },
+        });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          alert: saved.alert,
+          chainUnavailable: true,
+        });
+        expect(await f.store.get(f.pk, saved.sk)).toMatchObject({
+          status,
+          alert: saved.alert,
+          includedTxid: f.id,
+        });
+        expect(await f.store.get(f.pk, `JOB#${f.stored.id}`)).toEqual(
+          jobBefore,
+        );
+      }
+    },
+  );
   it("explicit server switch reaches stub submit through auth even while legacy release remains disabled", async () => {
     const f = await route(true);
     expect(release.mainnetEnabled).toBe(false);

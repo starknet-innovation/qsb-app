@@ -133,3 +133,37 @@ describe("withdrawal observation without resubmission authority", () => {
     });
   });
 });
+
+it.each(["conflict", "confirmed"])(
+  "preserves %s evidence through an outage but allows a successful reorg observation",
+  async (status) => {
+    const f = fixture();
+    const saved = {
+      ...intent,
+      status,
+      alert: status === "conflict" ? "Foreign spender" : undefined,
+      includedTxid: included,
+    };
+    f.inclusion.mockRejectedValue(new Error("Chain HTTP429"));
+    expect(await observeWithdrawal(saved, f.chain, f.miner)).toMatchObject({
+      status,
+      chainUnavailable: true,
+      alert: saved.alert,
+    });
+    if (status === "confirmed")
+      expect(
+        (await observeWithdrawal(saved, f.chain, f.miner)).includedTxid,
+      ).toBe(included);
+    f.inclusion.mockResolvedValue({
+      confirmed: false,
+      confirmations: 0,
+      outpointMatched: false,
+      outputMatched: false,
+    });
+    expect(await observeWithdrawal(saved, f.chain, f.miner)).toMatchObject({
+      status: "uncertain",
+      alert: undefined,
+      includedTxid: undefined,
+    });
+  },
+);

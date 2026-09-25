@@ -381,8 +381,13 @@ export function createApp(
     await store.put(
       {
         ...row,
-        status,
-        alert: observation.alert ?? null,
+        ...(observation.chainUnavailable
+          ? {}
+          : {
+              status,
+              alert: observation.alert ?? null,
+              includedTxid: observation.includedTxid,
+            }),
         checkedAt,
         version: row.version + 1,
       },
@@ -424,7 +429,8 @@ export function createApp(
     );
     return c.json({
       txid: id,
-      includedTxid: onChain?.confirmed ? actualTxid : undefined,
+      includedTxid: observation.includedTxid,
+      chainUnavailable: observation.chainUnavailable,
       status,
       checkedAt,
       chain: onChain,
@@ -718,6 +724,25 @@ export function createApp(
       intent.kind === "exact-withdrawal"
         ? await observeWithdrawal(intent, ledger, miner)
         : undefined;
+    if (observation?.chainUnavailable) {
+      await store.put(
+        {
+          ...intent,
+          version: intent.version + 1,
+          checkedAt: new Date().toISOString(),
+        },
+        intent.version,
+      );
+      return c.json({
+        job,
+        status: null,
+        submissionStatus: observation.status,
+        alert: observation.alert,
+        includedTxid: observation.includedTxid,
+        chainUnavailable: true,
+        retrySafe: false,
+      });
+    }
     if (observation && observation.status !== "confirmed") {
       await store.put(
         {
