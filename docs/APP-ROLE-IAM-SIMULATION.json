@@ -1,0 +1,134 @@
+{
+  "kind": "AWS IAM custom-policy simulation; not live DynamoDB calls",
+  "resource": "arn:aws:dynamodb:us-east-1:123456789012:table/qsb-policy-simulation",
+  "cases": [
+    {
+      "role": "api",
+      "policySha256": "fb58fcc09502e1643f79f1ba2c25a9fc858b4bd0cc2bf9de47747950d4d76aaa",
+      "keys": [
+        "OWNER#dummy"
+      ],
+      "decisions": {
+        "dynamodb:GetItem": "allowed",
+        "dynamodb:PutItem": "allowed",
+        "dynamodb:DeleteItem": "allowed",
+        "dynamodb:ConditionCheckItem": "allowed"
+      }
+    },
+    {
+      "role": "api",
+      "policySha256": "fb58fcc09502e1643f79f1ba2c25a9fc858b4bd0cc2bf9de47747950d4d76aaa",
+      "keys": [
+        "OUTPOINT#dummy"
+      ],
+      "decisions": {
+        "dynamodb:GetItem": "allowed",
+        "dynamodb:PutItem": "allowed",
+        "dynamodb:DeleteItem": "explicitDeny",
+        "dynamodb:ConditionCheckItem": "allowed"
+      }
+    },
+    {
+      "role": "api",
+      "policySha256": "fb58fcc09502e1643f79f1ba2c25a9fc858b4bd0cc2bf9de47747950d4d76aaa",
+      "keys": [
+        "SYSTEM#dummy"
+      ],
+      "decisions": {
+        "dynamodb:GetItem": "allowed",
+        "dynamodb:PutItem": "explicitDeny",
+        "dynamodb:DeleteItem": "explicitDeny",
+        "dynamodb:ConditionCheckItem": "allowed"
+      }
+    },
+    {
+      "role": "api",
+      "policySha256": "fb58fcc09502e1643f79f1ba2c25a9fc858b4bd0cc2bf9de47747950d4d76aaa",
+      "keys": [
+        "OWNER#dummy",
+        "OUTPOINT#dummy"
+      ],
+      "decisions": {
+        "dynamodb:GetItem": "allowed",
+        "dynamodb:PutItem": "allowed",
+        "dynamodb:DeleteItem": "explicitDeny",
+        "dynamodb:ConditionCheckItem": "allowed"
+      }
+    },
+    {
+      "role": "api",
+      "policySha256": "fb58fcc09502e1643f79f1ba2c25a9fc858b4bd0cc2bf9de47747950d4d76aaa",
+      "keys": [],
+      "decisions": {
+        "dynamodb:GetItem": "allowed",
+        "dynamodb:PutItem": "allowed",
+        "dynamodb:DeleteItem": "allowed",
+        "dynamodb:ConditionCheckItem": "allowed"
+      }
+    },
+    {
+      "role": "coordinator",
+      "policySha256": "6a8992d3dd3c293b8cbe408efa0bf974ef3a041f85138297bc76d1ab52abdce6",
+      "keys": [
+        "OWNER#dummy"
+      ],
+      "decisions": {
+        "dynamodb:GetItem": "allowed",
+        "dynamodb:PutItem": "allowed",
+        "dynamodb:DeleteItem": "implicitDeny",
+        "dynamodb:ConditionCheckItem": "implicitDeny"
+      }
+    },
+    {
+      "role": "coordinator",
+      "policySha256": "6a8992d3dd3c293b8cbe408efa0bf974ef3a041f85138297bc76d1ab52abdce6",
+      "keys": [
+        "OUTPOINT#dummy"
+      ],
+      "decisions": {
+        "dynamodb:GetItem": "allowed",
+        "dynamodb:PutItem": "implicitDeny",
+        "dynamodb:DeleteItem": "implicitDeny",
+        "dynamodb:ConditionCheckItem": "implicitDeny"
+      }
+    },
+    {
+      "role": "coordinator",
+      "policySha256": "6a8992d3dd3c293b8cbe408efa0bf974ef3a041f85138297bc76d1ab52abdce6",
+      "keys": [
+        "SYSTEM#dummy"
+      ],
+      "decisions": {
+        "dynamodb:GetItem": "allowed",
+        "dynamodb:PutItem": "implicitDeny",
+        "dynamodb:DeleteItem": "implicitDeny",
+        "dynamodb:ConditionCheckItem": "implicitDeny"
+      }
+    },
+    {
+      "role": "coordinator",
+      "policySha256": "6a8992d3dd3c293b8cbe408efa0bf974ef3a041f85138297bc76d1ab52abdce6",
+      "keys": [
+        "OWNER#dummy",
+        "OUTPOINT#dummy"
+      ],
+      "decisions": {
+        "dynamodb:GetItem": "allowed",
+        "dynamodb:PutItem": "implicitDeny",
+        "dynamodb:DeleteItem": "implicitDeny",
+        "dynamodb:ConditionCheckItem": "implicitDeny"
+      }
+    },
+    {
+      "role": "coordinator",
+      "policySha256": "6a8992d3dd3c293b8cbe408efa0bf974ef3a041f85138297bc76d1ab52abdce6",
+      "keys": [],
+      "decisions": {
+        "dynamodb:GetItem": "allowed",
+        "dynamodb:PutItem": "implicitDeny",
+        "dynamodb:DeleteItem": "implicitDeny",
+        "dynamodb:ConditionCheckItem": "implicitDeny"
+      }
+    }
+  ]
+}
