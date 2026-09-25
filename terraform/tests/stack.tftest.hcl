@@ -10,6 +10,7 @@ variables {
 }
 run "app_role_record_denies" {
   command = plan
+  variables { network = "mainnet" }
   assert {
     condition = alltrue([
       for role in ["api"] :
@@ -29,6 +30,7 @@ run "app_role_record_denies" {
 }
 run "coordinator_least_privilege" {
   command = plan
+  variables { network = "mainnet" }
   assert {
     condition = jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[0].Action == ["dynamodb:GetItem"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Action == ["dynamodb:PutItem"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Condition["ForAllValues:StringLike"]["dynamodb:LeadingKeys"] == ["OWNER#*"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Condition.Null["dynamodb:LeadingKeys"] == "false" && length(jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement) == 2 && !contains(keys(aws_iam_role_policy.records), "coordinator")
     error_message = "Coordinator may only GetItem and PutItem on present OWNER keys."
