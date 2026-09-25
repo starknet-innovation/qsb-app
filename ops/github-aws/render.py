@@ -59,7 +59,12 @@ def render(c):
     allow('Functions',['lambda:InvokeFunction'],[arn('lambda','function:qsb-*')],target=runtime)
     allow('Workflow',['states:StartExecution','states:DescribeExecution'],[arn('states','stateMachine:qsb-*'),arn('states','execution:qsb-*:*')],target=runtime)
     allow('RuntimeLogs',['logs:CreateLogStream','logs:PutLogEvents'],log_arns,target=runtime)
-    allow('ProviderSecret',['secretsmanager:GetSecretValue'],[arn('secretsmanager','secret:qsb-vault/runpod-*')],target=runtime)
+    allow('BatchRead',['batch:DescribeJobs','batch:DescribeJobDefinitions','batch:DescribeJobQueues','batch:DescribeComputeEnvironments','batch:ListJobs'],['*'],{'StringEquals':{'aws:RequestedRegion':region}},runtime)
+    allow('BatchSubmit',['batch:SubmitJob'],[arn('batch','job-queue/qsb-gpu'),arn('batch','job-definition/qsb-gpu-solver:*')],target=runtime)
+    allow('BatchTag',['batch:TagResource'],[arn('batch','job/*')],{'StringEquals':{'aws:RequestTag/Project':'qsb-gpu'},'ForAllValues:StringEquals':{'aws:TagKeys':['Project','QsbRequest','InputSha256']}},runtime)
+    allow('BatchCancel',['batch:CancelJob','batch:TerminateJob'],[arn('batch','job/*')],{'StringEquals':{'aws:ResourceTag/Project':'qsb-gpu'}},runtime)
+    allow('GpuInputs',['s3:PutObject'],[f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/inputs/*'],target=runtime)
+    allow('GpuOutputs',['s3:GetObject'],[f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/outputs/*'],target=runtime)
     # AWS log-delivery control APIs have no resource-level authorization.
     allow('WorkflowLogDelivery',['logs:CreateLogDelivery','logs:GetLogDelivery','logs:UpdateLogDelivery','logs:DeleteLogDelivery','logs:ListLogDeliveries','logs:PutResourcePolicy','logs:DescribeResourcePolicies','logs:DescribeLogGroups'],['*'],{'StringEquals':{'aws:RequestedRegion':region}},runtime)
     trust={'Version':'2012-10-17','Statement':[{'Effect':'Allow','Principal':{'Federated':iam('oidc-provider/token.actions.githubusercontent.com')},'Action':'sts:AssumeRoleWithWebIdentity','Condition':{'StringEquals':{'token.actions.githubusercontent.com:aud':'sts.amazonaws.com','token.actions.githubusercontent.com:sub':c['subject']}}}]}

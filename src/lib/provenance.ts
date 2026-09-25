@@ -22,20 +22,29 @@ export const externalSolverDescriptorSchema = z
     kernelCommit: z.string().regex(/^[a-f0-9]{40}$/),
     image: z
       .string()
-      .regex(/^ghcr\.io\/starknet-innovation\/qsb-solver@sha256:[a-f0-9]{64}$/),
+      .regex(
+        /^(?:ghcr\.io\/starknet-innovation\/qsb-solver|\d{12}\.dkr\.ecr\.eu-west-1\.amazonaws\.com\/qsb-solver)@sha256:[a-f0-9]{64}$/,
+      ),
   })
   .strict();
 export type SolverDescriptor =
-  typeof archived | typeof publishedV2 | z.infer<typeof externalSolverDescriptorSchema>;
+  | typeof archived
+  | typeof publishedV2
+  | z.infer<typeof externalSolverDescriptorSchema>;
 export function solverRegistry(descriptors: unknown[]) {
   const registry = new Map<string, string>([
     [archived.id, canonical(archived)],
   ]);
   for (const input of descriptors) {
     // Preserve the exact published legacy descriptor, never broaden legacy enrollment.
-    const descriptor = canonical(input) === canonical(publishedV2)
-      ? publishedV2 : externalSolverDescriptorSchema.parse(input);
-    if ("searchContract" in descriptor && descriptor.searchContract !== fingerprint(rankedContract))
+    const descriptor =
+      canonical(input) === canonical(publishedV2)
+        ? publishedV2
+        : externalSolverDescriptorSchema.parse(input);
+    if (
+      "searchContract" in descriptor &&
+      descriptor.searchContract !== fingerprint(rankedContract)
+    )
       throw new Error("SolverSearchContractMismatch");
     if (registry.has(descriptor.id)) throw new Error("DuplicateSolverRelease");
     registry.set(descriptor.id, canonical(descriptor));
@@ -59,7 +68,11 @@ export function canonical(value: unknown): string {
 export const fingerprint = (value: unknown) =>
   bytesToHex(sha256(new TextEncoder().encode(canonical(value))));
 export function assertPaidSolverContract(descriptor: SolverDescriptor): void {
-  if ("schemaVersion" in descriptor && (! ("searchContract" in descriptor) || descriptor.searchContract !== fingerprint(rankedContract)))
+  if (
+    "schemaVersion" in descriptor &&
+    (!("searchContract" in descriptor) ||
+      descriptor.searchContract !== fingerprint(rankedContract))
+  )
     throw new Error("SolverSearchContractRequired");
 }
 const registry = solverRegistry(externalDescriptors);

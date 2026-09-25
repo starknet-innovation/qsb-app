@@ -73,7 +73,15 @@ beforeEach(async () => {
     computeSeconds: 0,
     manifestHash: "a".repeat(64),
     manifest: {},
-    error: "Submission outcome unknown. Reconcile Runpod before resuming.",
+    error:
+      "Submission outcome unknown. Reconcile compute provider before resuming.",
+    batchSubmission: {
+      jobName: "qsb-test",
+      inputSha256: "a".repeat(64),
+      inputKey: "inputs/test.json",
+      queue: "queue",
+      definition: "definition",
+    },
     submissionStartedAt: "2026-09-24T00:00:00.000Z",
     updatedAt: now,
     createdAt: now,
@@ -225,9 +233,11 @@ it("refuses a second not-submitted decision after resume consumes the flag", asy
   expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(1);
   expect(lookup.health).not.toHaveBeenCalled();
 });
-it("accepts a drained expired submission with durable start time", async () => {
-  await run(replacement("ttl-expired"));
-  expect((await job()).oneSubmissionAllowed).toBe(true);
+it("refuses a drained expired submission with durable start time", async () => {
+  await expect(run(replacement("ttl-expired"))).rejects.toThrow(
+    "AwsBatchHasNoSubmissionTtl",
+  );
+  expect((await job()).oneSubmissionAllowed).toBeUndefined();
 });
 for (const reason of ["ttl-expired"] as const) {
   it.each([
@@ -241,16 +251,18 @@ for (const reason of ["ttl-expired"] as const) {
     async (submissionStartedAt) => {
       await change({ submissionStartedAt });
       await expect(run(replacement(reason))).rejects.toThrow(
-        "SubmissionTtlNotExpired",
+        "AwsBatchHasNoSubmissionTtl",
       );
       expect((await job()).oneSubmissionAllowed).toBeUndefined();
       expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(0);
     },
   );
-  it(`accepts ${reason} at the exact durable TTL boundary`, async () => {
+  it(`refuses ${reason} at the exact durable TTL boundary`, async () => {
     await change({ submissionStartedAt: "2026-09-24T01:00:00.000Z" });
-    await run(replacement(reason));
-    expect((await job()).oneSubmissionAllowed).toBe(true);
+    await expect(run(replacement(reason))).rejects.toThrow(
+      "AwsBatchHasNoSubmissionTtl",
+    );
+    expect((await job()).oneSubmissionAllowed).toBeUndefined();
   });
 }
 it.each([
@@ -303,33 +315,158 @@ it("requires a durable table before opening credentials in the CLI", async () =>
   }
 });
 
-it.each([400, 429, 499])("grants immediately for recorded HTTP %s and audits the status", async (httpStatus) => {
-  await change({ submissionStartedAt: now });
-  await run({ ...replacement(), httpStatus });
-  expect((await job()).oneSubmissionAllowed).toBe(true);
-  expect((await job()).submissionReconciliation).toMatchObject({ httpStatus, operator: "operator@example", evidence: "audit://incident/1", at: now, revision: 4 });
-  const audit = await store.list(pk, "RECONCILIATION#");
-  expect(audit).toHaveLength(1);
-  expect(audit[0]!.decision).toEqual((await job()).submissionReconciliation);
-});
-it.each([399, 500, undefined, 400.5, "timeout", "ECONNRESET"])("refuses immediate recovery with invalid/missing status %s", async (httpStatus) => {
-  await change({ submissionStartedAt: now });
-  const before = await job();
-  await expect(run({ ...replacement(), httpStatus } as ReconciliationDecision)).rejects.toThrow();
-  expect(await job()).toEqual(before);
-  expect(lookup.health).not.toHaveBeenCalled();
-  expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(0);
-});
+it.each([400, 429, 499])(
+  "grants immediately for recorded HTTP %s and audits the status",
+  async (httpStatus) => {
+    await change({ submissionStartedAt: now });
+    await run({ ...replacement(), httpStatus });
+    expect((await job()).oneSubmissionAllowed).toBe(true);
+    expect((await job()).submissionReconciliation).toMatchObject({
+      httpStatus,
+      operator: "operator@example",
+      evidence: "audit://incident/1",
+      at: now,
+      revision: 4,
+    });
+    const audit = await store.list(pk, "RECONCILIATION#");
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.decision).toEqual((await job()).submissionReconciliation);
+  },
+);
+it.each([399, 500, undefined, 400.5, "timeout", "ECONNRESET"])(
+  "refuses immediate recovery with invalid/missing status %s",
+  async (httpStatus) => {
+    await change({ submissionStartedAt: now });
+    const before = await job();
+    await expect(
+      run({ ...replacement(), httpStatus } as ReconciliationDecision),
+    ).rejects.toThrow();
+    expect(await job()).toEqual(before);
+    expect(lookup.health).not.toHaveBeenCalled();
+    expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(0);
+  },
+);
 it("does not let a 4xx field bypass the TTL-expired mode", async () => {
   await change({ submissionStartedAt: now });
-  await expect(run({ ...replacement("ttl-expired"), httpStatus: 400 })).rejects.toThrow();
+  await expect(
+    run({ ...replacement("ttl-expired"), httpStatus: 400 }),
+  ).rejects.toThrow();
   expect((await job()).oneSubmissionAllowed).toBeUndefined();
 });
 
+it("discovers an accepted request from durable identity without any replacement", async () => {
+  lookup.findRequest = vi.fn(async () => "provider-1");
+  await run({ ...decision, providerId: "discover" });
+  expect(lookup.findRequest).toHaveBeenCalledWith(
+    (await job()).batchSubmission,
+  );
+  expect(lookup.status).toHaveBeenCalledWith(
+    "provider-1",
+    (await job()).batchSubmission,
+  );
+  expect((await job()).oneSubmissionAllowed).toBeUndefined();
+});
+it("missing discovery evidence never grants a replacement", async () => {
+  lookup.findRequest = vi.fn(async () => {
+    throw Error("BatchRequestNotUniquelyFound");
+  });
+  await expect(run({ ...decision, providerId: "discover" })).rejects.toThrow(
+    "BatchRequestNotUniquelyFound",
+  );
+  expect((await job()).oneSubmissionAllowed).toBeUndefined();
+  expect(resumePolling).not.toHaveBeenCalled();
+});
+it("refuses to attach a job without a durable request identity", async () => {
+  await change({ batchSubmission: undefined });
+  await expect(run()).rejects.toThrow("BatchRequestIdentityRequired");
+});
+
+const batchReplacement = () =>
+  ({
+    ...replacement(),
+    reason: "batch-window-elapsed",
+    httpStatus: undefined,
+  }) as ReconciliationDecision;
+it("grants one bounded Batch replacement, preserving reservations and budget", async () => {
+  lookup.findRequest = vi.fn(async () => null);
+  await change({
+    submissionStartedAt: "2026-09-25T00:25:00.000Z",
+    computeSeconds: 900,
+  });
+  await run(batchReplacement());
+  expect(await job()).toMatchObject({
+    oneSubmissionAllowed: true,
+    batchReplacementFor: (await job()).batchSubmission!.jobName,
+    computeSeconds: 900,
+    revision: 4,
+  });
+  expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(1);
+  await expect(run(batchReplacement())).rejects.toThrow(
+    "DecisionAlreadyRecorded",
+  );
+  await change({ oneSubmissionAllowed: undefined });
+  await expect(run(batchReplacement())).rejects.toThrow(
+    "BatchReplacementAlreadyUsed",
+  );
+});
+it.each([
+  undefined,
+  "invalid",
+  "2026-09-25T00:25:00.001Z",
+  "2026-09-26T00:00:00Z",
+])(
+  "refuses Batch replacement outside evidence window: %s",
+  async (submissionStartedAt) => {
+    lookup.findRequest = vi.fn(async () => null);
+    await change({ submissionStartedAt });
+    await expect(run(batchReplacement())).rejects.toThrow(
+      "BatchRecoveryWindowRequired",
+    );
+    expect(lookup.findRequest).not.toHaveBeenCalled();
+    expect((await job()).oneSubmissionAllowed).toBeUndefined();
+  },
+);
+it.each([
+  { inQueue: 1, inProgress: 0 },
+  { inQueue: 0, inProgress: 1 },
+])("requires actual Batch drain %j", async (jobs) => {
+  lookup.findRequest = vi.fn(async () => null);
+  lookup.health = vi.fn(async () => ({ jobs }));
+  await expect(run(batchReplacement())).rejects.toThrow("EndpointNotDrained");
+  expect((await job()).batchReplacementFor).toBeUndefined();
+});
+it("attaches discovered Batch job instead of granting replacement", async () => {
+  lookup.findRequest = vi.fn(async () => "provider-1");
+  expect(await run(batchReplacement())).toMatchObject({
+    outcome: "provider-id",
+    providerId: "provider-1",
+  });
+  expect((await job()).oneSubmissionAllowed).toBeUndefined();
+  expect(lookup.health).not.toHaveBeenCalled();
+});
+it("does not treat failed discovery as absence", async () => {
+  lookup.findRequest = vi.fn(async () => {
+    throw Error("provider unavailable");
+  });
+  await expect(run(batchReplacement())).rejects.toThrow("provider unavailable");
+  expect((await job()).oneSubmissionAllowed).toBeUndefined();
+});
+it("atomically limits competing Batch window decisions to one allowance", async () => {
+  lookup.findRequest = vi.fn(async () => null);
+  const results = await Promise.allSettled([
+    run(batchReplacement()),
+    run(batchReplacement()),
+  ]);
+  expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+  expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(1);
+  expect((await job()).batchReplacementFor).toBe((await job()).batchSubmission!.jobName);
+});
 it("permits only one concurrent recorded-ID polling restart", async () => {
   await change({ status: "searching", runpodId: "provider-1" });
   const results = await Promise.allSettled([run(), run()]);
-  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  expect(
+    results.filter((result) => result.status === "fulfilled"),
+  ).toHaveLength(1);
   expect(resumePolling).toHaveBeenCalledTimes(1);
   expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(1);
   expect(await job()).toMatchObject({ revision: 4, runpodId: "provider-1" });
@@ -337,20 +474,73 @@ it("permits only one concurrent recorded-ID polling restart", async () => {
 it.each([
   { revision: 99, status: "paused" as const },
   { owner: "different-owner" },
-])("does not overwrite a concurrent recorded job change: %j", async (update) => {
-  await change({ status: "searching", runpodId: "provider-1" });
-  lookup.status = vi.fn(async (id) => {
-    await change(update);
-    return { id, status: "IN_PROGRESS" };
-  });
-  await expect(run()).rejects.toThrow();
-  expect(await job()).toMatchObject(update);
-  expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(0);
-  expect(resumePolling).not.toHaveBeenCalled();
-});
+])(
+  "does not overwrite a concurrent recorded job change: %j",
+  async (update) => {
+    await change({ status: "searching", runpodId: "provider-1" });
+    lookup.status = vi.fn(async (id) => {
+      await change(update);
+      return { id, status: "IN_PROGRESS" };
+    });
+    await expect(run()).rejects.toThrow();
+    expect(await job()).toMatchObject(update);
+    expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(0);
+    expect(resumePolling).not.toHaveBeenCalled();
+  },
+);
 it("rejects a recorded job stored under the wrong owner before provider reads", async () => {
-  await change({ status: "searching", runpodId: "provider-1", owner: "different-owner" });
+  await change({
+    status: "searching",
+    runpodId: "provider-1",
+    owner: "different-owner",
+  });
   await expect(run()).rejects.toThrow("JobIdentityMismatch");
   expect(lookup.status).not.toHaveBeenCalled();
   expect(resumePolling).not.toHaveBeenCalled();
+});
+
+it("permits one replacement for each separate uncertain request, never twice for the same request", async () => {
+  lookup.findRequest = vi.fn(async () => null);
+  const original = (await job()).batchSubmission!;
+  await run(batchReplacement());
+  await expect(run(batchReplacement())).rejects.toThrow("DecisionAlreadyRecorded");
+  // Resume consumes the allowance; the next paid intent replaces the identity and
+  // clears its pending marker. Its separate lost response needs its own recovery.
+  await change({ oneSubmissionAllowed: undefined, batchReplacementFor: undefined,
+    batchSubmission: { ...original, jobName: "qsb-second-request" }, gpuBudgetReservedSeconds: 1800 });
+  await run(batchReplacement());
+  expect((await job()).gpuBudgetReservedSeconds).toBe(1800);
+  await expect(run(batchReplacement())).rejects.toThrow("DecisionAlreadyRecorded");
+  await change({ oneSubmissionAllowed: undefined, batchReplacementFor: undefined });
+  await expect(run(batchReplacement())).rejects.toThrow("BatchReplacementAlreadyUsed");
+  await change({ batchSubmission: original });
+  await expect(run(batchReplacement())).rejects.toThrow("BatchReplacementAlreadyUsed");
+  const audits = await store.list(pk, `RECONCILIATION_REQUEST#${jobId}#`);
+  expect(audits).toHaveLength(2);
+  for (const audit of audits) expect(audit).not.toHaveProperty("expiresAt");
+  expect(audits.map((row) => (row.request as typeof original).jobName).sort()).toEqual([original.jobName, "qsb-second-request"].sort());
+});
+it.each(["2026-09-18T01:00:00Z", "2025-09-18T01:00:00Z"])("permits an older request after drain despite expired retention: %s", async (submissionStartedAt) => {
+  lookup.findRequest = vi.fn(async () => null);
+  await change({ submissionStartedAt });
+  await run(batchReplacement());
+  expect(lookup.health).toHaveBeenCalledOnce();
+  expect((await job()).oneSubmissionAllowed).toBe(true);
+});
+it("does not waive drain for requests older than retention", async () => {
+  lookup.findRequest = vi.fn(async () => null);
+  lookup.health = vi.fn(async () => ({ jobs: { inQueue: 0, inProgress: 1 } }));
+  await change({ submissionStartedAt: "2025-09-18T01:00:00Z" });
+  await expect(run(batchReplacement())).rejects.toThrow("EndpointNotDrained");
+  expect(await store.list(pk, "RECONCILIATION_REQUEST#")).toHaveLength(0);
+});
+it("rejects concurrent identity mutation without spending an allowance", async () => {
+  lookup.findRequest = vi.fn(async () => null);
+  lookup.health = vi.fn(async () => {
+    await change({ batchSubmission: { ...(await job()).batchSubmission!, jobName: "qsb-new-intent" } });
+    return { jobs: { inQueue: 0, inProgress: 0 } };
+  });
+  await expect(run(batchReplacement())).rejects.toThrow();
+  expect(await store.list(pk, "RECONCILIATION_REQUEST#")).toHaveLength(0);
+  expect((await job()).oneSubmissionAllowed).toBeUndefined();
 });

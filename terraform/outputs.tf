@@ -6,8 +6,8 @@ output "table_name" { value = aws_dynamodb_table.records.name }
 output "workflow_arn" { value = aws_sfn_state_machine.withdrawal.arn }
 output "source_commit" { value = var.source_commit }
 output "transactions_enabled" { value = var.mainnet_enabled }
-output "runpod_configured" { value = local.runpod }
-output "runpod_limits" {
+output "compute_configured" { value = local.compute }
+output "gpu_limits" {
   value = {
     workersMax         = local.gpu_spend.workersMax
     workersMin         = local.gpu_spend.workersMin

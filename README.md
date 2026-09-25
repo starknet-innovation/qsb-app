@@ -10,7 +10,7 @@ A research application for constructing and recovering quantum-safe Bitcoin vaul
 - `server/`: API, durable storage interfaces, search coordination, and transaction checks.
 - `worker/cpu/`: independent public CPU parameter export and hit verification. GPU images live in [qsb-solver](https://github.com/starknet-innovation/qsb-solver).
 - `tests/`: application unit tests, browser harnesses, and reference tests.
-- [terraform/](terraform/README.md): single-pipeline AWS infrastructure: static site, API, Step Functions coordinator, CPU verifier, records table and MFA-required reconciliation role. GPUs remain on Runpod; transactions stay disabled.
+- [terraform/](terraform/README.md): single-pipeline AWS infrastructure: static site, API, Step Functions coordinator, CPU verifier, records table and MFA-required reconciliation role. GPU pinning and subset searches use the separate AWS Batch stack in `terraform/gpu`; transactions stay disabled.
 - `contracts/`: versioned search-range vectors shared with qsb-solver.
 - `docs/STATUS.md`: achieved evidence summary.
 - [Mainnet readiness checklist](docs/MAINNET-READINESS.md): remaining tasks, dependencies and acceptance evidence.

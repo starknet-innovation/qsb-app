@@ -45,7 +45,7 @@ Rollback cannot revive legacy writers, release consumed commitments, or duplicat
 
 Treat `unknown`, `timeout`, and `http-ambiguous` as unpaid-or-paid until a provider or invoice record says which. The only action is reconcile. `reconcilePaidOutcome` returns `retry: false`. Requesting retry throws `BlindRetryRefused`. A known success is recorded once and is not submitted again.
 
-## Reconcile an unknown Runpod submission
+## Reconcile an unknown AWS Batch submission
 
 This section describes the pre-#54 implementation. The bootstrap `qsb-operator`
 profile cannot run it because it has no secret-read grant. Wait for #54 and the
@@ -57,26 +57,22 @@ Do not put credentials, wallet material, or raw logs in the evidence argument.
 The identifier is an operator assertion; IAM/CloudTrail identifies the caller.
 
 Required environment: `TABLE_NAME` (the CLI refuses MemoryStore), `AWS_REGION`,
-`RUNPOD_SECRET_ARN`, `RUNPOD_ENDPOINT_ID`, `WORKFLOW_ARN` and `QSB_NETWORK`
+`AWS_BATCH_JOB_QUEUE`, `AWS_BATCH_JOB_DEFINITION`, `AWS_BATCH_JOB_BUCKET`, `WORKFLOW_ARN` and `QSB_NETWORK`
 (`mainnet` or `testnet4`). On mainnet, also set `QSB_MAINNET_ENABLED` explicitly to
 `"true"` or `"false"`. It must match the deployed value: verify
 `terraform output -raw transactions_enabled` or uncached `GET /api/config`
 (`operationsEnabled`, with `network` equal to `mainnet`). Missing or malformed
-values refuse before application imports. Both modes validate the six base values before application imports,
+values refuse before application imports. Both modes validate the required values before application imports,
 credentials, or database/provider reads and writes. The operator role needs GetItem on job/vault records, transactional PutItem
-on the job and `RECONCILIATION#` audit rows, access to the configured provider
-credential (and its KMS key if applicable), and StartExecution on the configured
-workflow. The agent must not retrieve those credentials; provision them for the
-operator runtime. The CLI does not call `/run`, `/cancel` or broadcast.
+on the job and `RECONCILIATION#` audit rows, Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. It cannot submit or cancel Batch jobs and does not broadcast.
 
-To attach a known provider ID from Runpod's console and matching operator logs:
+To attach a known provider ID from AWS Batch's console and matching operator logs:
 
 ```
 npx tsx scripts/reconcile-submission.ts OWNER JOB --provider-id PROVIDER_ID --operator OPERATOR --evidence audit://incident/reference
 ```
 
-The command reads documented `/status/ID` fields; no `/requests` response shape or
-echoed `input` is assumed. The operator must bind live/terminal IDs to this exact
+The command reads Batch job status and immutable S3 results, binding the queue, definition revision and input SHA256. The operator must bind live/terminal IDs to this exact
 job, stage, range, endpoint and submission window using logs/console evidence.
 Completed outputs additionally must match the stored manifest, stage, attempt,
 kernel and exact range. Attachment grants no completion credit: the coordinator
@@ -101,8 +97,8 @@ refusal prints its reason and exits non-zero; an ID already saved before a workf
 start failure remains attached for operator reconciliation. Correct the prerequisite
 and rerun the same provider-ID decision; never submit a replacement as a workaround.
 
-To authorize exactly one replacement after proving Runpod rejected the call
-before acceptance with a retained HTTP 400–499 response from the paid `/run` POST
+To authorize exactly one replacement after proving AWS Batch rejected SubmitJob
+before acceptance with a retained HTTP 400–499 response from the paid SubmitJob request
 (not the limits preflight, a timeout, connection error or 5xx):
 
 ```
@@ -116,14 +112,7 @@ evidence, time and revision. The operator must retain the actual response from
 this job's paid POST. The tool validates the recorded code, not the external
 truth of an operator's evidence reference.
 
-For timeouts, connection errors, 5xx or no recorded HTTP response, use
-`--not-submitted ttl-expired` only after the complete 24-hour provider TTL has
-elapsed from durable `submissionStartedAt`. Legacy jobs without that timestamp
-cannot use TTL expiry. This mode does not accept `--http-status`; it never
-shortens the wait. Independently check the endpoint and billing/log window.
-TTL expiry does **not** prove that the old job was never accepted and can incur
-duplicate bounded work.
-Both modes require current health to show zero queued/in-progress requests.
+For timeouts, connection errors, 5xx or no recorded HTTP response, first reconcile the saved request identity. The explicit `batch-window-elapsed` operator path below permits one bounded replacement only after the 35-minute window, exact-name absence and queue drain. AWS Batch has no submission TTL: `ttl-expired` remains refused. The recorded-4xx fast path also requires queue drain.
 A list miss or an empty queue by itself never authorizes replacement.
 
 The decision and job change are one conditional transaction with a permanent
@@ -134,7 +123,51 @@ pause has no allowance. Time accounting is never cleared or refunded.
 This is an explicit operator attestation, not automatic verification of the cited
 external evidence. No live provider incident has been exercised for this change.
 
-Provider reference: https://docs.runpod.io/serverless/endpoints/send-requests
+Provider references: [AWS Batch SubmitJob](https://docs.aws.amazon.com/batch/latest/APIReference/API_SubmitJob.html) and [ListJobs](https://docs.aws.amazon.com/batch/latest/APIReference/API_ListJobs.html). Discovery uses the saved exact job name and follows every results page. `JOB_NAME` filtering includes all job statuses; absence from the list is not evidence that the paid request was rejected.
+
+### Job-definition revision changes and recovery
+
+Do not change `batch_job_definition` or its container properties while any withdrawal
+is `searching`, has an attached nonterminal provider job, or is paused with an
+unknown submission. Keep admission/resume quiescent during the change; reconcile
+outstanding intents and confirm all provider jobs are terminal and the queue is
+drained first. A paused unknown request is outstanding even when the queue is empty.
+
+The current adapter deliberately requires the configured revision to match the
+saved `batchSubmission.definition` for discovery and polling. Updating container
+properties creates a new revision; Terraform deregisters the previous revision by
+default. [Terraform documents this revision behavior](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/batch_job_definition.html).
+[AWS JobDetail](https://docs.aws.amazon.com/batch/latest/APIReference/API_JobDetail.html)
+returns the definition ARN used by the job. Changing the configured ARN does not
+migrate existing requests to the new revision.
+
+If configuration already advanced, recover using the original binding:
+
+1. Read the affected job's durable `batchSubmission` through the scoped operator
+   role. Preserve its exact `definition`, `queue`, job name, input key/hash and
+   provider ID; never edit them to match the new deployment.
+2. Set `AWS_BATCH_JOB_DEFINITION` in the reconciliation CLI environment to that
+   recorded revisioned ARN, and use the original queue and output bucket. This
+   applies to explicit IDs, `--provider-id discover`, and
+   `--not-submitted batch-window-elapsed`, including after seven days. The existing
+   elapsed-window, exact-name discovery, queue-drain and one-replacement checks
+   still apply; a revision mismatch is not evidence of rejection.
+3. Before any command that restarts polling, restore the coordinator's
+   `batch_job_definition` to the same recorded ARN through the reviewed deployment
+   procedure below, and verify the live `AWS_BATCH_JOB_DEFINITION`. Changing only
+   the CLI environment does not change Lambda. Keep new admissions/resumes
+   quiescent and handle different outstanding revisions separately.
+4. Reconcile and finish the original provider request before switching forward.
+   A deregistered old definition is not eligible for new submissions: `prepareRun`
+   requires `ACTIVE`. Do not resume a replacement against an inactive revision or
+   re-register/re-submit the original paid request as a recovery shortcut. If more
+   search work is needed, select an active, image-compatible reviewed definition
+   only after the original request is terminal or its unknown outcome has been
+   explicitly reconciled. Preserve reservations and all recorded GPU time.
+
+This is an operator recovery procedure, not automatic revision migration or
+permission to deploy. Image/release compatibility remains a separate admission
+check. The documentation change has not exercised a live revision rollback.
 
 ## Commit before deploy
 
@@ -175,7 +208,7 @@ not the configured cap.
 Startup, idle time, storage and provider retry/billing behavior are not an invoice
 cap. No paid run is authorized by changing this configuration.
 
-Before a paid claim, endpoint-limit failures pause with `Runpod limits unconfirmed;
+Before a paid claim, endpoint-limit failures pause with `Compute provider limits unconfirmed;
 nothing was submitted` and leave the time reservation unchanged. Fix the endpoint
 permission/configuration, then resume normally. A failure after the paid POST
 boundary remains an unknown submission and must be reconciled, never retried
@@ -227,7 +260,7 @@ exported credentials out of the parent shell; never print or share credentials:
   export AWS_REGION='eu-west-1'
   export AWS_BATCH_JOB_QUEUE='arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu'
   export AWS_BATCH_JOB_DEFINITION='arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:1'
-  export AWS_BATCH_JOB_BUCKET='qsb-gpu-example-jobs'
+  export AWS_BATCH_JOB_BUCKET='qsb-gpu-123456789012-eu-west-1-jobs'
   export WORKFLOW_ARN='arn:aws:states:eu-west-1:123456789012:stateMachine:qsb-app-withdrawal'
   export QSB_NETWORK='mainnet'
   # Set explicitly to the verified deployed switch; false refuses mainnet polling.
@@ -248,8 +281,8 @@ a post-bootstrap check in the linked access runbook.
 
 ### Reconcile an uncertain withdrawal (TX#)
 
-This is separate from Runpod submission reconciliation above. Never use the
-Runpod `--not-submitted` action for a signed withdrawal. Keep **both the vault
+This is separate from AWS Batch submission reconciliation above. Never use the
+compute `--not-submitted` action for a signed withdrawal. Keep **both the vault
 funding and helper outpoints reserved** and tell the user to keep the helper UTXO
 unspent while the result is uncertain. Never request another signature or accept
 replacement bytes for the vault.
@@ -335,3 +368,52 @@ not cancelled. After enabling again, resume a paused job to poll its existing
 provider ID. Reconcile uncertain submissions with the existing runbook; never
 reset an intent or submit a replacement solely because the switch was toggled.
 Reconcile outstanding jobs before changing capacity.
+
+### AWS migration decision and request recovery
+
+The user explicitly selected AWS for all QSB GPU work on 2026-09-25, superseding the earlier undecided-provider plan. Runpod is not the default or a fallback. This decision does not enable mainnet or enroll an unattested solver image.
+
+Before any paid intent is saved, `prepareRun` uploads the public input and returns its job name, SHA256, input key, queue and exact definition revision. The coordinator saves this `batchSubmission` identity together with `searching` and its spend reservation. An upload failure occurs before this marker and can be resumed without an unknown paid outcome.
+
+Use the existing reconciliation CLI with `--provider-id discover --operator ... --evidence ...` to search all statuses by the saved exact job name. Exactly one match is required. Both discovery and an explicitly supplied ID are checked against the saved name, request/project tags, input key/hash, queue and definition before attaching any queued, running, failed or completed job. Operator permissions need no access to input contents. Save incident evidence promptly: Batch guarantees terminal retention only for at least seven days.
+
+For a timed-out, disconnected or 5xx submission, the user-approved bounded recovery command is:
+
+```sh
+npx tsx scripts/reconcile-submission.ts OWNER JOB --not-submitted batch-window-elapsed --operator OPERATOR --evidence audit://incident/window-and-drain
+```
+
+It requires at least 35 minutes since the durable submission start (30-minute watchdog ceiling plus its 5-minute interval), with no maximum age. Exact-name discovery must return no job across all pages/statuses, and the QSB queue must have zero submitted, pending, runnable, starting and running jobs. Discovery failure or multiple matches refuses recovery. A discovered job is attached through the normal identity-checked provider-ID path instead. After seven days, an absent discovery result is no longer evidence that the job never existed; a drained queue after the required wait still permits the explicitly accepted bounded replacement. Positive discovery still attaches one match and multiple matches or a service error still refuse recovery. Old jobs without saved identity cannot use this path.
+
+This is an explicitly accepted bounded duplicate risk, not proof of non-acceptance. One such replacement is allowed per uncertain request, keyed by its saved Batch job name in an immutable `RECONCILIATION_REQUEST#<jobId>#<jobName>` audit row. The row and pending `batchReplacementFor` marker are recorded atomically with the normal revision audit. Resume consumes the one-shot allowance; the next paid-intent write clears the pending marker while recording a new request identity. The immutable request audit prevents granting the same old request another replacement. A later, separate uncertain submission in that withdrawal has its own single replacement under the same checks. Neither prior spend nor reservations are cleared; the replacement consumes the normal 15-minute budget reservation. The recorded-4xx fast path is unchanged. This command never submits GPU work itself. `ttl-expired` remains invalid for AWS Batch.
+
+The migration smoke image is not a production release: it lacks a build-provenance attestation and has been removed from the enrollment registry. Follow the attested release/copy procedure in `terraform/gpu/README.md` before any production enrollment.
+
+### Attested image mirror and local positive-hit replay
+
+The producer descriptor retains its canonical immutable
+`ghcr.io/starknet-innovation/qsb-solver@sha256:…` image. Batch preflight accepts
+that exact image, or the same digest in the `qsb-solver` ECR repository in the
+configured queue's AWS account and region. Different digests, accounts, regions,
+repositories and tags are refused before public-input upload or paid submission.
+Copy the manifest without changing its digest and verify the producer attestation
+before enrollment; the registry alias check is only a consistency check and does
+not itself prove build provenance. No account-specific mirror URL needs to appear
+in the browser release descriptor.
+
+`ops/aws-gpu-migration/replay-positive-hits.ts` reads an external public signing
+bundle and passes mocked Batch/S3 completed results through the real Batch parser
+and local CPU reference. Run `npm run vendor`, then:
+
+```sh
+npx tsx ops/aws-gpu-migration/replay-positive-hits.ts /path/to/public-signing-bundle.json
+```
+
+This command never submits work, signs, broadcasts, or credits ranges. It accepts
+only public reference fields from the external bundle and does not copy the bundle
+into the repository. The recorded [replay evidence](../ops/aws-gpu-migration/positive-hit-replay.json)
+checks all three historical puzzle hits, malformed candidates, mismatched request
+and output hashes, and changed subset locktime. Pinning candidates supply their
+own sequence/locktime, so that context mutation is not a pinning rejection test.
+These are real local cryptographic checks with mocked AWS transport, not a new GPU
+search, live Lambda/Batch integration, Core proof or miner inclusion.

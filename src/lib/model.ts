@@ -1,3 +1,10 @@
+export type BatchSubmissionIdentity = {
+  jobName: string;
+  inputSha256: string;
+  inputKey: string;
+  queue: string;
+  definition: string;
+};
 import type { SolverPin } from "./provenance";
 import { NETWORK_ID } from "./network";
 import { z } from "zod";
@@ -74,7 +81,10 @@ export const withdrawalSchema = z
     fee: sats,
     idempotencyKey: z.string().uuid(),
     costAccepted: z.literal(true),
-    solverReleaseId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/).optional(),
+    solverReleaseId: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9-]{0,127}$/)
+      .optional(),
   })
   .strict();
 export type Withdrawal = z.infer<typeof withdrawalSchema>;
@@ -102,12 +112,17 @@ export type Job = {
   gpuSubmissions?: number;
   /** Durable worst-case GPU seconds reserved before paid POSTs; never refunded. */
   gpuBudgetReservedSeconds?: number;
+  /** Legacy storage field: interpreted only with computeProvider for AWS jobs. */
   runpodId?: string;
+  computeProvider?: "aws-batch" | "runpod";
   txid?: string;
   retryRequested?: boolean;
   /** Audited operator decision allows one replacement, consumed atomically by resume. */
   oneSubmissionAllowed?: true;
+  /** Pending replacement for this uncertain request; cleared by the next paid intent. */
+  batchReplacementFor?: string;
   submissionStartedAt?: string;
+  batchSubmission?: BatchSubmissionIdentity;
   submissionReconciliation?: {
     kind: "provider-id" | "not-submitted";
     operator: string;
@@ -115,7 +130,8 @@ export type Job = {
     at: string;
     revision: number;
     providerId?: string;
-    reason?: "rejected-before-acceptance" | "ttl-expired";
+    reason?:
+      "rejected-before-acceptance" | "ttl-expired" | "batch-window-elapsed";
     httpStatus?: number;
   };
   error?: string;
