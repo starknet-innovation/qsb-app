@@ -1,3 +1,4 @@
+import { BatchClient } from "@aws-sdk/client-batch";
 import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
 import command from "../server/aws-batch-command.json";
@@ -289,9 +290,7 @@ it("discovery scans all pages and never treats zero or multiple matches as rejec
   expect(calls[0][0].input.jobStatus).toBeUndefined();
   expect(calls[1][0].input.nextToken).toBe("page2");
   t.batch.send.mockResolvedValueOnce({ jobSummaryList: [] });
-  await expect(t.provider.findRequest(identity)).rejects.toThrow(
-    "BatchRequestNotUniquelyFound",
-  );
+  expect(await t.provider.findRequest(identity)).toBeNull();
   t.batch.send.mockResolvedValueOnce({
     jobSummaryList: [
       { jobId: id, jobName: identity.jobName },
@@ -352,4 +351,37 @@ it.each([
   );
   expect(t.s3.send).not.toHaveBeenCalled();
   expect(t.submit).not.toHaveBeenCalled();
+});
+
+it("drain checks every active Batch status and rejects malformed discovery", async () => {
+  const t = setup();
+  const original = t.batch.send.getMockImplementation()!;
+  Object.setPrototypeOf(t.batch, BatchClient.prototype);
+  const statuses: string[] = [];
+  t.batch.send.mockImplementation(async (c: any) => {
+    if (c.constructor.name !== "ListJobsCommand") return original(c);
+    statuses.push(c.input.jobStatus);
+    return {
+      jobSummaryList: c.input.jobStatus === "PENDING" ? [{ jobId: id }] : [],
+    };
+  });
+  expect((await t.provider.health()).jobs).toEqual({
+    inQueue: 1,
+    inProgress: 0,
+  });
+  expect(statuses).toEqual([
+    "SUBMITTED",
+    "PENDING",
+    "RUNNABLE",
+    "STARTING",
+    "RUNNING",
+  ]);
+  t.batch.send.mockImplementation(async (c: any) =>
+    c.constructor.name === "ListJobsCommand" ? {} : original(c),
+  );
+  await expect(t.provider.health()).rejects.toThrow("ProviderListInvalid");
+  const prepared = await t.provider.prepareRun(image, {});
+  await expect(t.provider.findRequest(prepared.identity)).rejects.toThrow(
+    "ProviderListInvalid",
+  );
 });

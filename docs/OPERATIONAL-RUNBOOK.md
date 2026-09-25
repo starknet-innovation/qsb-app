@@ -98,7 +98,7 @@ evidence, time and revision. The operator must retain the actual response from
 this job's paid POST. The tool validates the recorded code, not the external
 truth of an operator's evidence reference.
 
-For timeouts, connection errors, 5xx or no recorded HTTP response, keep the job paused and reconcile CloudTrail, Batch job tags and S3 inputs. AWS Batch has no submission TTL: `--not-submitted ttl-expired` is explicitly refused, regardless of elapsed time. A replacement is permitted only for proven rejection before acceptance; that path also requires current health to show zero queued/in-progress jobs.
+For timeouts, connection errors, 5xx or no recorded HTTP response, first reconcile the saved request identity. The explicit `batch-window-elapsed` operator path below permits one bounded replacement only after the 35-minute window, exact-name absence and queue drain. AWS Batch has no submission TTL: `ttl-expired` remains refused. The recorded-4xx fast path also requires queue drain.
 A list miss or an empty queue by itself never authorizes replacement.
 
 The decision and job change are one conditional transaction with a permanent
@@ -326,7 +326,15 @@ Before any paid intent is saved, `prepareRun` uploads the public input and retur
 
 Use the existing reconciliation CLI with `--provider-id discover --operator ... --evidence ...` to search all statuses by the saved exact job name. Exactly one match is required. Both discovery and an explicitly supplied ID are checked against the saved name, request/project tags, input key/hash, queue and definition before attaching any queued, running, failed or completed job. Operator permissions need no access to input contents. Save incident evidence promptly: Batch guarantees terminal retention only for at least seven days.
 
-A list miss, expired retention, or an elapsed watchdog deadline is **not** proof of non-acceptance. Discovery never grants a replacement. If no match or positive rejection evidence exists, the submission stays paused for investigation; the migration intentionally does not weaken the never-resubmit invariant into a time-based retry. Historical jobs without a saved Batch identity require manual evidence review and are not automatically attached or replayed.
+For a timed-out, disconnected or 5xx submission, the user-approved bounded recovery command is:
+
+```sh
+npx tsx scripts/reconcile-submission.ts OWNER JOB --not-submitted batch-window-elapsed --operator OPERATOR --evidence audit://incident/window-and-drain
+```
+
+It requires at least 35 minutes since the durable submission start (30-minute watchdog ceiling plus its 5-minute interval), and less than seven days so terminal retention can support discovery. Exact-name discovery must return no job across all pages/statuses, and the QSB queue must have zero submitted, pending, runnable, starting and running jobs. Discovery failure or multiple matches refuses recovery. A discovered job is attached through the normal identity-checked provider-ID path instead. Old jobs without saved identity cannot use this path.
+
+This is an explicitly accepted bounded duplicate risk, not proof of non-acceptance. One such replacement is allowed per withdrawal, recorded atomically with the reconciliation audit and a persistent `batchReplacementUsed` marker. The existing one-shot allowance is consumed before the paid call; a second ambiguous replacement is refused even after resume. Neither prior spend nor reservations are cleared; the replacement consumes the normal 15-minute budget reservation. The recorded-4xx fast path is unchanged. This command never submits GPU work itself. `ttl-expired` remains invalid for AWS Batch.
 
 The migration smoke image is not a production release: it lacks a build-provenance attestation and has been removed from the enrollment registry. Follow the attested release/copy procedure in `terraform/gpu/README.md` before any production enrollment.
 

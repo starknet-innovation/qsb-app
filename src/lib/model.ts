@@ -119,6 +119,8 @@ export type Job = {
   retryRequested?: boolean;
   /** Audited operator decision allows one replacement, consumed atomically by resume. */
   oneSubmissionAllowed?: true;
+  /** At most one ambiguous Batch replacement per withdrawal; never reset. */
+  batchReplacementUsed?: true;
   submissionStartedAt?: string;
   batchSubmission?: BatchSubmissionIdentity;
   submissionReconciliation?: {
@@ -128,7 +130,8 @@ export type Job = {
     at: string;
     revision: number;
     providerId?: string;
-    reason?: "rejected-before-acceptance" | "ttl-expired";
+    reason?:
+      "rejected-before-acceptance" | "ttl-expired" | "batch-window-elapsed";
     httpStatus?: number;
   };
   error?: string;

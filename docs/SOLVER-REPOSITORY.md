@@ -27,16 +27,15 @@ contract. Before enrollment:
    archived qsb-config-a-ranked-v2.json. It is retained byte-for-byte.
 4. Run the registry generator, tests and package build. Generated imports support
    both Vite and the Lambda bundle; the app needs no CUDA source hashes.
-5. Separately configure the existing Runpod endpoint with that exact image digest.
-   This is deployment configuration, not a change to application code. Selecting
-   a descriptor does not change the endpoint's image or attest its live filesystem.
-   Before every paid submission, the coordinator passes the job's pinned image to
-   the Runpod cap preflight. The REST v2 endpoint response must confirm that exact
-   immutable `image` reference as well as limits. Missing, tagged or different
-   images fail closed before the paid intent; equal kernelCommit is insufficient.
-   This is control-plane consistency, not cryptographic runtime attestation: do not
-   change endpoint configuration while jobs are active. Index versus platform
-   manifest digests and registry aliases are not treated as equivalent.
+5. Separately register an immutable AWS Batch job-definition revision using the
+   enrolled digest, and configure its exact ARN in the deployment. Before every
+   paid submission, Batch preflight verifies the image, queue and compute limits.
+   A canonical GHCR image may be mirrored at the same digest into the queue's
+   account/region `qsb-solver` ECR repository. Different digests, tags or arbitrary
+   aliases fail closed before input upload and the paid intent. Preserve the
+   attested manifest digest when copying; index and platform digests are distinct.
+   This is control-plane consistency, not runtime attestation. Selecting a
+   descriptor does not reconfigure Batch or publish an image.
 
 Withdrawal selection can name solverReleaseId; the browser lists registered
 releases and the server freezes the chosen descriptor in the job. Existing vaults

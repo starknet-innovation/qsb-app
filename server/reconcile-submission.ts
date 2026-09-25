@@ -37,7 +37,11 @@ export const reconciliationDecisionSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("not-submitted"),
-      reason: z.enum(["rejected-before-acceptance", "ttl-expired"]),
+      reason: z.enum([
+        "rejected-before-acceptance",
+        "ttl-expired",
+        "batch-window-elapsed",
+      ]),
       httpStatus: z.number().int().min(400).max(499).optional(),
       operator: evidence,
       evidence,
@@ -54,7 +58,7 @@ export const reconciliationDecisionSchema = z.discriminatedUnion("kind", [
           message: "Recorded HTTP 4xx required",
         });
       if (
-        decision.reason === "ttl-expired" &&
+        decision.reason !== "rejected-before-acceptance" &&
         decision.httpStatus !== undefined
       )
         ctx.addIssue({
@@ -68,7 +72,7 @@ export type ReconciliationDecision = z.infer<
   typeof reconciliationDecisionSchema
 >;
 export type SubmissionLookup = {
-  findRequest?(identity: BatchSubmissionIdentity): Promise<string>;
+  findRequest?(identity: BatchSubmissionIdentity): Promise<string | null>;
   status(
     id: string,
     identity?: BatchSubmissionIdentity,
@@ -124,7 +128,9 @@ export async function reconcileUnknownSubmission(input: {
   if (decision.kind === "provider-id" && decision.providerId === "discover") {
     if (!job.batchSubmission || !lookup.findRequest)
       throw new ReconciliationError("BatchRequestIdentityRequired");
-    decision.providerId = await lookup.findRequest(job.batchSubmission);
+    const found = await lookup.findRequest(job.batchSubmission);
+    if (!found) throw new ReconciliationError("BatchRequestNotFound");
+    decision.providerId = found;
   }
   const recorded =
     decision.kind === "provider-id" &&
@@ -218,14 +224,41 @@ export async function reconcileUnknownSubmission(input: {
     job.status = "searching";
     delete job.error;
   } else {
-    // A list miss, a timeout or a 5xx alone is not proof of non-acceptance.
-    // Batch has no submission TTL. Retention and watchdog timing cannot prove
-    // non-acceptance; only evidenced pre-acceptance rejection permits replacement.
+    // AWS has no submission TTL. The explicit Batch recovery policy requires
+    // the 30-minute watchdog ceiling plus one 5-minute interval, positive queue
+    // drain, and exact-name absence within the terminal-job retention window.
     if (decision.reason === "ttl-expired")
       throw new ReconciliationError("AwsBatchHasNoSubmissionTtl");
+    if (decision.reason === "batch-window-elapsed") {
+      if (job.batchReplacementUsed)
+        throw new ReconciliationError("BatchReplacementAlreadyUsed");
+      const started = Date.parse(job.submissionStartedAt ?? "");
+      const elapsed = Date.parse(now) - started;
+      if (
+        !Number.isFinite(elapsed) ||
+        elapsed < 35 * 60 * 1000 ||
+        elapsed >= 7 * 24 * 60 * 60 * 1000
+      )
+        throw new ReconciliationError("BatchRecoveryWindowRequired");
+      if (!job.batchSubmission || !lookup.findRequest)
+        throw new ReconciliationError("BatchRequestIdentityRequired");
+      const found = await lookup.findRequest(job.batchSubmission);
+      if (found)
+        return reconcileUnknownSubmission({
+          ...input,
+          decision: {
+            kind: "provider-id",
+            providerId: found,
+            operator: decision.operator,
+            evidence: decision.evidence,
+          },
+        });
+    }
     const health = await lookup.health();
     if (health.jobs.inQueue !== 0 || health.jobs.inProgress !== 0)
       throw new ReconciliationError("EndpointNotDrained");
+    if (decision.reason === "batch-window-elapsed")
+      job.batchReplacementUsed = true;
     job.oneSubmissionAllowed = true;
   }
   const priorRevision = job.revision;

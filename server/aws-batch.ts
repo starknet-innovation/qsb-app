@@ -99,6 +99,11 @@ export class AwsBatch implements ComputeProvider {
       new DescribeJobQueuesCommand({ jobQueues: [this.queue] }),
       { abortSignal: AbortSignal.timeout(20000) },
     );
+    if (
+      queues.jobQueues?.length !== 1 ||
+      queues.jobQueues[0]?.jobQueueArn !== this.queue
+    )
+      throw new Error("ProviderQueueUnconfirmed");
     let inQueue = 0,
       inProgress = 0;
     for (const status of [
@@ -113,6 +118,8 @@ export class AwsBatch implements ComputeProvider {
         { jobQueue: this.queue, jobStatus: status },
         { abortSignal: AbortSignal.timeout(20000) },
       )) {
+        if (!Array.isArray(page.jobSummaryList))
+          throw new Error("ProviderListInvalid");
         if (status === "RUNNING")
           inProgress += page.jobSummaryList?.length || 0;
         else inQueue += page.jobSummaryList?.length || 0;
@@ -239,8 +246,8 @@ export class AwsBatch implements ComputeProvider {
     };
     return Object.assign(submit, { identity });
   }
-  /** Discovery is positive evidence only: absence never authorizes a replacement. */
-  async findRequest(identity: BatchSubmissionIdentity): Promise<string> {
+  /** Complete exact-name discovery; absence alone never authorizes replacement. */
+  async findRequest(identity: BatchSubmissionIdentity): Promise<string | null> {
     if (
       identity.queue !== this.queue ||
       identity.definition !== this.definition ||
@@ -259,11 +266,14 @@ export class AwsBatch implements ComputeProvider {
         }),
         { abortSignal },
       );
-      for (const j of page.jobSummaryList ?? []) {
+      if (!Array.isArray(page.jobSummaryList))
+        throw new Error("ProviderListInvalid");
+      for (const j of page.jobSummaryList) {
         if (j.jobName === identity.jobName && j.jobId) ids.add(j.jobId);
       }
       nextToken = page.nextToken;
     } while (nextToken);
+    if (ids.size === 0) return null;
     if (ids.size !== 1) throw new Error("BatchRequestNotUniquelyFound");
     return [...ids][0];
   }
