@@ -1,8 +1,10 @@
 # Terraform deployment (AWS application, Runpod GPUs)
 
-This folder deploys the **public checkout's historical/research application stack** into a new AWS environment. GPUs remain on an existing Runpod serverless endpoint. It does not create GPU resources or reuse any existing validation environment. Mainnet job creation is the Step Functions coordinator ([mainnet pipeline](../docs/MAINNET-PIPELINE.md)). The [supervised runtime infrastructure](runtime/README.md) is not deployed for `network = "mainnet"`.
+This folder deploys the **single Step Functions application pipeline** into a fresh AWS account. GPUs run on an existing Runpod serverless endpoint. Mainnet job creation follows API Lambda → Step Functions → coordinator Lambda → Runpod, with CPU re-checks in the reference Lambda. See [mainnet pipeline](../docs/MAINNET-PIPELINE.md).
 
-**Scope:** working frontend/API infrastructure and historical coordinator/reference wiring, with all transaction activation disabled. The newer optimized long-running supervised runtime is not the mainnet path and is not a self-contained public deployment; it cannot be hosted unchanged by these short-lived Lambdas. See [mainnet readiness](../docs/MAINNET-READINESS.md). Applying Terraform is not mainnet activation, wallet compatibility certification, or permission to spend funds.
+There is no supervised host, VPC/NAT, EBS/Backup, dispatch queue/DLQ, evidence bucket/table, watchdog, runtime installer or ECR repository in this application stack. Supervised source remains parked for removal under #23. GitHub OIDC deployment bootstrap remains separate and supported. Applying Terraform is not mainnet activation, wallet compatibility certification, or permission to spend funds. See [mainnet readiness](../docs/MAINNET-READINESS.md).
+
+Recorded local evidence: [single-pipeline mock plan inventory](../docs/SINGLE-PIPELINE-PLAN.json). The configured plan has 43 infrastructure resources plus 21 frontend objects for this build, three Lambda functions, four service roles, one MFA-required reconciliation role and one table. Counts of frontend objects vary with the build. This is not a live regional plan or deployment.
 
 ## Resources
 
@@ -16,7 +18,7 @@ This folder deploys the **public checkout's historical/research application stac
 | Operations | Separate service roles, resource-scoped data/compute grants, 30-day log retention and failure alarms |
 | External | Existing Runpod endpoint and optional existing Secrets Manager ARN; no secret values in Terraform |
 
-`provision_runtime` must stay false when `network` is `mainnet`. A plan that sets it is rejected. No EC2 GPUs, custom DNS or certificates are needed for the default CloudFront hostname. AWS-managed public networking reaches Runpod. Custom domains, WAF/rate policy beyond API throttling and regional IAM/cutover review remain separate work. This is a new-environment stack: do not point it at production records or import existing infrastructure casually.
+The `provision_runtime`, `runtime_*` and cleanup-endpoint settings have been removed. No EC2 GPUs, custom DNS or certificates are needed for the default CloudFront hostname. AWS-managed public networking reaches Runpod. Custom domains, WAF/rate policy beyond API throttling and regional IAM/cutover review remain separate work. This is the first-deploy layout for a new account, not a migration or teardown procedure. Do not apply it to an existing supervised state: removed resources would be scheduled for destruction. Preserve any old state and infrastructure until a separately reviewed migration and teardown is authorized.
 
 ## Prerequisites
 
@@ -44,12 +46,14 @@ cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 terraform -chdir=terraform init
 terraform -chdir=terraform validate
 terraform -chdir=terraform plan -out=deployment.tfplan
+terraform -chdir=terraform show -json deployment.tfplan > /tmp/qsb-plan.json
+python3 terraform/tests/check-single-pipeline.py /tmp/qsb-plan.json
 # Review the complete plan. Verify git status is clean and HEAD is pushed to origin.
 terraform -chdir=terraform apply deployment.tfplan
 terraform -chdir=terraform output app_url
 ```
 
-`build.mjs` runs pinned upstream preparation, typecheck/frontend build, bundles both Node Lambda entrypoints (including SDK dependencies), creates deterministic Lambda ZIPs and records file SHA256s/network/commit. The build is done **before** Terraform parses `fileset`/file hashes. It does not deploy anything. Pass `--network=mainnet` or `--network=testnet4`; an omitted network is refused. The Terraform `network` variable has no default, and `terraform.tfvars.example` sets `mainnet`. The normal builder refuses a dirty tree; `--allow-dirty` permits local inspection only and records `clean:false`, which the Terraform deployment gate rejects.
+`build.mjs` runs pinned upstream preparation, typecheck/frontend build, bundles both Node Lambda entrypoints (including SDK dependencies), creates deterministic Lambda ZIPs and records file SHA256s/network/commit. The build is done **before** Terraform parses `fileset`/file hashes. It does not deploy anything. The build packages only frontend assets, API, coordinator and CPU reference; it does not build a supervised dispatcher or host archive. Pass `--network=mainnet` or `--network=testnet4`; an omitted network is refused. The Terraform `network` variable has no default, and `terraform.tfvars.example` sets `mainnet`. The normal builder refuses a dirty tree; `--allow-dirty` permits local inspection only and records `clean:false`, which the Terraform deployment gate rejects.
 
 Choose `--network=testnet4` and `network="testnet4"` together for a Testnet4-identity preview. Both mainnet operations and Testnet4 rehearsal remain disabled; this does not assert that the installed Xverse supports Testnet4. There is intentionally no `enable_mainnet` or rehearsal activation variable.
 
@@ -57,11 +61,13 @@ Artifacts must remain in `terraform/.build` through plan/apply. Terraform reject
 
 ### Runpod credentials
 
-Optionally supply both `runpod_endpoint_id` and `runpod_secret_arn`. The existing secret must contain JSON shaped as `{"apiKey":"<privately provisioned value>"}`. Provision its value privately outside Terraform; do not send it to an assistant or commit it. Terraform neither creates a secret version nor reads its value. Only the coordinator gets the exact secret read permission. Add the exact customer-managed KMS key ARN only when needed; cross-account/key policies need separate review.
+Optionally supply both `runpod_endpoint_id` and `runpod_secret_arn`. The existing secret must contain JSON shaped as `{"apiKey":"<privately provisioned value>"}`. Provision its value privately outside Terraform; do not send it to an assistant or commit it. Keep this single existing secret as the provider-key source of truth; do not create a second copy for API, verifier, deployment bootstrap or a host. Terraform neither creates a secret nor a secret version and does not read its value. Among application services, only the coordinator gets the exact secret read permission. The MFA-required reconciliation operator role can read that same secret for the CLI; it creates no additional copy. Add the exact customer-managed KMS key ARN only when needed; cross-account/key policies need separate review.
 
 The coordinator Lambda environment and `runpod_limits` output publish `workersMax=1`, `workersMin=0`, and `executionTimeoutMs=900000` from `server/gpu-spend.json`, plus `MAX_JOB_GPU_SECONDS=14745600` (4,096 GPU-hours per job). Before each paid submission the coordinator sets those endpoint limits and does not submit unless the provider confirms them. It atomically reserves the execution timeout before every paid POST and pauses if the cumulative time reservation would exceed that budget. Failed, cancelled, timed-out and uncertain submissions remain charged; stage changes and resume requests cannot reset it; it does not credit a 64-hit output as a finished range. Applying Terraform does not call Runpod, start a workflow, or authorize spend. `release.mainnetEnabled` and `broadcastAuthorized` stay false. AWS Lambda concurrency is **not** a GPU spending cap. The experimental GPU USD ceiling stays unevaluated. IAM-authorized direct validation invocations can use paid compute even while public transaction routes are gated: restrict operator access accordingly.
 
 ### State and configuration
+
+For GitHub OIDC, follow [the separate administrator bootstrap](../ops/github-aws/README.md). Its identity trust and authentication-only workflow remain unchanged. The bounded deployment role cannot create arbitrary CDN/API resources: an administrator must allocate and register those IDs first, then explicitly import the selected resources into the fresh application state before using that role for Terraform. An authenticated administrator with deployment permissions can instead execute the first application plan/apply. This PR performs neither bootstrap, import nor deployment.
 
 The default Terraform backend is local. State/plans may contain operational metadata; keep them private and encrypted. `.gitignore` excludes state, plans, local tfvars and artifacts. For a team, configure a separately bootstrapped encrypted/locked remote state backend before applying; do not manage its bucket with the same state it stores. No backend credentials belong in source. Commit `.terraform.lock.hcl`.
 
@@ -89,10 +95,11 @@ terraform -chdir=terraform init -backend=false
 terraform -chdir=terraform validate
 # First build from the current clean committed checkout (mainnet identity for these tests).
 export TF_VAR_source_commit="$(git rev-parse HEAD)"
-terraform -chdir=terraform test
+terraform -chdir=terraform test -json -verbose > /tmp/qsb-terraform-tests.jsonl
+python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-tests.jsonl
 ```
 
-The tests use a mocked AWS provider and plan only. They check disabled activation, persistence protection, absence of API provider credentials, no generic paid-work retry, and rejection of network/commit/partial-provider mismatches. They do not call AWS or Runpod and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
+The tests use a mocked AWS provider and plan only. `check-single-pipeline.py` checks both expanded mocked plans (unconfigured preview and configured Runpod) or a saved real plan: exactly three application Lambdas, four service roles, one MFA-required reconciliation role, one table, one state machine and one frontend bucket, with no supervised infrastructure or secret-value resources. Counts exclude frontend objects and the separately bootstrapped GitHub OIDC/state infrastructure. They check disabled activation, persistence protection, absence of API provider credentials, no generic paid-work retry, and rejection of network/commit/partial-provider mismatches. They do not call AWS or Runpod and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
 
 References: [Lambda + HTTP API](https://developer.hashicorp.com/terraform/tutorials/aws/lambda-api-gateway), [fileset build-time semantics](https://developer.hashicorp.com/terraform/language/functions/fileset), [provider resource documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs).
 
@@ -107,3 +114,20 @@ of cost estimates. The 90-second coordinator timeout includes the CPU export,
 limits preflight, POST and database persistence. Applying this configuration does
 not establish a strict physical startup-worker bound: extra INITIALIZING provider
 records and idle/storage billing require separate operational observation.
+
+### Reconciliation operator role
+
+`operator_principal_arns` is required, with no default: supply exact existing IAM
+user or role ARNs in your private tfvars. Account-root delegation and wildcards
+are rejected. The role uses the configured IAM path and permissions boundary;
+its ARN is `operator_reconcile_role_arn`. The MFA condition is mandatory, so a
+federated session that does not provide `aws:MultiFactorAuthPresent` cannot assume
+it. Do not remove the condition to work around that.
+
+See the [operator assume-role procedure](../docs/OPERATIONAL-RUNBOOK.md#assume-the-reconciliation-role).
+The inline policy grants only GetItem/PutItem on present OWNER partitions, one
+coordinator StartExecution, and the configured provider secret. Optional CMK
+decryption is scoped to the configured key through Secrets Manager. A configured
+boundary and the key policy must also allow it; this change does not broaden
+administrator-managed boundaries. A future provider replacement changes the
+provider credential grant, not record or workflow authority.

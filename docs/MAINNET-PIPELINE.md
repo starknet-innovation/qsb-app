@@ -9,7 +9,7 @@ Mainnet job creation uses one pipeline: `createApp`, then `startWorkflow`, then 
 
 `POST /api/jobs/supervised` is not a mainnet route. Supervised creation, dispatch, fresh-proof, activation, and miner-inclusion modules stay in the repository. Supervised tests remain and are off this path. Removing that code is a later step.
 
-`provision_runtime` is refused when `network` is `mainnet`. The supervised runtime Terraform is not the mainnet path and is not applied for that environment.
+Terraform declares only this pipeline, with one records table and one existing Runpod secret reference. Supervised host, dispatch queue, evidence storage and watchdog infrastructure have been removed for the fresh-account deployment; there is no `provision_runtime` switch. See the [deployment instructions](../terraform/README.md).
 
 ## Still refused
 

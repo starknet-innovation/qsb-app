@@ -32,10 +32,6 @@ resource "terraform_data" "release" {
       condition     = (var.runpod_endpoint_id == "") == (var.runpod_secret_arn == "")
       error_message = "Supply both Runpod endpoint and secret ARN, or neither."
     }
-    precondition {
-      condition     = !(var.network == "mainnet" && var.provision_runtime)
-      error_message = "Do not deploy the supervised runtime for the mainnet environment. Mainnet jobs use the Step Functions coordinator."
-    }
   }
 }
 resource "aws_dynamodb_table" "records" {

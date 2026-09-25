@@ -28,6 +28,13 @@ export const permissionModel = {
       mayChangeReservationAuthority: false,
       mayBroadcast: false,
     },
+    "operator-reconcile": {
+      data: ["GetItem", "PutItem"],
+      secrets: ["GetSecretValue"],
+      evidence: "write-reconciliation-audit",
+      mayChangeReservationAuthority: false,
+      mayBroadcast: false,
+    },
     runtime: {
       data: ["GetItem", "PutItem", "Query", "ConditionCheckItem"],
       secrets: ["GetSecretValue"],
@@ -55,6 +62,7 @@ type PermissionModel = {
   roles: {
     api: RolePermissions;
     coordinator: RolePermissions;
+    "operator-reconcile": RolePermissions;
     runtime: RolePermissions & { evidence: string };
     operator: RolePermissions & {
       maySetMainnetEnabled: boolean;
@@ -81,13 +89,14 @@ export function assertPermissionSeparation(
   if (model.roles.api.evidence === model.roles.runtime.evidence)
     throw new Error("EvidenceAccessMustDiffer");
   if (
+    model.roles["operator-reconcile"].mayChangeReservationAuthority ||
     model.roles.coordinator.mayChangeReservationAuthority ||
     model.roles.api.mayChangeReservationAuthority ||
     model.roles.runtime.mayChangeReservationAuthority ||
     !model.roles.operator.mayChangeReservationAuthority
   )
     throw new Error("OnlyOperatorMayChangeReservationAuthority");
-  for (const role of [model.roles.api, model.roles.coordinator, model.roles.runtime, model.roles.operator]) {
+  for (const role of [model.roles.api, model.roles.coordinator, model.roles.runtime, model.roles.operator, model.roles["operator-reconcile"]]) {
     if (role.mayBroadcast) throw new Error("BroadcastRefused");
   }
   if (

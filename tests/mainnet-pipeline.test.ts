@@ -69,9 +69,8 @@ it("documents one mainnet pipeline through createApp, startWorkflow, and the coo
   expect(lambda).not.toContain("installSupervisedCreation(");
   expect(app).toContain("await startWorkflow(job)");
   expect(workflow).toContain("function:${var.name}-coordinator");
-  expect(releaseGate).toContain(
-    '!(var.network == "mainnet" && var.provision_runtime)',
-  );
+  expect(releaseGate).toContain('toset(["api", "coordinator", "reference"])');
+  expect(releaseGate).not.toContain("provision_runtime");
   expect(release.mainnetEnabled).toBe(false);
   expect(capability.broadcastAuthorized).toBe(false);
 });

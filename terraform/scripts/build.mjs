@@ -20,12 +20,7 @@ execFileSync('npm',['run','build'],{stdio:'inherit',env:{...process.env,VITE_QSB
 const out = path.join(root,'terraform/.build');
 rmSync(out,{recursive:true,force:true});mkdirSync(out,{recursive:true});
 cpSync('dist',path.join(out,'frontend'),{recursive:true});
-execFileSync('node',['supervised/build.mjs'],{stdio:'inherit'});
-cpSync('supervised/dist',path.join(out,'runtime'),{recursive:true});
-execFileSync('node',['supervised/runtime/build.mjs'],{stdio:'inherit'});
-cpSync('supervised/runtime/runtime.tar.gz',path.join(out,'runtime/runtime.tar.gz'));
-cpSync('supervised/runtime/dist/manifest.json',path.join(out,'runtime/runtime-manifest.json'));
-for (const [name,entry] of [['api','server/lambda.ts'],['coordinator','server/coordinator.ts'],['watchdog','terraform/runtime/watchdog.mjs'],['dispatch','supervised/dispatch/publisher.ts']]) {
+for (const [name,entry] of [['api','server/lambda.ts'],['coordinator','server/coordinator.ts']]) {
   mkdirSync(path.join(out,name));
   await build({entryPoints:[entry],outfile:path.join(out,name,'index.js'),bundle:true,platform:'node',target:'node22',format:'cjs',minify:true,define:{'import.meta.env':'undefined'},logLevel:'warning'});
 }
@@ -35,7 +30,7 @@ execFileSync('python3',[path.join(root,'terraform/scripts/zip.py'),out],{stdio:'
 const walk=(dir,prefix='')=>readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(dir,e.name),prefix+e.name+'/'):[prefix+e.name]);
 const frontendFiles=walk(path.join(out,'frontend')).sort();
 const files={};
-for(const n of ['api.zip','coordinator.zip','reference.zip','watchdog.zip','dispatch.zip',...readdirSync(path.join(out,'runtime')).map(n=>'runtime/'+n),...frontendFiles.map(n=>'frontend/'+n)]) files[n]=createHash('sha256').update(readFileSync(path.join(out,n))).digest('hex');
+for(const n of ['api.zip','coordinator.zip','reference.zip',...frontendFiles.map(n=>'frontend/'+n)]) files[n]=createHash('sha256').update(readFileSync(path.join(out,n))).digest('hex');
 const after=execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim();
 // Dependency preparation must not silently modify tracked source.
 if(clean && after) throw Error('Build changed tracked source; review and rebuild from a clean commit');
