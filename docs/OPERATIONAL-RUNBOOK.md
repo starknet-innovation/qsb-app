@@ -57,8 +57,16 @@ Every proposed mainnet spend requires a separate exact-transaction authorization
 
 ### Coordinator GPU-time allowance
 
-`server/gpu-spend.json` is the bundled source of truth. The selected budget is
-14,745,600 seconds (4,096 GPU-hours) per job. Changing it requires review/build/deploy.
+`server/gpu-spend.json` is the bundled source of truth. The user chose
+14,745,600 seconds (4,096 GPU-hours) per job on PR #36. The planning calculation
+uses Config A's upstream honest-work comment of roughly 2^47 candidates
+(`public/qsb/qsb_pipeline.py:255`), divided by the roughly 2^34 candidates per
+subset range in `server/search-ranges.ts`: 8,192 range-equivalents. Reserving
+900 seconds each gives 2,048 GPU-hours; a 100% margin gives 4,096 GPU-hours.
+This is a planning assumption from a code comment, not measured expected runtime
+or a success guarantee; pinning geometry differs. If that estimate is per round
+rather than total, the allowance must be reassessed and raised through review.
+Changing it requires review/build/deploy.
 Before every paid POST, the coordinator atomically saves the greater of cumulative
 reserved seconds and observed compute seconds, plus the submission's timeout
 (currently 900 seconds). It pauses if this would exceed the budget. This permits
