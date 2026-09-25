@@ -38,7 +38,7 @@
       "zod": "^4.0.0"
     },
     "devDependencies": {
-      "@playwright/test": "^1.55.0",
+      "@playwright/test": "1.63.0",
       "@types/node": "^22.0.0",
       "@types/react": "^19.0.0",
       "@types/react-dom": "^19.0.0",
@@ -74,15 +74,15 @@
     },
     "node": ">=22",
     "nodeSource": "README.md",
-    "packageJsonSha256": "002d368ac1d4b9baf091c7a7d88a5061858c0d1b3c52e0fca4e3204287ece577",
-    "packageLockSha256": "633d302ec95b0e175ba1bf9d24ee827b93b27c33910b76ca434b99c783754e4b",
+    "packageJsonSha256": "12766b927d960944f70d5ff034ce5f6055d38e6168760067a6756d445781a4eb",
+    "packageLockSha256": "8142e980dcb0b81cdd56579992d027d4870cbb4c83e2a5cf236a6377aa2f2a7d",
     "runpodPin": "1.7.13"
   },
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
       "api": "17cd97f5e748aea4ac9157f219995086a86d119c6d644ac36eadb8e8efef8fc9",
-      "build-metadata": "f10b0153b7b42609d49e6d78a54858d00834c1f0852a2e3ab27e89c9e61ee0d7",
+      "build-metadata": "e0c1d165fc0789a41a64d9d43bc6487e2a4978c75ca3995f1199c65a53050e23",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "aa52623e93d5326f68bd158a27a8a89195fc4721204873df2cc56ac7a2ad8f4c",
       "evidence-reader": "768e7c8098ff9d9b473f5c7a0a77ff272d679b1e9cab801dfd0145832ce88c58",
@@ -130,8 +130,8 @@
       "AGENTS.md": "302ac626fa8e321d7cea178f95548890d64aac6b1c4b32f95a67fc4468ba5ee1",
       "README.md": "d476b0cfec3847dd8bcc165beeec2e45d2f3031084de6073d0426ea60c9abfb7",
       "docs/source-build/20260924/solver-build-receipt.json": "1e243370561b16c7d2c1d9be68e756fe39fbea44167f0e70d8507d1a14dfc160",
-      "package-lock.json": "633d302ec95b0e175ba1bf9d24ee827b93b27c33910b76ca434b99c783754e4b",
-      "package.json": "002d368ac1d4b9baf091c7a7d88a5061858c0d1b3c52e0fca4e3204287ece577",
+      "package-lock.json": "8142e980dcb0b81cdd56579992d027d4870cbb4c83e2a5cf236a6377aa2f2a7d",
+      "package.json": "12766b927d960944f70d5ff034ce5f6055d38e6168760067a6756d445781a4eb",
       "research/optimized-subset/LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
       "research/optimized-subset/README.md": "0e8f6f75af6a8f87174f4a2f7df27579e220d6f8208110c5a89c7b7050ca43a2",
       "research/optimized-subset/subset/GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",

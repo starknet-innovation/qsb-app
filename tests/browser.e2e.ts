@@ -105,6 +105,9 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
     secp256k1.getPublicKey(new Uint8Array(32).fill(8)),
   ).address!;
   let vault: any, submitted: any;
+  await page.route("**/api/config", (route) =>
+    route.fulfill({ json: { network: "mainnet", operationsEnabled: true } }),
+  );
   await page.route("**/api/payment-utxos", (route) =>
     route.fulfill({
       json: { utxos: [{ txid: "22".repeat(32), vout: 0, value: "10000" }] },
