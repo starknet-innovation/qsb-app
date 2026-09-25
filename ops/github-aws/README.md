@@ -95,3 +95,75 @@ structural policy checks, not a live AWS authorization test. `verify.py` also
 includes explicit denied-service and PassRole cases for a later IAM simulation.
 Changing the renderer does not update already installed roles or boundaries;
 review and apply that administrator-managed policy change separately.
+
+## Human access without root
+
+Day-to-day AWS work (checks, Terraform applies, GPU smoke runs, reconcile) must
+not use the account root. `access.py` renders three administrator-owned
+identities from the same private inventory, plus `operator_user` (the IAM user
+name) and `gpu_vpc` (the VPC of the `terraform/gpu` security group):
+
+| Identity | Path | Can | Cannot |
+| --- | --- | --- | --- |
+| IAM user `operator_user` | `/qsb/operators/` | sign in (console or `aws login`), change its password, assume the two roles | anything else; it has no access keys |
+| `qsb-viewonly` | `/qsb/bootstrap/` | AWS `ViewOnlyAccess`, plus Batch/Scheduler/IAM describe, IAM simulation and Cost Explorer reads | read data: S3 objects, DynamoDB items, secrets, parameters, KMS decrypt, log events, Lambda code, execution input/output |
+| `qsb-operator` | `/qsb/bootstrap/` | everything `qsb-github-deploy` can, plus the `terraform/gpu` stack and its smoke jobs | ingress rules, `RunInstances`, VPC/gateway creation, users, access keys or MFA devices, editing any `/qsb/bootstrap/` identity or policy, removing a boundary |
+
+Both roles trust only that user, and only with MFA (`aws:MultiFactorAuthPresent`).
+Sessions last at most 1 hour for `qsb-operator` and 4 hours for `qsb-viewonly`.
+GPU runtime roles (`/qsb/runtime/qsb-gpu-*`) can be created or changed only with
+the new `qsb-gpu-boundary`. It allows the ECS instance agent, pulling the
+`qsb-solver` image, the GPU log streams, reading job inputs, writing job outputs,
+and the watchdog's list/describe/terminate of `qsb-gpu`-tagged jobs. It does not
+allow submitting paid jobs, passing roles, reading secrets or broad S3 access.
+`terraform/gpu` must set `permissions_boundary` on its four roles to that policy.
+
+### Create them once, as root
+
+1. Add `operator_user` and `gpu_vpc` to the private inventory (outside Git).
+2. Check offline: `python3 ops/github-aws/test_access.py`, then
+   `python3 ops/github-aws/verify_access.py --profile ADMIN --inventory INVENTORY`.
+3. Commit and push; the checkout must be clean and match its remote branch.
+4. `python3 ops/github-aws/bootstrap_access.py --profile ADMIN --inventory INVENTORY`
+   prints the plan (names and policy sizes only). Add `--apply` to create it. It
+   refuses to touch an existing identity and never creates a password, key or
+   MFA device. If a call fails midway, reconcile the partial identities; don't retry blind.
+5. As root in the console, enable console access for the user and assign an MFA
+   device. Nobody else handles the password or MFA secret.
+
+### Use them
+
+`aws login --profile qsb-user` signs in as the user. Then define the role
+profiles in `~/.aws/config` (account number and MFA device ARN are yours to fill in):
+
+```ini
+[profile qsb-user]
+region = eu-west-1
+
+[profile qsb-view]
+role_arn = arn:aws:iam::ACCOUNT:role/qsb/bootstrap/qsb-viewonly
+source_profile = qsb-user
+mfa_serial = arn:aws:iam::ACCOUNT:mfa/DEVICE
+duration_seconds = 14400
+region = eu-west-1
+
+[profile qsb-operator]
+role_arn = arn:aws:iam::ACCOUNT:role/qsb/bootstrap/qsb-operator
+source_profile = qsb-user
+mfa_serial = arn:aws:iam::ACCOUNT:mfa/DEVICE
+duration_seconds = 3600
+region = eu-west-1
+```
+
+The first call on each role profile asks for an MFA code, then the CLI caches
+the role session until it expires. Agents such as Claude or Codex use a cached
+session that you started. They never see or type the code. Then:
+
+- confirm with `python3 ops/github-aws/verify_access.py --profile qsb-view --inventory INVENTORY --live`;
+- add the user's ARN to `operator_principal_arns` so it can assume the reconcile role;
+- keep root for break-glass only.
+
+**Verify** before relying on these, against current AWS docs:
+- whether `aws login` sessions carry the MFA context (the `mfa_serial` profiles don't depend on it);
+- Batch's `PassRole` service names for compute-environment instance roles;
+- whether the Terraform AWS provider sends `default_tags` as create-time tags for security groups and launch templates.
