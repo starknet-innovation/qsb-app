@@ -2,7 +2,7 @@
 
 A research application for constructing and recovering quantum-safe Bitcoin vaults, with local wallet signing, a public-data GPU search worker, and independently checked search results.
 
-**Research snapshot — not a production release. Mainnet operations are disabled by default.** The optimized solver has a separate source-built worker image; the application's historical worker remains unchanged. Do not use this repository to hold real funds.
+**Research snapshot — not a production release. Mainnet operations are disabled by default.** GPU workers and optimized research are maintained in the separate qsb-solver repository; the app retains independent CPU verification. Do not use this repository to hold real funds.
 
 ## What is included
 
@@ -36,7 +36,7 @@ The preparation step supplies the pinned sources required by provenance tests an
 QSB_NETWORK=mainnet VITE_QSB_NETWORK=mainnet npm run dev
 ```
 
-`vendor` downloads two pinned upstream source archives and applies the checked-in patch; review `scripts/vendor.py` and `scripts/patch_upstream.py` before running it. It does not require wallet secrets. The local API uses an in-memory store. Do not put a real backup, recovery phrase, or passphrase into an issue or pull request.
+`vendor` downloads an allowlist of generator/reference Python files and their license from one pinned upstream commit, then applies the checked-in patch; review `scripts/vendor.py` and `scripts/patch_upstream.py` before running it. It does not require wallet secrets. The local API uses an in-memory store. Do not put a real backup, recovery phrase, or passphrase into an issue or pull request.
 
 `package:release --check` rebuilds `release/source-manifest.json` from this checkout. That manifest is a source closure. It does not build the CUDA image, and the historical image name in the archived solver descriptor is not a deployable registry identity. CUDA sources and image builds belong to qsb-solver.
 

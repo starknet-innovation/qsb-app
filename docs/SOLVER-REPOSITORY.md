@@ -53,3 +53,32 @@ The maintainer confirmed compiled-binary redistribution approval on 25 September
 2026. This records that confirmation, not an independent legal opinion. The solver
 repo retains upstream notices and licenses. No funded fixture, GPU allocation,
 production deployment or mainnet submission is part of this extraction.
+
+## First external release
+
+[v0.1.0](https://github.com/starknet-innovation/qsb-solver/releases/tag/v0.1.0)
+was built by [release run 36113649324](https://github.com/starknet-innovation/qsb-solver/actions/runs/36113649324)
+from commit `d72fb4fca0b684501f3db4038dcbc105ead6c117`.
+The exact released descriptor is `src/lib/releases/qsb-solver-v0-1-0.json`.
+Its image is:
+
+```
+ghcr.io/starknet-innovation/qsb-solver@sha256:badfcac297db6c242cf0e91e78fe294fa900d3c59f363258ec6d0d502162c755
+```
+
+GitHub build provenance verification passed with the repository, release workflow,
+tag ref and exact source commit constrained:
+
+```sh
+gh attestation verify oci://ghcr.io/starknet-innovation/qsb-solver@sha256:badfcac297db6c242cf0e91e78fe294fa900d3c59f363258ec6d0d502162c755 \
+  --repo starknet-innovation/qsb-solver \
+  --signer-workflow starknet-innovation/qsb-solver/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.1.0 \
+  --source-digest d72fb4fca0b684501f3db4038dcbc105ead6c117
+```
+
+The public OCI index, Linux amd64 manifest and config were anonymously readable
+and their bytes matched their digests. Released range vectors matched the app's
+contract byte-for-byte. The release builds the historical two-stage worker; it
+is not an optimized-candidate promotion or a new GPU/end-to-end proof. Registration
+leaves the default, deployed endpoint, mainnet and broadcast settings unchanged.

@@ -12,7 +12,7 @@ The goal is a working mainnet withdrawal without production-grade hardening. Tra
 Don't reopen these in code or PRs.
 
 - **One pipeline.** The Step Functions coordinator is the single mainnet pipeline (#9). The supervised stacks (the in-process handoff and the deployed Lambda → queue → host path) are parked. Don't change them, except to remove them under #23.
-- **Solver release.** The historical worker is rebuilt from `worker/Dockerfile` under a new descriptor in `src/lib/releases` (#15). Keep `qsb-config-a-ranked-v2.json` byte-identical. The solver is chosen at withdrawal, from the releases compatible with the vault's protocol. A deposit is never bound to one solver.
+- **Solver release.** The historical worker is built from `worker/Dockerfile` in `starknet-innovation/qsb-solver`; its attested image digest and repository commit are enrolled in a new descriptor in `src/lib/releases` (#15, #35). Keep `qsb-config-a-ranked-v2.json` byte-identical. The solver is chosen at withdrawal, from the releases compatible with the vault's protocol. A deposit is never bound to one solver.
 - **One deposit per vault.** Never offer a way to deposit into an existing vault. Payments to a vault's script from outside the app are flagged and never spent (#16, #27).
 - **No test chains.** The first end-to-end run is on mainnet with a small deposit (#22). Before submit, an offline consensus check runs Bitcoin Core's script interpreter on the exact signed transaction (#20).
 

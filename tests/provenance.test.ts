@@ -9,6 +9,7 @@ import {
   vaultConfiguration,
   externalSolverDescriptorSchema,
   solverRegistry,
+  solverReleases,
 } from "../src/lib/provenance";
 const vault = () => ({
   network: "regtest",
@@ -131,4 +132,16 @@ it("refuses duplicate releases and archived ID replacement", () => {
   expect(() =>
     solverRegistry([{ ...external(), id: currentSolverId }]),
   ).toThrow("DuplicateSolverRelease");
+});
+
+it("pins the published external release while retaining the archived default", () => {
+  const releases = solverReleases().filter((release) => "schemaVersion" in release);
+  expect(releases.length).toBeGreaterThan(0);
+  for (const release of releases) {
+    const v = vault();
+    const pin = pinSolver(v, release.id);
+    expect(assertSolverPin(pin, v)).toEqual(release);
+    expect(pin.descriptor).not.toHaveProperty("sourceHashes");
+    expect(pinSolver(v).descriptor.id).toBe(currentSolverId);
+  }
 });

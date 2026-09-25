@@ -49,7 +49,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "14924f78e73dee0f59e5dd52098a3e753e326ede41cfdbad45ba44be19ad87d9",
+      "api": "1b0828a9e5238f9d992e0de456bd40a45c95232d82bd2a01ae6358ec80909e70",
       "build-metadata": "0ef7e2da90e49e60d4184faff68b3518eb7c17112957efda33ae49a6036d2348",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "ba4f4f410f52855d2d0ed377040a9e9bb494786be3e748ce891b6928fa01aadc",
@@ -92,7 +92,7 @@
       "value": null
     },
     "sourceFiles": {
-      "AGENTS.md": "302ac626fa8e321d7cea178f95548890d64aac6b1c4b32f95a67fc4468ba5ee1",
+      "AGENTS.md": "ecf40c1c07dad0c5799dd1606b4f4e813280d820cce0ea189235ee3af0a40250",
       "README.md": "a0649108b1391eaaaa09cbbf8fc8f2e7bead0cb7af728055d740ebbb5e719cce",
       "contracts/ranked-v2.json": "1bf7fb177e684c7b9c520b2dcb3c6e840f346e6d9c2c37089b35ee6fae010076",
       "docs/source-build/20260924/solver-build-receipt.json": "1e243370561b16c7d2c1d9be68e756fe39fbea44167f0e70d8507d1a14dfc160",
@@ -152,7 +152,8 @@
       "src/lib/qsb.ts": "7595c7ae373325cefe4a77c2ec15f863880c8e2f79550e2bbc3be2b930a80132",
       "src/lib/readiness.ts": "1808212289b484d658408fe4728436e18da7810ee97faee1a77d7ec4ba826a16",
       "src/lib/releases/qsb-config-a-ranked-v2.json": "76cec4ab084e3c40501ecb8245a7b2968dadc7d587840a82adc5382544255c59",
-      "src/lib/releases/registry.generated.ts": "490847fe42c5eecc3d430fa2bfb590e56ce8f1011ab0f25737d096a12617ce36",
+      "src/lib/releases/qsb-solver-v0-1-0.json": "682c68f53f059717b51d3457d3eb1ad2d1b0023eca4bed0e5c60f9d863275c8e",
+      "src/lib/releases/registry.generated.ts": "49e8d1c423d23da4fd726a44786278fe800c326bd759c71228b99fef38bcb3c3",
       "src/lib/session.ts": "d323b192bcde1a5980a73221554eac670a7bfc07b509b55dbdef2008c91722ba",
       "src/lib/transactions.ts": "c730f432e9f2ec80a9449abdc31c8b4f2e703f4b2a9abf5ba030a097565ba81c",
       "src/mainnet/admissionClient.ts": "11fe2d36d16329a4b51f15cb0b4d534e3e9338f2bf2f707c8dece04f7765a89b",
