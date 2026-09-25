@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import {
+  fingerprint,
+  assertPaidSolverContract,
   assertSolverPin,
   assertVaultConfiguration,
   pinSolver,
@@ -97,8 +99,11 @@ it("preserves the archived descriptor byte-for-byte without requiring CUDA sourc
       .digest("hex"),
   ).toBe("76cec4ab084e3c40501ecb8245a7b2968dadc7d587840a82adc5382544255c59");
 });
+import publishedV2 from "../src/lib/releases/qsb-solver-v0-1-0.json";
+import rankedContract from "../contracts/ranked-v2.json";
 const external = () => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
+  searchContract: fingerprint(rankedContract),
   id: "qsb-external-test",
   protocol: "qsb-config-a-v1",
   generatorCommit: "2c9172051d5c150ef0a994ca6b988a08a3ef9e85",
@@ -117,6 +122,9 @@ it("registers a source-independent immutable external release", () => {
 });
 it.each([
   { searchVersion: "ranked-v3" },
+  { searchContract: "d".repeat(64) },
+  { searchContract: undefined },
+  { schemaVersion: 2 },
   { solverCommit: "main" },
   { image: "ghcr.io/starknet-innovation/qsb-solver:latest" },
   { solverRepository: "https://example.com/solver" },
@@ -144,4 +152,10 @@ it("pins the published external release while retaining the archived default", (
     expect(pin.descriptor).not.toHaveProperty("sourceHashes");
     expect(pinSolver(v).descriptor.id).toBe(currentSolverId);
   }
+});
+
+it("retains published v2 verbatim but refuses new paid work without a tested contract", () => {
+  const old = solverRelease(publishedV2.id);
+  expect(() => assertPaidSolverContract(old)).toThrow("SolverSearchContractRequired");
+  expect(() => assertPaidSolverContract(externalSolverDescriptorSchema.parse(external()))).not.toThrow();
 });

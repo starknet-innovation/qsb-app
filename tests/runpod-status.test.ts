@@ -2,10 +2,12 @@ import { afterEach, expect, it, vi } from "vitest";
 import { Runpod, RUNPOD_JOB_TTL_MS } from "../server/providers";
 import { gpuSpendLimits } from "../server/gpu-spend";
 
-function confirmedLimits() {
+const expectedImage = "ghcr.io/starknet-innovation/qsb-solver@sha256:" + "c".repeat(64);
+function confirmedLimits(image: unknown = expectedImage) {
   return new Response(
     JSON.stringify({
       id: "endpoint",
+      image,
       workers: {
         min: gpuSpendLimits.workersMin,
         max: gpuSpendLimits.workersMax,
@@ -66,7 +68,7 @@ it("sets workersMax, workersMin, and the execution timeout before one paid submi
     .mockResolvedValueOnce(new Response(JSON.stringify({ id: "job-1" })));
   vi.stubGlobal("fetch", fetcher);
   expect(
-    await new Runpod("endpoint", "disposable").run({ stage: "pinning" }),
+    await new Runpod("endpoint", "disposable").run({ stage: "pinning" }, expectedImage),
   ).toEqual({
     id: "job-1",
   });
@@ -90,13 +92,14 @@ it("does not submit paid work when the endpoint refuses the worker cap", async (
     new Response(
       JSON.stringify({
         id: "endpoint",
+        image: expectedImage,
         workers: { min: 0, max: 3 },
         timeout: gpuSpendLimits.executionTimeoutMs,
       }),
     ),
   );
   vi.stubGlobal("fetch", fetcher);
-  await expect(new Runpod("endpoint", "disposable").run({})).rejects.toThrow(
+  await expect(new Runpod("endpoint", "disposable").run({}, expectedImage)).rejects.toThrow(
     "ProviderLimitsUnconfirmed",
   );
   expect(fetcher).toHaveBeenCalledTimes(1);
@@ -109,7 +112,7 @@ it("never retries paid submission errors", async () => {
     .mockResolvedValueOnce(confirmedLimits())
     .mockResolvedValueOnce(new Response("", { status: 500 }));
   vi.stubGlobal("fetch", fetcher);
-  await expect(new Runpod("endpoint", "disposable").run({})).rejects.toThrow(
+  await expect(new Runpod("endpoint", "disposable").run({}, expectedImage)).rejects.toThrow(
     "500",
   );
   expect(fetcher).toHaveBeenCalledTimes(2);
@@ -176,7 +179,7 @@ it("prepared submissions perform no second control-plane call and cannot be reus
     .mockResolvedValueOnce(confirmedLimits())
     .mockRejectedValueOnce(new Error("lost POST response"));
   vi.stubGlobal("fetch", fetcher);
-  const submit = await new Runpod("endpoint", "disposable").prepareRun();
+  const submit = await new Runpod("endpoint", "disposable").prepareRun(expectedImage);
   expect(fetcher).toHaveBeenCalledTimes(1);
   await expect(submit({})).rejects.toThrow("lost POST response");
   await expect(submit({})).rejects.toThrow("SubmissionAlreadyAttempted");
@@ -190,7 +193,28 @@ it.each([403, 500])("does not POST after limits HTTP %s", async (status) => {
   const fetcher = vi.fn().mockResolvedValue(new Response("", { status }));
   vi.stubGlobal("fetch", fetcher);
   await expect(
-    new Runpod("endpoint", "disposable").prepareRun(),
+    new Runpod("endpoint", "disposable").prepareRun(expectedImage),
   ).rejects.toThrow(String(status));
   expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it.each([undefined, "solver:latest", "ghcr.io/starknet-innovation/qsb-solver@sha256:" + "d".repeat(64)])("rejects endpoint image %s before a paid POST", async (image) => {
+  const payload = await confirmedLimits().json();
+  if (image === undefined) delete payload.image;
+  else payload.image = image;
+  const response = new Response(JSON.stringify(payload));
+  const fetcher = vi.fn().mockResolvedValue(response);
+  vi.stubGlobal("fetch", fetcher);
+  await expect(new Runpod("endpoint", "disposable").prepareRun(expectedImage)).rejects.toThrow();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls[0][1].method).toBe("PATCH");
+});
+it("rechecks image identity even when two submissions use the same kernel commit", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(confirmedLimits()).mockResolvedValueOnce(new Response(JSON.stringify({id:"first"}))).mockResolvedValueOnce(confirmedLimits("other:tag"));
+  vi.stubGlobal("fetch", fetcher);
+  const provider = new Runpod("endpoint", "disposable");
+  const input = {kernelCommit: "b".repeat(40)};
+  await provider.run(input, expectedImage);
+  await expect(provider.run(input, expectedImage)).rejects.toThrow("ProviderImageUnconfirmed");
+  expect(fetcher.mock.calls.filter(([, options]) => options.method === "POST")).toHaveLength(1);
 });

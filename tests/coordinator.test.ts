@@ -7,10 +7,20 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   cpu: vi.fn(),
 }));
-vi.mock("../src/lib/releases/registry.generated", () => ({
+vi.mock("../src/lib/releases/registry.generated", async () => {
+  const hash = await import("node:crypto"), contract = await import("../contracts/ranked-v2.json");
+  return ({
   default: [
     {
-      schemaVersion: 2,
+      schemaVersion: 3,
+      searchContract: (() => {
+        function canonical(value: any): string {
+          if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+          if (value !== null && typeof value === "object") return `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`;
+          return JSON.stringify(value);
+        }
+        return hash.createHash("sha256").update(canonical(contract.default)).digest("hex");
+      })(),
       id: "external-test",
       protocol: "qsb-config-a-v1",
       generatorCommit: "2c9172051d5c150ef0a994ca6b988a08a3ef9e85",
@@ -21,7 +31,7 @@ vi.mock("../src/lib/releases/registry.generated", () => ({
       image: "ghcr.io/starknet-innovation/qsb-solver@sha256:" + "c".repeat(64),
     },
   ],
-}));
+}); });
 vi.mock("../server/gpu-spend", async (importOriginal) => {
   const actual = await importOriginal<any>();
   return {
@@ -287,6 +297,7 @@ it("keeps polling a paused provider request until cancellation is confirmed", as
 it.each([
   new Error("403"),
   new Error("ProviderLimitsUnconfirmed"),
+  new Error("ProviderImageUnconfirmed"),
   new Error("AbortError"),
 ])(
   "pauses a failed limits preflight without a paid claim: %s",
@@ -509,6 +520,7 @@ it("routes an external descriptor through submission and CPU verification withou
   await seed({ solver: pin });
   await store.put({ pk, sk: "VAULT#v", version: 1, vault }, 0);
   await handler(event);
+  expect(mocks.prepareRun).toHaveBeenCalledWith(pin.descriptor.image);
   expect(mocks.run).toHaveBeenCalledWith(
     expect.objectContaining({
       kernelCommit: "b".repeat(40),

@@ -30,6 +30,7 @@ beforeEach(async () => {
     status: vi.fn(async () => ({ status: "IN_PROGRESS" })),
     cancel: vi.fn(async () => ({ status: "CANCELLED" })),
   };
+  provider.prepareRun = vi.fn(async () => provider.run);
   cpu = vi.fn(async (input: any) =>
     input.action === "export"
       ? { parameterBase64: "public", parameterSha256: "b".repeat(64) }
@@ -699,4 +700,15 @@ it("rejects an unsupported pinned release before any provider request", async ()
   expect(provider.run).not.toHaveBeenCalled();
   expect(provider.status).not.toHaveBeenCalled();
   expect(cpu).not.toHaveBeenCalled();
+});
+
+it("rejects image preflight without allocating or losing a retry intent", async () => {
+  const row = (await store.get(pk, sk))!;
+  await store.put({...row,version:row.version+1,validation:{...row.validation,retry:[7]}},row.version);
+  provider.prepareRun.mockRejectedValue(new Error("ProviderImageUnconfirmed"));
+  await expect(tick()).rejects.toThrow("ProviderImageUnconfirmed");
+  expect(provider.run).not.toHaveBeenCalled();
+  const saved = (await store.get(pk, sk))!;
+  expect(saved.validation).toMatchObject({nextAttempt:0,retry:[7],active:[]});
+  expect(saved.job.status).toBe("queued");
 });

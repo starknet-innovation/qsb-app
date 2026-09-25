@@ -1,12 +1,15 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
+import rankedContract from "../../contracts/ranked-v2.json";
+import publishedV2 from "./releases/qsb-solver-v0-1-0.json";
 import archived from "./releases/qsb-config-a-ranked-v2.json";
 import { z } from "zod";
 import externalDescriptors from "./releases/registry.generated";
 
 export const externalSolverDescriptorSchema = z
   .object({
-    schemaVersion: z.literal(2),
+    schemaVersion: z.literal(3),
+    searchContract: z.string().regex(/^[a-f0-9]{64}$/),
     id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/),
     protocol: z.literal("qsb-config-a-v1"),
     generatorCommit: z.literal("2c9172051d5c150ef0a994ca6b988a08a3ef9e85"),
@@ -23,13 +26,17 @@ export const externalSolverDescriptorSchema = z
   })
   .strict();
 export type SolverDescriptor =
-  typeof archived | z.infer<typeof externalSolverDescriptorSchema>;
+  typeof archived | typeof publishedV2 | z.infer<typeof externalSolverDescriptorSchema>;
 export function solverRegistry(descriptors: unknown[]) {
   const registry = new Map<string, string>([
     [archived.id, canonical(archived)],
   ]);
   for (const input of descriptors) {
-    const descriptor = externalSolverDescriptorSchema.parse(input);
+    // Preserve the exact published legacy descriptor, never broaden legacy enrollment.
+    const descriptor = canonical(input) === canonical(publishedV2)
+      ? publishedV2 : externalSolverDescriptorSchema.parse(input);
+    if ("searchContract" in descriptor && descriptor.searchContract !== fingerprint(rankedContract))
+      throw new Error("SolverSearchContractMismatch");
     if (registry.has(descriptor.id)) throw new Error("DuplicateSolverRelease");
     registry.set(descriptor.id, canonical(descriptor));
   }
@@ -51,6 +58,10 @@ export function canonical(value: unknown): string {
 }
 export const fingerprint = (value: unknown) =>
   bytesToHex(sha256(new TextEncoder().encode(canonical(value))));
+export function assertPaidSolverContract(descriptor: SolverDescriptor): void {
+  if ("schemaVersion" in descriptor && (! ("searchContract" in descriptor) || descriptor.searchContract !== fingerprint(rankedContract)))
+    throw new Error("SolverSearchContractRequired");
+}
 const registry = solverRegistry(externalDescriptors);
 export const currentSolverId = archived.id;
 export function solverRelease(id: string): SolverDescriptor {

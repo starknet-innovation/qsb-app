@@ -1,4 +1,4 @@
-import { assertSolverPin, solverRelease } from "../src/lib/provenance";
+import { assertPaidSolverContract, assertSolverPin, solverRelease } from "../src/lib/provenance";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
 import { chain } from "./chain";
@@ -212,11 +212,12 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     };
     let submit: (input: unknown) => Promise<{ id: string }>;
     try {
-      submit = await runpod.prepareRun();
+      assertPaidSolverContract(selected);
+      submit = await runpod.prepareRun(selected.image);
     } catch {
       job.status = "paused";
       job.error =
-        "Runpod limits unconfirmed; nothing was submitted. Resume after correcting provider configuration.";
+        "Solver contract or Runpod image/limits unconfirmed; nothing was submitted. Resume after correcting provider configuration.";
       await save();
       return { ...event, done: true };
     }

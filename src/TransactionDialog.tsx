@@ -1,4 +1,4 @@
-import {fingerprint, solverReleases, currentSolverId} from './lib/provenance';
+import {fingerprint, solverReleases, currentSolverId, assertPaidSolverContract} from './lib/provenance';
 import {readSessionEpoch} from './lib/api';
 import {prepareMainnetSearchRequest,retainedMainnetSubmission} from './mainnet/submission';
 import {retainedRequests} from './mainnet/retainedRequest';
@@ -714,7 +714,9 @@ export default function TransactionDialog({
                     Solver release
                     <select value={solverId} disabled={!!busy || !!unlocked?.authorization}
                       onChange={(event) => setSolverId(event.target.value)}>
-                      {solverReleases().map((descriptor) => (
+                      {solverReleases().filter((descriptor) => {
+                        try { assertPaidSolverContract(descriptor); return true; } catch { return false; }
+                      }).map((descriptor) => (
                         <option key={descriptor.id} value={descriptor.id}>{descriptor.id}</option>
                       ))}
                     </select>

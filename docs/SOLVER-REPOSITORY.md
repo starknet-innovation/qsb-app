@@ -22,7 +22,7 @@ publishes its GHCR digest and GitHub provenance, and attaches solver.json plus t
 contract. Before enrollment:
 
 1. Verify provenance against starknet-innovation/qsb-solver and the exact tag commit.
-2. Compare the released range vectors with the app's contract and run both suites.
+2. Require schemaVersion 3 and `searchContract`, the SHA-256 of canonical sorted-key compact JSON from `contracts/ranked-v2.json`. The producer derives it after checking its valid/rejected vectors; the app registry independently compares it with `fingerprint()` of its imported contract before enrollment. Run both suites.
 3. Copy solver.json as a new JSON descriptor in src/lib/releases; never edit the
    archived qsb-config-a-ranked-v2.json. It is retained byte-for-byte.
 4. Run the registry generator, tests and package build. Generated imports support
@@ -30,6 +30,13 @@ contract. Before enrollment:
 5. Separately configure the existing Runpod endpoint with that exact image digest.
    This is deployment configuration, not a change to application code. Selecting
    a descriptor does not change the endpoint's image or attest its live filesystem.
+   Before every paid submission, the coordinator passes the job's pinned image to
+   the Runpod cap preflight. The REST v2 endpoint response must confirm that exact
+   immutable `image` reference as well as limits. Missing, tagged or different
+   images fail closed before the paid intent; equal kernelCommit is insufficient.
+   This is control-plane consistency, not cryptographic runtime attestation: do not
+   change endpoint configuration while jobs are active. Index versus platform
+   manifest digests and registry aliases are not treated as equivalent.
 
 Withdrawal selection can name solverReleaseId; the browser lists registered
 releases and the server freezes the chosen descriptor in the job. Existing vaults
@@ -49,8 +56,7 @@ Historical app source-audit checks were removed; their removal does not certify
 the optimized candidate. App coverage-accounting tests and independent CPU
 comparison tests remain here.
 
-The maintainer confirmed compiled-binary redistribution approval on 25 September
-2026. This records that confirmation, not an independent legal opinion. The solver
+The maintainer confirmed compiled-binary redistribution approval in the [25 September decision](https://github.com/starknet-innovation/qsb-app/pull/47#issuecomment-5829603150). This records that confirmation, not an independent legal opinion. The solver
 repo retains upstream notices and licenses. No funded fixture, GPU allocation,
 production deployment or mainnet submission is part of this extraction.
 
@@ -82,3 +88,12 @@ and their bytes matched their digests. Released range vectors matched the app's
 contract byte-for-byte. The release builds the historical two-stage worker; it
 is not an optimized-candidate promotion or a new GPU/end-to-end proof. Registration
 leaves the default, deployed endpoint, mainnet and broadcast settings unchanged.
+
+The published v0.1.0 schemaVersion 2 descriptor remains byte-identical for historical
+job inspection. Its missing contract binding now refuses **new paid submissions**.
+It is not silently upgraded. A new producer release and separately reviewed verbatim
+enrollment are required before that external solver can run. The archived app
+descriptor/default also remains byte-identical; its placeholder image is not a
+deployable release and fails the endpoint image check against a real deployment.
+
+The schema 3 producer update is [qsb-solver PR #3](https://github.com/starknet-innovation/qsb-solver/pull/3); it has not published a replacement release. No future digest or descriptor is invented here.
