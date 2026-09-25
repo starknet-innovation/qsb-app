@@ -238,7 +238,7 @@ it("refuses to resume an unknown submission even when a list miss set an allowan
   const resumed = await app.request(post(`/jobs/${jobId}/resume`, {}, token));
   expect(resumed.status).toBe(409);
   expect(await resumed.json()).toEqual({
-    error: "Reconcile the unknown Runpod submission before retrying.",
+    error: "Reconcile the unknown compute provider submission before retrying.",
   });
   const kept = (await store.get(`OWNER#${address}`, `JOB#${jobId}`))
     ?.job as Job;

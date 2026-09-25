@@ -1,0 +1,10 @@
+[
+  "/usr/bin/setpriv",
+  "--no-new-privs",
+  "--bounding-set=-all",
+  "--inh-caps=-all",
+  "--ambient-caps=-all",
+  "/bin/sh",
+  "-c",
+  "set -eu; grep -E '^Cap|^NoNewPrivs' /proc/self/status; nvidia-smi --query-gpu=name,uuid,driver_version --format=csv,noheader; exec python3 /opt/qsb/aws_entrypoint.py"
+]

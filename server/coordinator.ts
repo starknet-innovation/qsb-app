@@ -1,11 +1,15 @@
 import { deployedSolver } from "./solver-deployment";
-import { assertPaidSolverContract, assertSolverPin, solverRelease } from "../src/lib/provenance";
+import {
+  assertPaidSolverContract,
+  assertSolverPin,
+  solverRelease,
+} from "../src/lib/provenance";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
 import { chain } from "./chain";
 import { store } from "./store";
 import { validationTick } from "./validation-search";
-import { Runpod } from "./providers";
+import { configuredCompute, computeConfigured } from "./compute-provider";
 import { release, type Job, type PublicVault } from "../src/lib/model";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { z } from "zod";
@@ -15,13 +19,6 @@ import {
   HOST_HIT_CAPACITY,
   publishedHitRecords,
 } from "./runtime/coverage-ledger";
-import {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} from "@aws-sdk/client-secrets-manager";
-const secretsClient = new SecretsManagerClient({
-  region: process.env.AWS_REGION,
-});
 const cpuClient = new LambdaClient({ region: process.env.AWS_REGION });
 type Event = { owner: string; jobId: string; revision: number; polls?: number };
 const candidateOutput = z.object({
@@ -54,24 +51,6 @@ async function cpu(payload: unknown) {
     throw new Error("ReferenceVerificationFailed");
   return JSON.parse(Buffer.from(response.Payload).toString());
 }
-// Runtime-only credential resolution. Never return credentials, provider headers,
-// or raw exceptions from this boundary to callers or logs.
-async function configuredRunpod() {
-  const secretArn = process.env.RUNPOD_SECRET_ARN,
-    endpoint = process.env.RUNPOD_ENDPOINT_ID;
-  if (!secretArn || !endpoint) throw new Error("ComputeConfigurationRequired");
-  try {
-    const secret = await secretsClient.send(
-      new GetSecretValueCommand({ SecretId: secretArn }),
-    );
-    const key = z
-      .object({ apiKey: z.string().min(1) })
-      .parse(JSON.parse(secret.SecretString || "{}")).apiKey;
-    return new Runpod(endpoint, key);
-  } catch {
-    throw new Error("ComputeCredentialUnavailable");
-  }
-}
 // Only identifiers enter workflow history. Recovery secrets never enter AWS.
 export async function handler(event: Event | { action: "providerHealth" }) {
   // IAM-only Lambda diagnostic; no HTTP route exposes it. This reads provider
@@ -80,9 +59,10 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     z.object({ action: z.literal("providerHealth") })
       .strict()
       .parse(event);
-    const provider = await configuredRunpod();
+    const provider = await configuredCompute();
     return {
-      endpointId: process.env.RUNPOD_ENDPOINT_ID,
+      provider: "aws-batch",
+      queue: process.env.AWS_BATCH_JOB_QUEUE,
       health: await provider.health(),
     };
   }
@@ -93,7 +73,22 @@ export async function handler(event: Event | { action: "providerHealth" }) {
   const job = row.job as Job;
   if (event.revision !== job.revision) return { ...event, done: true };
   if (event.owner.startsWith("regtest:") && row.validation) {
-    return validationTick(event, row, store, await configuredRunpod(), cpu);
+    const legacyState = row.validation as {
+      active?: { id?: string }[];
+      cancel?: string[];
+    };
+    if (
+      job.computeProvider !== "aws-batch" &&
+      (legacyState.active?.some((x) => x.id) || legacyState.cancel?.length)
+    ) {
+      job.status = "paused";
+      job.error =
+        "Legacy provider job requires reconciliation before AWS migration.";
+      await store.put({ ...row, version: row.version + 1, job }, row.version);
+      return { ...event, done: true };
+    }
+    job.computeProvider = "aws-batch";
+    return validationTick(event, row, store, await configuredCompute(), cpu);
   }
   const save = () =>
     store.put({ ...row, version: row.version + 1, job }, row.version);
@@ -108,7 +103,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     // Otherwise /resume could mistake this paused job for unsubmitted work.
     if (job.status === "searching" && !job.runpodId) {
       if (!job.error?.includes("Submission outcome unknown"))
-        job.error = `Submission outcome unknown. Reconcile Runpod before resuming.${job.error ? ` ${job.error}` : ""}`;
+        job.error = `Submission outcome unknown. Reconcile compute provider before resuming.${job.error ? ` ${job.error}` : ""}`;
       delete job.oneSubmissionAllowed;
     }
     // A deployment rollback must leave paid work reconcilable/resumable.
@@ -122,11 +117,16 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     await save();
     return { ...event, done: true };
   }
-  const secretArn = process.env.RUNPOD_SECRET_ARN,
-    endpoint = process.env.RUNPOD_ENDPOINT_ID;
-  if (!secretArn || !endpoint || !process.env.REFERENCE_FUNCTION) {
+  if (!computeConfigured() || !process.env.REFERENCE_FUNCTION) {
+    if (job.status === "searching" && !job.runpodId) {
+      if (!job.error?.includes("Submission outcome unknown"))
+        job.error = `Submission outcome unknown. Reconcile compute provider before resuming.${job.error ? ` ${job.error}` : ""}`;
+      delete job.oneSubmissionAllowed;
+    }
     job.status = "paused";
-    job.error = "Compute and verification configuration required.";
+    const reason = "Compute and verification configuration required.";
+    if (!job.error?.includes(reason))
+      job.error = `${reason}${job.error ? ` ${job.error}` : ""}`;
     await save();
     return { ...event, done: true };
   }
@@ -138,12 +138,19 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     await save();
     row.version++;
   }
-  const runpod = await configuredRunpod();
+  if (job.runpodId && job.computeProvider !== "aws-batch") {
+    job.status = "paused";
+    job.error =
+      "Legacy provider job requires reconciliation before AWS migration.";
+    await save();
+    return { ...event, done: true };
+  }
+  const provider = await configuredCompute();
   if (job.status === "paused") {
     if (job.runpodId) {
-      const pending = await runpod.status(job.runpodId);
+      const pending = await provider.status(job.runpodId, job.batchSubmission);
       if (["IN_QUEUE", "IN_PROGRESS"].includes(pending.status)) {
-        await runpod.cancel(job.runpodId);
+        await provider.cancel(job.runpodId);
         // A cancellation acknowledgement is not a terminal job status. Keep
         // polling the durable id, including after a coordinator restart.
         return {
@@ -185,7 +192,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     if (job.status === "searching") {
       job.status = "paused";
       job.error =
-        "Submission outcome unknown. Reconcile Runpod before resuming.";
+        "Submission outcome unknown. Reconcile compute provider before resuming.";
       delete job.oneSubmissionAllowed;
       await save();
       return { ...event, done: true };
@@ -232,15 +239,26 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       ...job.parameterHashes,
       [key]: parameters.parameterSha256,
     };
-    let submit: (input: unknown) => Promise<{ id: string }>;
+    let submit: import("./aws-batch").PreparedRun;
     try {
       deployedSolver(selected.id);
       assertPaidSolverContract(selected);
-      submit = await runpod.prepareRun(selected.image);
+      submit = await provider.prepareRun(selected.image, {
+        protocol: selected.protocol,
+        kernelCommit: selected.kernelCommit,
+        manifestHash: job.manifestHash,
+        stage: job.stage,
+        attempt: job.attempt,
+        searchVersion,
+        ...parameters,
+        ...(job.solution
+          ? { sequence: job.solution.sequence, locktime: job.solution.locktime }
+          : {}),
+      });
     } catch {
       job.status = "paused";
       job.error =
-        "Solver contract or Runpod image/limits unconfirmed; nothing was submitted. Resume after correcting provider configuration.";
+        "Solver contract, compute provider configuration or public input upload unconfirmed; nothing was submitted. Resume after correcting preparation.";
       await save();
       return { ...event, done: true };
     }
@@ -249,22 +267,14 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     job.gpuBudgetReservedSeconds = reservedSeconds;
     job.gpuSubmissions = (job.gpuSubmissions ?? 0) + 1;
     job.status = "searching";
+    job.computeProvider = "aws-batch";
+    job.batchSubmission = submit.identity;
+    delete job.batchReplacementFor;
     job.submissionStartedAt = new Date().toISOString();
     delete job.retryRequested;
     delete job.oneSubmissionAllowed;
     await save();
-    const result = await submit({
-      protocol: selected.protocol,
-      kernelCommit: selected.kernelCommit,
-      manifestHash: job.manifestHash,
-      stage: job.stage,
-      attempt: job.attempt,
-      searchVersion,
-      ...parameters,
-      ...(job.solution
-        ? { sequence: job.solution.sequence, locktime: job.solution.locktime }
-        : {}),
-    });
+    const result = await submit();
     job.runpodId = result.id;
     await store.put({ ...row, version: row.version + 2, job }, row.version + 1);
     return {
@@ -274,7 +284,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       polls: (event.polls || 0) + 1,
     };
   }
-  const result = await runpod.status(job.runpodId);
+  const result = await provider.status(job.runpodId, job.batchSubmission);
   if (["FAILED", "CANCELLED", "TIMED_OUT"].includes(result.status)) {
     if (job.retryRequested) {
       delete job.runpodId;

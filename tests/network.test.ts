@@ -88,14 +88,14 @@ it("build, deploy, and test configurations name a network", () => {
   const variables = readFileSync("terraform/variables.tf", "utf8");
   const networkVariable = variables.slice(
     variables.indexOf('variable "network"'),
-    variables.indexOf('variable "runpod_endpoint_id"'),
+    variables.indexOf('variable "batch_job_queue"'),
   );
   expect(networkVariable).not.toMatch(/^\s*default\s*=/m);
   expect(readFileSync("terraform/terraform.tfvars.example", "utf8")).toContain(
     'network        = "mainnet"',
   );
   for (const path of ["terraform/compute.tf"]) {
-    expect(readFileSync(path, "utf8")).toContain("QSB_NETWORK = var.network");
+    expect(readFileSync(path, "utf8")).toMatch(/QSB_NETWORK\s*=\s*var.network/);
   }
   expect(readFileSync("terraform/scripts/build.mjs", "utf8")).not.toContain(
     "?? 'mainnet'",

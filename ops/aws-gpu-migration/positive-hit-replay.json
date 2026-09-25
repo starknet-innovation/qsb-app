@@ -1,0 +1,41 @@
+{
+  "schema": "qsb-batch-public-hit-replay-v1",
+  "scope": "mocked AWS Batch/S3 transport and real local CPU reference; public historical replay only",
+  "liveAwsCalls": 0,
+  "paidSubmissions": 0,
+  "rangeCredits": 0,
+  "freshSearch": false,
+  "coreOrMinerProof": false,
+  "rows": [
+    {
+      "stage": "pinning",
+      "attempt": 1468,
+      "parameterSha256": "e410ce8aeec69b28b4a6eaebf4032b6628820ba075bc8ec79212f9a28d47857d",
+      "positiveHitVerified": true,
+      "invalidCandidateRejected": true,
+      "alteredContextRejected": null,
+      "requestMismatchRejected": true,
+      "outputMismatchRejected": true
+    },
+    {
+      "stage": "round1",
+      "attempt": 2436,
+      "parameterSha256": "eb0c9275bed41802078f5f2f4c12b0b2116e5668ff24e498e15a98a9093019f5",
+      "positiveHitVerified": true,
+      "invalidCandidateRejected": true,
+      "alteredContextRejected": true,
+      "requestMismatchRejected": true,
+      "outputMismatchRejected": true
+    },
+    {
+      "stage": "round2",
+      "attempt": 1145,
+      "parameterSha256": "ceb4e80ef6b6a9c10560db9bc11e767b4f2e513c1fecc4ba839d7e42180d2eea",
+      "positiveHitVerified": true,
+      "invalidCandidateRejected": true,
+      "alteredContextRejected": true,
+      "requestMismatchRejected": true,
+      "outputMismatchRejected": true
+    }
+  ]
+}

@@ -890,7 +890,7 @@ export default function App() {
                   {
                     icon: Activity,
                     title: "03. Compute a withdrawal",
-                    text: "Runpod searches public transaction data. The GPU never needs your recovery secrets.",
+                    text: "AWS GPUs search public transaction data. The GPU never needs your recovery secrets.",
                   },
                   {
                     icon: CheckCheck,

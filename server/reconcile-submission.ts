@@ -1,15 +1,16 @@
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
-import {
-  GetSecretValueCommand,
-  SecretsManagerClient,
-} from "@aws-sdk/client-secrets-manager";
 import { z } from "zod";
 import { reconciliationEnvironmentError } from "./reconciliation-environment";
-import { release, type Job, type PublicVault } from "../src/lib/model";
+import {
+  release,
+  type Job,
+  type PublicVault,
+  type BatchSubmissionIdentity,
+} from "../src/lib/model";
 import { NETWORK_ID } from "../src/lib/network";
 import { assertSolverPin, solverRelease } from "../src/lib/provenance";
 import { rehearsalAddressAllowed, transactionsEnabled } from "./network";
-import { Runpod, RUNPOD_JOB_TTL_MS } from "./providers";
+import { configuredCompute } from "./compute-provider";
 import { searchVersion, workRange } from "./search-ranges";
 import { store as defaultStore, type Store } from "./store";
 
@@ -36,24 +37,46 @@ export const reconciliationDecisionSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("not-submitted"),
-      reason: z.enum(["rejected-before-acceptance", "ttl-expired"]),
+      reason: z.enum([
+        "rejected-before-acceptance",
+        "ttl-expired",
+        "batch-window-elapsed",
+      ]),
       httpStatus: z.number().int().min(400).max(499).optional(),
       operator: evidence,
       evidence,
     })
     .strict()
     .superRefine((decision, ctx) => {
-      if (decision.reason === "rejected-before-acceptance" && decision.httpStatus === undefined)
-        ctx.addIssue({ code: "custom", path: ["httpStatus"], message: "Recorded HTTP 4xx required" });
-      if (decision.reason === "ttl-expired" && decision.httpStatus !== undefined)
-        ctx.addIssue({ code: "custom", path: ["httpStatus"], message: "HTTP status is only valid for rejected-before-acceptance" });
+      if (
+        decision.reason === "rejected-before-acceptance" &&
+        decision.httpStatus === undefined
+      )
+        ctx.addIssue({
+          code: "custom",
+          path: ["httpStatus"],
+          message: "Recorded HTTP 4xx required",
+        });
+      if (
+        decision.reason !== "rejected-before-acceptance" &&
+        decision.httpStatus !== undefined
+      )
+        ctx.addIssue({
+          code: "custom",
+          path: ["httpStatus"],
+          message: "HTTP status is only valid for rejected-before-acceptance",
+        });
     }),
 ]);
 export type ReconciliationDecision = z.infer<
   typeof reconciliationDecisionSchema
 >;
 export type SubmissionLookup = {
-  status(id: string): Promise<{ id: string; status: string; output?: unknown }>;
+  findRequest?(identity: BatchSubmissionIdentity): Promise<string | null>;
+  status(
+    id: string,
+    identity?: BatchSubmissionIdentity,
+  ): Promise<{ id: string; status: string; output?: unknown }>;
   health(): Promise<{ jobs: { inQueue: number; inProgress: number } }>;
 };
 export type PollingStart = { started: boolean; reason?: string };
@@ -74,8 +97,8 @@ export type ReconciliationResult = {
 export function pollingStartAllowed(owner: string): boolean {
   return transactionsEnabled && rehearsalAddressAllowed(owner);
 }
-/** Operator-only reconciliation. Never submits or cancels work. The provider's
- * requests list is not submission history and status need not echo input.
+/** Operator-only reconciliation. Never submits or cancels work. Attach only
+ * positive evidence bound to the saved Batch request; list absence is not proof.
  */
 export async function reconcileUnknownSubmission(input: {
   store: Store;
@@ -90,8 +113,10 @@ export async function reconcileUnknownSubmission(input: {
 }): Promise<ReconciliationResult> {
   const { store, owner, jobId, lookup, log } = input;
   const decision = reconciliationDecisionSchema.parse(input.decision);
-  if (decision.kind === "provider-id" &&
-      !(input.pollingAllowed ?? pollingStartAllowed)(owner))
+  if (
+    decision.kind === "provider-id" &&
+    !(input.pollingAllowed ?? pollingStartAllowed)(owner)
+  )
     throw new ReconciliationError("PollingNotAllowed");
   const pk = `OWNER#${owner}`,
     sk = `JOB#${jobId}`;
@@ -100,6 +125,13 @@ export async function reconcileUnknownSubmission(input: {
   if (!row || !job) throw new ReconciliationError("JobNotFound");
   if (job.owner !== owner || job.id !== jobId)
     throw new ReconciliationError("JobIdentityMismatch");
+  if (decision.kind === "provider-id" && decision.providerId === "discover") {
+    if (!job.batchSubmission || !lookup.findRequest)
+      throw new ReconciliationError("BatchRequestIdentityRequired");
+    const found = await lookup.findRequest(job.batchSubmission);
+    if (!found) throw new ReconciliationError("BatchRequestNotFound");
+    decision.providerId = found;
+  }
   const recorded =
     decision.kind === "provider-id" &&
     job.status === "searching" &&
@@ -129,11 +161,17 @@ export async function reconcileUnknownSubmission(input: {
     selected.generatorCommit !== release.qsbCommit
   )
     throw new ReconciliationError("SolverRuntimeMismatch");
+  let replacementRequestKey: string | undefined;
   const now = input.now ?? new Date().toISOString();
   if (!Number.isFinite(Date.parse(now)))
     throw new ReconciliationError("InvalidTime");
   if (decision.kind === "provider-id") {
-    const result = await lookup.status(decision.providerId);
+    if (!job.batchSubmission)
+      throw new ReconciliationError("BatchRequestIdentityRequired");
+    const result = await lookup.status(
+      decision.providerId,
+      job.batchSubmission,
+    );
     if (result.id !== decision.providerId)
       throw new ReconciliationError("ProviderIdMismatch");
     if (
@@ -175,22 +213,44 @@ export async function reconcileUnknownSubmission(input: {
     // Commit that revision and audit row atomically before starting the workflow.
     if (!recorded) {
       job.runpodId = decision.providerId;
+      job.computeProvider = "aws-batch";
       job.status = "searching";
       delete job.error;
     }
   } else {
-    // A list miss, a timeout or a 5xx alone is not proof of non-acceptance.
-    // Only an explicitly recorded HTTP 4xx may bypass the TTL. All other
-    // outcomes require the durable full TTL; both paths still require drain.
+    // AWS has no submission TTL. The explicit Batch recovery policy requires
+    // the 30-minute watchdog ceiling plus one 5-minute interval, positive queue
+    // drain and discovery. After terminal retention expires, absence is not
+    // proof of non-acceptance; the explicitly accepted bounded risk still applies.
+    if (decision.reason === "ttl-expired")
+      throw new ReconciliationError("AwsBatchHasNoSubmissionTtl");
+    if (decision.reason === "batch-window-elapsed") {
+      const started = Date.parse(job.submissionStartedAt ?? "");
+      const elapsed = Date.parse(now) - started;
+      if (!Number.isFinite(elapsed) || elapsed < 35 * 60 * 1000)
+        throw new ReconciliationError("BatchRecoveryWindowRequired");
+      if (!job.batchSubmission || !lookup.findRequest)
+        throw new ReconciliationError("BatchRequestIdentityRequired");
+      replacementRequestKey = `RECONCILIATION_REQUEST#${jobId}#${job.batchSubmission.jobName}`;
+      if (await store.get(pk, replacementRequestKey))
+        throw new ReconciliationError("BatchReplacementAlreadyUsed");
+      const found = await lookup.findRequest(job.batchSubmission);
+      if (found)
+        return reconcileUnknownSubmission({
+          ...input,
+          decision: {
+            kind: "provider-id",
+            providerId: found,
+            operator: decision.operator,
+            evidence: decision.evidence,
+          },
+        });
+    }
     const health = await lookup.health();
     if (health.jobs.inQueue !== 0 || health.jobs.inProgress !== 0)
       throw new ReconciliationError("EndpointNotDrained");
-    const started = Date.parse(job.submissionStartedAt ?? "");
-    if (
-      decision.reason === "ttl-expired" &&
-      (!Number.isFinite(started) || Date.parse(now) < started + RUNPOD_JOB_TTL_MS)
-    )
-      throw new ReconciliationError("SubmissionTtlNotExpired");
+    if (decision.reason === "batch-window-elapsed")
+      job.batchReplacementFor = job.batchSubmission!.jobName;
     job.oneSubmissionAllowed = true;
   }
   const priorRevision = job.revision;
@@ -203,6 +263,15 @@ export async function reconcileUnknownSubmission(input: {
     revision: job.revision,
   };
   await store.atomicPut([
+    ...(replacementRequestKey
+      ? [{ row: {
+          pk,
+          sk: replacementRequestKey,
+          version: 0,
+          request: job.batchSubmission,
+          decision: job.submissionReconciliation,
+        } }]
+      : []),
     { row: { ...row, job, version: row.version + 1 }, expected: row.version },
     {
       row: {
@@ -230,30 +299,12 @@ export async function reconcileUnknownSubmission(input: {
     resubmitted: false,
     pollingStarted: polling.started,
     ...(decision.kind === "provider-id" && !polling.started
-      ? { reason: polling.reason ?? "polling-not-started" } : {}),
+      ? { reason: polling.reason ?? "polling-not-started" }
+      : {}),
     ...(decision.kind === "provider-id"
       ? { providerId: decision.providerId }
       : {}),
   };
-}
-
-async function openRunpod(): Promise<Runpod> {
-  const secretArn = process.env.RUNPOD_SECRET_ARN;
-  const endpoint = process.env.RUNPOD_ENDPOINT_ID;
-  if (!secretArn || !endpoint)
-    throw new ReconciliationError("ComputeConfigurationRequired");
-  try {
-    const secret = await new SecretsManagerClient({
-      region: process.env.AWS_REGION,
-    }).send(new GetSecretValueCommand({ SecretId: secretArn }));
-    const key = z
-      .object({ apiKey: z.string().min(1) })
-      .parse(JSON.parse(secret.SecretString || "{}")).apiKey;
-    return new Runpod(endpoint, key);
-  } catch (error) {
-    if (error instanceof ReconciliationError) throw error;
-    throw new ReconciliationError("ComputeCredentialUnavailable");
-  }
 }
 
 async function startPolling(job: Job): Promise<PollingStart> {
@@ -322,21 +373,26 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
         ? { kind: "provider-id", providerId: options["--provider-id"] }
         : { kind: "not-submitted", reason: options["--not-submitted"] }),
       ...(options["--http-status"] !== undefined
-        ? { httpStatus: /^\d{3}$/.test(options["--http-status"]) ? Number(options["--http-status"]) : NaN }
+        ? {
+            httpStatus: /^\d{3}$/.test(options["--http-status"])
+              ? Number(options["--http-status"])
+              : NaN,
+          }
         : {}),
       operator: options["--operator"],
       evidence: options["--evidence"],
     });
     if (decision.kind === "provider-id" && !pollingStartAllowed(owner))
       throw new ReconciliationError("PollingNotAllowed");
-    const endpoint = await openRunpod();
+    const endpoint = await configuredCompute();
     const result = await reconcileUnknownSubmission({
       store: defaultStore,
       owner,
       jobId,
       decision,
       lookup: {
-        status: (id) => endpoint.status(id),
+        findRequest: (identity) => endpoint.findRequest(identity),
+        status: (id, identity) => endpoint.status(id, identity),
         health: () => endpoint.health(),
       },
       log: (entry) => process.stderr.write(`${JSON.stringify(entry)}\n`),

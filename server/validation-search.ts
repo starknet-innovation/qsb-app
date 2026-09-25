@@ -1,8 +1,12 @@
-import { assertPaidSolverContract, assertSolverPin, solverRelease } from "../src/lib/provenance";
+import {
+  assertPaidSolverContract,
+  assertSolverPin,
+  solverRelease,
+} from "../src/lib/provenance";
 /** Operator-created regtest jobs only. No browser/API route can create these records. */
 import { z } from "zod";
 import type { Row, Store } from "./store";
-import type { Runpod } from "./providers";
+import type { ComputeProvider } from "./aws-batch";
 import { release, type Job, type PublicVault } from "../src/lib/model";
 import { searchVersion, workRange, subsetRank } from "./search-ranges";
 import {
@@ -20,6 +24,15 @@ import { readHoldSolverBinding } from "./runtime/solver-review";
 const slot = z.object({
   attempt: z.number().int().nonnegative(),
   id: z.string().optional(),
+  batchSubmission: z
+    .object({
+      jobName: z.string(),
+      inputSha256: z.string(),
+      inputKey: z.string(),
+      queue: z.string(),
+      definition: z.string(),
+    })
+    .optional(),
 });
 const stateSchema = z.object({
   network: z.literal("regtest"),
@@ -47,7 +60,7 @@ export async function validationTick(
   event: Event,
   row: Row,
   store: Store,
-  runpod: Runpod,
+  provider: ComputeProvider,
   cpu: Cpu,
 ) {
   if (!event.owner.startsWith("regtest:"))
@@ -82,9 +95,9 @@ export async function validationTick(
   // Drain only ids submitted by this run before starting a new phase or stopping.
   if (state.cancel.length) {
     const id = state.cancel[0];
-    const status = await runpod.status(id);
+    const status = await provider.status(id);
     if (["IN_QUEUE", "IN_PROGRESS"].includes(status.status)) {
-      await runpod.cancel(id);
+      await provider.cancel(id);
       return finish(false, 5); // Confirm terminal status before releasing this id.
     }
     job.computeSeconds += (status.executionTime || 0) / 1000;
@@ -128,7 +141,7 @@ export async function validationTick(
   const results = await Promise.all(
     state.active.map(async (unit) => ({
       unit,
-      result: await runpod.status(unit.id!),
+      result: await provider.status(unit.id!),
     })),
   );
   for (const { unit, result } of results) {
@@ -185,7 +198,10 @@ export async function validationTick(
     state.candidatesChecked += output.candidates.length;
     job.computeSeconds += (result.executionTime || 0) / 1000;
     if (checked.valid === true) {
-      if (output.status !== "completed" || output.checkpoint !== "range-complete") {
+      if (
+        output.status !== "completed" ||
+        output.checkpoint !== "range-complete"
+      ) {
         const decision = applyRange(
           state.coverageLedger ?? emptyLedger(),
           scope,
@@ -382,25 +398,28 @@ export async function validationTick(
     await save();
   }
   assertPaidSolverContract(selected);
-  const submit = await runpod.prepareRun(selected.image);
-  if (retryAttempt === undefined) state.nextAttempt++;
-  else state.retry.shift();
-  const unit: { attempt: number; id?: string } = { attempt };
-  state.active.push(unit);
-  job.status = "searching";
-  await save(); // A crash after this point pauses; it never duplicates paid work.
-  const response = await submit({
+  const submit = await provider.prepareRun(selected.image, {
     protocol: selected.protocol,
     kernelCommit: selected.kernelCommit,
     manifestHash: job.manifestHash,
     stage: job.stage,
-    attempt: unit.attempt,
+    attempt,
     searchVersion,
     ...state.parameters,
     ...(job.solution
       ? { sequence: job.solution.sequence, locktime: job.solution.locktime }
       : {}),
   });
+  if (retryAttempt === undefined) state.nextAttempt++;
+  else state.retry.shift();
+  const unit: z.infer<typeof slot> = {
+    attempt,
+    batchSubmission: submit.identity,
+  };
+  state.active.push(unit);
+  job.status = "searching";
+  await save(); // A crash after this point pauses; it never duplicates paid work.
+  const response = await submit();
   unit.id = response.id;
   await save();
   return finish(false, state.active.length < state.slots ? 0 : 5);
@@ -428,7 +447,8 @@ function sameWorkRange(
 }
 
 function searchStage(stage: string): SearchStage {
-  if (stage === "pinning" || stage === "round1" || stage === "round2") return stage;
+  if (stage === "pinning" || stage === "round1" || stage === "round2")
+    return stage;
   throw new Error("InvalidValidationStage");
 }
 
