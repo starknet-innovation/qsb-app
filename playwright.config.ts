@@ -4,7 +4,9 @@ export default defineConfig({
   testMatch: "**/*.e2e.ts",
   timeout: 120000,
   workers: 1,
-  use: { baseURL: "http://127.0.0.1:5173", headless: true },
+  forbidOnly: !!process.env.CI,
+  reporter: [["list"], ["html", { open: "never" }]],
+  use: { baseURL: "http://127.0.0.1:5173", headless: true, trace: "retain-on-failure", screenshot: "only-on-failure" },
   webServer: {
     command: "npm run dev",
     env: {
@@ -13,7 +15,7 @@ export default defineConfig({
       VITE_QSB_NETWORK: "mainnet",
     },
     url: "http://127.0.0.1:5173",
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env.CI,
     timeout: 30000,
   },
 });
