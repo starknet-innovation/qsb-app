@@ -10,12 +10,12 @@ A research application for constructing and recovering quantum-safe Bitcoin vaul
 - `server/`: API, durable storage interfaces, search coordination, and transaction checks.
 - `worker/`: historical worker plus the [source-built optimized worker](worker/optimized/README.md) and public CPU verification code.
 - `tests/`: application unit tests, browser harnesses, and reference tests.
-- [terraform/](terraform/README.md): AWS app and optional supervised-runtime infrastructure (CPU host, evidence storage, queues and cleanup), with GPUs on Runpod and execution disabled.
+- [terraform/](terraform/README.md): single-pipeline AWS infrastructure: static site, API, Step Functions coordinator, CPU verifier, records table and MFA-required reconciliation role. GPUs remain on Runpod; transactions stay disabled.
 - `research/optimized-subset/`: isolated optimized CUDA source with exact exceptional-point recovery and checked host operations. See its README before use.
 - `docs/STATUS.md`: achieved evidence summary.
 - [Mainnet readiness checklist](docs/MAINNET-READINESS.md): remaining tasks, dependencies and acceptance evidence.
 
-This is a curated export, not the complete operational workspace. Cloud deployment settings, credentials, customer data, signed transactions, raw validation journals, compiled artifacts and one-off recovery scripts are excluded. The [Linux supervisor source package](supervised/runtime/README.md) is now buildable here, with deployment identity enrollment still required.
+This is a curated export, not the complete operational workspace. Cloud deployment settings, credentials, customer data, signed transactions, raw validation journals, compiled artifacts and one-off recovery scripts are excluded. The [Linux supervisor source package](supervised/runtime/README.md) remains parked research source; the application Terraform does not deploy it.
 
 ## Local development
 

@@ -181,6 +181,7 @@ export const runpodStatusSchema = z.object({
   output: z.unknown().optional(),
   error: z.string().optional(),
 });
+export const RUNPOD_JOB_TTL_MS = 86400000;
 export class Runpod {
   constructor(
     private endpoint: string,
@@ -280,7 +281,7 @@ export class Runpod {
           input,
           policy: {
             executionTimeout: gpuSpendLimits.executionTimeoutMs,
-            ttl: 86400000,
+            ttl: RUNPOD_JOB_TTL_MS,
           },
         }),
       );

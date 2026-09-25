@@ -94,7 +94,7 @@ it("build, deploy, and test configurations name a network", () => {
   expect(readFileSync("terraform/terraform.tfvars.example", "utf8")).toContain(
     'network        = "mainnet"',
   );
-  for (const path of ["terraform/compute.tf", "terraform/runtime-dispatch.tf"]) {
+  for (const path of ["terraform/compute.tf"]) {
     expect(readFileSync(path, "utf8")).toContain("QSB_NETWORK = var.network");
   }
   expect(readFileSync("terraform/scripts/build.mjs", "utf8")).not.toContain(

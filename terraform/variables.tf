@@ -48,7 +48,7 @@ variable "runpod_secret_arn" {
   type        = string
   default     = ""
   validation {
-    condition     = var.runpod_secret_arn == "" || can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$", var.runpod_secret_arn))
+    condition     = var.runpod_secret_arn == "" || can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$", var.runpod_secret_arn))
     error_message = "Supply a Secrets Manager ARN or leave empty."
   }
 }
@@ -56,6 +56,10 @@ variable "runpod_secret_kms_key_arn" {
   description = "Optional customer-managed KMS key ARN for the existing secret; no decrypt grant otherwise."
   type        = string
   default     = ""
+  validation {
+    condition     = var.runpod_secret_kms_key_arn == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/(mrk-)?[a-f0-9-]+$", var.runpod_secret_kms_key_arn))
+    error_message = "Supply one exact KMS key ARN or leave empty; wildcards are not allowed."
+  }
 }
 variable "lambda_concurrency" {
   type    = number
@@ -80,4 +84,14 @@ variable "iam_permissions_boundary_arn" {
   description = "Administrator-managed boundary required for GitHub-created runtime roles."
   type        = string
   default     = null
+}
+
+variable "operator_principal_arns" {
+  description = "Explicit IAM user/role principals allowed to assume the reconciliation role with MFA. No account-root delegation, wildcard or default."
+  type        = set(string)
+  nullable    = false
+  validation {
+    condition     = length(var.operator_principal_arns) > 0 && alltrue([for arn in var.operator_principal_arns : can(regex("^arn:aws(-[a-z]+)?:iam::[0-9]{12}:(user|role)/[A-Za-z0-9+=,.@_/-]+$", arn))])
+    error_message = "Supply at least one exact IAM user or role ARN; root, wildcard and session principals are not accepted."
+  }
 }

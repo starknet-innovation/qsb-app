@@ -24,3 +24,18 @@ jobs:
         run: git diff --exit-code
       - run: npm run typecheck
       - run: npm test -- --no-file-parallelism
+      - name: Build coordinator deployment artifacts
+        run: node terraform/scripts/build.mjs --network=mainnet
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: 1.15.5
+          terraform_wrapper: false
+      - name: Validate single-pipeline Terraform without AWS credentials
+        run: |
+          terraform -chdir=terraform init -backend=false -input=false
+          terraform -chdir=terraform fmt -check
+          terraform -chdir=terraform validate
+          terraform -chdir=terraform test -json -verbose -var="source_commit=$(git rev-parse HEAD)" > /tmp/qsb-terraform-test.jsonl
+          python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-test.jsonl
+          python3 terraform/tests/check-single-pipeline.py
+          python3 ops/github-aws/test_render.py

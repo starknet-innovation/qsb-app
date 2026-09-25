@@ -45,6 +45,75 @@ Rollback cannot revive legacy writers, release consumed commitments, or duplicat
 
 Treat `unknown`, `timeout`, and `http-ambiguous` as unpaid-or-paid until a provider or invoice record says which. The only action is reconcile. `reconcilePaidOutcome` returns `retry: false`. Requesting retry throws `BlindRetryRefused`. A known success is recorded once and is not submitted again.
 
+## Reconcile an unknown Runpod submission
+
+An unknown POST is never retried automatically. The operator command requires an
+explicit decision with an operator identifier and a public evidence reference.
+Do not put credentials, wallet material, or raw logs in the evidence argument.
+The identifier is an operator assertion; IAM/CloudTrail identifies the caller.
+
+Required environment: `TABLE_NAME` (the CLI refuses MemoryStore), `AWS_REGION`,
+`RUNPOD_SECRET_ARN`, `RUNPOD_ENDPOINT_ID`, `WORKFLOW_ARN` and `QSB_NETWORK`
+(`mainnet` or `testnet4`). Both modes validate all six before application imports,
+credentials, or database/provider reads and writes. The operator role needs GetItem on job/vault records, transactional PutItem
+on the job and `RECONCILIATION#` audit rows, access to the configured provider
+credential (and its KMS key if applicable), and StartExecution on the configured
+workflow. The agent must not retrieve those credentials; provision them for the
+operator runtime. The CLI does not call `/run`, `/cancel` or broadcast.
+
+To attach a known provider ID from Runpod's console and matching operator logs:
+
+```
+npx tsx scripts/reconcile-submission.ts OWNER JOB --provider-id PROVIDER_ID --operator OPERATOR --evidence audit://incident/reference
+```
+
+The command reads documented `/status/ID` fields; no `/requests` response shape or
+echoed `input` is assumed. The operator must bind live/terminal IDs to this exact
+job, stage, range, endpoint and submission window using logs/console evidence.
+Completed outputs additionally must match the stored manifest, stage, attempt,
+kernel and exact range. Attachment grants no completion credit: the coordinator
+still validates the output and CPU-checks hits. Existing attached IDs can restart
+polling idempotently. Mainnet switches remain unchanged, and disabled transaction
+routes refuse provider-ID attachment before any read or write. A polling-start
+refusal prints its reason and exits non-zero; an ID already saved before a workflow
+start failure remains attached for operator reconciliation. Correct the prerequisite
+and rerun the same provider-ID decision; never submit a replacement as a workaround.
+
+To authorize exactly one replacement after proving Runpod rejected the call
+before acceptance with a retained HTTP 400–499 response from the paid `/run` POST
+(not the limits preflight, a timeout, connection error or 5xx):
+
+```
+npx tsx scripts/reconcile-submission.ts OWNER JOB --not-submitted rejected-before-acceptance --http-status 429 --operator OPERATOR --evidence audit://incident/rejection
+```
+
+The immediate path requires `--http-status` to be an integer from 400 through
+499. Missing, malformed, non-HTTP and other status values are refused; the status
+is stored in the job decision and immutable audit row alongside the operator,
+evidence, time and revision. The operator must retain the actual response from
+this job's paid POST. The tool validates the recorded code, not the external
+truth of an operator's evidence reference.
+
+For timeouts, connection errors, 5xx or no recorded HTTP response, use
+`--not-submitted ttl-expired` only after the complete 24-hour provider TTL has
+elapsed from durable `submissionStartedAt`. Legacy jobs without that timestamp
+cannot use TTL expiry. This mode does not accept `--http-status`; it never
+shortens the wait. Independently check the endpoint and billing/log window.
+TTL expiry does **not** prove that the old job was never accepted and can incur
+duplicate bounded work.
+Both modes require current health to show zero queued/in-progress requests.
+A list miss or an empty queue by itself never authorizes replacement.
+
+The decision and job change are one conditional transaction with a permanent
+`RECONCILIATION#JOB#REVISION` audit row. Repeated or racing decisions cannot grant
+multiple allowances. `/resume` requires the matching audited revision and consumes
+the allowance in the same write that advances the revision; the next unknown
+pause has no allowance. Time accounting is never cleared or refunded.
+This is an explicit operator attestation, not automatic verification of the cited
+external evidence. No live provider incident has been exercised for this change.
+
+Provider reference: https://docs.runpod.io/serverless/endpoints/send-requests
+
 ## Commit before deploy
 
 Never deploy code or infrastructure changes before committing them to Git. Verify that deployed source matches the recorded commit and contains no uncommitted changes. Push the commit to the project remote before deployment and report the commit or PR with the deployment target. Never commit secrets or ignored runtime configuration.
@@ -98,3 +167,65 @@ See [APP-ROLE-SANDBOX.md](APP-ROLE-SANDBOX.md) for the reproducible 60-decision
 read-only simulation and exact regional transaction/batch requests, expected
 responses and consistent-read checks. The live sandbox portion remains pending
 operator confirmation; simulator output alone does not release the merge hold.
+
+### Assume the reconciliation role
+
+Terraform now exports `operator_reconcile_role_arn`. Only the exact IAM principals
+in the required `operator_principal_arns` variable may assume it, and AWS must
+see MFA. This role is separate from the parked reservation-authority operator.
+It cannot access SYSTEM or OUTPOINT partitions, Query/Scan, Update/Delete/BatchWrite,
+or alter reservation authority. Its GetItem and PutItem permissions use
+`ForAllValues:StringLike` on `dynamodb:LeadingKeys = OWNER#*` and require the key
+with `Null: false`. IAM authorizes transaction puts via `dynamodb:PutItem`, not a
+fictitious `dynamodb:TransactWriteItems` action. Conditions restrict partition keys,
+not sort keys; the CLI enforces the job/audit shapes and conditional versions.
+
+Before invoking the CLI, the operator configures an MFA-capable source profile
+and a role profile in their local AWS config (replace these public placeholders):
+
+```ini
+[profile qsb-reconcile-mfa]
+role_arn = arn:aws:iam::123456789012:role/qsb/runtime/qsb-app-operator-reconcile
+source_profile = your-approved-iam-user-profile
+mfa_serial = arn:aws:iam::123456789012:mfa/your-device
+region = eu-west-1
+```
+
+Use the actual Terraform output ARN, including its configured path. The source
+identity also needs permission to assume that role. IAM Identity Center/federated
+MFA does not automatically supply this condition; use an approved MFA-capable
+identity, never weaken the trust policy. AWS CLI prompts for MFA and caches the
+short-lived role credentials. Run inside a subshell so session credentials do
+not remain in the parent shell; disable tracing and never print or share them:
+
+```sh
+(
+  set +x
+  set -e
+  aws sts get-caller-identity --profile qsb-reconcile-mfa
+  session_exports="$(aws configure export-credentials --profile qsb-reconcile-mfa --format env)" || exit 1
+  eval "$session_exports"
+  unset session_exports
+  unset AWS_PROFILE AWS_DEFAULT_PROFILE
+  # Verify the assumed-role ARN before proceeding; this prints no credentials.
+  aws sts get-caller-identity
+  export TABLE_NAME='your-records-table'
+  export AWS_REGION='eu-west-1'
+  export RUNPOD_SECRET_ARN='arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb-vault/runpod-EXAMPLE'
+  export RUNPOD_ENDPOINT_ID='yourendpointid'
+  export WORKFLOW_ARN='arn:aws:states:eu-west-1:123456789012:stateMachine:qsb-app-withdrawal'
+  export QSB_NETWORK='mainnet'
+  npx tsx scripts/reconcile-submission.ts OWNER JOB --provider-id PROVIDER_ID --operator OPERATOR --evidence audit://incident/reference
+)
+```
+
+The six environment values must come from the intended deployment. Do not put a
+provider key into any of them or manually fetch a secret value: the CLI obtains
+the configured credential at runtime. The example attaches an already-known ID;
+it is not permission to attest non-submission or spend again. Use the separate
+reconciliation procedure and evidence requirements above for those decisions.
+The role grants no broadcast permission and changes no mainnet activation flag.
+
+Policy references: [DynamoDB LeadingKeys](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/specifying-conditions.html)
+and [AWS MFA-protected API access](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_configure-api-require.html).
+Local policy/plan tests do not prove a live assumed-role session or regional IAM enforcement.

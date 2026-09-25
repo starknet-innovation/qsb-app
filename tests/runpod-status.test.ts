@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { Runpod } from "../server/providers";
+import { Runpod, RUNPOD_JOB_TTL_MS } from "../server/providers";
 import { gpuSpendLimits } from "../server/gpu-spend";
 
 function confirmedLimits() {
@@ -181,6 +181,10 @@ it("prepared submissions perform no second control-plane call and cannot be reus
   await expect(submit({})).rejects.toThrow("lost POST response");
   await expect(submit({})).rejects.toThrow("SubmissionAlreadyAttempted");
   expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(fetcher.mock.calls[1]![1].body).policy).toEqual({
+    executionTimeout: gpuSpendLimits.executionTimeoutMs,
+    ttl: RUNPOD_JOB_TTL_MS,
+  });
 });
 it.each([403, 500])("does not POST after limits HTTP %s", async (status) => {
   const fetcher = vi.fn().mockResolvedValue(new Response("", { status }));

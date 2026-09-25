@@ -1,19 +1,15 @@
 aws_account_id = "123456789012" # Replace with your intended account.
 region         = "eu-west-1"
-name           = "qsb-research"
+name           = "qsb-app"
 network        = "mainnet" # Network identity only; transactions remain disabled.
 # Set source_commit from: git rev-parse HEAD
 # source_commit = "<full clean pushed commit SHA>"
 
 # Optional; provide both or leave both empty. Existing Runpod infrastructure only.
 # runpod_endpoint_id = "yourendpointid"
-# runpod_secret_arn  = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/runpod-EXAMPLE"
+# runpod_secret_arn  = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb-vault/runpod-EXAMPLE"
 # runpod_secret_kms_key_arn = "arn:aws:kms:eu-west-1:123456789012:key/<key-id>"
 # alarm_actions = ["arn:aws:sns:eu-west-1:123456789012:operations"]
 
-# Optional dormant supervised runtime: see runtime/README.md before enabling.
-# provision_runtime = true
-# runtime_ami_id = "ami-0123456789abcdef0"
-# runtime_ami_owner = "123456789012"
-# runtime_availability_zone = "eu-west-1a"
-# cleanup_endpoints = {}
+# Required: exact existing IAM principals; assume-role calls must carry MFA.
+operator_principal_arns = ["arn:aws:iam::123456789012:user/qsb-operator"]
