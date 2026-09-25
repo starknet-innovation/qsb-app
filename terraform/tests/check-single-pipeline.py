@@ -41,7 +41,31 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def validate(rows, expanded):
+# Everything the API Lambda's environment may draw on (terraform/compute.tf). In a real first plan that
+# environment is unknown until apply, because it includes the CloudFront domain, so the plan's configuration
+# references are checked against this list instead: any new reference fails closed until reviewed here.
+# References carry no key names or constants; re-run with --deploy after the first apply, when the
+# environment is known, and rely on the mock-plan tests for constants.
+API_ENV_REFERENCES = {
+    'aws_cloudfront_distribution.web', 'aws_cloudfront_distribution.web.domain_name',
+    'aws_dynamodb_table.records', 'aws_dynamodb_table.records.name',
+    'local.solver_release_id', 'local.workflow_arn',
+    'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network',
+}
+
+
+def config_env_references(configuration, name):
+    """References behind a Lambda's environment map in a saved plan's configuration section."""
+    resources = {r['address']: r for r in (configuration or {}).get('root_module', {}).get('resources', [])}
+    function = resources.get(f'aws_lambda_function.{name}')
+    require(function is not None, f'aws_lambda_function.{name} missing from the plan configuration')
+    variables = (function.get('expressions', {}).get('environment') or [{}])[0].get('variables', {})
+    return set(variables.get('references', [])) if isinstance(variables, dict) else set()
+
+
+def validate(rows, expanded, configuration=None, unknown_env=None):
+    """unknown_env is unknown_lambda_env(): 'whole', or the set of keys whose values are unknown."""
+    unknown_env = unknown_env or {}
     types = Counter(row['type'] for row in rows)
     require(not (types.keys() - ALLOWED), 'Unexpected application resource type')
     for kind, names in EXPECTED.items():
@@ -52,10 +76,28 @@ def validate(rows, expanded):
     require(len(roles) == (5 if expanded else 3) and {r['name'] for r in roles} == {'lambda', 'workflow', 'operator_reconcile'}, 'Expected only Lambda/workflow service roles and one reconciliation operator role')
     if expanded:
         funcs = {r['name']: r for r in rows if r['type'] == 'aws_lambda_function'}
-        envs = {name: (row.get('values', {}).get('environment') or [{}])[0].get('variables', {})
+        envs = {name: dict((row.get('values', {}).get('environment') or [{}])[0].get('variables', {}) or {})
                 for name, row in funcs.items()}
-        require(envs['api'].get('TABLE_NAME') and envs['api']['TABLE_NAME'] == envs['coordinator'].get('TABLE_NAME'),
-                'API and coordinator must use the same table')
+        whole = {name for name, how in unknown_env.items() if how == 'whole'}
+        require(whole <= {'api'}, f'environment of {sorted(whole - {"api"})} is wholly unknown at plan; '
+                                  'only the API environment is expected to be')
+        # Partly unknown maps still name every key: check the keys, with unknown values as None.
+        for name, how in unknown_env.items():
+            if how != 'whole':
+                envs[name].update({key: None for key in how})
+        table = next((r.get('values', {}).get('name') for r in rows if r['type'] == 'aws_dynamodb_table'), None)
+        for name in ('api', 'coordinator'):
+            if name in whole:
+                require(configuration is not None, 'the API environment is unknown until apply; pass a saved '
+                                                   'plan with its configuration section')
+                refs = config_env_references(configuration, name)
+                require(refs <= API_ENV_REFERENCES, 'API environment draws on something not reviewed: '
+                        f'{sorted(refs - API_ENV_REFERENCES)}')
+                require('aws_dynamodb_table.records.name' in refs, 'API and coordinator must use the same table')
+            else:
+                value = envs[name].get('TABLE_NAME')
+                require(value and (value == table if table else value == envs['coordinator'].get('TABLE_NAME')),
+                        'API and coordinator must use the same table (TABLE_NAME must be known at plan)')
         require(all(not any(k.startswith('SUPERVISED_') for k in env) for env in envs.values()),
                 'No supervised routing in application Lambda environments')
         require('AWS_BATCH_JOB_QUEUE' not in envs['api'] and 'AWS_BATCH_JOB_QUEUE' not in envs['reference'],
@@ -89,6 +131,32 @@ def deploy_checks(plan, first_apply):
         require(actions <= {('create',)}, 'first apply must be create-only: the state key must be empty and no '
                                           'resource may already exist')
     return {'deployChecks': 'passed', 'roles': len(roles), 'firstApply': first_apply}
+
+
+def unknown_lambda_env(changes):
+    """How Terraform marks each Lambda's environment in after_unknown.
+
+    Returns {name: 'whole'} when the block or the whole variables map is unknown (only key-less configuration
+    references remain), or {name: {keys...}} when only some values are unknown: those key names are still known.
+    A Lambda that isn't listed is fully known.
+    """
+    out = {}
+    for row in changes:
+        if row.get('type') != 'aws_lambda_function' or row.get('mode', 'managed') != 'managed':
+            continue
+        env = (row.get('change', {}).get('after_unknown') or {}).get('environment')
+        if env is True or (isinstance(env, list) and env and (env[0] is True or
+                                                               (isinstance(env[0], dict) and env[0].get('variables') is True))):
+            out[row['name']] = 'whole'
+        elif isinstance(env, list) and env and isinstance(env[0], dict) and isinstance(env[0].get('variables'), dict):
+            require(all(v in (True, False) for v in env[0]['variables'].values()),
+                    f"unrecognised after_unknown shape for aws_lambda_function.{row['name']}")
+            keys = {k for k, v in env[0]['variables'].items() if v is True}
+            if keys:
+                out[row['name']] = keys
+        elif env not in (None, [], [{}]):
+            require(False, f"unrecognised after_unknown shape for aws_lambda_function.{row['name']}")
+    return out
 
 
 def module_resources(module):
@@ -128,11 +196,13 @@ def main():
                     rows = [dict(row, values=row['change']['after'])
                             for row in event['test_plan']['resource_changes']
                             if row.get('mode') == 'managed' and row['change']['after'] is not None]
-                    result['runs'][name] = validate(rows, True)
+                    result['runs'][name] = validate(rows, True, None,
+                                                    unknown_lambda_env(event['test_plan']['resource_changes']))
             require(set(result['runs']) == {'baseline', 'configured_single_pipeline'},
                     'Both baseline and configured-provider plans are required')
         else:
-            result = validate(module_resources(plan['planned_values']['root_module']), True)
+            result = validate(module_resources(plan['planned_values']['root_module']), True, plan.get('configuration'),
+                              unknown_lambda_env(plan.get('resource_changes', [])))
             result['evidence'] = 'saved-plan-inventory'
             if '--deploy' in flags:
                 result.update(deploy_checks(plan, '--first-apply' in flags))
