@@ -117,6 +117,7 @@ def main(a):
     denied = lambda r: (not r.get('ok') and r.get('code') == 'AccessDeniedException'
                         and r.get('denial') in APP_POLICY_DENIALS)
     shown = lambda r: 'ok' if r.get('ok') else f"{r.get('code')} ({r.get('denial') or 'no denial reason'})"
+    cause = None
     try:
         created.append('table')
         aws('dynamodb', 'create-table', '--table-name', name, '--billing-mode', 'PAY_PER_REQUEST',
@@ -183,6 +184,8 @@ def main(a):
         seen = rows('OWNER#', 'SYSTEM#')
         check('denied batch wrote neither row', not any(seen.values()), seen)
         report['completed'] = True
+    except BaseException as e:  # held so cleanup, the evidence and the ABORTED message below still happen
+        cause = e
     finally:
         if a.keep:
             print(f'kept sandbox resources named {name}', flush=True)
@@ -225,8 +228,8 @@ def main(a):
         evidence.chmod(0o600)
     print(json.dumps({'passed': report['passed'], 'checks': len(report['checks']), 'evidence': str(evidence)}), flush=True)
     if report['outcome'] == 'aborted':
-        raise SystemExit('Sandbox run ABORTED before every check ran: the evidence is incomplete and is not a pass. '
-                         'Do not deposit; fix the cause and rerun.')
+        raise SystemExit(f'Sandbox run ABORTED before every check ran ({str(cause) or type(cause).__name__}): the evidence '
+                         'is incomplete and is not a pass. Do not deposit; fix the cause and rerun.') from cause
     if report['outcome'] == 'inconclusive':
         raise SystemExit('Sandbox result is INCONCLUSIVE (the control step failed, or a denial was unattributed): do not '
                          'deposit. Rerun once; if it repeats, change the attribution method through review. An '

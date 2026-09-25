@@ -20,7 +20,7 @@ APP_DENY = {'ok': False, 'code': 'AccessDeniedException', 'denial': 'explicit-de
 
 class SandboxRunner(unittest.TestCase):
     def run_sandbox(self, behaviour=None, fail=None, keep=False, function_error=None, propagation=0,
-                    delete_fails=(), leaky=()):
+                    delete_fails=(), leaky=(), interrupt=None):
         """behaviour maps a step to the Lambda's result; defaults model the documented AWS evaluation.
         The mock table applies each step's effect, so the runner's row reads see what really happened."""
         self.calls, self.gets, self.deleted_names, rows = [], [], [], set()
@@ -46,6 +46,8 @@ class SandboxRunner(unittest.TestCase):
             args = command[command.index('--no-cli-pager') + 1:]
             service, operation = args[:2]
             self.calls.append((service, operation))
+            if (service, operation) == interrupt:
+                raise KeyboardInterrupt
             if (service, operation) == fail:
                 return error(command, 'AccessDeniedException')
             if operation in delete_fails:
@@ -194,17 +196,24 @@ class SandboxRunner(unittest.TestCase):
         self.assertEqual(self.check('denied transaction wrote')['observed'], {'owner': True, 'system': True})
 
     def test_lambda_failure_and_setup_failure_clean_up(self):
-        with self.assertRaisesRegex(SystemExit, 'sandbox Lambda failed'):
+        with self.assertRaisesRegex(SystemExit, r'ABORTED .*\(allowed-transaction: the sandbox Lambda failed'):
             self.run_sandbox(function_error='allowed-transaction')
         self.assertTrue(self.report['cleanupComplete'])
         # Every check recorded so far passed, but the run stopped: the evidence must not read as a pass.
         self.assertTrue(self.report['checks'] and all(c['passed'] for c in self.report['checks']))
         self.assertEqual((self.report['passed'], self.report['outcome'], self.report['completed']),
                          (False, 'aborted', False))
-        with self.assertRaisesRegex(SystemExit, 'put-role-policy failed'):
+        with self.assertRaisesRegex(SystemExit, r'ABORTED .*\(iam put-role-policy failed'):
             self.run_sandbox(fail=('iam', 'put-role-policy'))
         self.assertEqual(set(self.report['cleanup']), {'role-policy', 'role', 'table'})
         self.assertNotIn(('lambda', 'delete-function'), self.calls)
+
+    def test_interruption_still_cleans_up_and_reports_aborted(self):
+        with self.assertRaisesRegex(SystemExit, r'ABORTED .*\(KeyboardInterrupt\).*Do not deposit'):
+            self.run_sandbox(interrupt=('dynamodb', 'get-item'))
+        self.assertEqual(self.report['outcome'], 'aborted')
+        self.assertTrue(self.report['cleanupComplete'])
+        self.assertEqual(set(self.report['cleanup']), {'function', 'role-policy', 'role', 'table'})
 
     def test_role_propagation_is_retried_then_bounded(self):
         self.run_sandbox(propagation=3)
