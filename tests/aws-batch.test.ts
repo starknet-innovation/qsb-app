@@ -242,14 +242,12 @@ function httpResponse(statusCode: number, value: unknown) {
   };
 }
 it("the real SDK paid client performs exactly one HTTP attempt on a retryable 500", async () => {
-  transport.handle
-    .mockReset()
-    .mockResolvedValue(
-      httpResponse(500, {
-        __type: "ServerException",
-        message: "lost acceptance response",
-      }),
-    );
+  transport.handle.mockReset().mockResolvedValue(
+    httpResponse(500, {
+      __type: "ServerException",
+      message: "lost acceptance response",
+    }),
+  );
   const t = setup(true),
     run = await t.provider.prepareRun(image, {});
   await expect(run()).rejects.toThrow();
@@ -303,5 +301,55 @@ it("discovery scans all pages and never treats zero or multiple matches as rejec
   await expect(t.provider.findRequest(identity)).rejects.toThrow(
     "BatchRequestNotUniquelyFound",
   );
+  expect(t.submit).not.toHaveBeenCalled();
+});
+
+// The producer attests GHCR; deployment may mirror the exact manifest into ECR.
+it("accepts the canonical producer digest mirrored into the queue account and region", async () => {
+  const t = setup();
+  const run = await t.provider.prepareRun(
+    "ghcr.io/starknet-innovation/qsb-solver@sha256:" + "a".repeat(64),
+    {},
+  );
+  expect(run.identity.queue).toBe(queue);
+  expect(t.submit).not.toHaveBeenCalled();
+});
+it.each([
+  "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@sha256:" +
+    "b".repeat(64),
+  "000000000000.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@sha256:" +
+    "a".repeat(64),
+  "123456789012.dkr.ecr.us-east-1.amazonaws.com/qsb-solver@sha256:" +
+    "a".repeat(64),
+  "123456789012.dkr.ecr.eu-west-1.amazonaws.com/other@sha256:" + "a".repeat(64),
+  "example.com/qsb-solver@sha256:" + "a".repeat(64),
+  "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver:latest",
+])(
+  "rejects an unbound deployment image before upload or paid submission: %s",
+  async (deployed) => {
+    const t = setup();
+    t.config.containerProperties.image = deployed;
+    await expect(
+      t.provider.prepareRun(
+        "ghcr.io/starknet-innovation/qsb-solver@sha256:" + "a".repeat(64),
+        {},
+      ),
+    ).rejects.toThrow("ProviderImageUnconfirmed");
+    expect(t.s3.send).not.toHaveBeenCalled();
+    expect(t.submit).not.toHaveBeenCalled();
+  },
+);
+it.each([
+  "ghcr.io/other/qsb-solver@sha256:" + "a".repeat(64),
+  "ghcr.io/starknet-innovation/qsb-solver:latest",
+  "image:latest",
+])("does not alias an unapproved producer image %s", async (enrolled) => {
+  const t = setup();
+  if (enrolled === "image:latest")
+    t.config.containerProperties.image = enrolled;
+  await expect(t.provider.prepareRun(enrolled, {})).rejects.toThrow(
+    "ProviderImageUnconfirmed",
+  );
+  expect(t.s3.send).not.toHaveBeenCalled();
   expect(t.submit).not.toHaveBeenCalled();
 });

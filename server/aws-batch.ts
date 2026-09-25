@@ -44,6 +44,29 @@ export interface ComputeProvider {
   ): Promise<ComputeStatus>;
   cancel(id: string): Promise<unknown>;
 }
+/** An enrolled immutable producer image may be mirrored byte-for-byte to this
+ * deployment's qsb-solver ECR repository. This binds digests, not attestations.
+ */
+export function batchImageMatches(
+  enrolled: string,
+  deployed: string,
+  queue: string,
+): boolean {
+  if (!/^.+@sha256:[a-f0-9]{64}$/.test(enrolled)) return false;
+  if (enrolled === deployed) return true;
+  const source =
+    /^ghcr\.io\/starknet-innovation\/qsb-solver@sha256:([a-f0-9]{64})$/.exec(
+      enrolled,
+    );
+  const target =
+    /^arn:aws:batch:([a-z0-9-]+):(\d{12}):job-queue\/qsb-[\w-]+$/.exec(queue);
+  return Boolean(
+    source &&
+    target &&
+    deployed ===
+      `${target[2]}.dkr.ecr.${target[1]}.amazonaws.com/qsb-solver@sha256:${source[1]}`,
+  );
+}
 export class AwsBatch implements ComputeProvider {
   constructor(
     private queue: string,
@@ -124,7 +147,7 @@ export class AwsBatch implements ComputeProvider {
       definitions.jobDefinitions?.length !== 1 ||
       d?.jobDefinitionArn !== this.definition ||
       d.status !== "ACTIVE" ||
-      d.containerProperties?.image !== image
+      !batchImageMatches(image, d.containerProperties?.image ?? "", this.queue)
     )
       throw new Error("ProviderImageUnconfirmed");
     const resources = d.containerProperties?.resourceRequirements;

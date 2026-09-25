@@ -109,7 +109,7 @@ pause has no allowance. Time accounting is never cleared or refunded.
 This is an explicit operator attestation, not automatic verification of the cited
 external evidence. No live provider incident has been exercised for this change.
 
-Provider reference: https://docs.runpod.io/serverless/endpoints/send-requests
+Provider references: [AWS Batch SubmitJob](https://docs.aws.amazon.com/batch/latest/APIReference/API_SubmitJob.html) and [ListJobs](https://docs.aws.amazon.com/batch/latest/APIReference/API_ListJobs.html). Discovery uses the saved exact job name and follows every results page. `JOB_NAME` filtering includes all job statuses; absence from the list is not evidence that the paid request was rejected.
 
 ## Commit before deploy
 
@@ -329,3 +329,32 @@ Use the existing reconciliation CLI with `--provider-id discover --operator ... 
 A list miss, expired retention, or an elapsed watchdog deadline is **not** proof of non-acceptance. Discovery never grants a replacement. If no match or positive rejection evidence exists, the submission stays paused for investigation; the migration intentionally does not weaken the never-resubmit invariant into a time-based retry. Historical jobs without a saved Batch identity require manual evidence review and are not automatically attached or replayed.
 
 The migration smoke image is not a production release: it lacks a build-provenance attestation and has been removed from the enrollment registry. Follow the attested release/copy procedure in `terraform/gpu/README.md` before any production enrollment.
+
+### Attested image mirror and local positive-hit replay
+
+The producer descriptor retains its canonical immutable
+`ghcr.io/starknet-innovation/qsb-solver@sha256:…` image. Batch preflight accepts
+that exact image, or the same digest in the `qsb-solver` ECR repository in the
+configured queue's AWS account and region. Different digests, accounts, regions,
+repositories and tags are refused before public-input upload or paid submission.
+Copy the manifest without changing its digest and verify the producer attestation
+before enrollment; the registry alias check is only a consistency check and does
+not itself prove build provenance. No account-specific mirror URL needs to appear
+in the browser release descriptor.
+
+`ops/aws-gpu-migration/replay-positive-hits.ts` reads an external public signing
+bundle and passes mocked Batch/S3 completed results through the real Batch parser
+and local CPU reference. Run `npm run vendor`, then:
+
+```sh
+npx tsx ops/aws-gpu-migration/replay-positive-hits.ts /path/to/public-signing-bundle.json
+```
+
+This command never submits work, signs, broadcasts, or credits ranges. It accepts
+only public reference fields from the external bundle and does not copy the bundle
+into the repository. The recorded [replay evidence](../ops/aws-gpu-migration/positive-hit-replay.json)
+checks all three historical puzzle hits, malformed candidates, mismatched request
+and output hashes, and changed subset locktime. Pinning candidates supply their
+own sequence/locktime, so that context mutation is not a pinning rejection test.
+These are real local cryptographic checks with mocked AWS transport, not a new GPU
+search, live Lambda/Batch integration, Core proof or miner inclusion.

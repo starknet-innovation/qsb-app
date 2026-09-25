@@ -51,7 +51,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "b54a392fa735d6b85ca7aaeae0fac10fada9891d2e26e816bcab89870e5db3d1",
+      "api": "71bf1765eaa5aaac3190cb0c7412030275a474826a3c55ac5b7c3c5381b1fab0",
       "build-metadata": "2c4804c98f40b16adda8fde8e13f053d59cc53e26f951906064834edd469b1c6",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "a4d74bdd20df6bee7d4bca946fe3f1334c19e5b75988e541dc211a543fea3576",
@@ -111,7 +111,7 @@
       "scripts/storage-inventory.ts": "c8ecc1d3ed239f444efd50ab8bb704be13408f609aba1e80d16a5325d5e4603e",
       "server/app.ts": "e9f876621fc44fc787d0b692922951548717b13f7576b46d1760a08d6b306cf7",
       "server/aws-batch-command.json": "5a4544d33c5744dbc438c0d515a84e3bb2c8e80d8662020c4a7c765ed5267881",
-      "server/aws-batch.ts": "9acf70258b88d00c245038c455c805b052ba0e25cfba82062c44d71d1236dd5f",
+      "server/aws-batch.ts": "7605200de3985636092c669eb2b2cd005a14b87c09c155e9529aec9e2a623377",
       "server/chain.ts": "36c38bd382f0b865f58e951ff9d006cdfb92e358930bec0267f986c1e1707bd2",
       "server/compute-provider.ts": "5eb7b180e3dfa7b89a22aaf5f70b6c1ec4544fef4e924e3ce9f8838838e5b6fb",
       "server/consensus.ts": "2684a00a3a53a942d3cc0815b8f9aa5fd659439f6811ceac465d38cbd08377a8",
