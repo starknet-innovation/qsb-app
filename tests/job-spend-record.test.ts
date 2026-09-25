@@ -162,6 +162,14 @@ describe("stored withdrawal spend record", () => {
     );
   });
 
+  it("rejects a stored destination that differs from its unchanged output script", () => {
+    const record = buildStoredSpendRecord(job());
+    const otherAddress = btc.p2wpkh(secp256k1.getPublicKey(new Uint8Array(32).fill(7))).address!;
+    const mismatched = job({ manifest: { ...manifest, destination: otherAddress } });
+    assertMismatch(signedTx(record), mismatched);
+    expect(() => buildStoredSpendRecord(mismatched)).toThrow("ExactSpendMismatch");
+  });
+
   it("rejects a wrong amount when the stored fee still matches that output", () => {
     const record = buildStoredSpendRecord(job());
     const outputValue = 89999n;
