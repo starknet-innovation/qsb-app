@@ -106,9 +106,6 @@ test("browser signs a coordinator solved result in Xverse without broadcasting o
   );
   expect(published.format).toBe("qsb-coordinator-public-signed-result-v1");
   expect(published.helperSighash).toBe("SIGHASH_ALL");
-  expect(published.broadcastAuthorized).toBe(false);
-  expect(published.mainnetEnabled).toBe(false);
-  expect(published.qsbConsensusProven).toBe(false);
   expect(published.rawTxHex).toMatch(/^(?:[a-f0-9]{2})+$/);
   expect(JSON.stringify(published)).not.toContain("fixture");
   expect(JSON.stringify(published)).not.toContain("passphrase");

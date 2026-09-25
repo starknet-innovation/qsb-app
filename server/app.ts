@@ -568,6 +568,7 @@ export function createApp(
       stage: "pinning",
       attempt: 0,
       computeSeconds: 0,
+      gpuBudgetReservedSeconds: 0,
       revision: 0,
     };
     await store.atomicPut([
