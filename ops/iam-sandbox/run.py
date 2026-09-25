@@ -20,7 +20,6 @@ import io
 import json
 import re
 import subprocess
-import sys
 import tempfile
 import time
 import uuid
@@ -30,7 +29,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = ROOT / 'terraform/policies/app-records.json'
 HANDLER = Path(__file__).resolve().with_name('handler.py')
-DENIED = ('AccessDeniedException',)
+# A denial counts only if AWS attributes it to the role's own identity policy (app-records.json). A denial
+# from the permissions boundary or an SCP would mean the check isn't testing what it claims to.
+APP_POLICY_DENIALS = ('explicit-deny-identity', 'no-identity-allow')
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--profile', required=True, help='the qsb-operator profile (or an exported session: use "")')
@@ -82,13 +83,18 @@ def main(a):
     report = {'kind': 'APP-ROLE-SANDBOX steps 2-3, run in a throwaway Lambda', 'commit': commit, 'region': a.region,
               'resourceName': name, 'caller': '/'.join(caller[:2]),
               'policySha256': hashlib.sha256(raw).hexdigest(),
-              'rolePolicySha256': hashlib.sha256(json.dumps(role_policy, sort_keys=True).encode()).hexdigest(),
+              # Hashed with the account masked: a hash over the real ARN would let the 12-digit account be recovered.
+              'rolePolicySha256': hashlib.sha256(json.dumps(role_policy, sort_keys=True).replace(account, '<ACCOUNT>')
+                                                 .encode()).hexdigest(),
               'boundary': 'qsb-runtime-boundary', 'steps': [], 'checks': []}
 
     def present(prefix):
         item, _ = aws('dynamodb', 'get-item', '--table-name', name, '--consistent-read',
                       '--key', json.dumps({'pk': {'S': prefix + suffix}, 'sk': {'S': 'IAM_TEST'}}))
         return 'Item' in item
+
+    def rows(*prefixes):
+        return {p.rstrip('#').lower(): present(p) for p in prefixes}
 
     def invoke(step):
         with tempfile.TemporaryDirectory() as tmp:
@@ -106,23 +112,23 @@ def main(a):
         report['checks'].append({'check': label, 'passed': bool(passed), 'observed': observed})
         print(f"  [{'PASS' if passed else 'FAIL'}] {label}: {observed}", flush=True)
 
-    denied = lambda r: not r.get('ok') and (r.get('code') in DENIED or
-                                           (r.get('code') == 'TransactionCanceledException' and
-                                            'AccessDenied' in (r.get('cancellationReasons') or [])))
+    denied = lambda r: (not r.get('ok') and r.get('code') == 'AccessDeniedException'
+                        and r.get('denial') in APP_POLICY_DENIALS)
+    shown = lambda r: 'ok' if r.get('ok') else f"{r.get('code')} ({r.get('denial') or 'no denial reason'})"
     try:
+        created.append('table')
         aws('dynamodb', 'create-table', '--table-name', name, '--billing-mode', 'PAY_PER_REQUEST',
             '--attribute-definitions', 'AttributeName=pk,AttributeType=S', 'AttributeName=sk,AttributeType=S',
             '--key-schema', 'AttributeName=pk,KeyType=HASH', 'AttributeName=sk,KeyType=RANGE', '--tags', json.dumps(tags))
-        created.append('table')
         aws('dynamodb', 'wait', 'table-exists', '--table-name', name)
+        created.append('role')
         aws('iam', 'create-role', '--role-name', name, '--path', '/qsb/runtime/', '--permissions-boundary', boundary,
             '--assume-role-policy-document', json.dumps({'Version': '2012-10-17', 'Statement': [
                 {'Effect': 'Allow', 'Principal': {'Service': 'lambda.amazonaws.com'}, 'Action': 'sts:AssumeRole'}]}),
             '--description', 'Disposable APP-ROLE-SANDBOX test role', '--tags', json.dumps(tags))
-        created.append('role')
+        created.append('role-policy')
         aws('iam', 'put-role-policy', '--role-name', name, '--policy-name', 'app-records',
             '--policy-document', json.dumps(role_policy))
-        created.append('role-policy')
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, 'w') as z:
             z.writestr('handler.py', HANDLER.read_text())
@@ -130,6 +136,7 @@ def main(a):
             bundle.write(buffer.getvalue())
             bundle.flush()
             # A new role can't be assumed by Lambda until IAM has propagated it; retry only that.
+            created.append('function')
             for attempt in range(24):
                 _, code = aws('lambda', 'create-function', '--function-name', name, '--runtime', 'python3.13',
                               '--handler', 'handler.handler', '--timeout', '30',
@@ -141,54 +148,76 @@ def main(a):
                 if code != 'InvalidParameterValueException' or attempt == 23:
                     raise SystemExit(f'lambda create-function failed: {code}')
                 time.sleep(5)
-        created.append('function')
         aws('lambda', 'wait', 'function-active-v2', '--function-name', name)
 
+        # Positive control: the role can write an OWNER# row at all, so later denials are about the policy.
+        r = invoke('control-owner-put')
+        check('control: the test role can write an OWNER# row', r.get('ok'), shown(r))
+        aws('dynamodb', 'delete-item', '--table-name', name,
+            '--key', json.dumps({'pk': {'S': 'OWNER#' + suffix}, 'sk': {'S': 'IAM_TEST'}}))
         # Step 2: a transaction with a denied SYSTEM# Put must write nothing.
         r = invoke('denied-transaction')
-        check('mixed transaction with a SYSTEM# Put is denied', denied(r), r.get('code'))
-        check('denied transaction wrote neither row', not present('OWNER#') and not present('SYSTEM#'),
-              'owner and system rows absent')
+        check('mixed transaction with a SYSTEM# Put is denied by the app policy', denied(r), shown(r))
+        seen = rows('OWNER#', 'SYSTEM#')
+        check('denied transaction wrote neither row', not any(seen.values()), seen)
         # The reservation shape: allowed Puts plus a SYSTEM# ConditionCheck.
         r = invoke('allowed-transaction')
-        check('owner + outpoint Puts with a SYSTEM# ConditionCheck succeed', r.get('ok'), r.get('code') or 'ok')
+        check('owner + outpoint Puts with a SYSTEM# ConditionCheck succeed', r.get('ok'), shown(r))
+        seen = rows('OWNER#', 'OUTPOINT#', 'SYSTEM#')
         check('allowed transaction wrote owner and outpoint, not system',
-              present('OWNER#') and present('OUTPOINT#') and not present('SYSTEM#'), 'rows as expected')
+              seen == {'owner': True, 'outpoint': True, 'system': False}, seen)
         r = invoke('outpoint-put-again')
-        check('conditional re-create of the outpoint fails', r.get('code') == 'ConditionalCheckFailedException',
-              r.get('code') or 'ok')
+        check('conditional re-create of the outpoint fails', r.get('code') == 'ConditionalCheckFailedException', shown(r))
         r = invoke('outpoint-delete')
-        check('outpoint delete is denied', denied(r), r.get('code') or 'ok')
-        check('outpoint reservation remains', present('OUTPOINT#'), 'outpoint row present')
+        check('outpoint delete is denied by the app policy', denied(r), shown(r))
+        seen = rows('OUTPOINT#')
+        check('outpoint reservation remains', seen == {'outpoint': True}, seen)
         # Step 3: a mixed BatchWriteItem must be denied with no partial write.
         aws('dynamodb', 'delete-item', '--table-name', name,
             '--key', json.dumps({'pk': {'S': 'OWNER#' + suffix}, 'sk': {'S': 'IAM_TEST'}}))
         r = invoke('denied-batch')
-        check('mixed BatchWriteItem is denied', denied(r), r.get('code') or ('ok, unprocessed' if r.get('unprocessed') else 'ok'))
-        check('denied batch wrote neither row', not present('OWNER#') and not present('SYSTEM#'),
-              'owner and system rows absent')
+        check('mixed BatchWriteItem is denied by the app policy', denied(r),
+              shown(r) + (', unprocessed items' if r.get('unprocessed') else ''))
+        seen = rows('OWNER#', 'SYSTEM#')
+        check('denied batch wrote neither row', not any(seen.values()), seen)
     finally:
         if a.keep:
             print(f'kept sandbox resources named {name}', flush=True)
         else:
-            if 'function' in created:
-                aws('lambda', 'delete-function', '--function-name', name, check=False)
-                aws('logs', 'delete-log-group', '--log-group-name', f'/aws/lambda/{name}', check=False)
-            if 'role-policy' in created:
-                aws('iam', 'delete-role-policy', '--role-name', name, '--policy-name', 'app-records', check=False)
-            if 'role' in created:
-                aws('iam', 'delete-role', '--role-name', name, check=False)
-            if 'table' in created:
-                aws('dynamodb', 'delete-table', '--table-name', name, check=False)
-            report['cleanedUp'] = created
-            print(f"deleted sandbox {', '.join(reversed(created)) or 'nothing'}", flush=True)
+            # Delete in reverse; a resource that never came into being reads as not-found, which is fine.
+            gone = ('ResourceNotFoundException', 'NoSuchEntity', 'NoSuchEntityException')
+            steps = {'function': [('lambda', 'delete-function', '--function-name', name),
+                                  ('logs', 'delete-log-group', '--log-group-name', f'/aws/lambda/{name}')],
+                     'role-policy': [('iam', 'delete-role-policy', '--role-name', name, '--policy-name', 'app-records')],
+                     'role': [('iam', 'delete-role', '--role-name', name)],
+                     'table': [('dynamodb', 'delete-table', '--table-name', name)]}
+            outcome = {}
+            for resource in ('function', 'role-policy', 'role', 'table'):
+                if resource not in created:
+                    continue
+                primary, *extra = steps[resource]
+                _, code = aws(*primary, check=False)
+                outcome[resource] = 'deleted' if code is None else 'not-found' if code in gone else f'failed: {code}'
+                for call in extra:  # the function's log group exists only if it managed to log
+                    _, code = aws(*call, check=False)
+                    if code is not None and code not in gone:
+                        outcome[resource] += f' (log group: failed: {code})'
+            report['cleanup'] = outcome
+            failed = [r for r, o in outcome.items() if 'failed' in o]
+            print(f"cleanup: {outcome}" + (f"; delete these by hand: {name} ({', '.join(failed)})" if failed else ''),
+                  flush=True)
+            report['cleanupComplete'] = not failed
         report['passed'] = bool(report['checks']) and all(c['passed'] for c in report['checks'])
         evidence.parent.mkdir(parents=True, exist_ok=True)
         evidence.write_text(json.dumps(report, indent=2) + '\n')
         evidence.chmod(0o600)
     print(json.dumps({'passed': report['passed'], 'checks': len(report['checks']), 'evidence': str(evidence)}), flush=True)
     if not report['passed']:
-        raise SystemExit('Sandbox checks failed: do not deposit; do not loosen the policy. See the evidence.')
+        raise SystemExit('Sandbox checks failed: do not deposit, and do not loosen the app policy. A denial the '
+                         'evidence attributes to the permissions boundary means the boundary is missing something the '
+                         'app policy grants: fix the boundary through review. See the evidence.')
+    if report.get('cleanupComplete') is False:
+        raise SystemExit('Checks passed, but cleanup is incomplete: delete the resources named in the output by hand')
 
 
 if __name__ == '__main__':
