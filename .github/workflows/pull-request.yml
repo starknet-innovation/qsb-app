@@ -61,6 +61,7 @@ jobs:
           python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-test.jsonl
           python3 terraform/tests/check-single-pipeline.py
           python3 ops/github-aws/test_render.py
+          python3 terraform/gpu/test_watchdog.py
 
   browser-safety:
     runs-on: ubuntu-24.04

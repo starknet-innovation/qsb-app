@@ -172,7 +172,7 @@ run "reject_provider_definition_wildcard" {
     network              = "mainnet"
     batch_job_definition = "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-*"
   }
-  expect_failures = [var.batch_job_definition, terraform_data.release]
+  expect_failures = [var.batch_job_definition]
 }
 run "exact_submit_default_off" {
   command = plan
