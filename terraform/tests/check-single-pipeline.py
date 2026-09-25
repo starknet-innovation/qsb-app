@@ -128,12 +128,19 @@ def deploy_checks(plan, first_apply):
 
 
 def unknown_lambda_env(changes):
-    """Lambdas whose environment variables Terraform marks unknown until apply."""
+    """Lambdas whose environment Terraform marks unknown until apply, wholly or in part.
+
+    Only a fully known environment is trusted as known: an absent block ([]), or one with nothing unknown.
+    Any other after_unknown shape (the whole block, the whole map, or single values) counts as unknown, so
+    its checks fall back to the reviewed configuration references, or refuse.
+    """
+    def has_unknown(value):
+        return value is True or (isinstance(value, dict) and any(has_unknown(v) for v in value.values())) or \
+            (isinstance(value, list) and any(has_unknown(v) for v in value))
     out = set()
     for row in changes:
         if row.get('type') == 'aws_lambda_function' and row.get('mode', 'managed') == 'managed':
-            env = (row.get('change', {}).get('after_unknown') or {}).get('environment')
-            if isinstance(env, list) and env and isinstance(env[0], dict) and env[0].get('variables') is True:
+            if has_unknown((row.get('change', {}).get('after_unknown') or {}).get('environment')):
                 out.add(row['name'])
     return frozenset(out)
 

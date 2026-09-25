@@ -87,7 +87,7 @@ Getting the role path wrong on the first apply means replacing the roles later, 
    - then, from a clean `main`, `--apply` as the administrator, confirmed or with `--yes --plan-hash`.
 
    It refuses if the operator policies would need a different number of documents, or if a changed policy already has five versions. Either way, stop and handle it as a reviewed step.
-6. From then on, run plans and applies as `qsb-operator`.
+6. From then on, run plans and applies as `qsb-operator`. On the first such plan, when every Lambda environment is known from state, run `check-single-pipeline.py --deploy` again: it then checks key names and constants that a first plan can only check through configuration references.
 
 Replacing any registered resource later (the distribution, origin access control, response-headers policy or API) needs the administrator again. So do changes to the API stage's access-log settings, which need account-wide log-delivery permissions. The API and stage ignore tag changes, so new commits don't need API Gateway tag permissions. **Verify** both behaviours on the first `qsb-operator` apply.
 

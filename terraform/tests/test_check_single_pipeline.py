@@ -119,6 +119,21 @@ class DeployChecks(unittest.TestCase):
                                                    'after_unknown': {'environment': [{'variables': True}]}}})
         self.refused(doc, 'only the API environment is expected')
 
+    def test_partly_or_wholly_unknown_environments_count_as_unknown(self):
+        for shape in (True, [{'variables': {'WORKFLOW_ARN': True}}]):
+            doc = self.unknown_api_env()
+            doc['resource_changes'].append({'type': 'aws_lambda_function', 'name': 'reference', 'mode': 'managed',
+                                            'change': {'actions': ['create'], 'after_unknown': {'environment': shape}}})
+            with self.subTest(shape=shape):
+                self.refused(doc, 'only the API environment is expected')
+
+    def test_known_coordinator_table_is_checked_while_the_api_is_unknown(self):
+        doc = self.unknown_api_env()
+        for r in doc['planned_values']['root_module']['resources']:
+            if r['type'] == 'aws_lambda_function' and r['name'] == 'coordinator':
+                r['values']['environment'][0]['variables']['TABLE_NAME'] = 'qsb-other'
+        self.refused(doc, 'must use the same table')
+
     def test_known_table_names_must_match_the_table(self):
         doc = plan()
         for r in doc['planned_values']['root_module']['resources']:
