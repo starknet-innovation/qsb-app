@@ -650,7 +650,7 @@ export function createApp(
       return c.json({ error: "This job cannot be paused." }, 409);
     if (job.status === "searching" && !job.runpodId)
       job.error =
-        "Submission outcome unknown. Reconcile Runpod before resuming.";
+        "Submission outcome unknown. Reconcile compute provider before resuming.";
     job.status = "paused";
     job.updatedAt = new Date().toISOString();
     await store.put({ ...r, version: r.version + 1, job }, r.version);
@@ -697,7 +697,7 @@ export function createApp(
       )
     )
       return c.json(
-        { error: "Reconcile the unknown Runpod submission before retrying." },
+        { error: "Reconcile the unknown compute provider submission before retrying." },
         409,
       );
     if (

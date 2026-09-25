@@ -53,11 +53,11 @@ def validate(rows, expanded):
                 'API and coordinator must use the same table')
         require(all(not any(k.startswith('SUPERVISED_') for k in env) for env in envs.values()),
                 'No supervised routing in application Lambda environments')
-        require('RUNPOD_SECRET_ARN' not in envs['api'] and 'RUNPOD_SECRET_ARN' not in envs['reference'],
-                'Only coordinator may receive the provider credential reference')
-        policies = [r for r in rows if r['type'] == 'aws_iam_role_policy' and r['name'] == 'runpod']
-        require(len(policies) == (1 if envs['coordinator'].get('RUNPOD_SECRET_ARN') else 0),
-                'Exactly one provider credential policy when configured')
+        require('AWS_BATCH_JOB_QUEUE' not in envs['api'] and 'AWS_BATCH_JOB_QUEUE' not in envs['reference'],
+                'Only coordinator may receive the AWS Batch binding reference')
+        policies = [r for r in rows if r['type'] == 'aws_iam_role_policy' and r['name'] == 'batch']
+        require(len(policies) == (1 if envs['coordinator'].get('AWS_BATCH_JOB_QUEUE') else 0),
+                'Exactly one AWS Batch binding policy when configured')
     return {'resourcesExcludingFrontendObjects': sum(v for k,v in types.items() if k != 'aws_s3_object'),
             'frontendObjects': types.get('aws_s3_object', 0), 'resourceTypes': dict(sorted(types.items()))}
 

@@ -2,7 +2,7 @@ import { assertPaidSolverContract, assertSolverPin, solverRelease } from "../src
 /** Operator-created regtest jobs only. No browser/API route can create these records. */
 import { z } from "zod";
 import type { Row, Store } from "./store";
-import type { Runpod } from "./providers";
+import type { ComputeProvider } from "./aws-batch";
 import { release, type Job, type PublicVault } from "../src/lib/model";
 import { searchVersion, workRange, subsetRank } from "./search-ranges";
 import {
@@ -47,7 +47,7 @@ export async function validationTick(
   event: Event,
   row: Row,
   store: Store,
-  runpod: Runpod,
+  provider: ComputeProvider,
   cpu: Cpu,
 ) {
   if (!event.owner.startsWith("regtest:"))
@@ -82,9 +82,9 @@ export async function validationTick(
   // Drain only ids submitted by this run before starting a new phase or stopping.
   if (state.cancel.length) {
     const id = state.cancel[0];
-    const status = await runpod.status(id);
+    const status = await provider.status(id);
     if (["IN_QUEUE", "IN_PROGRESS"].includes(status.status)) {
-      await runpod.cancel(id);
+      await provider.cancel(id);
       return finish(false, 5); // Confirm terminal status before releasing this id.
     }
     job.computeSeconds += (status.executionTime || 0) / 1000;
@@ -128,7 +128,7 @@ export async function validationTick(
   const results = await Promise.all(
     state.active.map(async (unit) => ({
       unit,
-      result: await runpod.status(unit.id!),
+      result: await provider.status(unit.id!),
     })),
   );
   for (const { unit, result } of results) {
@@ -382,7 +382,7 @@ export async function validationTick(
     await save();
   }
   assertPaidSolverContract(selected);
-  const submit = await runpod.prepareRun(selected.image);
+  const submit = await provider.prepareRun(selected.image);
   if (retryAttempt === undefined) state.nextAttempt++;
   else state.retry.shift();
   const unit: { attempt: number; id?: string } = { attempt };

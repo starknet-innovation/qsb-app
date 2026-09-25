@@ -1,6 +1,6 @@
-# Terraform deployment (AWS application, Runpod GPUs)
+# Terraform deployment (AWS application, AWS Batch GPUs)
 
-This folder deploys the **single Step Functions application pipeline** into a fresh AWS account. GPUs run on an existing Runpod serverless endpoint. Mainnet job creation follows API Lambda → Step Functions → coordinator Lambda → Runpod, with CPU re-checks in the reference Lambda. See [mainnet pipeline](../docs/MAINNET-PIPELINE.md).
+This folder deploys the **single Step Functions application pipeline** into a fresh AWS account. GPUs run on an existing AWS Batch serverless endpoint. Mainnet job creation follows API Lambda → Step Functions → coordinator Lambda → AWS Batch, with CPU re-checks in the reference Lambda. See [mainnet pipeline](../docs/MAINNET-PIPELINE.md).
 
 There is no supervised host, VPC/NAT, EBS/Backup, dispatch queue/DLQ, evidence bucket/table, watchdog, runtime installer or ECR repository in this application stack. Supervised source remains parked for removal under #23. GitHub OIDC deployment bootstrap remains separate and supported. Applying Terraform is not mainnet activation, wallet compatibility certification, or permission to spend funds. See [mainnet readiness](../docs/MAINNET-READINESS.md).
 
@@ -16,9 +16,9 @@ Recorded local evidence: [single-pipeline mock plan inventory](../docs/SINGLE-PI
 | Search control | Node.js 22 coordinator, Standard Step Functions loop and continuation; no generic retry around paid work |
 | CPU checks | Python 3.13 ARM64 reference Lambda; public inputs only |
 | Operations | Separate service roles, resource-scoped data/compute grants, 30-day log retention and failure alarms |
-| External | Existing Runpod endpoint and optional existing Secrets Manager ARN; no secret values in Terraform |
+| External | Existing AWS Batch endpoint and optional existing Secrets Manager ARN; no secret values in Terraform |
 
-The `provision_runtime`, `runtime_*` and cleanup-endpoint settings have been removed. No EC2 GPUs, custom DNS or certificates are needed for the default CloudFront hostname. AWS-managed public networking reaches Runpod. Custom domains, WAF/rate policy beyond API throttling and regional IAM/cutover review remain separate work. This is the first-deploy layout for a new account, not a migration or teardown procedure. Do not apply it to an existing supervised state: removed resources would be scheduled for destruction. Preserve any old state and infrastructure until a separately reviewed migration and teardown is authorized.
+The `provision_runtime`, `runtime_*` and cleanup-endpoint settings have been removed. No EC2 GPUs, custom DNS or certificates are needed for the default CloudFront hostname. AWS-managed public networking reaches AWS Batch. Custom domains, WAF/rate policy beyond API throttling and regional IAM/cutover review remain separate work. This is the first-deploy layout for a new account, not a migration or teardown procedure. Do not apply it to an existing supervised state: removed resources would be scheduled for destruction. Preserve any old state and infrastructure until a separately reviewed migration and teardown is authorized.
 
 ## Prerequisites
 
@@ -26,7 +26,7 @@ The `provision_runtime`, `runtime_*` and cleanup-endpoint settings have been rem
 - An AWS account and an authenticated local AWS profile/session with deployment permissions. No access keys in `.tfvars`.
 - A clean, committed and pushed checkout. The provider account allowlist prevents accidental account targeting.
 - Enough regional Lambda reserved-concurrency quota for three functions (default two each).
-- Existing Runpod setup only if you need provider diagnostics/isolated operator validation. Omit both compute settings for a frontend/API preview.
+- Existing AWS Batch setup only if you need provider diagnostics/isolated operator validation. Omit both compute settings for a frontend/API preview.
 
 The historical registry location in this public snapshot is deliberately a placeholder. You must build and review a compatible worker/release binding before an operator search; supplying an arbitrary leaderboard or optimized image to this historical coordinator is unsupported. Infrastructure provisioning does not repair or activate that binding.
 
@@ -42,7 +42,7 @@ npm test
 node terraform/scripts/build.mjs --network=mainnet
 export TF_VAR_source_commit="$(git rev-parse HEAD)"
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-# Edit terraform.tfvars: intended account, region/name; optional existing Runpod references.
+# Edit terraform.tfvars: intended account, region/name; optional existing AWS Batch references.
 terraform -chdir=terraform init
 terraform -chdir=terraform validate
 terraform -chdir=terraform plan -out=deployment.tfplan
@@ -57,13 +57,13 @@ terraform -chdir=terraform output app_url
 
 Choose `--network=testnet4` and `network="testnet4"` together for a Testnet4-identity preview. Both mainnet operations and Testnet4 rehearsal remain disabled; this does not assert that the installed Xverse supports Testnet4. There is intentionally no `enable_mainnet` or rehearsal activation variable.
 
-Artifacts must remain in `terraform/.build` through plan/apply. Terraform rejects mismatched commit/network, dirty builds, changed artifact hashes, changed frontend file membership and incomplete Runpod configuration. These checks are local consistency controls, not cryptographic provenance of a developer-controlled manifest. The operator must verify the commit is pushed before every apply. Never apply a stale saved plan after changing the checkout/configuration/artifacts.
+Artifacts must remain in `terraform/.build` through plan/apply. Terraform rejects mismatched commit/network, dirty builds, changed artifact hashes, changed frontend file membership and incomplete AWS Batch configuration. These checks are local consistency controls, not cryptographic provenance of a developer-controlled manifest. The operator must verify the commit is pushed before every apply. Never apply a stale saved plan after changing the checkout/configuration/artifacts.
 
-### Runpod credentials
+### AWS Batch credentials
 
-Optionally supply both `runpod_endpoint_id` and `runpod_secret_arn`. The existing secret must contain JSON shaped as `{"apiKey":"<privately provisioned value>"}`. Provision its value privately outside Terraform; do not send it to an assistant or commit it. Keep this single existing secret as the provider-key source of truth; do not create a second copy for API, verifier, deployment bootstrap or a host. Terraform neither creates a secret nor a secret version and does not read its value. Among application services, only the coordinator gets the exact secret read permission. The MFA-required reconciliation operator role can read that same secret for the CLI; it creates no additional copy. Add the exact customer-managed KMS key ARN only when needed; cross-account/key policies need separate review.
+Supply all three `batch_job_queue`, `batch_job_definition` (revisioned ARN), and `batch_job_bucket` from the independently deployed [`gpu/`](gpu/README.md) stack, or leave all three empty. Only the coordinator can submit paid jobs. The MFA reconciliation operator can inspect jobs and read output artifacts but cannot submit them. No AWS Batch API key or Secrets Manager secret is used by this pipeline. Select the matching enrolled schema-v3 `solver_release_id`. Configuring compute does not enable mainnet or exact submission.
 
-The coordinator Lambda environment and `runpod_limits` output publish `workersMax=1`, `workersMin=0`, and `executionTimeoutMs=900000` from `server/gpu-spend.json`, plus `MAX_JOB_GPU_SECONDS=14745600` (4,096 GPU-hours per job). Before each paid submission the coordinator sets those endpoint limits and does not submit unless the provider confirms them. It atomically reserves the execution timeout before every paid POST and pauses if the cumulative time reservation would exceed that budget. Failed, cancelled, timed-out and uncertain submissions remain charged; stage changes and resume requests cannot reset it; it does not credit a 64-hit output as a finished range. Applying Terraform does not call Runpod, start a workflow, or authorize spend. `release.mainnetEnabled` and `broadcastAuthorized` stay false. AWS Lambda concurrency is **not** a GPU spending cap. The experimental GPU USD ceiling stays unevaluated. IAM-authorized direct validation invocations can use paid compute even while public transaction routes are gated: restrict operator access accordingly.
+The coordinator Lambda environment and `runpod_limits` output publish `workersMax=1`, `workersMin=0`, and `executionTimeoutMs=900000` from `server/gpu-spend.json`, plus `MAX_JOB_GPU_SECONDS=14745600` (4,096 GPU-hours per job). Before each paid submission the coordinator sets those endpoint limits and does not submit unless the provider confirms them. It atomically reserves the execution timeout before every paid POST and pauses if the cumulative time reservation would exceed that budget. Failed, cancelled, timed-out and uncertain submissions remain charged; stage changes and resume requests cannot reset it; it does not credit a 64-hit output as a finished range. Applying Terraform does not call AWS Batch, start a workflow, or authorize spend. `release.mainnetEnabled` and `broadcastAuthorized` stay false. AWS Lambda concurrency is **not** a GPU spending cap. The experimental GPU USD ceiling stays unevaluated. IAM-authorized direct validation invocations can use paid compute even while public transaction routes are gated: restrict operator access accordingly.
 
 ### State and configuration
 
@@ -99,11 +99,11 @@ terraform -chdir=terraform test -json -verbose > /tmp/qsb-terraform-tests.jsonl
 python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-tests.jsonl
 ```
 
-The tests use a mocked AWS provider and plan only. `check-single-pipeline.py` checks both expanded mocked plans (unconfigured preview and configured Runpod) or a saved real plan: exactly three application Lambdas, four service roles, one MFA-required reconciliation role, one table, one state machine and one frontend bucket, with no supervised infrastructure or secret-value resources. Counts exclude frontend objects and the separately bootstrapped GitHub OIDC/state infrastructure. They check disabled activation, persistence protection, absence of API provider credentials, no generic paid-work retry, and rejection of network/commit/partial-provider mismatches. They do not call AWS or Runpod and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
+The tests use a mocked AWS provider and plan only. `check-single-pipeline.py` checks both expanded mocked plans (unconfigured preview and configured AWS Batch) or a saved real plan: exactly three application Lambdas, four service roles, one MFA-required reconciliation role, one table, one state machine and one frontend bucket, with no supervised infrastructure or secret-value resources. Counts exclude frontend objects and the separately bootstrapped GitHub OIDC/state infrastructure. They check disabled activation, persistence protection, absence of API provider credentials, no generic paid-work retry, and rejection of network/commit/partial-provider mismatches. They do not call AWS or AWS Batch and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
 
 References: [Lambda + HTTP API](https://developer.hashicorp.com/terraform/tutorials/aws/lambda-api-gateway), [fileset build-time semantics](https://developer.hashicorp.com/terraform/language/functions/fileset), [provider resource documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs).
 
-The coordinator Runpod credential must have permission to **update the configured
+The coordinator AWS Batch credential must have permission to **update the configured
 endpoint** as well as submit/status/cancel jobs. The control-plane PATCH happens
 before a paid attempt is journaled. A failed check produces a resumable pause
 without consuming a submission; successful confirmation yields a single-use POST.

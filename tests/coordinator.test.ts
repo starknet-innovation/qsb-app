@@ -23,15 +23,10 @@ vi.mock("../server/network", async (importOriginal) => {
   const actual = await importOriginal<any>();
   return { ...actual, get transactionsEnabled() { return mocks.enabled; } };
 });
-vi.mock("../server/providers", () => ({
-  slipstream: {},
-  Runpod: class {
-    health = mocks.health;
-    run = mocks.run;
-    prepareRun = mocks.prepareRun;
-    status = mocks.status;
-    cancel = mocks.cancel;
-  },
+vi.mock("../server/providers",()=>({slipstream:{}}));
+vi.mock("../server/compute-provider",()=>({
+  computeConfigured:()=>Boolean(process.env.AWS_BATCH_JOB_QUEUE && process.env.AWS_BATCH_JOB_DEFINITION && process.env.AWS_BATCH_JOB_BUCKET),
+  configuredCompute:async()=>({health:mocks.health,run:mocks.run,prepareRun:mocks.prepareRun,status:mocks.status,cancel:mocks.cancel}),
 }));
 vi.mock("@aws-sdk/client-secrets-manager", () => ({
   SecretsManagerClient: class {
@@ -63,6 +58,7 @@ const pk = "OWNER#test",
   sk = "JOB#test-job";
 async function seed(extra: Partial<Job> = {}) {
   const job = {
+    computeProvider: "aws-batch",
     id: event.jobId,
     owner: event.owner,
     vaultId: "v",
@@ -90,8 +86,9 @@ beforeEach(() => {
   (store as MemoryStore).rows.clear();
   vi.clearAllMocks();
   process.env.SOLVER_RELEASE_ID = "served-test";
-  process.env.RUNPOD_SECRET_ARN = "test-arn";
-  process.env.RUNPOD_ENDPOINT_ID = "test-endpoint";
+  process.env.AWS_BATCH_JOB_DEFINITION = "test-arn";
+  process.env.AWS_BATCH_JOB_BUCKET = "test-bucket";
+  process.env.AWS_BATCH_JOB_QUEUE = "test-queue";
   process.env.REFERENCE_FUNCTION = "test-reference";
   mocks.cpu.mockImplementation(async (command) => ({
     Payload: Buffer.from(
@@ -108,7 +105,7 @@ beforeEach(() => {
 it("does not submit a paused unknown job that already has one later submission allowed", async () => {
   await seed({
     status: "paused",
-    error: "Submission outcome unknown. Reconcile Runpod before resuming.",
+    error: "Submission outcome unknown. Reconcile compute provider before resuming.",
     oneSubmissionAllowed: true,
   });
   expect(await handler(event)).toMatchObject({ done: true });
@@ -220,7 +217,7 @@ it("checks provider credentials without starting work or requiring a funded vaul
     workers: { running: 0 },
   });
   expect(await handler({ action: "providerHealth" })).toMatchObject({
-    endpointId: "test-endpoint",
+    provider: "aws-batch", queue: "test-queue",
     health: { jobs: { inQueue: 0 } },
   });
   expect(mocks.run).not.toHaveBeenCalled();
@@ -618,7 +615,7 @@ it.each(["queued", "searching"] as const)("deployment switch pauses %s without l
   expect(await store.get(reservation.pk,reservation.sk)).toEqual(reservation);
 });
 it("deployment pause preserves unknown-submission blockers", async () => {
-  await seed({status:"queued",submissionStartedAt:"2026-09-25T00:00:00.000Z",error:"Submission outcome unknown. Reconcile Runpod before resuming."});
+  await seed({status:"queued",submissionStartedAt:"2026-09-25T00:00:00.000Z",error:"Submission outcome unknown. Reconcile compute provider before resuming."});
   mocks.enabled = false;
   await handler(event);
   const paused = (await store.get(pk,sk))!;
@@ -663,7 +660,7 @@ it("marks a searching job with a lost POST response unknown before deployment pa
   await store.put({pk:`SESSION#${createHash("sha256").update(token).digest("hex")}`,sk:"AUTH",version:0,owner:event.owner,network:"mainnet"});
   const response = await createApp(store).request(`/api/jobs/${event.jobId}/resume`, {method:"POST",headers:{Authorization:`Bearer ${token}`}});
   expect(response.status).toBe(409);
-  expect(await response.json()).toEqual({error:"Reconcile the unknown Runpod submission before retrying."});
+  expect(await response.json()).toEqual({error:"Reconcile the unknown compute provider submission before retrying."});
   await handler(event);
   expect(mocks.prepareRun).not.toHaveBeenCalled();
   expect(mocks.run).not.toHaveBeenCalled();
@@ -686,4 +683,12 @@ it("persists resumed polling state before a transient provider failure", async (
   expect(await handler(event)).toMatchObject({done:false,waitSeconds:5});
   expect(mocks.run).not.toHaveBeenCalled();
   expect(mocks.prepareRun).not.toHaveBeenCalled();
+});
+
+it('pauses a legacy provider ID without contacting AWS or resubmitting', async () => {
+  await seed({status:'searching',runpodId:'legacy-paid',computeProvider:undefined});
+  await handler(event);
+  expect((await store.get(pk,sk))!.job).toMatchObject({status:'paused',runpodId:'legacy-paid',error:'Legacy provider job requires reconciliation before AWS migration.'});
+  expect(mocks.status).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled();
 });

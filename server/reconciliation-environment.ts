@@ -5,8 +5,9 @@ export function reconciliationEnvironmentError(
   const required = {
     TABLE_NAME: "TableNameRequired",
     AWS_REGION: "AwsRegionRequired",
-    RUNPOD_SECRET_ARN: "RunpodSecretArnRequired",
-    RUNPOD_ENDPOINT_ID: "RunpodEndpointIdRequired",
+    AWS_BATCH_JOB_QUEUE: "BatchQueueRequired",
+    AWS_BATCH_JOB_DEFINITION: "BatchDefinitionRequired",
+    AWS_BATCH_JOB_BUCKET: "BatchBucketRequired",
     WORKFLOW_ARN: "WorkflowArnRequired",
     QSB_NETWORK: "QsbNetworkRequired",
   };

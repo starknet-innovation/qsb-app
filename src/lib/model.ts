@@ -102,7 +102,9 @@ export type Job = {
   gpuSubmissions?: number;
   /** Durable worst-case GPU seconds reserved before paid POSTs; never refunded. */
   gpuBudgetReservedSeconds?: number;
+  /** Legacy storage field: interpreted only with computeProvider for AWS jobs. */
   runpodId?: string;
+  computeProvider?: "aws-batch" | "runpod";
   txid?: string;
   retryRequested?: boolean;
   /** Audited operator decision allows one replacement, consumed atomically by resume. */

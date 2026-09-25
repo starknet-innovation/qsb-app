@@ -1,15 +1,11 @@
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
-import {
-  GetSecretValueCommand,
-  SecretsManagerClient,
-} from "@aws-sdk/client-secrets-manager";
 import { z } from "zod";
 import { reconciliationEnvironmentError } from "./reconciliation-environment";
 import { release, type Job, type PublicVault } from "../src/lib/model";
 import { NETWORK_ID } from "../src/lib/network";
 import { assertSolverPin, solverRelease } from "../src/lib/provenance";
 import { rehearsalAddressAllowed, transactionsEnabled } from "./network";
-import { Runpod, RUNPOD_JOB_TTL_MS } from "./providers";
+import { configuredCompute } from "./compute-provider";
 import { searchVersion, workRange } from "./search-ranges";
 import { store as defaultStore, type Store } from "./store";
 
@@ -181,21 +177,17 @@ export async function reconcileUnknownSubmission(input: {
       };
     }
     job.runpodId = decision.providerId;
+    job.computeProvider = "aws-batch";
     job.status = "searching";
     delete job.error;
   } else {
     // A list miss, a timeout or a 5xx alone is not proof of non-acceptance.
     // Only an explicitly recorded HTTP 4xx may bypass the TTL. All other
     // outcomes require the durable full TTL; both paths still require drain.
+    if (decision.reason === "ttl-expired") throw new ReconciliationError("AwsBatchHasNoSubmissionTtl");
     const health = await lookup.health();
     if (health.jobs.inQueue !== 0 || health.jobs.inProgress !== 0)
       throw new ReconciliationError("EndpointNotDrained");
-    const started = Date.parse(job.submissionStartedAt ?? "");
-    if (
-      decision.reason === "ttl-expired" &&
-      (!Number.isFinite(started) || Date.parse(now) < started + RUNPOD_JOB_TTL_MS)
-    )
-      throw new ReconciliationError("SubmissionTtlNotExpired");
     job.oneSubmissionAllowed = true;
   }
   const priorRevision = job.revision;
@@ -240,25 +232,6 @@ export async function reconcileUnknownSubmission(input: {
       ? { providerId: decision.providerId }
       : {}),
   };
-}
-
-async function openRunpod(): Promise<Runpod> {
-  const secretArn = process.env.RUNPOD_SECRET_ARN;
-  const endpoint = process.env.RUNPOD_ENDPOINT_ID;
-  if (!secretArn || !endpoint)
-    throw new ReconciliationError("ComputeConfigurationRequired");
-  try {
-    const secret = await new SecretsManagerClient({
-      region: process.env.AWS_REGION,
-    }).send(new GetSecretValueCommand({ SecretId: secretArn }));
-    const key = z
-      .object({ apiKey: z.string().min(1) })
-      .parse(JSON.parse(secret.SecretString || "{}")).apiKey;
-    return new Runpod(endpoint, key);
-  } catch (error) {
-    if (error instanceof ReconciliationError) throw error;
-    throw new ReconciliationError("ComputeCredentialUnavailable");
-  }
 }
 
 async function startPolling(job: Job): Promise<PollingStart> {
@@ -334,7 +307,7 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
     });
     if (decision.kind === "provider-id" && !pollingStartAllowed(owner))
       throw new ReconciliationError("PollingNotAllowed");
-    const endpoint = await openRunpod();
+    const endpoint = await configuredCompute();
     const result = await reconcileUnknownSubmission({
       store: defaultStore,
       owner,

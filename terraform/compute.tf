@@ -39,13 +39,17 @@ resource "aws_iam_role_policy" "coordinator_records" {
     ]
   })
 }
-resource "aws_iam_role_policy" "runpod" {
-  count = local.runpod ? 1 : 0
+resource "aws_iam_role_policy" "batch" {
+  count = local.compute ? 1 : 0
   role  = aws_iam_role.lambda["coordinator"].id
-  policy = jsonencode({ Version = "2012-10-17", Statement = concat(
-    [{ Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = var.runpod_secret_arn }],
-    var.runpod_secret_kms_key_arn == "" ? [] : [{ Effect = "Allow", Action = "kms:Decrypt", Resource = var.runpod_secret_kms_key_arn, Condition = { StringEquals = { "kms:ViaService" = "secretsmanager.${var.region}.amazonaws.com" } } }]
-  ) })
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Effect = "Allow", Action = ["batch:DescribeJobs", "batch:DescribeJobDefinitions", "batch:DescribeJobQueues", "batch:DescribeComputeEnvironments", "batch:ListJobs"], Resource = "*", Condition = { StringEquals = { "aws:RequestedRegion" = var.region } } },
+    { Effect = "Allow", Action = "batch:SubmitJob", Resource = [var.batch_job_queue, var.batch_job_definition] },
+    { Effect = "Allow", Action = "batch:TagResource", Resource = "arn:aws:batch:${var.region}:${var.aws_account_id}:job/*", Condition = { StringEquals = { "aws:RequestTag/Project" = "qsb-gpu" }, "ForAllValues:StringEquals" = { "aws:TagKeys" = ["Project", "QsbRequest", "InputSha256"] } } },
+    { Effect = "Allow", Action = ["batch:CancelJob", "batch:TerminateJob"], Resource = "arn:aws:batch:${var.region}:${var.aws_account_id}:job/*", Condition = { StringEquals = { "aws:ResourceTag/Project" = "qsb-gpu" } } },
+    { Effect = "Allow", Action = "s3:PutObject", Resource = "arn:aws:s3:::${var.batch_job_bucket}/inputs/*" },
+    { Effect = "Allow", Action = "s3:GetObject", Resource = "arn:aws:s3:::${var.batch_job_bucket}/outputs/*" }
+  ] })
 }
 resource "aws_iam_role_policy" "reference" {
   role   = aws_iam_role.lambda["coordinator"].id
@@ -80,9 +84,9 @@ resource "aws_lambda_function" "coordinator" {
   memory_size                    = 512
   reserved_concurrent_executions = var.lambda_concurrency
   environment {
-    variables = merge({ TABLE_NAME = aws_dynamodb_table.records.name, QSB_NETWORK = var.network, SOLVER_RELEASE_ID = var.solver_release_id, QSB_MAINNET_ENABLED = tostring(var.mainnet_enabled), QSB_REHEARSAL_ENABLED = "false", REFERENCE_FUNCTION = aws_lambda_function.reference.function_name }, local.gpu_limit_env, local.runpod ? { RUNPOD_ENDPOINT_ID = var.runpod_endpoint_id, RUNPOD_SECRET_ARN = var.runpod_secret_arn } : {})
+    variables = merge({ TABLE_NAME = aws_dynamodb_table.records.name, QSB_NETWORK = var.network, SOLVER_RELEASE_ID = var.solver_release_id, QSB_MAINNET_ENABLED = tostring(var.mainnet_enabled), QSB_REHEARSAL_ENABLED = "false", REFERENCE_FUNCTION = aws_lambda_function.reference.function_name }, local.gpu_limit_env, local.compute ? { AWS_BATCH_JOB_QUEUE = var.batch_job_queue, AWS_BATCH_JOB_DEFINITION = var.batch_job_definition, AWS_BATCH_JOB_BUCKET = var.batch_job_bucket } : {})
   }
-  depends_on = [terraform_data.release, aws_iam_role_policy.logs, aws_iam_role_policy.coordinator_records, aws_iam_role_policy.reference, aws_iam_role_policy.runpod]
+  depends_on = [terraform_data.release, aws_iam_role_policy.logs, aws_iam_role_policy.coordinator_records, aws_iam_role_policy.reference, aws_iam_role_policy.batch]
 }
 resource "aws_lambda_function" "api" {
   function_name                  = "${var.name}-api"

@@ -22,8 +22,10 @@ resource "aws_iam_role_policy" "operator_reconcile" {
         Resource = "arn:${data.aws_partition.current.partition}:dynamodb:${var.region}:${var.aws_account_id}:table/${aws_dynamodb_table.records.name}"
       })],
       [{ Sid = "StartCoordinator", Effect = "Allow", Action = ["states:StartExecution"], Resource = local.workflow_arn }],
-      local.runpod ? [{ Sid = "ReadProviderCredential", Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = var.runpod_secret_arn }] : [],
-      local.runpod && var.runpod_secret_kms_key_arn != "" ? [{ Sid = "DecryptProviderCredential", Effect = "Allow", Action = ["kms:Decrypt"], Resource = var.runpod_secret_kms_key_arn, Condition = { StringEquals = { "kms:ViaService" = "secretsmanager.${var.region}.amazonaws.com" } } }] : []
+      local.compute ? [
+        { Effect = "Allow", Action = ["batch:DescribeJobs", "batch:ListJobs", "batch:DescribeJobQueues"], Resource = "*", Condition = { StringEquals = { "aws:RequestedRegion" = var.region } } },
+        { Effect = "Allow", Action = "s3:GetObject", Resource = "arn:aws:s3:::${var.batch_job_bucket}/outputs/*" }
+      ] : []
     )
   })
 }

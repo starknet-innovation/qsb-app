@@ -22,7 +22,7 @@ export const externalSolverDescriptorSchema = z
     kernelCommit: z.string().regex(/^[a-f0-9]{40}$/),
     image: z
       .string()
-      .regex(/^ghcr\.io\/starknet-innovation\/qsb-solver@sha256:[a-f0-9]{64}$/),
+      .regex(/^(?:ghcr\.io\/starknet-innovation\/qsb-solver|905846953990\.dkr\.ecr\.eu-west-1\.amazonaws\.com\/qsb-solver)@sha256:[a-f0-9]{64}$/),
   })
   .strict();
 export type SolverDescriptor =

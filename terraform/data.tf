@@ -2,13 +2,13 @@ locals {
   artifacts    = "${path.module}/.build"
   build        = jsondecode(file("${local.artifacts}/manifest.json"))
   workflow_arn = "arn:${data.aws_partition.current.partition}:states:${var.region}:${var.aws_account_id}:stateMachine:${var.name}-withdrawal"
-  runpod       = var.runpod_endpoint_id != "" && var.runpod_secret_arn != ""
+  compute      = var.batch_job_queue != "" && var.batch_job_definition != "" && var.batch_job_bucket != ""
   gpu_spend    = jsondecode(file("${path.module}/../server/gpu-spend.json"))
   gpu_limit_env = {
-    RUNPOD_WORKERS_MAX          = tostring(local.gpu_spend.workersMax)
-    RUNPOD_WORKERS_MIN          = tostring(local.gpu_spend.workersMin)
-    RUNPOD_EXECUTION_TIMEOUT_MS = tostring(local.gpu_spend.executionTimeoutMs)
-    MAX_JOB_GPU_SECONDS         = tostring(local.gpu_spend.maxJobGpuSeconds)
+    GPU_WORKERS_MAX          = tostring(local.gpu_spend.workersMax)
+    GPU_WORKERS_MIN          = tostring(local.gpu_spend.workersMin)
+    GPU_EXECUTION_TIMEOUT_MS = tostring(local.gpu_spend.executionTimeoutMs)
+    MAX_JOB_GPU_SECONDS      = tostring(local.gpu_spend.maxJobGpuSeconds)
   }
   functions = toset(["api", "coordinator", "reference"])
   mime = {
@@ -29,8 +29,8 @@ resource "terraform_data" "release" {
       error_message = "Build artifacts changed or frontend files were added/removed; rebuild."
     }
     precondition {
-      condition     = (var.runpod_endpoint_id == "") == (var.runpod_secret_arn == "")
-      error_message = "Supply both Runpod endpoint and secret ARN, or neither."
+      condition     = length(compact([var.batch_job_queue, var.batch_job_definition, var.batch_job_bucket])) == 0 || length(compact([var.batch_job_queue, var.batch_job_definition, var.batch_job_bucket])) == 3
+      error_message = "Supply all three AWS Batch bindings, or none."
     }
   }
 }

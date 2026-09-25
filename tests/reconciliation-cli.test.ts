@@ -18,17 +18,17 @@ vi.mock("../server/store", async (original) => {
   return { ...actual, store: new actual.MemoryStore() };
 });
 import { store } from "../server/store";
-import { Runpod } from "../server/providers";
+import { AwsBatch } from "../server/aws-batch";
 import { reconcileSubmissionCli, reconcileUnknownSubmission } from "../server/reconcile-submission";
 
 const required = {
-  TABLE_NAME: "dummy-table", AWS_REGION: "us-east-1", RUNPOD_SECRET_ARN: "dummy-secret",
-  RUNPOD_ENDPOINT_ID: "dummy-endpoint", WORKFLOW_ARN: "dummy-workflow", QSB_NETWORK: "mainnet", QSB_MAINNET_ENABLED: "true",
+  TABLE_NAME: "dummy-table", AWS_REGION: "us-east-1", AWS_BATCH_JOB_DEFINITION: "arn:aws:batch:eu-west-1:905846953990:job-definition/qsb-gpu-solver:1", AWS_BATCH_JOB_BUCKET: "qsb-gpu-jobs",
+  AWS_BATCH_JOB_QUEUE: "arn:aws:batch:eu-west-1:905846953990:job-queue/qsb-gpu", WORKFLOW_ARN: "dummy-workflow", QSB_NETWORK: "mainnet", QSB_MAINNET_ENABLED: "true",
 };
 const args = ["owner", "job", "--provider-id", "provider-1", "--operator", "test", "--evidence", "audit://test"];
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); mocks.allowed.mockReturnValue(true); process.exitCode = undefined; });
 
-it.each(Object.entries({ TABLE_NAME: "TableNameRequired", AWS_REGION: "AwsRegionRequired", RUNPOD_SECRET_ARN: "RunpodSecretArnRequired", RUNPOD_ENDPOINT_ID: "RunpodEndpointIdRequired", WORKFLOW_ARN: "WorkflowArnRequired", QSB_NETWORK: "QsbNetworkRequired" }))(
+it.each(Object.entries({ TABLE_NAME: "TableNameRequired", AWS_REGION: "AwsRegionRequired", AWS_BATCH_JOB_DEFINITION: "BatchDefinitionRequired", AWS_BATCH_JOB_BUCKET: "BatchBucketRequired", AWS_BATCH_JOB_QUEUE: "BatchQueueRequired", WORKFLOW_ARN: "WorkflowArnRequired", QSB_NETWORK: "QsbNetworkRequired" }))(
   "refuses missing %s through the real CLI before importing application configuration",
   (name, reason) => {
     const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, ...required, AWS_EC2_METADATA_DISABLED: "true" };
@@ -68,7 +68,7 @@ it("prints the polling refusal reason, exits nonzero and preserves the attached 
   await store.put({ pk: "OWNER#owner", sk: "VAULT#v", version: 0, vault: { network: "mainnet" } });
   mocks.secret.mockResolvedValue({ SecretString: JSON.stringify({ apiKey: "public-test-placeholder" }) });
   mocks.workflow.mockRejectedValue(Object.assign(new Error(), { name: "ExecutionAlreadyExists" }));
-  vi.spyOn(Runpod.prototype, "status").mockResolvedValue({ id: "provider-1", status: "IN_PROGRESS" });
+  vi.spyOn(AwsBatch.prototype, "status").mockResolvedValue({ id: "provider-1", status: "IN_PROGRESS" });
   const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
   await reconcileSubmissionCli(args);
@@ -84,7 +84,7 @@ it.each(["400", "499"])("CLI records immediate HTTP %s recovery without waiting 
   await store.put({ pk, sk: "JOB#job", version: 0, job });
   await store.put({ pk, sk: "VAULT#v", version: 0, vault: { network: "mainnet" } });
   mocks.secret.mockResolvedValue({ SecretString: JSON.stringify({ apiKey: "public-test-placeholder" }) });
-  vi.spyOn(Runpod.prototype, "health").mockResolvedValue({ jobs: { inQueue: 0, inProgress: 0 }, workers: {} } as any);
+  vi.spyOn(AwsBatch.prototype, "health").mockResolvedValue({ jobs: { inQueue: 0, inProgress: 0 }, workers: {} } as any);
   vi.spyOn(process.stdout, "write").mockReturnValue(true);
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
   await reconcileSubmissionCli([owner, "job", "--not-submitted", "rejected-before-acceptance", "--http-status", status, "--operator", "test", "--evidence", "audit://http"]);

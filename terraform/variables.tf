@@ -34,31 +34,28 @@ variable "network" {
     error_message = "Set network to mainnet or testnet4."
   }
 }
-variable "runpod_endpoint_id" {
-  description = "Existing compatible Runpod serverless endpoint; empty leaves compute unconfigured. This stack never creates or scales GPUs."
-  type        = string
-  default     = ""
+variable "batch_job_queue" {
+  type    = string
+  default = ""
   validation {
-    condition     = var.runpod_endpoint_id == "" || can(regex("^[a-z0-9]{10,32}$", var.runpod_endpoint_id))
-    error_message = "Supply an endpoint ID, not a URL."
+    condition     = var.batch_job_queue == "" || can(regex("^arn:aws:batch:[a-z0-9-]+:[0-9]{12}:job-queue/qsb-[a-z0-9-]+$", var.batch_job_queue))
+    error_message = "Use an exact QSB AWS Batch binding."
   }
 }
-variable "runpod_secret_arn" {
-  description = "Existing AWS Secrets Manager secret ARN containing JSON apiKey. Never pass the secret value to Terraform."
-  type        = string
-  default     = ""
+variable "batch_job_definition" {
+  type    = string
+  default = ""
   validation {
-    condition     = var.runpod_secret_arn == "" || can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$", var.runpod_secret_arn))
-    error_message = "Supply a Secrets Manager ARN or leave empty."
+    condition     = var.batch_job_definition == "" || can(regex("^arn:aws:batch:[a-z0-9-]+:[0-9]{12}:job-definition/qsb-[a-z0-9-]+:[0-9]+$", var.batch_job_definition))
+    error_message = "Use an exact QSB AWS Batch binding."
   }
 }
-variable "runpod_secret_kms_key_arn" {
-  description = "Optional customer-managed KMS key ARN for the existing secret; no decrypt grant otherwise."
-  type        = string
-  default     = ""
+variable "batch_job_bucket" {
+  type    = string
+  default = ""
   validation {
-    condition     = var.runpod_secret_kms_key_arn == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/(mrk-)?[a-f0-9-]+$", var.runpod_secret_kms_key_arn))
-    error_message = "Supply one exact KMS key ARN or leave empty; wildcards are not allowed."
+    condition     = var.batch_job_bucket == "" || can(regex("^qsb-[a-z0-9-]+$", var.batch_job_bucket))
+    error_message = "Use an exact QSB AWS Batch binding."
   }
 }
 variable "lambda_concurrency" {
@@ -74,7 +71,6 @@ variable "alarm_actions" {
   type        = list(string)
   default     = []
 }
-
 variable "iam_role_path" {
   description = "Use /qsb/runtime/ for the dedicated GitHub deployment identity."
   type        = string
@@ -85,7 +81,6 @@ variable "iam_permissions_boundary_arn" {
   type        = string
   default     = null
 }
-
 variable "operator_principal_arns" {
   description = "Explicit IAM user/role principals allowed to assume the reconciliation role with MFA. No account-root delegation, wildcard or default."
   type        = set(string)
@@ -95,7 +90,6 @@ variable "operator_principal_arns" {
     error_message = "Supply at least one exact IAM user or role ARN; root, wildcard and session principals are not accepted."
   }
 }
-
 variable "exact_submit_enabled" {
   description = "Single exact-withdrawal submit switch. Keep false until explicit issue #22 transaction authorization. Does not enable wallet creation or search."
   type        = bool
@@ -105,7 +99,6 @@ variable "exact_submit_enabled" {
     error_message = "Exact submission is implemented for mainnet only."
   }
 }
-
 variable "solver_release_id" {
   description = "Enrolled schema-v3 solver release served by the configured endpoint. Empty refuses new jobs."
   type        = string
@@ -115,7 +108,6 @@ variable "solver_release_id" {
     error_message = "solver_release_id must be an enrolled release ID, not an image/tag or URL."
   }
 }
-
 variable "mainnet_enabled" {
   description = "Enable mainnet funding/search routes and coordinator. Requires explicit approval for issue #22; exact submission has a separate switch."
   type        = bool

@@ -73,7 +73,7 @@ beforeEach(async () => {
     computeSeconds: 0,
     manifestHash: "a".repeat(64),
     manifest: {},
-    error: "Submission outcome unknown. Reconcile Runpod before resuming.",
+    error: "Submission outcome unknown. Reconcile compute provider before resuming.",
     submissionStartedAt: "2026-09-24T00:00:00.000Z",
     updatedAt: now,
     createdAt: now,
@@ -225,9 +225,9 @@ it("refuses a second not-submitted decision after resume consumes the flag", asy
   expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(1);
   expect(lookup.health).not.toHaveBeenCalled();
 });
-it("accepts a drained expired submission with durable start time", async () => {
-  await run(replacement("ttl-expired"));
-  expect((await job()).oneSubmissionAllowed).toBe(true);
+it("refuses a drained expired submission with durable start time", async () => {
+  await expect(run(replacement("ttl-expired"))).rejects.toThrow("AwsBatchHasNoSubmissionTtl");
+  expect((await job()).oneSubmissionAllowed).toBeUndefined();
 });
 for (const reason of ["ttl-expired"] as const) {
   it.each([
@@ -241,16 +241,16 @@ for (const reason of ["ttl-expired"] as const) {
     async (submissionStartedAt) => {
       await change({ submissionStartedAt });
       await expect(run(replacement(reason))).rejects.toThrow(
-        "SubmissionTtlNotExpired",
+        "AwsBatchHasNoSubmissionTtl",
       );
       expect((await job()).oneSubmissionAllowed).toBeUndefined();
       expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(0);
     },
   );
-  it(`accepts ${reason} at the exact durable TTL boundary`, async () => {
+  it(`refuses ${reason} at the exact durable TTL boundary`, async () => {
     await change({ submissionStartedAt: "2026-09-24T01:00:00.000Z" });
-    await run(replacement(reason));
-    expect((await job()).oneSubmissionAllowed).toBe(true);
+    await expect(run(replacement(reason))).rejects.toThrow("AwsBatchHasNoSubmissionTtl");
+    expect((await job()).oneSubmissionAllowed).toBeUndefined();
   });
 }
 it.each([

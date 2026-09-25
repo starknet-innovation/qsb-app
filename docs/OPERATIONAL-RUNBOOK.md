@@ -45,7 +45,7 @@ Rollback cannot revive legacy writers, release consumed commitments, or duplicat
 
 Treat `unknown`, `timeout`, and `http-ambiguous` as unpaid-or-paid until a provider or invoice record says which. The only action is reconcile. `reconcilePaidOutcome` returns `retry: false`. Requesting retry throws `BlindRetryRefused`. A known success is recorded once and is not submitted again.
 
-## Reconcile an unknown Runpod submission
+## Reconcile an unknown AWS Batch submission
 
 An unknown POST is never retried automatically. The operator command requires an
 explicit decision with an operator identifier and a public evidence reference.
@@ -53,26 +53,22 @@ Do not put credentials, wallet material, or raw logs in the evidence argument.
 The identifier is an operator assertion; IAM/CloudTrail identifies the caller.
 
 Required environment: `TABLE_NAME` (the CLI refuses MemoryStore), `AWS_REGION`,
-`RUNPOD_SECRET_ARN`, `RUNPOD_ENDPOINT_ID`, `WORKFLOW_ARN` and `QSB_NETWORK`
+`AWS_BATCH_JOB_QUEUE`, `AWS_BATCH_JOB_DEFINITION`, `AWS_BATCH_JOB_BUCKET`, `WORKFLOW_ARN` and `QSB_NETWORK`
 (`mainnet` or `testnet4`). On mainnet, also set `QSB_MAINNET_ENABLED` explicitly to
 `"true"` or `"false"`. It must match the deployed value: verify
 `terraform output -raw transactions_enabled` or uncached `GET /api/config`
 (`operationsEnabled`, with `network` equal to `mainnet`). Missing or malformed
-values refuse before application imports. Both modes validate the six base values before application imports,
+values refuse before application imports. Both modes validate the required values before application imports,
 credentials, or database/provider reads and writes. The operator role needs GetItem on job/vault records, transactional PutItem
-on the job and `RECONCILIATION#` audit rows, access to the configured provider
-credential (and its KMS key if applicable), and StartExecution on the configured
-workflow. The agent must not retrieve those credentials; provision them for the
-operator runtime. The CLI does not call `/run`, `/cancel` or broadcast.
+on the job and `RECONCILIATION#` audit rows, Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. It cannot submit or cancel Batch jobs and does not broadcast.
 
-To attach a known provider ID from Runpod's console and matching operator logs:
+To attach a known provider ID from AWS Batch's console and matching operator logs:
 
 ```
 npx tsx scripts/reconcile-submission.ts OWNER JOB --provider-id PROVIDER_ID --operator OPERATOR --evidence audit://incident/reference
 ```
 
-The command reads documented `/status/ID` fields; no `/requests` response shape or
-echoed `input` is assumed. The operator must bind live/terminal IDs to this exact
+The command reads Batch job status and immutable S3 results, binding the queue, definition revision and input SHA256. The operator must bind live/terminal IDs to this exact
 job, stage, range, endpoint and submission window using logs/console evidence.
 Completed outputs additionally must match the stored manifest, stage, attempt,
 kernel and exact range. Attachment grants no completion credit: the coordinator
@@ -87,8 +83,8 @@ refusal prints its reason and exits non-zero; an ID already saved before a workf
 start failure remains attached for operator reconciliation. Correct the prerequisite
 and rerun the same provider-ID decision; never submit a replacement as a workaround.
 
-To authorize exactly one replacement after proving Runpod rejected the call
-before acceptance with a retained HTTP 400–499 response from the paid `/run` POST
+To authorize exactly one replacement after proving AWS Batch rejected SubmitJob
+before acceptance with a retained HTTP 400–499 response from the paid SubmitJob request
 (not the limits preflight, a timeout, connection error or 5xx):
 
 ```
@@ -102,14 +98,7 @@ evidence, time and revision. The operator must retain the actual response from
 this job's paid POST. The tool validates the recorded code, not the external
 truth of an operator's evidence reference.
 
-For timeouts, connection errors, 5xx or no recorded HTTP response, use
-`--not-submitted ttl-expired` only after the complete 24-hour provider TTL has
-elapsed from durable `submissionStartedAt`. Legacy jobs without that timestamp
-cannot use TTL expiry. This mode does not accept `--http-status`; it never
-shortens the wait. Independently check the endpoint and billing/log window.
-TTL expiry does **not** prove that the old job was never accepted and can incur
-duplicate bounded work.
-Both modes require current health to show zero queued/in-progress requests.
+For timeouts, connection errors, 5xx or no recorded HTTP response, keep the job paused and reconcile CloudTrail, Batch job tags and S3 inputs. AWS Batch has no submission TTL: `--not-submitted ttl-expired` is explicitly refused, regardless of elapsed time. A replacement is permitted only for proven rejection before acceptance; that path also requires current health to show zero queued/in-progress jobs.
 A list miss or an empty queue by itself never authorizes replacement.
 
 The decision and job change are one conditional transaction with a permanent
@@ -161,7 +150,7 @@ not the configured cap.
 Startup, idle time, storage and provider retry/billing behavior are not an invoice
 cap. No paid run is authorized by changing this configuration.
 
-Before a paid claim, endpoint-limit failures pause with `Runpod limits unconfirmed;
+Before a paid claim, endpoint-limit failures pause with `Compute provider limits unconfirmed;
 nothing was submitted` and leave the time reservation unchanged. Fix the endpoint
 permission/configuration, then resume normally. A failure after the paid POST
 boundary remains an unknown submission and must be reconciled, never retried
@@ -219,8 +208,9 @@ not remain in the parent shell; disable tracing and never print or share them:
   aws sts get-caller-identity
   export TABLE_NAME='your-records-table'
   export AWS_REGION='eu-west-1'
-  export RUNPOD_SECRET_ARN='arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb-vault/runpod-EXAMPLE'
-  export RUNPOD_ENDPOINT_ID='yourendpointid'
+  export AWS_BATCH_JOB_QUEUE='arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu'
+  export AWS_BATCH_JOB_DEFINITION='arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:1'
+  export AWS_BATCH_JOB_BUCKET='qsb-gpu-123456789012-eu-west-1-jobs'
   export WORKFLOW_ARN='arn:aws:states:eu-west-1:123456789012:stateMachine:qsb-app-withdrawal'
   export QSB_NETWORK='mainnet'
   npx tsx scripts/reconcile-submission.ts OWNER JOB --provider-id PROVIDER_ID --operator OPERATOR --evidence audit://incident/reference
@@ -240,8 +230,8 @@ Local policy/plan tests do not prove a live assumed-role session or regional IAM
 
 ### Reconcile an uncertain withdrawal (TX#)
 
-This is separate from Runpod submission reconciliation above. Never use the
-Runpod `--not-submitted` action for a signed withdrawal. Keep **both the vault
+This is separate from AWS Batch submission reconciliation above. Never use the
+compute `--not-submitted` action for a signed withdrawal. Keep **both the vault
 funding and helper outpoints reserved** and tell the user to keep the helper UTXO
 unspent while the result is uncertain. Never request another signature or accept
 replacement bytes for the vault.
