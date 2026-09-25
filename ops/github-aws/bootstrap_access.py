@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 from access import MANAGED_POLICY_LIMIT, access, size
+from analyzer_readiness import ensure_analyzer
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--profile', required=True)
@@ -31,7 +32,7 @@ if not remote or remote[0] != commit:
 
 
 def aws(*args):
-    r = subprocess.run(['aws', '--profile', a.profile, '--region', c['region'], '--output', 'json', '--no-cli-pager', *args],
+    r = subprocess.run(['aws', '--profile', a.profile, '--region', c['region'], '--output', 'json', '--no-cli-pager', '--cli-connect-timeout', '10', '--cli-read-timeout', '20', *args],
                        capture_output=True, text=True)
     if r.returncode:
         code = re.search(r'\(([A-Za-z]+)\)', r.stderr)
@@ -74,6 +75,11 @@ if 'qsb-runtime-boundary' not in policies:
     raise SystemExit('Run bootstrap.py first: qsb-runtime-boundary is missing')
 
 
+# An analyzer failure must leave the create-once human identities untouched.
+readiness = ensure_analyzer(aws, commit)
+print(f'external-access analyzer {readiness}', flush=True)
+
+
 def create_policy(name, document, description):
     return aws('iam', 'create-policy', '--policy-name', name, '--path', '/qsb/bootstrap/',
                '--policy-document', json.dumps(document), '--description', description, '--tags', tags)['Policy']['Arn']
@@ -104,12 +110,5 @@ for role in ('viewonly', 'operator'):
     for policy_arn in attached[role]:
         aws('iam', 'attach-role-policy', '--role-name', spec['name'], '--policy-arn', policy_arn)
     print(f"created role {spec['name']} with {len(attached[role])} managed policies", flush=True)
-# Role trust and S3 bucket policies can name outside principals; flag any such access.
-if not aws('accessanalyzer', 'list-analyzers', '--type', 'ACCOUNT')['analyzers']:
-    aws('accessanalyzer', 'create-analyzer', '--analyzer-name', 'qsb-external-access', '--type', 'ACCOUNT',
-        '--tags', json.dumps({'Application': 'qsb-vault', 'SourceCommit': commit}))
-    print('created external-access analyzer qsb-external-access', flush=True)
-else:
-    print('an external-access analyzer already exists; kept it', flush=True)
 print(json.dumps({'done': True, 'commit': commit, 'next': 'set console password and TOTP MFA for the user as root'}),
       flush=True)

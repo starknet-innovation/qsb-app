@@ -200,7 +200,7 @@ class HumanAccess(unittest.TestCase):
         guard = self.sid(self.operator, 'ProtectAccessAnalyzer')
         self.assertEqual((guard['Effect'], guard['Action'], guard['Resource']), ('Deny', ['access-analyzer:*'], ['*']))
         granted = {a for a, _ in self.allowed(self.viewonly)}
-        self.assertTrue({'access-analyzer:ListAnalyzers', 'access-analyzer:ListFindingsV2'} <= granted)
+        self.assertLessEqual({'access-analyzer:ListAnalyzers', 'access-analyzer:ListFindingsV2'}, granted)
 
     def test_policies_fit_iam_limits(self):
         for role in ('viewonly', 'operator'):

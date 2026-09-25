@@ -201,7 +201,14 @@ surfaces, including frontend content access. MFA on the original operator sessio
 does not make those downstream grants expire.
 
 `bootstrap_access.py` creates an IAM Access Analyzer external-access analyzer,
-`qsb-external-access`, if the account has none. The operator is denied every
+`qsb-external-access`, if the selected region has no account analyzer. Before creating
+any human-access IAM policies, user or roles, it requires an existing `ACTIVE`
+analyzer or confirms the new analyzer becomes `ACTIVE`. Failed, disabled or
+unknown states stop the bootstrap. A new analyzer still creating after 20 polls
+(three-second intervals, plus bounded CLI request time) also stops before IAM
+writes; inspect it and rerun after it becomes active. Existing inactive analyzers
+are never replaced automatically. This checks analyzer readiness, not alert delivery.
+The operator is denied every
 Access Analyzer action, and `qsb-viewonly` can list findings. After bootstrap,
 root should route its findings to an independently controlled alert destination.
 Also alert on CloudTrail CreateRole, UpdateAssumeRolePolicy, PutBucketPolicy and
