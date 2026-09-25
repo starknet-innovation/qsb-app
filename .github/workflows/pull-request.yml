@@ -68,6 +68,7 @@ jobs:
           python3 ops/github-aws/test_access.py
           python3 ops/github-aws/test_bootstrap_access.py
           python3 ops/github-aws/test_update_installed.py
+          python3 ops/iam-sandbox/test_run.py
 
       - name: Test explicitly selected solver deployment identities
         run: |

@@ -21,6 +21,8 @@ accessed. The output records source policy hashes and actual simulator decisions
 
 ## 2. Regional transaction checks (operator)
 
+**Automated runner:** `ops/iam-sandbox/run.py`, run as `qsb-operator`, performs steps 2 and 3 below from a throwaway Lambda that uses the test role. The human access roles can't assume that role by design. It records the evidence and cleans up; see [its README](../ops/iam-sandbox/README.md). The manual procedure below remains the specification it follows.
+
 Prerequisites: a dedicated disposable sandbox table with string `pk` and `sk`,
 and an API test role whose only DynamoDB identity policy is the current
 `terraform/policies/app-records.json` statements, each scoped to that table ARN
