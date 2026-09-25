@@ -22,7 +22,7 @@ The `provision_runtime`, `runtime_*` and cleanup-endpoint settings have been rem
 
 ## Prerequisites
 
-- Terraform 1.7+ (less than 2), Node.js 22+, npm, Python 3 and curl.
+- Terraform 1.11+ (less than 2; S3 state lockfiles need 1.11), Node.js 22+, npm, Python 3 and curl.
 - An AWS account and an authenticated local AWS profile/session with deployment permissions. No access keys in `.tfvars`.
 - A clean, committed and pushed checkout. The provider account allowlist prevents accidental account targeting.
 - Enough regional Lambda reserved-concurrency quota for three functions (default two each).
@@ -77,7 +77,7 @@ Getting the role path wrong on the first apply means replacing the roles later, 
 1. Use `qsb-viewonly` to check that nothing named `<name>-*` exists yet. IAM role names are unique across the account.
 2. Check that the state key is empty, so `plan` must be create-only, then run `check-single-pipeline.py --deploy --first-apply`.
 3. Start the apply with a fresh session. CloudFront can take over 15 minutes, and exported credentials last at most an hour. If they expire mid-apply, Terraform writes `errored.tfstate`. In that case:
-   - run `terraform state push errored.tfstate`, and `terraform force-unlock` if a lock remains;
+   - run `terraform force-unlock` first if a lock remains, because `state push` takes the lock, then `terraform state push errored.tfstate`;
    - then plan again;
    - never re-apply blind.
 4. Register the new IDs. Take them from the outputs `cloudfront_distribution_id`, `origin_access_control_id`, `response_headers_policy_id` and `api_id`, and put them in the inventory keys `distributions`, `origin_access_controls`, `response_headers_policies` and `apis`. Put them *in place of* the parked legacy stacks' IDs: those stacks are admin-only until they're torn down, and swapping keeps the rendered policies the same size.

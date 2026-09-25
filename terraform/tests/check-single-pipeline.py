@@ -116,6 +116,8 @@ def main():
         try:
             plan = json.loads(content)
         except json.JSONDecodeError:
+            require(not flags, '--deploy and --first-apply need a saved plan from terraform show -json, '
+                               'not terraform test output')
             events = [json.loads(line) for line in content.splitlines() if line.strip()]
             require(any(e.get('type') == 'test_summary' and e['test_summary']['status'] == 'pass' for e in events),
                     'Terraform test suite must pass before its mock plans count as evidence')
