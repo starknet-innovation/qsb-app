@@ -59,7 +59,7 @@ Artifacts must remain in `terraform/.build` through plan/apply. Terraform reject
 
 Optionally supply both `runpod_endpoint_id` and `runpod_secret_arn`. The existing secret must contain JSON shaped as `{"apiKey":"<privately provisioned value>"}`. Provision its value privately outside Terraform; do not send it to an assistant or commit it. Terraform neither creates a secret version nor reads its value. Only the coordinator gets the exact secret read permission. Add the exact customer-managed KMS key ARN only when needed; cross-account/key policies need separate review.
 
-Endpoint capacity, zero minimum workers, worker image, TTL/deadlines, watchdogs, drain and deletion remain Runpod/operator responsibilities. AWS Lambda concurrency is **not** a GPU spending cap. Applying this stack does not start a workflow or change endpoint capacity. IAM-authorized direct validation invocations can use paid compute even while public transaction routes are gated: restrict operator access accordingly.
+The coordinator Lambda environment and `runpod_limits` output publish `workersMax=1`, `workersMin=0`, and `executionTimeoutMs=900000` from `server/gpu-spend.json`, plus `MAX_JOB_GPU_SECONDS=14745600` (4,096 GPU-hours per job). Before each paid submission the coordinator sets those endpoint limits and does not submit unless the provider confirms them. It atomically reserves the execution timeout before every paid POST and pauses if the cumulative time reservation would exceed that budget. Failed, cancelled, timed-out and uncertain submissions remain charged; stage changes and resume requests cannot reset it; it does not credit a 64-hit output as a finished range. Applying Terraform does not call Runpod, start a workflow, or authorize spend. `release.mainnetEnabled` and `broadcastAuthorized` stay false. AWS Lambda concurrency is **not** a GPU spending cap. The experimental GPU USD ceiling stays unevaluated. IAM-authorized direct validation invocations can use paid compute even while public transaction routes are gated: restrict operator access accordingly.
 
 ### State and configuration
 
@@ -95,3 +95,15 @@ terraform -chdir=terraform test
 The tests use a mocked AWS provider and plan only. They check disabled activation, persistence protection, absence of API provider credentials, no generic paid-work retry, and rejection of network/commit/partial-provider mismatches. They do not call AWS or Runpod and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
 
 References: [Lambda + HTTP API](https://developer.hashicorp.com/terraform/tutorials/aws/lambda-api-gateway), [fileset build-time semantics](https://developer.hashicorp.com/terraform/language/functions/fileset), [provider resource documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs).
+
+The coordinator Runpod credential must have permission to **update the configured
+endpoint** as well as submit/status/cancel jobs. The control-plane PATCH happens
+before a paid attempt is journaled. A failed check produces a resumable pause
+without consuming a submission; successful confirmation yields a single-use POST.
+The JSON file is the source of the reported limits; Terraform does not duplicate
+its attempt/timeout literals. The bundled application schema validates its bounds.
+See the operational runbook for sizing, worst-case execution allowance and limits
+of cost estimates. The 90-second coordinator timeout includes the CPU export,
+limits preflight, POST and database persistence. Applying this configuration does
+not establish a strict physical startup-worker bound: extra INITIALIZING provider
+records and idle/storage billing require separate operational observation.

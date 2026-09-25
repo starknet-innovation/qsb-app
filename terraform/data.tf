@@ -3,7 +3,14 @@ locals {
   build        = jsondecode(file("${local.artifacts}/manifest.json"))
   workflow_arn = "arn:${data.aws_partition.current.partition}:states:${var.region}:${var.aws_account_id}:stateMachine:${var.name}-withdrawal"
   runpod       = var.runpod_endpoint_id != "" && var.runpod_secret_arn != ""
-  functions    = toset(["api", "coordinator", "reference"])
+  gpu_spend    = jsondecode(file("${path.module}/../server/gpu-spend.json"))
+  gpu_limit_env = {
+    RUNPOD_WORKERS_MAX          = tostring(local.gpu_spend.workersMax)
+    RUNPOD_WORKERS_MIN          = tostring(local.gpu_spend.workersMin)
+    RUNPOD_EXECUTION_TIMEOUT_MS = tostring(local.gpu_spend.executionTimeoutMs)
+    MAX_JOB_GPU_SECONDS         = tostring(local.gpu_spend.maxJobGpuSeconds)
+  }
+  functions = toset(["api", "coordinator", "reference"])
   mime = {
     html = "text/html; charset=utf-8", js = "application/javascript", mjs = "application/javascript",
     css  = "text/css", json = "application/json", svg = "image/svg+xml", wasm = "application/wasm",
