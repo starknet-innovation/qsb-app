@@ -28,6 +28,11 @@ import {
 } from "./lib/backup";
 import { assembleQsb, validateRecovery, lockQsb } from "./lib/qsb";
 import {
+  rebuildWithdrawalFromSolvedResult,
+  signedCoordinatorResult,
+} from "./mainnet/localSignature";
+import type { CoordinatorSignedResult } from "./mainnet/coordinatorResult";
+import {
   parseBtc,
   formatBtc,
   withdrawalSchema,
@@ -44,10 +49,23 @@ const digest = async (text: string) =>
       await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)),
     ),
   );
+function downloadPublicResult(text: string, jobId: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(jobId))
+    throw new Error("Invalid solved result.");
+  const url = URL.createObjectURL(
+    new Blob([text], { type: "application/json" }),
+  );
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `qsb-coordinator-public-signed-result-${jobId}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 export default function TransactionDialog({
   vault,
   wallet,
   job,
+  solvedResult,
   onClose,
   onUpdated,
   supervisedSearch,
@@ -55,6 +73,7 @@ export default function TransactionDialog({
   vault: PublicVault;
   wallet: Wallet;
   job?: Job;
+  solvedResult?: unknown;
   onClose: () => void;
   onUpdated: () => void;
   supervisedSearch?: SupervisedSearch;
@@ -62,7 +81,7 @@ export default function TransactionDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   const generation = useRef(0);
   const submission = useRef<ReturnType<typeof retainedMainnetSubmission>|undefined>(undefined);
-  const lifetimeKey=fingerprint({vault,wallet,job:job?.id,supervisedSearch});
+  const lifetimeKey=fingerprint({vault,wallet,job:job?.id,supervisedSearch,solved:solvedResult??null});
   const lifetime=useRef(lifetimeKey);
   if(lifetime.current!==lifetimeKey){lifetime.current=lifetimeKey;generation.current++;}
 
@@ -305,13 +324,22 @@ export default function TransactionDialog({
           `/vaults/${vault.id}/funding`,
         );
         const helper = await input(job.manifest.helper);
-        const raw = await assembleQsb(
+        const local = solvedResult !== undefined ? await rebuildWithdrawalFromSolvedResult({
+          solved: solvedResult,
+          job,
+          stateJson: unlocked.stateJson,
+          helper,
+          fundingPreviousTxHex: previousTxHex,
+          assemble: assembleQsb,
+        }) : undefined;
+        const raw = local ? local.raw : await assembleQsb(
           unlocked.stateJson,
           job.manifest,
           job.solution,
         );
-        verifyWithdrawalCommitment(raw, job.manifest, job.solution);
-        const bound = await bindRecoveryAssembly(unlocked, job.solution, raw);
+        if (!local) verifyWithdrawalCommitment(raw, job.manifest, job.solution);
+        const solution = local ? local.solved.solution : job.solution;
+        const bound = await bindRecoveryAssembly(unlocked, solution, raw);
         const assemblyKey = `qsb-assembly:${vault.scriptHash}`;
         const rememberedAssembly = localStorage.getItem(assemblyKey);
         if (
@@ -334,10 +362,12 @@ export default function TransactionDialog({
           downloadBackup(backup, `${vault.id}-signing`);
           return;
         }
-        await assertRecoveryAssembly(unlocked, job.solution, raw);
-        const expected = helperPsbt(raw, helper, previousTxHex);
+        await assertRecoveryAssembly(unlocked, solution, raw);
+        const expected = local
+          ? local.transaction
+          : helperPsbt(raw, helper, previousTxHex);
         check();
-        await assertOperations();
+        if (!local) await assertOperations();
       check();
       const returned = await signPsbt(
           wallet.address,
@@ -345,6 +375,19 @@ export default function TransactionDialog({
           [0],
         );
         check();
+        if (local) {
+          const published: CoordinatorSignedResult = signedCoordinatorResult(
+            local.solved,
+            expected,
+            base64.decode(returned),
+            wallet,
+          );
+          downloadPublicResult(JSON.stringify(published), published.jobId);
+          setResult(
+            `Signed locally in Xverse: ${published.txid}. Nothing was broadcast. QSB consensus and chain inclusion are not established here.`,
+          );
+          return;
+        }
         const signed = verifySignedPsbt(expected, base64.decode(returned));
         signed.finalize();
         const r = await api<{ submission: { txid: string; status: string } }>(
@@ -411,6 +454,13 @@ export default function TransactionDialog({
               : "Prepare withdrawal"}
         </h2>
         <p>{vault.name}</p>
+        {job && solvedResult !== undefined && (
+          <p>
+            The solved result is public. Xverse signs the helper on this
+            device. The recovery backup stays in this browser, and nothing is
+            broadcast.
+          </p>
+        )}
         {result ? (
           <>
             <p role="status">{result}</p>
