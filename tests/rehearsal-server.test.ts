@@ -164,19 +164,22 @@ it("resumes a paused job when only another coverage account is stopped", async (
   const resumed = await app.request(post(`/jobs/${jobId}/resume`, {}, token));
   expect(resumed.status).toBe(202);
   expect((await resumed.json()).job.status).toBe("queued");
-  await store.put({
-    pk: `OWNER#${address}`,
-    sk: `JOB#${jobId}`,
-    version: 1,
-    job: { ...job, status: "paused", revision: 1 },
-    validation: {
-      coverageLedger: {
-        holdSolverBinarySha256: null,
-        measuresHoldSolverBinary: false,
-        accounts: [{ ...account, sessionId: `${address}/${jobId}` }],
+  await store.put(
+    {
+      pk: `OWNER#${address}`,
+      sk: `JOB#${jobId}`,
+      version: 1,
+      job: { ...job, status: "paused", revision: 1 },
+      validation: {
+        coverageLedger: {
+          holdSolverBinarySha256: null,
+          measuresHoldSolverBinary: false,
+          accounts: [{ ...account, sessionId: `${address}/${jobId}` }],
+        },
       },
     },
-  }, 1);
+    1,
+  );
   const blocked = await app.request(post(`/jobs/${jobId}/resume`, {}, token));
   expect(blocked.status).toBe(409);
   expect(await blocked.json()).toEqual({
@@ -237,10 +240,50 @@ it("refuses to resume an unknown submission even when a list miss set an allowan
   expect(await resumed.json()).toEqual({
     error: "Reconcile the unknown Runpod submission before retrying.",
   });
-  const kept = (await store.get(`OWNER#${address}`, `JOB#${jobId}`))?.job as Job;
+  const kept = (await store.get(`OWNER#${address}`, `JOB#${jobId}`))
+    ?.job as Job;
   expect(kept.status).toBe("paused");
   expect(kept.oneSubmissionAllowed).toBe(true);
   expect(kept.runpodId).toBeUndefined();
+  const row = (await store.get(`OWNER#${address}`, `JOB#${jobId}`))!;
+  await store.put(
+    {
+      ...row,
+      version: row.version + 1,
+      job: {
+        ...kept,
+        submissionReconciliation: {
+          kind: "not-submitted",
+          reason: "rejected-before-acceptance",
+          operator: "operator@example",
+          evidence: "audit://incident/1",
+          at: new Date().toISOString(),
+          revision: kept.revision,
+        },
+      },
+    },
+    row.version,
+  );
+  const allowed = await app.request(post(`/jobs/${jobId}/resume`, {}, token));
+  expect(allowed.status).toBe(202);
+  const queued = (await store.get(`OWNER#${address}`, `JOB#${jobId}`))!
+    .job as Job;
+  expect(queued.oneSubmissionAllowed).toBeUndefined();
+  expect(
+    (await app.request(post(`/jobs/${jobId}/resume`, {}, token))).status,
+  ).toBe(409);
+  const again = (await store.get(`OWNER#${address}`, `JOB#${jobId}`))!;
+  await store.put(
+    {
+      ...again,
+      version: again.version + 1,
+      job: { ...queued, status: "paused", error: job.error },
+    },
+    again.version,
+  );
+  expect(
+    (await app.request(post(`/jobs/${jobId}/resume`, {}, token))).status,
+  ).toBe(409);
 });
 it("blocks Teststream preflight when the miner reports a different chain and does not submit without a permit", async () => {
   const request = vi

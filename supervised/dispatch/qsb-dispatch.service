@@ -8,6 +8,7 @@ Type=oneshot
 ExecStart=/usr/bin/node /opt/qsb/dispatcher/dispatcher.cjs
 WorkingDirectory=/opt/qsb/dispatcher
 Environment=AWS_REGION=eu-west-1
+Environment=QSB_NETWORK=mainnet
 UMask=0077
 Restart=no
 TimeoutStartSec=35min

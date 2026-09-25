@@ -8,82 +8,106 @@ import { release, type Job, type PublicVault } from "../src/lib/model";
 import { NETWORK_ID } from "../src/lib/network";
 import { assertSolverPin, solverRelease } from "../src/lib/provenance";
 import { rehearsalAddressAllowed, transactionsEnabled } from "./network";
-import { Runpod } from "./providers";
-import { searchVersion } from "./search-ranges";
+import { Runpod, RUNPOD_JOB_TTL_MS } from "./providers";
+import { searchVersion, workRange } from "./search-ranges";
 import { store as defaultStore, type Store } from "./store";
 
 export class ReconciliationError extends Error {
-  readonly logged: boolean;
-  constructor(message: string, logged = false) {
+  constructor(message: string) {
     super(message);
     this.name = "ReconciliationError";
-    this.logged = logged;
   }
 }
-
+const evidence = z
+  .string()
+  .min(1)
+  .max(500)
+  .regex(/^[\x20-\x7e]+$/);
+export const reconciliationDecisionSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("provider-id"),
+      providerId: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+      operator: evidence,
+      evidence,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("not-submitted"),
+      reason: z.enum(["rejected-before-acceptance", "ttl-expired"]),
+      operator: evidence,
+      evidence,
+    })
+    .strict(),
+]);
+export type ReconciliationDecision = z.infer<
+  typeof reconciliationDecisionSchema
+>;
+export type SubmissionLookup = {
+  status(id: string): Promise<{ id: string; status: string; output?: unknown }>;
+  health(): Promise<{ jobs: { inQueue: number; inProgress: number } }>;
+};
+export type PollingStart = { started: boolean; reason?: string };
 export type ReconciliationLog = {
-  action:
-    | "load"
-    | "check-runpod"
-    | "record-provider-id"
-    | "resume-polling"
-    | "refuse";
+  action: string;
   jobId: string;
   owner: string;
-  providerId?: string;
-  inspected?: string[];
-  unreadable?: string[];
   reason?: string;
-  started?: boolean;
+  providerId?: string;
 };
-
-export type SubmissionLookup = {
-  requests(): Promise<Array<{ id: string }>>;
-  status(id: string): Promise<{ id?: string; input?: unknown }>;
+export type ReconciliationResult = {
+  outcome: "provider-id" | "not-submitted";
+  resubmitted: false;
+  providerId?: string;
+  pollingStarted: boolean;
 };
-
-export type PollingStart = { started: boolean; reason?: string };
-
-export type ReconciliationResult =
-  | {
-      outcome: "provider-id";
-      providerId: string;
-      resubmitted: false;
-      pollingStarted: boolean;
-    }
-  | {
-      outcome: "unresolved";
-      resubmitted: false;
-    };
-
-const unknownSubmission =
-  "Submission outcome unknown. Reconcile Runpod before resuming.";
-
-function refuse(message: string): never {
-  throw new ReconciliationError(message, true);
+export function pollingStartAllowed(owner: string): boolean {
+  return transactionsEnabled && rehearsalAddressAllowed(owner);
 }
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function unknownPause(job: Job): boolean {
-  return (
-    job.status === "paused" &&
-    !job.runpodId &&
-    job.error?.includes("Submission outcome unknown") === true
-  );
-}
-
-function parameterKey(job: Job): string {
-  return `${job.stage}:${job.solution?.sequence ?? ""}:${job.solution?.locktime ?? ""}`;
-}
-
-function selectedSolver(job: Job, vault: PublicVault) {
-  if ((vault.network ?? "mainnet") !== NETWORK_ID)
-    throw new ReconciliationError("VaultNetworkMismatch", true);
+/** Operator-only reconciliation. Never submits or cancels work. The provider's
+ * requests list is not submission history and status need not echo input.
+ */
+export async function reconcileUnknownSubmission(input: {
+  store: Store;
+  owner: string;
+  jobId: string;
+  decision: ReconciliationDecision;
+  lookup: SubmissionLookup;
+  log: (entry: ReconciliationLog) => void;
+  resumePolling: (job: Job) => Promise<PollingStart>;
+  now?: string;
+}): Promise<ReconciliationResult> {
+  const { store, owner, jobId, lookup, log } = input;
+  const decision = reconciliationDecisionSchema.parse(input.decision);
+  const pk = `OWNER#${owner}`,
+    sk = `JOB#${jobId}`;
+  const row = await store.get(pk, sk),
+    job = row?.job as Job | undefined;
+  if (!row || !job) throw new ReconciliationError("JobNotFound");
+  if (job.owner !== owner || job.id !== jobId)
+    throw new ReconciliationError("JobIdentityMismatch");
+  const recorded =
+    decision.kind === "provider-id" &&
+    job.status === "searching" &&
+    job.runpodId === decision.providerId;
+  if (
+    !recorded &&
+    !(
+      job.status === "paused" &&
+      !job.runpodId &&
+      job.error?.includes("Submission outcome unknown")
+    )
+  )
+    throw new ReconciliationError("UnknownSubmissionRequired");
+  if (job.oneSubmissionAllowed)
+    throw new ReconciliationError("DecisionAlreadyRecorded");
+  const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
+  const vault = vaultRow?.vault as PublicVault | undefined;
+  if (!vault || vault.network !== NETWORK_ID)
+    throw new ReconciliationError("VaultNetworkMismatch");
   if (vault.configuration && !job.solver)
-    throw new ReconciliationError("SolverPinRequired", true);
+    throw new ReconciliationError("SolverPinRequired");
   const selected = job.solver
     ? assertSolverPin(job.solver, vault)
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
@@ -92,265 +116,117 @@ function selectedSolver(job: Job, vault: PublicVault) {
     selected.kernelCommit !== release.kernelCommit ||
     selected.generatorCommit !== release.qsbCommit
   )
-    throw new ReconciliationError("SolverRuntimeMismatch", true);
-  return selected;
-}
-
-function expectedIdentity(job: Job, protocol: string, kernelCommit: string) {
-  const parameterSha256 = job.parameterHashes?.[parameterKey(job)];
-  if (!parameterSha256)
-    throw new ReconciliationError("SubmissionIdentityUnavailable", true);
+    throw new ReconciliationError("SolverRuntimeMismatch");
+  const now = input.now ?? new Date().toISOString();
+  if (!Number.isFinite(Date.parse(now)))
+    throw new ReconciliationError("InvalidTime");
+  if (decision.kind === "provider-id") {
+    const result = await lookup.status(decision.providerId);
+    if (result.id !== decision.providerId)
+      throw new ReconciliationError("ProviderIdMismatch");
+    if (
+      ![
+        "IN_QUEUE",
+        "IN_PROGRESS",
+        "COMPLETED",
+        "FAILED",
+        "CANCELLED",
+        "TIMED_OUT",
+      ].includes(result.status)
+    )
+      throw new ReconciliationError("ProviderStatusInvalid");
+    // Completed results must carry the worker's context. CPU validation and range
+    // credit still happen only in the coordinator, never in this command.
+    if (result.status === "COMPLETED") {
+      const output = z
+        .object({
+          manifestHash: z.string(),
+          stage: z.string(),
+          attempt: z.number(),
+          kernelCommit: z.string(),
+          workRange: z.record(z.string(), z.unknown()),
+        })
+        .parse(result.output);
+      const range = workRange(job.stage, job.attempt);
+      if (
+        output.manifestHash !== job.manifestHash ||
+        output.stage !== job.stage ||
+        output.attempt !== job.attempt ||
+        output.kernelCommit !== selected.kernelCommit ||
+        Object.entries(range).some(([k, v]) => output.workRange[k] !== v) ||
+        Object.keys(output.workRange).some((k) => !(k in range))
+      )
+        throw new ReconciliationError("ProviderContextMismatch");
+    }
+    if (recorded) {
+      const polling = await input.resumePolling(job);
+      return {
+        outcome: "provider-id",
+        providerId: decision.providerId,
+        resubmitted: false,
+        pollingStarted: polling.started,
+      };
+    }
+    job.runpodId = decision.providerId;
+    job.status = "searching";
+    delete job.error;
+  } else {
+    // A list miss, a timeout or a 5xx alone is not proof of non-acceptance.
+    // The operator must attest rejection before acceptance, or wait the durable
+    // submission's full provider TTL and independently confirm endpoint drain.
+    const health = await lookup.health();
+    if (health.jobs.inQueue !== 0 || health.jobs.inProgress !== 0)
+      throw new ReconciliationError("EndpointNotDrained");
+    if (decision.reason === "ttl-expired") {
+      const started = Date.parse(job.submissionStartedAt ?? "");
+      if (
+        !Number.isFinite(started) ||
+        Date.parse(now) < started + RUNPOD_JOB_TTL_MS
+      )
+        throw new ReconciliationError("SubmissionTtlNotExpired");
+    }
+    job.oneSubmissionAllowed = true;
+  }
+  const priorRevision = job.revision;
+  job.revision += 1;
+  job.updatedAt = now;
+  delete job.retryRequested;
+  job.submissionReconciliation = {
+    ...decision,
+    at: now,
+    revision: job.revision,
+  };
+  await store.atomicPut([
+    { row: { ...row, job, version: row.version + 1 }, expected: row.version },
+    {
+      row: {
+        pk,
+        sk: `RECONCILIATION#${jobId}#${priorRevision}`,
+        version: 0,
+        decision: job.submissionReconciliation,
+      },
+    },
+  ]);
+  log({
+    action: decision.kind,
+    owner,
+    jobId,
+    ...(decision.kind === "provider-id"
+      ? { providerId: decision.providerId }
+      : { reason: decision.reason }),
+  });
+  const polling =
+    decision.kind === "provider-id"
+      ? await input.resumePolling(job)
+      : { started: false };
   return {
-    protocol,
-    kernelCommit,
-    manifestHash: job.manifestHash,
-    stage: job.stage,
-    attempt: job.attempt,
-    searchVersion,
-    parameterSha256,
-    ...(job.solution
-      ? { sequence: job.solution.sequence, locktime: job.solution.locktime }
+    outcome: decision.kind,
+    resubmitted: false,
+    pollingStarted: polling.started,
+    ...(decision.kind === "provider-id"
+      ? { providerId: decision.providerId }
       : {}),
   };
-}
-
-type InputClass = "match" | "different" | "unreadable";
-
-/** A list entry is "different" only when an identity field disagrees. An extra key does not prove that. */
-function classifyInput(input: unknown, expected: object): InputClass {
-  if (!isPlainObject(input)) return "unreadable";
-  const fields = expected as Record<string, unknown>;
-  let differs = false;
-  for (const [key, value] of Object.entries(fields)) {
-    if (!Object.prototype.hasOwnProperty.call(input, key)) return "unreadable";
-    if (input[key] !== value) differs = true;
-  }
-  if (differs) return "different";
-  const allowed = new Set([...Object.keys(fields), "parameterBase64"]);
-  if (Object.keys(input).some((key) => !allowed.has(key))) return "unreadable";
-  return "match";
-}
-
-export function pollingStartAllowed(owner: string): boolean {
-  return transactionsEnabled && rehearsalAddressAllowed(owner);
-}
-
-/**
- * Check Runpod for a paused unknown submission and record one outcome.
- * This function never submits work.
- */
-export async function reconcileUnknownSubmission(input: {
-  store: Store;
-  owner: string;
-  jobId: string;
-  lookup: SubmissionLookup;
-  log: (entry: ReconciliationLog) => void;
-  resumePolling: (job: Job) => Promise<PollingStart>;
-  now?: string;
-}): Promise<ReconciliationResult> {
-  const { store, owner, jobId, lookup, log } = input;
-  const pk = `OWNER#${owner}`;
-  const sk = `JOB#${jobId}`;
-  log({ action: "load", jobId, owner });
-  const row = await store.get(pk, sk);
-  const job = row?.job as Job | undefined;
-  if (!row || !job) {
-    log({ action: "refuse", jobId, owner, reason: "job-not-found" });
-    return refuse("JobNotFound");
-  }
-  const recorded = job.status === "searching" && Boolean(job.runpodId);
-  if (!unknownPause(job) && !recorded) {
-    log({ action: "refuse", jobId, owner, reason: "not-unknown-submission" });
-    return refuse("UnknownSubmissionRequired");
-  }
-  const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
-  const vault = vaultRow?.vault as PublicVault | undefined;
-  if (!vaultRow || !vault) {
-    log({ action: "refuse", jobId, owner, reason: "vault-not-found" });
-    return refuse("VaultNotFound");
-  }
-  let identity: ReturnType<typeof expectedIdentity>;
-  try {
-    const selected = selectedSolver(job, vault);
-    identity = expectedIdentity(job, selected.protocol, selected.kernelCommit);
-  } catch (error) {
-    if (error instanceof ReconciliationError && error.logged) {
-      log({ action: "refuse", jobId, owner, reason: error.message });
-      throw error;
-    }
-    log({
-      action: "refuse",
-      jobId,
-      owner,
-      reason: "submission-identity-failed",
-    });
-    return refuse("SubmissionIdentityUnavailable");
-  }
-  const now = input.now ?? new Date().toISOString();
-  const dropAllowance = async () => {
-    if (job.oneSubmissionAllowed !== true) return;
-    delete job.oneSubmissionAllowed;
-    if (!recorded) {
-      job.status = "paused";
-      job.error = unknownSubmission;
-      delete job.retryRequested;
-    }
-    job.updatedAt = now;
-    await store.put({ ...row, version: row.version + 1, job }, row.version);
-  };
-  let listed: Array<{ id: string }>;
-  try {
-    listed = await lookup.requests();
-  } catch {
-    log({ action: "refuse", jobId, owner, reason: "provider-check-failed" });
-    await dropAllowance();
-    return refuse("ProviderCheckIncomplete");
-  }
-  if (listed.length >= 1000) {
-    log({ action: "refuse", jobId, owner, reason: "provider-list-truncated" });
-    await dropAllowance();
-    return refuse("ProviderCheckIncomplete");
-  }
-  const providerIds = listed.map((request) => request.id);
-  if (job.runpodId && !providerIds.includes(job.runpodId))
-    providerIds.push(job.runpodId);
-  const readings: Array<{
-    providerId: string;
-    kind: InputClass;
-    reason?: string;
-  }> = [];
-  for (const providerId of providerIds) {
-    if (readings.some((reading) => reading.providerId === providerId)) continue;
-    let status: { id?: string; input?: unknown };
-    try {
-      status = await lookup.status(providerId);
-    } catch {
-      readings.push({
-        providerId,
-        kind: "unreadable",
-        reason: "provider-status-failed",
-      });
-      continue;
-    }
-    if (status.id && status.id !== providerId) {
-      readings.push({
-        providerId,
-        kind: "unreadable",
-        reason: "provider-id-mismatch",
-      });
-      continue;
-    }
-    const kind = classifyInput(status.input, identity);
-    readings.push({
-      providerId,
-      kind,
-      ...(kind === "unreadable"
-        ? { reason: "provider-input-unreadable" }
-        : {}),
-    });
-  }
-  const inspected = readings.map((reading) => reading.providerId);
-  const unreadable = readings
-    .filter((reading) => reading.kind === "unreadable")
-    .map((reading) => reading.providerId);
-  const found = readings
-    .filter((reading) => reading.kind === "match")
-    .map((reading) => reading.providerId);
-  log({
-    action: "check-runpod",
-    jobId,
-    owner,
-    inspected,
-    ...(unreadable.length ? { unreadable } : {}),
-  });
-  if (unreadable.length > 0) {
-    for (const reading of readings) {
-      if (reading.kind !== "unreadable") continue;
-      log({
-        action: "refuse",
-        jobId,
-        owner,
-        providerId: reading.providerId,
-        inspected,
-        reason: reading.reason,
-      });
-    }
-    await dropAllowance();
-    return { outcome: "unresolved", resubmitted: false };
-  }
-  if (found.length > 1) {
-    log({ action: "refuse", jobId, owner, reason: "ambiguous-provider-match" });
-    await dropAllowance();
-    return refuse("AmbiguousProviderMatch");
-  }
-  if (found.length === 1) {
-    const providerId = found[0];
-    if (!providerId) {
-      log({ action: "refuse", jobId, owner, reason: "ambiguous-provider-match" });
-      await dropAllowance();
-      return refuse("AmbiguousProviderMatch");
-    }
-    if (recorded && job.runpodId !== providerId) {
-      log({
-        action: "refuse",
-        jobId,
-        owner,
-        providerId,
-        reason: "provider-id-differs",
-      });
-      await dropAllowance();
-      return refuse("ProviderIdDiffers");
-    }
-    if (!recorded) {
-      job.runpodId = providerId;
-      job.status = "searching";
-      delete job.error;
-      delete job.oneSubmissionAllowed;
-      delete job.retryRequested;
-      job.revision += 1;
-      job.updatedAt = now;
-      await store.put({ ...row, version: row.version + 1, job }, row.version);
-    }
-    log({
-      action: "record-provider-id",
-      jobId,
-      owner,
-      providerId,
-      ...(recorded ? { reason: "already-recorded" } : {}),
-    });
-    const polling = await input.resumePolling(job);
-    log({
-      action: "resume-polling",
-      jobId,
-      owner,
-      providerId,
-      started: polling.started,
-      ...(polling.reason ? { reason: polling.reason } : {}),
-    });
-    return {
-      outcome: "provider-id",
-      providerId,
-      resubmitted: false,
-      pollingStarted: polling.started,
-    };
-  }
-  log({
-    action: "refuse",
-    jobId,
-    owner,
-    ...(recorded ? { providerId: job.runpodId } : {}),
-    reason: recorded
-      ? "recorded-provider-missing"
-      : "list-is-not-submission-history",
-  });
-  await dropAllowance();
-  return { outcome: "unresolved", resubmitted: false };
-}
-
-function assertIdentifier(value: string | undefined, label: string): string {
-  if (!value || !/^[\x21-\x7e]{1,200}$/.test(value))
-    throw new ReconciliationError(`Invalid${label}`);
-  return value;
 }
 
 async function openRunpod(): Promise<Runpod> {
@@ -400,53 +276,66 @@ async function startPolling(job: Job): Promise<PollingStart> {
 
 export async function reconcileSubmissionCli(args: string[]): Promise<void> {
   try {
-    if (args.length !== 2) {
-      process.stderr.write(
-        "Usage: npx tsx scripts/reconcile-submission.ts <owner> <job-id>\n",
-      );
-      process.exitCode = 1;
-      return;
+    // Never let an operator command silently select the in-memory store.
+    if (!process.env.TABLE_NAME)
+      throw new ReconciliationError("TableNameRequired");
+    const [owner, jobId, ...flags] = args;
+    if (
+      !owner ||
+      !jobId ||
+      !/^[\x21-\x7e]{1,200}$/.test(owner) ||
+      !/^[\x21-\x7e]{1,200}$/.test(jobId)
+    )
+      throw new ReconciliationError("OwnerAndJobRequired");
+    const options: Record<string, string> = {};
+    for (let i = 0; i < flags.length; i += 2) {
+      const key = flags[i],
+        value = flags[i + 1];
+      if (
+        !key ||
+        !value ||
+        ![
+          "--provider-id",
+          "--not-submitted",
+          "--operator",
+          "--evidence",
+        ].includes(key) ||
+        key in options
+      )
+        throw new ReconciliationError("InvalidOptions");
+      options[key] = value;
     }
-    const owner = assertIdentifier(args[0], "owner");
-    const jobId = assertIdentifier(args[1], "job-id");
+    if (
+      Boolean(options["--provider-id"]) === Boolean(options["--not-submitted"])
+    )
+      throw new ReconciliationError("ExplicitDecisionRequired");
+    const decision = reconciliationDecisionSchema.parse({
+      ...(options["--provider-id"]
+        ? { kind: "provider-id", providerId: options["--provider-id"] }
+        : { kind: "not-submitted", reason: options["--not-submitted"] }),
+      operator: options["--operator"],
+      evidence: options["--evidence"],
+    });
     const endpoint = await openRunpod();
-    const log = (entry: ReconciliationLog) => {
-      process.stderr.write(`${JSON.stringify(entry)}\n`);
-    };
     const result = await reconcileUnknownSubmission({
       store: defaultStore,
       owner,
       jobId,
+      decision,
       lookup: {
-        requests: () => endpoint.requests(),
         status: (id) => endpoint.status(id),
+        health: () => endpoint.health(),
       },
-      log,
-      resumePolling: (job) => startPolling(job),
+      log: (entry) => process.stderr.write(`${JSON.stringify(entry)}\n`),
+      resumePolling: startPolling,
     });
-    switch (result.outcome) {
-      case "provider-id":
-        process.stdout.write(`${JSON.stringify(result)}\n`);
-        return;
-      case "unresolved":
-        process.stdout.write(`${JSON.stringify(result)}\n`);
-        process.exitCode = 1;
-        return;
-      default: {
-        const neverOutcome: never = result;
-        throw new ReconciliationError(
-          `Unhandled reconciliation outcome: ${String(neverOutcome)}`,
-        );
-      }
-    }
+    process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
-    if (!(error instanceof ReconciliationError) || !error.logged) {
-      const reason =
-        error instanceof ReconciliationError
-          ? error.message
-          : "reconciliation-failed";
-      process.stderr.write(`${JSON.stringify({ action: "refuse", reason })}\n`);
-    }
+    const reason =
+      error instanceof ReconciliationError
+        ? error.message
+        : "ReconciliationFailed";
+    process.stderr.write(`${JSON.stringify({ action: "refuse", reason })}\n`);
     process.exitCode = 1;
   }
 }

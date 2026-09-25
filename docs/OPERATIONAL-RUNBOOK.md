@@ -46,25 +46,59 @@ Treat `unknown`, `timeout`, and `http-ambiguous` as unpaid-or-paid until a provi
 
 ## Reconcile an unknown Runpod submission
 
-The coordinator pauses a job when a billable submission's outcome is unknown (`Submission outcome unknown. Reconcile Runpod before resuming.`). Leave the job paused. Do not resume it, and do not submit it again, until Runpod has been checked.
+An unknown POST is never retried automatically. The operator command requires an
+explicit decision with an operator identifier and a public evidence reference.
+Do not put credentials, wallet material, or raw logs in the evidence argument.
+The identifier is an operator assertion; IAM/CloudTrail identifies the caller.
 
-From a checkout of this repository, pass the job's owner and id:
+Required environment: `TABLE_NAME` (the CLI refuses MemoryStore), `AWS_REGION`,
+`RUNPOD_SECRET_ARN`, `RUNPOD_ENDPOINT_ID`. `WORKFLOW_ARN` is also required to restart
+polling. The operator role needs GetItem on job/vault records, transactional PutItem
+on the job and `RECONCILIATION#` audit rows, access to the configured provider
+credential (and its KMS key if applicable), and StartExecution on the configured
+workflow. The agent must not retrieve those credentials; provision them for the
+operator runtime. The CLI does not call `/run`, `/cancel` or broadcast.
+
+To attach a known provider ID from Runpod's console and matching operator logs:
 
 ```
-npx tsx scripts/reconcile-submission.ts <owner> <job-id>
+npx tsx scripts/reconcile-submission.ts OWNER JOB --provider-id PROVIDER_ID --operator OPERATOR --evidence audit://incident/reference
 ```
 
-The command loads that job, lists the endpoint's current Runpod requests with GET `/requests`, and reads each request with GET `/status`. It logs every action to stderr as one JSON object per line. A log line contains the job id, owner, and provider ids only. It does not contain credentials, parameter payloads, or wallet material.
+The command reads documented `/status/ID` fields; no `/requests` response shape or
+echoed `input` is assumed. The operator must bind live/terminal IDs to this exact
+job, stage, range, endpoint and submission window using logs/console evidence.
+Completed outputs additionally must match the stored manifest, stage, attempt,
+kernel and exact range. Attachment grants no completion credit: the coordinator
+still validates the output and CPU-checks hits. Existing attached IDs can restart
+polling idempotently. Mainnet switches remain unchanged, and disabled transaction
+routes prevent polling from being started.
 
-The command never calls Runpod `/run`, never resumes the job by itself, and never broadcasts.
+To authorize exactly one replacement after proving Runpod rejected the call
+before acceptance (for example a retained definite rejection, not a timeout/5xx):
 
-GET `/requests` is the endpoint's current request list. It is not a history of this job. Completed requests leave the list, and the client does not page it. A miss, an empty list, or a request that cannot be shown to be a different submission does not mean this job was never accepted. The command leaves the job paused, does not set `oneSubmissionAllowed`, and does not authorize another submission. Resume stays refused. If that flag was already set, this check removes it.
+```
+npx tsx scripts/reconcile-submission.ts OWNER JOB --not-submitted rejected-before-acceptance --operator OPERATOR --evidence audit://incident/rejection
+```
 
-The command stores a provider id only when every listed request was read, exactly one status input matches this job's manifest hash, stage, attempt, solver identity, and parameter hash, and every other request is a different submission. It then returns the job to `searching` so polling can read that id. Polling uses `/status`. While `release.mainnetEnabled` is false, the command does not start the coordinator, because that pass would fail the job. Re-run the command after transactions are enabled for the owner to start polling. A re-run reads a stored provider id even when the request list no longer includes it, and it does not submit.
+For an ambiguous call, use `--not-submitted ttl-expired` only after independently
+checking the endpoint and billing/log window. This mode requires the complete
+24-hour provider TTL to have elapsed from `submissionStartedAt`, saved by the
+coordinator before the POST. Legacy jobs without that timestamp cannot use this
+mode. The outcome name denotes replacement permission; TTL expiry does **not**
+prove that the old job was never accepted and can incur duplicate bounded work.
+Both modes require current health to show zero queued/in-progress requests.
+A list miss or an empty queue by itself never authorizes replacement.
 
-If more than one request matches, or any listed request cannot be read, the command records neither outcome and does not submit. It logs the full id list, including each unreadable id, before it returns.
+The decision and job change are one conditional transaction with a permanent
+`RECONCILIATION#JOB#REVISION` audit row. Repeated or racing decisions cannot grant
+multiple allowances. `/resume` requires the matching audited revision and consumes
+the allowance in the same write that advances the revision; the next unknown
+pause has no allowance. Time accounting is never cleared or refunded.
+This is an explicit operator attestation, not automatic verification of the cited
+external evidence. No live provider incident has been exercised for this change.
 
-This command does not set `release.mainnetEnabled` or `broadcastAuthorized`.
+Provider reference: https://docs.runpod.io/serverless/endpoints/send-requests
 
 ## Commit before deploy
 

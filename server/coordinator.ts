@@ -132,8 +132,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
   const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
   if (!vaultRow) throw new Error("VaultNotFound");
   const vault = vaultRow.vault as PublicVault;
-  if ((vault.network ?? "mainnet") !== NETWORK_ID)
-    throw new Error("VaultNetworkMismatch");
+  if (vault.network !== NETWORK_ID) throw new Error("VaultNetworkMismatch");
   await chain.assertNetwork();
   if (vault.configuration && !job.solver) throw new Error("SolverPinRequired");
   // Legacy jobs retain the historical release explicitly, never the current default.
@@ -182,6 +181,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       [key]: parameters.parameterSha256,
     };
     job.status = "searching";
+    job.submissionStartedAt = new Date().toISOString();
     delete job.retryRequested;
     delete job.oneSubmissionAllowed;
     await save();

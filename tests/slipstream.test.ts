@@ -38,6 +38,7 @@ async function fixture() {
     sk: "AUTH",
     version: 0,
     owner: "owner",
+    network: "mainnet",
   });
   await store.put({
     pk: "OWNER#owner",

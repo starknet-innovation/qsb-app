@@ -62,7 +62,7 @@ async function seed(extra: Partial<Job> = {}) {
     pk,
     sk: "VAULT#v",
     version: 0,
-    vault: { publicStateJson: "{}" },
+    vault: { publicStateJson: "{}", network: "mainnet" },
   });
 }
 beforeEach(() => {
@@ -112,6 +112,16 @@ it("consumes a one-submission allowance before the paid call and does not replay
   expect(
     ((await store.get(pk, sk))?.job as Job).oneSubmissionAllowed,
   ).toBeUndefined();
+});
+it("rejects a vault that omits its network before any paid request", async () => {
+  await seed();
+  const row = await store.get(pk, "VAULT#v");
+  await store.put(
+    { ...row!, vault: { publicStateJson: "{}" }, version: row!.version + 1 },
+    row!.version,
+  );
+  await expect(handler(event)).rejects.toThrow("VaultNetworkMismatch");
+  expect(mocks.run).not.toHaveBeenCalled();
 });
 it("stops a stale workflow revision before any paid request", async () => {
   await seed({ revision: 1 });

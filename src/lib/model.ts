@@ -100,8 +100,18 @@ export type Job = {
   runpodId?: string;
   txid?: string;
   retryRequested?: boolean;
-  /** Operator reconciliation found no Runpod request. Resume may submit once. */
+  /** Audited operator decision allows one replacement, consumed atomically by resume. */
   oneSubmissionAllowed?: true;
+  submissionStartedAt?: string;
+  submissionReconciliation?: {
+    kind: "provider-id" | "not-submitted";
+    operator: string;
+    evidence: string;
+    at: string;
+    revision: number;
+    providerId?: string;
+    reason?: "rejected-before-acceptance" | "ttl-expired";
+  };
   error?: string;
   computeSeconds: number;
   solution?: {

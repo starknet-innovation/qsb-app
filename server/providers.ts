@@ -154,8 +154,8 @@ export const runpodStatusSchema = z.object({
   executionTime: z.number().optional(),
   output: z.unknown().optional(),
   error: z.string().optional(),
-  input: z.unknown().optional(),
 });
+export const RUNPOD_JOB_TTL_MS = 86400000;
 export class Runpod {
   constructor(
     private endpoint: string,
@@ -199,41 +199,9 @@ export class Runpod {
     return z.object({ id: z.string() }).parse(
       await this.request("run", {
         input,
-        policy: { executionTimeout: 900000, ttl: 86400000 },
+        policy: { executionTimeout: 900000, ttl: RUNPOD_JOB_TTL_MS },
       }),
     );
-  }
-  async requests() {
-    // Read-only list. Reconciliation uses it to identify an existing request.
-    // This method does not submit work.
-    const signal = AbortSignal.timeout(20000);
-    for (let attempt = 0; ; attempt++) {
-      signal.throwIfAborted();
-      const response = await fetch(
-        `https://api.runpod.ai/v2/${this.endpoint}/requests`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${this.key}` },
-          signal,
-          redirect: "error",
-        },
-      );
-      if (response.ok)
-        return z
-          .object({
-            requests: z
-              .array(z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]+$/) }))
-              .max(1000),
-          })
-          .parse(await response.json()).requests;
-      const retryable = [429, 500, 502, 503, 504].includes(response.status);
-      if (!retryable || attempt >= 2)
-        throw new Error(`Provider request failed (${response.status})`);
-      await response.body?.cancel();
-      await new Promise((resolve) =>
-        setTimeout(resolve, attempt === 0 ? 250 : 750),
-      );
-    }
   }
   async status(id: string) {
     if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error("Invalid job id");
@@ -251,13 +219,14 @@ export class Runpod {
           redirect: "error",
         },
       );
-      if (response.ok)
-        return runpodStatusSchema.parse(await response.json());
+      if (response.ok) return runpodStatusSchema.parse(await response.json());
       const retryable = [429, 500, 502, 503, 504].includes(response.status);
       if (!retryable || attempt >= 2)
         throw new Error(`Provider request failed (${response.status})`);
       await response.body?.cancel();
-      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 250 : 750));
+      await new Promise((resolve) =>
+        setTimeout(resolve, attempt === 0 ? 250 : 750),
+      );
     }
   }
   cancel(id: string) {
