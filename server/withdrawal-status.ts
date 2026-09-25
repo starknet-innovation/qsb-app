@@ -31,7 +31,7 @@ export async function observeWithdrawal(
     return {
       status: terminal
         ? (intent.status as string)
-        : intent.postAcknowledged === true
+        : intent.postAcknowledged === true || (!exact && inMiner)
           ? "submitted"
           : "uncertain",
       chain: null,
