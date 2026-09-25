@@ -7,12 +7,15 @@ controller_commit=$3
 hourly_usd=$4
 [ -f /run/qsb-shutdown-armed ]
 systemctl is-active --quiet qsb-benchmark-expire.timer
-mkdir /var/lib/qsb-benchmark-started
-mkdir /results
+# A failed image-load preflight may resume; GPU execution may never repeat.
+[ ! -f /results/controller-commit.txt ]
+[ ! -f /results/benchmark.log ]
+mkdir -p /results
 cd "$artifact_dir"
 sha256sum -c SHA256SUMS
 gzip -dc image.tar.gz | docker load
 [ "$(docker image inspect qsb-aws-benchmark:sm86 --format '{{.Id}}')" = "$expected_image" ]
+mkdir /var/lib/qsb-benchmark-compute-started
 printf '%s\n' "$controller_commit" > /results/controller-commit.txt
 nvidia-smi > /results/nvidia-smi.txt
 set +e

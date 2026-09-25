@@ -33,3 +33,10 @@ uses a fresh private encrypted S3 bucket with TLS required. The host role gains
 GetObject on exactly the image object; it receives no bucket listing, writing,
 application access, presigned URL or operator credentials. Check the trusted
 archive hash after download. Delete the object and bucket during cleanup.
+
+Docker image stores differ: the build host reported the config digest while this
+AMI reports the OCI manifest digest as `.Id`. Derive the expected host identity
+from the checksum-verified archive's index.json/manifest.json, not from the host
+itself. The initial identity check stopped before any GPU process. The runner
+allows a preflight-only recovery while retaining separate durable compute-start
+and output markers that prohibit rerunning any GPU execution.
