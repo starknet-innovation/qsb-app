@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 libssl3
 COPY --from=build /opt/qsb-benchmark /opt/qsb-benchmark
 COPY worker/cpu /src/worker/cpu
 COPY ops/aws-gpu-benchmark /src/ops/aws-gpu-benchmark
+ENV OPENSSL_CONF=/src/ops/aws-gpu-benchmark/openssl.cnf
+RUN python3 -m unittest discover -s /src/ops/aws-gpu-benchmark -p 'test_*.py'
 RUN python3 /src/ops/aws-gpu-benchmark/prepare.py /opt/qsb-benchmark/fixture
 ENV PYTHONDONTWRITEBYTECODE=1
 ENTRYPOINT ["python3", "/src/ops/aws-gpu-benchmark/run.py"]
