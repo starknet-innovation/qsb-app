@@ -2,11 +2,11 @@ mock_provider "aws" {}
 mock_provider "archive" {}
 
 variables {
-  release_manifest_path        = "tests/fixtures/build-identities.json"
+  release_manifest_path        = "../.build/test-gpu-valid.json"
   aws_account_id               = "123456789012"
   gpu_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-gpu-boundary"
-  source_commit                = "0000000000000000000000000000000000000000"
-  image                        = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  source_commit                = jsondecode(file("../.build/manifest.json")).commit
+  image                        = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../../src/lib/releases/qsb-solver-aws-v0-1-0.json")).image)[1]}"
   subnets                      = ["subnet-0123456789abcdef0"]
   vpc_id                       = "vpc-0123456789abcdef0"
 }
@@ -54,5 +54,47 @@ run "reject_solver_digest_mismatch" {
 run "reject_app_source_mismatch" {
   command = plan
   variables { source_commit = "1111111111111111111111111111111111111111" }
+  expect_failures = [terraform_data.release_identity]
+}
+
+run "reject_unknown_id" {
+  command = plan
+  variables { release_manifest_path = "../.build/test-gpu-unknown-id.json" }
+  expect_failures = [terraform_data.release_identity]
+}
+
+run "reject_historical_schema" {
+  command = plan
+  variables {
+    release_manifest_path = "../.build/test-gpu-historical-schema.json"
+    image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../.build/test-gpu-historical-schema.json")).identities.solver.image)[1]}"
+  }
+  expect_failures = [terraform_data.release_identity]
+}
+
+run "reject_wrong_image" {
+  command = plan
+  variables {
+    release_manifest_path = "../.build/test-gpu-wrong-image.json"
+    image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../.build/test-gpu-wrong-image.json")).identities.solver.image)[1]}"
+  }
+  expect_failures = [terraform_data.release_identity]
+}
+
+run "reject_wrong_commit" {
+  command = plan
+  variables { release_manifest_path = "../.build/test-gpu-wrong-commit.json" }
+  expect_failures = [terraform_data.release_identity]
+}
+
+run "reject_wrong_reference" {
+  command = plan
+  variables { release_manifest_path = "../.build/test-gpu-wrong-reference.json" }
+  expect_failures = [terraform_data.release_identity]
+}
+
+run "reject_wrong_file" {
+  command = plan
+  variables { release_manifest_path = "../.build/test-gpu-wrong-file.json" }
   expect_failures = [terraform_data.release_identity]
 }

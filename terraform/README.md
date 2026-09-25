@@ -98,6 +98,7 @@ terraform -chdir=terraform init -backend=false
 terraform -chdir=terraform validate
 # First build from the current clean committed checkout (mainnet identity for these tests).
 export TF_VAR_source_commit="$(git rev-parse HEAD)"
+node --import tsx terraform/scripts/review-fixtures.mjs
 terraform -chdir=terraform test -json -verbose > /tmp/qsb-terraform-tests.jsonl
 python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-tests.jsonl
 ```

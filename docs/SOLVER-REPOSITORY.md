@@ -119,7 +119,12 @@ that release workflow, source commit and tag on 25 September 2026. An anonymous 
 ```sh
 gh attestation verify "oci://$(node -p 'require("./src/lib/releases/qsb-solver-aws-v0-1-0.json").image')" \
   --repo starknet-innovation/qsb-solver \
-  --signer-workflow starknet-innovation/qsb-solver/.github/workflows/release.yml
+  --signer-workflow starknet-innovation/qsb-solver/.github/workflows/release.yml \
+  --source-ref refs/tags/aws-v0.1.0 \
+  --source-digest "$(node -p 'require("./src/lib/releases/qsb-solver-aws-v0-1-0.json").solverCommit')" \
+  --deny-self-hosted-runners
+gh release download aws-v0.1.0 -R starknet-innovation/qsb-solver -p solver.json -O - \
+  | cmp - src/lib/releases/qsb-solver-aws-v0-1-0.json
 ```
 
 Build the app with the descriptor's ID as `--solver-release` to generate the

@@ -329,3 +329,12 @@ run "reject_changed_solver_selection_including_omission" {
   }
   expect_failures = [terraform_data.release]
 }
+
+run "reject_reference_identity_mismatch" {
+  command = plan
+  variables {
+    network = "mainnet"
+    build_manifest_path = ".build/test-bad-reference.json"
+  }
+  expect_failures = [terraform_data.release]
+}

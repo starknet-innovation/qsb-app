@@ -1,6 +1,11 @@
+variable "build_manifest_path" {
+  type        = string
+  default     = null
+  description = "Optional build manifest path; artifact hashes are always checked against this module's .build directory."
+}
 locals {
   artifacts         = "${path.module}/.build"
-  build             = jsondecode(file("${local.artifacts}/manifest.json"))
+  build             = jsondecode(file(var.build_manifest_path != null ? var.build_manifest_path : "${local.artifacts}/manifest.json"))
   workflow_arn      = "arn:${data.aws_partition.current.partition}:states:${var.region}:${var.aws_account_id}:stateMachine:${var.name}-withdrawal"
   solver_release_id = try(local.build.identities.solver.id, "")
   compute           = var.batch_job_queue != "" && var.batch_job_definition != "" && var.batch_job_bucket != ""

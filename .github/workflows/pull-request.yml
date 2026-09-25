@@ -57,6 +57,7 @@ jobs:
           terraform -chdir=terraform/gpu init -backend=false -input=false
           terraform -chdir=terraform/gpu validate
           terraform -chdir=terraform/gpu fmt -check
+          node --import tsx terraform/scripts/review-fixtures.mjs
           terraform -chdir=terraform/gpu test
           terraform -chdir=terraform test -json -verbose -var="source_commit=$(git rev-parse HEAD)" > /tmp/qsb-terraform-test.jsonl
           python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-test.jsonl
@@ -64,6 +65,14 @@ jobs:
           python3 ops/github-aws/test_render.py
           python3 terraform/gpu/test_watchdog.py
           python3 ops/github-aws/test_access.py
+
+      - name: Test explicitly selected solver deployment identities
+        run: |
+          node terraform/scripts/build.mjs --network=mainnet --solver-release="$(node -p 'require("./src/lib/releases/qsb-solver-aws-v0-1-0.json").id')"
+          node --import tsx terraform/scripts/review-fixtures.mjs
+          terraform -chdir=terraform test -json -verbose -var="source_commit=$(git rev-parse HEAD)" > /tmp/qsb-terraform-selected-test.jsonl
+          python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-selected-test.jsonl
+          terraform -chdir=terraform/gpu test
 
   browser-safety:
     runs-on: ubuntu-24.04

@@ -52,13 +52,35 @@ variable "release_manifest_path" {
 }
 locals {
   release_build = jsondecode(file(var.release_manifest_path))
+  enrolled_releases = { for name in fileset("${path.module}/../../src/lib/releases", "*.json") :
+    jsondecode(file("${path.module}/../../src/lib/releases/${name}")).id => jsondecode(file("${path.module}/../../src/lib/releases/${name}"))
+  }
+  enrolled_solver = try(local.enrolled_releases[local.release_build.identities.solver.id], null)
 }
 resource "terraform_data" "release_identity" {
-  input = local.release_build
+  input = local.release_build.identities
   lifecycle {
     precondition {
       condition     = try(local.release_build.clean && local.release_build.commit == var.source_commit && local.release_build.identities.reference.appCommit == var.source_commit, false)
       error_message = "Use a generated clean app build matching source_commit."
+    }
+    precondition {
+      condition = try(
+        local.enrolled_solver.schemaVersion == 3 &&
+        local.enrolled_solver.image == local.release_build.identities.solver.image &&
+        local.enrolled_solver.solverCommit == local.release_build.identities.solver.solverCommit,
+        false
+      )
+      error_message = "Build solver must match an enrolled schema-3 descriptor's ID, image and source commit."
+    }
+    precondition {
+      condition = try(
+        local.release_build.identities.reference.artifact == "reference.zip" &&
+        local.release_build.identities.reference.sha256 == local.release_build.files["reference.zip"] &&
+        alltrue([for name, hash in local.release_build.files : filesha256("${dirname(var.release_manifest_path)}/${name}") == hash]),
+        false
+      )
+      error_message = "CPU identity and every build artifact must match the manifest file hashes."
     }
     precondition {
       condition = try(
