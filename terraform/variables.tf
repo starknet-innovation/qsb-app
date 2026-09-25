@@ -57,7 +57,7 @@ variable "runpod_secret_kms_key_arn" {
   type        = string
   default     = ""
   validation {
-    condition     = var.runpod_secret_kms_key_arn == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", var.runpod_secret_kms_key_arn))
+    condition     = var.runpod_secret_kms_key_arn == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/(mrk-)?[a-f0-9-]+$", var.runpod_secret_kms_key_arn))
     error_message = "Supply one exact KMS key ARN or leave empty; wildcards are not allowed."
   }
 }

@@ -132,7 +132,7 @@ run "operator_reconcile_scope" {
     operator_principal_arns      = ["arn:aws:iam::123456789012:user/alice", "arn:aws:iam::123456789012:role/operators"]
     runpod_endpoint_id           = "exampleendpoint"
     runpod_secret_arn            = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/runpod-Example"
-    runpod_secret_kms_key_arn    = "arn:aws:kms:eu-west-1:123456789012:key/11111111-1111-4111-8111-111111111111"
+    runpod_secret_kms_key_arn    = "arn:aws:kms:eu-west-1:123456789012:key/mrk-11111111111111111111111111111111"
     iam_role_path                = "/qsb/runtime/"
     iam_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary"
   }

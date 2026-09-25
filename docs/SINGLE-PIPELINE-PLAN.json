@@ -2,7 +2,7 @@
   "evidence": "mock-provider-plan-inventory",
   "runs": {
     "baseline": {
-      "resourcesExcludingFrontendObjects": 40,
+      "resourcesExcludingFrontendObjects": 42,
       "frontendObjects": 21,
       "resourceTypes": {
         "aws_apigatewayv2_api": 1,
@@ -15,8 +15,8 @@
         "aws_cloudwatch_log_group": 5,
         "aws_cloudwatch_metric_alarm": 4,
         "aws_dynamodb_table": 1,
-        "aws_iam_role": 4,
-        "aws_iam_role_policy": 8,
+        "aws_iam_role": 5,
+        "aws_iam_role_policy": 9,
         "aws_lambda_function": 3,
         "aws_lambda_permission": 1,
         "aws_s3_bucket": 1,
@@ -30,7 +30,7 @@
       }
     },
     "configured_single_pipeline": {
-      "resourcesExcludingFrontendObjects": 41,
+      "resourcesExcludingFrontendObjects": 43,
       "frontendObjects": 21,
       "resourceTypes": {
         "aws_apigatewayv2_api": 1,
@@ -43,8 +43,8 @@
         "aws_cloudwatch_log_group": 5,
         "aws_cloudwatch_metric_alarm": 4,
         "aws_dynamodb_table": 1,
-        "aws_iam_role": 4,
-        "aws_iam_role_policy": 9,
+        "aws_iam_role": 5,
+        "aws_iam_role_policy": 10,
         "aws_lambda_function": 3,
         "aws_lambda_permission": 1,
         "aws_s3_bucket": 1,
@@ -58,7 +58,7 @@
       }
     }
   },
-  "testedCommit": "26666d264d7d1b90e86c55704f98449095abf3d7",
+  "testedCommit": "3170f64653a8d71a525ebd42e73e4f4f749d5bb4",
   "terraformVersion": "1.15.5",
   "awsProviderVersion": "6.66.0",
   "commands": [
