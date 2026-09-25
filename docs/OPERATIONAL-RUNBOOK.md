@@ -47,6 +47,11 @@ Treat `unknown`, `timeout`, and `http-ambiguous` as unpaid-or-paid until a provi
 
 ## Reconcile an unknown AWS Batch submission
 
+Run this as `qsb-operator` against the deployed AWS Batch coordinator; see
+[Reconciliation with the bootstrap operator profile](#reconciliation-with-the-bootstrap-operator-profile).
+The Batch path needs no provider secret. The profile has broader deployment
+privileges than this CLI uses; it is not a scoped reconciliation-only session.
+
 An unknown POST is never retried automatically. The operator command requires an
 explicit decision with an operator identifier and a public evidence reference.
 Do not put credentials, wallet material, or raw logs in the evidence argument.
@@ -59,8 +64,8 @@ Required environment: `TABLE_NAME` (the CLI refuses MemoryStore), `AWS_REGION`,
 `terraform output -raw transactions_enabled` or uncached `GET /api/config`
 (`operationsEnabled`, with `network` equal to `mainnet`). Missing or malformed
 values refuse before application imports. Both modes validate the required values before application imports,
-credentials, or database/provider reads and writes. The operator role needs GetItem on job/vault records, transactional PutItem
-on the job and `RECONCILIATION#` audit rows, Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. It cannot submit or cancel Batch jobs and does not broadcast.
+credentials, or database/provider reads and writes. The CLI needs GetItem on job/vault records, transactional PutItem
+on the job, `RECONCILIATION#` and `RECONCILIATION_REQUEST#` audit rows, Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. The CLI never submits or cancels Batch jobs and does not broadcast; the `qsb-operator` session itself has broader deployment and data permissions.
 
 To attach a known provider ID from AWS Batch's console and matching operator logs:
 
@@ -219,42 +224,34 @@ read-only simulation and exact regional transaction/batch requests, expected
 responses and consistent-read checks. The live sandbox portion remains pending
 operator confirmation; simulator output alone does not release the merge hold.
 
-### Assume the reconciliation role
+### Reconciliation with the bootstrap operator profile
 
-Terraform now exports `operator_reconcile_role_arn`. Only the exact IAM principals
-in the required `operator_principal_arns` variable may assume it, and AWS must
-see MFA. This role is separate from the parked reservation-authority operator.
-It cannot access SYSTEM or OUTPOINT partitions, Query/Scan, Update/Delete/BatchWrite,
-or alter reservation authority. Its GetItem and PutItem permissions use
-`ForAllValues:StringLike` on `dynamodb:LeadingKeys = OWNER#*` and require the key
-with `Null: false`. IAM authorizes transaction puts via `dynamodb:PutItem`, not a
-fictitious `dynamodb:TransactWriteItems` action. Conditions restrict partition keys,
-not sort keys; the CLI enforces the job/audit shapes and conditional versions.
+This profile procedure requires #54's Batch CLI and deployed coordinator. The
+older Runpod version requires secret access that `qsb-operator` does not have;
+it fails closed. Do not use it or add secret permissions as a workaround.
+For both provider-submission and TX# reconciliation, use the MFA-backed
+`qsb-operator` profile from [the access runbook](../ops/github-aws/README.md#use-them).
+The user may assume only the two bootstrap roles, and the roles cannot chain.
+Do not configure a `qsb-reconcile-mfa` profile pointing at the runtime reconcile
+role: those explicit denies make it unreachable. Terraform's separately scoped
+`operator_reconcile_role_arn` remains dormant for this bootstrap user.
 
-Before invoking the CLI, the operator configures an MFA-capable source profile
-and a role profile in their local AWS config (replace these public placeholders):
+The actual `qsb-operator` session has deployment privileges, including
+`dynamodb:*` on QSB tables. It is not restricted to OWNER partitions and can
+Query/Scan/Update/Delete and access SYSTEM/OUTPOINT records. The reconciliation
+CLI's exact-record, conditional-version and audit checks provide the operational
+restriction here; the session's IAM policy does not enforce the narrower CLI
+scope. Do not describe this profile as a least-privilege reconciliation identity.
 
-```ini
-[profile qsb-reconcile-mfa]
-role_arn = arn:aws:iam::123456789012:role/qsb/runtime/qsb-app-operator-reconcile
-source_profile = your-approved-iam-user-profile
-mfa_serial = arn:aws:iam::123456789012:mfa/your-device
-region = eu-west-1
-```
-
-Use the actual Terraform output ARN, including its configured path. The source
-identity also needs permission to assume that role. IAM Identity Center/federated
-MFA does not automatically supply this condition; use an approved MFA-capable
-identity, never weaken the trust policy. AWS CLI prompts for MFA and caches the
-short-lived role credentials. Run inside a subshell so session credentials do
-not remain in the parent shell; disable tracing and never print or share them:
+Have the human establish the MFA session first. Run inside a subshell to keep
+exported credentials out of the parent shell; never print or share credentials:
 
 ```sh
 (
   set +x
   set -e
-  aws sts get-caller-identity --profile qsb-reconcile-mfa
-  session_exports="$(aws configure export-credentials --profile qsb-reconcile-mfa --format env)" || exit 1
+  aws sts get-caller-identity --profile qsb-operator
+  session_exports="$(aws configure export-credentials --profile qsb-operator --format env)" || exit 1
   eval "$session_exports"
   unset session_exports
   unset AWS_PROFILE AWS_DEFAULT_PROFILE
@@ -267,20 +264,21 @@ not remain in the parent shell; disable tracing and never print or share them:
   export AWS_BATCH_JOB_BUCKET='qsb-gpu-123456789012-eu-west-1-jobs'
   export WORKFLOW_ARN='arn:aws:states:eu-west-1:123456789012:stateMachine:qsb-app-withdrawal'
   export QSB_NETWORK='mainnet'
+  # Set explicitly to the verified deployed switch; false refuses mainnet polling.
+  export QSB_MAINNET_ENABLED='false'
   npx tsx scripts/reconcile-submission.ts OWNER JOB --provider-id PROVIDER_ID --operator OPERATOR --evidence audit://incident/reference
 )
 ```
 
-The six environment values must come from the intended deployment. Do not put a
-provider key into any of them or manually fetch a secret value: the CLI obtains
-the configured credential at runtime. The example attaches an already-known ID;
-it is not permission to attest non-submission or spend again. Use the separate
-reconciliation procedure and evidence requirements above for those decisions.
-The role grants no broadcast permission and changes no mainnet activation flag.
-
-Policy references: [DynamoDB LeadingKeys](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/specifying-conditions.html)
-and [AWS MFA-protected API access](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_configure-api-require.html).
-Local policy/plan tests do not prove a live assumed-role session or regional IAM enforcement.
+Use the intended deployment's values, including the recorded Batch definition
+revision for recovery of an older request. Verify the deployed coordinator uses
+that revision before restarting polling; changing local environment does not
+change Lambda. The CLI makes no paid submission and does not broadcast, though
+the operator identity has broader capabilities. This example is not permission
+to attest non-submission, resume paid work or activate mainnet. All existing
+reconciliation evidence requirements and exact-spend authorization still apply.
+No secret retrieval is needed by the Batch path. Live profile/MFA behavior remains
+a post-bootstrap check in the linked access runbook.
 
 ### Reconcile an uncertain withdrawal (TX#)
 
@@ -294,7 +292,7 @@ replacement bytes for the vault.
    Confirmation is established from the funding outpoint's actual spender and
    expected spend, not solely from the original txid. Investigate a foreign-spend
    alert immediately; do not treat it as successful inclusion.
-2. Under the scoped reconciliation-role session above, set `TABLE_NAME`,
+2. Under the bootstrap qsb-operator session above (with its broader deployment privileges), set `TABLE_NAME`,
    `AWS_REGION` and `QSB_NETWORK=mainnet` for the intended deployment, then run:
 
    ```sh

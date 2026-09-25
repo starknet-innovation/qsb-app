@@ -91,8 +91,10 @@ QSB_NETWORK=mainnet TABLE_NAME=your-records-table AWS_REGION=eu-west-1 \
     --operator OPERATOR --evidence audit://incident/reference
 ```
 
-Use the approved scoped reconciliation-role session described in the operational
-runbook. This CLI requires the persistent table and mainnet configuration before
+Use the MFA-backed `qsb-operator` session described in
+[Reconciliation with the bootstrap operator profile](OPERATIONAL-RUNBOOK.md#reconciliation-with-the-bootstrap-operator-profile).
+That session has broader deployment and data privileges; the CLI's conditional
+record checks restrict this operation, not the session's IAM scope. This CLI requires the persistent table and mainnet configuration before
 importing clients. It loads `JOB#` → original `TX#`, checks owner/job identity,
 exact signed-byte hash and stored spend binding, then observes the funding
 outpoint and original miner txid using the same status logic as the API. It saves

@@ -31,6 +31,21 @@ gpu_role = iam('role/qsb/runtime/qsb-gpu-job')
 queue = arn('batch', 'job-queue/qsb-gpu')
 
 operator_cases = [
+    ('allow api invocation permission', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), True,
+     [ctx('lambda:Principal', 'apigateway.amazonaws.com')]),
+    ('allow watchdog invocation permission', 'lambda:AddPermission', arn('lambda', 'function:qsb-gpu-watchdog'), True,
+     [ctx('lambda:Principal', 'events.amazonaws.com')]),
+    ('deny external lambda principal', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), 'explicitDeny',
+     [ctx('lambda:Principal', '999999999999')]),
+    ('deny missing lambda principal', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
+    ('deny public lambda principal', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), 'explicitDeny',
+     [ctx('lambda:Principal', '*')]),
+    ('deny function url creation', 'lambda:CreateFunctionUrlConfig', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
+    ('deny function url updates', 'lambda:UpdateFunctionUrlConfig', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
+    ('deny table resource policy', 'dynamodb:PutResourcePolicy', arn('dynamodb', 'table/qsb-records'), 'explicitDeny', []),
+    ('silence the analyzer', 'access-analyzer:DeleteAnalyzer', arn('access-analyzer', 'analyzer/qsb-external-access'),
+     'explicitDeny', []),
+    ('deny registry resource policy', 'ecr:SetRepositoryPolicy', arn('ecr', 'repository/qsb-solver'), 'explicitDeny', []),
     ('submit smoke job', 'batch:SubmitJob', queue, True, []),
     ('submit to other queue', 'batch:SubmitJob', arn('batch', 'job-queue/other'), False, []),
     ('update compute environment', 'batch:UpdateComputeEnvironment', arn('batch', 'compute-environment/qsb-gpu'), True, []),
@@ -47,6 +62,15 @@ operator_cases = [
     ('other rule', 'events:PutRule', arn('events', 'rule/other'), False, []),
     ('bounded gpu role', 'iam:CreateRole', gpu_role, True, gpu_bound),
     ('unbounded gpu role', 'iam:CreateRole', gpu_role, False, []),
+    ('gpu role with runtime boundary', 'iam:CreateRole', gpu_role, 'explicitDeny',
+     [ctx('iam:PermissionsBoundary', iam('policy/qsb/bootstrap/qsb-runtime-boundary'))]),
+    ('assume a runtime role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-api'), 'explicitDeny', []),
+    ('pass non-gpu role to tasks', 'iam:PassRole', iam('role/qsb/runtime/qsb-research-api'), False,
+     [ctx('iam:PassedToService', 'ecs-tasks.amazonaws.com')]),
+    ('terminate job with other tag', 'batch:TerminateJob', arn('batch', 'job/abc'), False,
+     [ctx('aws:ResourceTag/Project', 'other')]),
+    ('pass gpu role to lambda', 'iam:PassRole', gpu_role, True, [ctx('iam:PassedToService', 'lambda.amazonaws.com')]),
+    ('pass gpu role to batch', 'iam:PassRole', gpu_role, False, [ctx('iam:PassedToService', 'batch.amazonaws.com')]),
     ('add gpu boundary', 'iam:PutRolePermissionsBoundary', gpu_role, True, gpu_bound),
     ('remove boundary', 'iam:DeleteRolePermissionsBoundary', gpu_role, False, []),
     ('pass gpu role to tasks', 'iam:PassRole', gpu_role, True, [ctx('iam:PassedToService', 'ecs-tasks.amazonaws.com')]),
@@ -65,11 +89,15 @@ viewonly_cases = [
     ('describe queues', 'batch:DescribeJobQueues', '*', True, []),
     ('list schedules', 'scheduler:ListSchedules', '*', True, []),
     ('simulate policy', 'iam:SimulateCustomPolicy', '*', True, []),
+    ('list analyzer findings', 'access-analyzer:ListFindingsV2', '*', True, []),
     ('read object', 's3:GetObject', 'arn:aws:s3:::any/x', False, []),
     ('read item', 'dynamodb:GetItem', arn('dynamodb', 'table/qsb-records'), False, []),
     ('read secret', 'secretsmanager:GetSecretValue', arn('secretsmanager', 'secret:any'), False, []),
     ('read logs', 'logs:GetLogEvents', arn('logs', 'log-group:any:*'), False, []),
     ('submit job', 'batch:SubmitJob', queue, False, []),
+    ('read object version', 's3:GetObjectVersion', 'arn:aws:s3:::any/x', False, []),
+    ('read stack template', 'cloudformation:GetTemplate', arn('cloudformation', 'stack/any/*'), 'explicitDeny', []),
+    ('assume any role', 'sts:AssumeRole', iam('role/any'), 'explicitDeny', []),
 ]
 gpu_cases = [
     ('boundary: job input read', 's3:GetObject', f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/inputs/x', True, []),
@@ -94,11 +122,24 @@ def simulate(label, documents, role, cases):
         if r.returncode:
             raise SystemExit(f'{label}/{name}: simulator call failed')
         decision = json.loads(r.stdout)['EvaluationResults'][0]['EvalDecision']
-        assert (decision == 'allowed') == allowed, (label, name, decision)
+        # A string expectation names the exact decision, so a guard deny can't pass as an implicit one.
+        ok = decision == allowed if isinstance(allowed, str) else (decision == 'allowed') == allowed
+        assert ok, (label, name, decision)
         print(f'{label}: {name}: {decision}', flush=True)
 
 
 simulate('operator', out['operator']['policies'], 'qsb-operator', operator_cases)
 simulate('viewonly', out['viewonly']['policies'], 'qsb-viewonly', viewonly_cases)
 simulate('gpu-boundary', [out['gpu_boundary']['document']], None, gpu_cases)
-print(f'Passed {len(operator_cases) + len(viewonly_cases) + len(gpu_cases)} IAM simulations.', flush=True)
+user_cases = [
+    ('assume operator', 'sts:AssumeRole', iam('role/qsb/bootstrap/qsb-operator'), True, []),
+    ('assume the reconcile role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-operator-reconcile'),
+     'explicitDeny', []),
+    ('assume operator-made runtime role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-api'), 'explicitDeny', []),
+    ('read records directly', 'dynamodb:GetItem', arn('dynamodb', 'table/qsb-research-records'), 'explicitDeny', []),
+    ('invoke a function directly', 'lambda:InvokeFunction', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
+    ('create access key', 'iam:CreateAccessKey', iam('user/qsb/operators/' + c['operator_user']), 'explicitDeny', []),
+]
+simulate('user', [out['user']['inline']], None, user_cases)
+total = len(operator_cases) + len(viewonly_cases) + len(gpu_cases) + len(user_cases)
+print(f'Passed {total} IAM simulations.', flush=True)

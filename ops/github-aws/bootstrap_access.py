@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 from access import MANAGED_POLICY_LIMIT, access, size
+from analyzer_readiness import ensure_analyzer
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--profile', required=True)
@@ -31,7 +32,7 @@ if not remote or remote[0] != commit:
 
 
 def aws(*args):
-    r = subprocess.run(['aws', '--profile', a.profile, '--region', c['region'], '--output', 'json', '--no-cli-pager', *args],
+    r = subprocess.run(['aws', '--profile', a.profile, '--region', c['region'], '--output', 'json', '--no-cli-pager', '--cli-connect-timeout', '10', '--cli-read-timeout', '20', *args],
                        capture_output=True, text=True)
     if r.returncode:
         code = re.search(r'\(([A-Za-z]+)\)', r.stderr)
@@ -50,6 +51,7 @@ plan = {
     'user': out['user']['path'] + out['user']['name'],
     'roles': {'qsb-viewonly': ['ViewOnlyAccess', *viewonly_names], 'qsb-operator': operator_names},
     'gpu_boundary': 'qsb-gpu-boundary',
+    'external_access_analyzer': 'qsb-external-access (created only if the account has none)',
     'policy_sizes': {n: size(d) for n, d in zip(viewonly_names + operator_names,
                                                 out['viewonly']['policies'] + out['operator']['policies'])},
 }
@@ -60,16 +62,22 @@ print(json.dumps(plan, indent=2), flush=True)
 if not a.apply:
     raise SystemExit()
 
-# Fail closed if anything already exists; inspect and reconcile it separately.
-roles = {r['RoleName'] for r in aws('iam', 'list-roles', '--path-prefix', '/qsb/')['Roles']}
-policies = {x['PolicyName'] for x in aws('iam', 'list-policies', '--scope', 'Local', '--path-prefix', '/qsb/')['Policies']}
-users = {u['UserName'] for u in aws('iam', 'list-users', '--path-prefix', '/qsb/')['Users']}
+# Fail closed if anything already exists; inspect and reconcile it separately. Role, user
+# and customer-managed policy names are unique account-wide, whatever their path.
+roles = {r['RoleName'] for r in aws('iam', 'list-roles')['Roles']}
+policies = {x['PolicyName'] for x in aws('iam', 'list-policies', '--scope', 'Local')['Policies']}
+users = {u['UserName'] for u in aws('iam', 'list-users')['Users']}
 clash = ({'qsb-viewonly', 'qsb-operator'} & roles) | ({'qsb-gpu-boundary', *viewonly_names, *operator_names} & policies) \
     | ({out['user']['name']} & users)
 if clash:
     raise SystemExit('Already exists, inspect before updating: ' + ', '.join(sorted(clash)))
 if 'qsb-runtime-boundary' not in policies:
     raise SystemExit('Run bootstrap.py first: qsb-runtime-boundary is missing')
+
+
+# An analyzer failure must leave the create-once human identities untouched.
+readiness = ensure_analyzer(aws, commit)
+print(f'external-access analyzer {readiness}', flush=True)
 
 
 def create_policy(name, document, description):
@@ -102,4 +110,5 @@ for role in ('viewonly', 'operator'):
     for policy_arn in attached[role]:
         aws('iam', 'attach-role-policy', '--role-name', spec['name'], '--policy-arn', policy_arn)
     print(f"created role {spec['name']} with {len(attached[role])} managed policies", flush=True)
-print(json.dumps({'done': True, 'commit': commit, 'next': 'set console password and MFA for the user as root'}), flush=True)
+print(json.dumps({'done': True, 'commit': commit, 'next': 'set console password and TOTP MFA for the user as root'}),
+      flush=True)
