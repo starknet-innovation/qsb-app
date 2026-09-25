@@ -161,6 +161,7 @@ export async function reconcileUnknownSubmission(input: {
     selected.generatorCommit !== release.qsbCommit
   )
     throw new ReconciliationError("SolverRuntimeMismatch");
+  let replacementRequestKey: string | undefined;
   const now = input.now ?? new Date().toISOString();
   if (!Number.isFinite(Date.parse(now)))
     throw new ReconciliationError("InvalidTime");
@@ -219,22 +220,20 @@ export async function reconcileUnknownSubmission(input: {
   } else {
     // AWS has no submission TTL. The explicit Batch recovery policy requires
     // the 30-minute watchdog ceiling plus one 5-minute interval, positive queue
-    // drain, and exact-name absence within the terminal-job retention window.
+    // drain and discovery. After terminal retention expires, absence is not
+    // proof of non-acceptance; the explicitly accepted bounded risk still applies.
     if (decision.reason === "ttl-expired")
       throw new ReconciliationError("AwsBatchHasNoSubmissionTtl");
     if (decision.reason === "batch-window-elapsed") {
-      if (job.batchReplacementUsed)
-        throw new ReconciliationError("BatchReplacementAlreadyUsed");
       const started = Date.parse(job.submissionStartedAt ?? "");
       const elapsed = Date.parse(now) - started;
-      if (
-        !Number.isFinite(elapsed) ||
-        elapsed < 35 * 60 * 1000 ||
-        elapsed >= 7 * 24 * 60 * 60 * 1000
-      )
+      if (!Number.isFinite(elapsed) || elapsed < 35 * 60 * 1000)
         throw new ReconciliationError("BatchRecoveryWindowRequired");
       if (!job.batchSubmission || !lookup.findRequest)
         throw new ReconciliationError("BatchRequestIdentityRequired");
+      replacementRequestKey = `RECONCILIATION_REQUEST#${jobId}#${job.batchSubmission.jobName}`;
+      if (await store.get(pk, replacementRequestKey))
+        throw new ReconciliationError("BatchReplacementAlreadyUsed");
       const found = await lookup.findRequest(job.batchSubmission);
       if (found)
         return reconcileUnknownSubmission({
@@ -251,7 +250,7 @@ export async function reconcileUnknownSubmission(input: {
     if (health.jobs.inQueue !== 0 || health.jobs.inProgress !== 0)
       throw new ReconciliationError("EndpointNotDrained");
     if (decision.reason === "batch-window-elapsed")
-      job.batchReplacementUsed = true;
+      job.batchReplacementFor = job.batchSubmission!.jobName;
     job.oneSubmissionAllowed = true;
   }
   const priorRevision = job.revision;
@@ -264,6 +263,15 @@ export async function reconcileUnknownSubmission(input: {
     revision: job.revision,
   };
   await store.atomicPut([
+    ...(replacementRequestKey
+      ? [{ row: {
+          pk,
+          sk: replacementRequestKey,
+          version: 0,
+          request: job.batchSubmission,
+          decision: job.submissionReconciliation,
+        } }]
+      : []),
     { row: { ...row, job, version: row.version + 1 }, expected: row.version },
     {
       row: {

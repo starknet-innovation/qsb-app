@@ -119,6 +119,7 @@ it("does not submit a paused unknown job that already has one later submission a
 it("consumes a one-submission allowance before the paid call and does not replay it", async () => {
   await seed({
     oneSubmissionAllowed: true,
+    batchReplacementFor: "prior-uncertain-request",
     gpuSubmissions: 7,
     gpuBudgetReservedSeconds: 6300,
   });
@@ -132,6 +133,7 @@ it("consumes a one-submission allowance before the paid call and does not replay
   expect(
     ((await store.get(pk, sk))?.job as Job).oneSubmissionAllowed,
   ).toBeUndefined();
+  expect(((await store.get(pk, sk))?.job as Job).batchReplacementFor).toBeUndefined();
   expect(await handler(event)).toMatchObject({ done: true });
   expect(mocks.run).toHaveBeenCalledTimes(1);
   expect((await store.get(pk, sk))?.job).toMatchObject({
@@ -702,4 +704,35 @@ it("persists the request identity in the same paid intent before calling SubmitJ
   });
   await expect(handler(event)).rejects.toThrow("lost response");
   expect((await store.get(pk,sk))!.job).toHaveProperty("batchSubmission.jobName", "qsb-test");
+});
+
+it.each(["AWS_BATCH_JOB_QUEUE", "REFERENCE_FUNCTION"])("preserves uncertain POST through missing %s and refuses resume", async (setting) => {
+  await seed({status:"searching",submissionStartedAt:"2026-09-25T00:00:00.000Z",gpuSubmissions:7,gpuBudgetReservedSeconds:6300,oneSubmissionAllowed:true});
+  const prior = process.env[setting];
+  delete process.env[setting];
+  await handler(event);
+  const paused = (await store.get(pk,sk))!;
+  expect(paused.job).toMatchObject({status:"paused",submissionStartedAt:"2026-09-25T00:00:00.000Z",gpuSubmissions:7,gpuBudgetReservedSeconds:6300,error:expect.stringContaining("Submission outcome unknown")});
+  expect(paused.job).not.toHaveProperty("oneSubmissionAllowed");
+  expect(paused.job).not.toHaveProperty("runpodId");
+  process.env[setting] = prior;
+  const { createApp } = await import("../server/app");
+  const { createHash } = await import("node:crypto");
+  const token = "a".repeat(43);
+  await store.put({pk:`SESSION#${createHash("sha256").update(token).digest("hex")}`,sk:"AUTH",version:0,owner:event.owner,network:"mainnet"});
+  const response = await createApp(store).request(`/api/jobs/${event.jobId}/resume`, {method:"POST",headers:{Authorization:`Bearer ${token}`}});
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({error:"Reconcile the unknown compute provider submission before retrying."});
+  await handler(event);
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it.each(["configuration", "prepare"])("retains pending request allowance during %s failure before paid intent", async (failure) => {
+  await seed({ batchReplacementFor: "qsb-prior-request" });
+  if (failure === "configuration") delete process.env.AWS_BATCH_JOB_QUEUE;
+  else mocks.prepareRun.mockRejectedValue(new Error("preparation failed"));
+  await handler(event);
+  expect(((await store.get(pk, sk))!.job as Job).batchReplacementFor).toBe("qsb-prior-request");
+  expect(mocks.run).not.toHaveBeenCalled();
 });

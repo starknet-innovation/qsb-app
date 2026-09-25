@@ -119,8 +119,8 @@ export type Job = {
   retryRequested?: boolean;
   /** Audited operator decision allows one replacement, consumed atomically by resume. */
   oneSubmissionAllowed?: true;
-  /** At most one ambiguous Batch replacement per withdrawal; never reset. */
-  batchReplacementUsed?: true;
+  /** Pending replacement for this uncertain request; cleared by the next paid intent. */
+  batchReplacementFor?: string;
   submissionStartedAt?: string;
   batchSubmission?: BatchSubmissionIdentity;
   submissionReconciliation?: {

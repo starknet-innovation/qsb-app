@@ -14,10 +14,31 @@ Use an operator-configured AWS profile and explicitly supply the expected `aws_a
 terraform init -backend-config="bucket=${QSB_STATE_BUCKET:?Set the operator state bucket}" -backend-config=key=qsb/gpu/terraform.tfstate -backend-config=region=eu-west-1 -backend-config=encrypt=true -backend-config=use_lockfile=true
 ```
 
-Supply `source_commit` (the clean pushed app commit), `image` (verified ECR digest), `vpc_id` and public `subnets` with an Internet gateway. On first deployment only, target the ECR repository, import the checksummed solver workflow image, push it and record the resulting manifest digest before a full plan/apply. Never use a mutable tag or substitute the Docker config digest for the registry manifest digest. Save plans, source/build receipt, outputs and smoke-test records outside Git.
+Supply `source_commit` (the clean pushed app commit), `image` (verified ECR digest), `vpc_id` and public `subnets` with an Internet gateway. Also supply the required `gpu_permissions_boundary_arn`:
+
+```hcl
+gpu_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-gpu-boundary"
+```
+
+Replace the example account with `aws_account_id`; other accounts, policy names and paths are rejected. All four GPU roles (`qsb-gpu-instance`, `qsb-gpu-job`, `qsb-gpu-execution`, `qsb-gpu-watchdog`) retain `/qsb/runtime/` and use this same boundary. There is no unbounded default, including when applying as an administrator. The boundary must already exist from the separately reviewed [access bootstrap](../../ops/github-aws/README.md); this stack references it and cannot create or modify its policy. The #56 operator grant requires that exact boundary, and #57 separately tightens the access-role policies. Supplying an ARN does not establish that its live policy document matches reviewed source: verify that separately before apply. Existing roles receive an attachment update in the plan; this source change does not attach a boundary to live roles by itself.
+
+On first deployment only, target the ECR repository, verify the published GHCR AWS solver release and its build-provenance attestation, then use a digest-preserving registry copy into ECR. Verify that both registry manifest digests are identical before a full plan/apply; do not substitute a Docker load/push or an unattested workflow tarball for the attested release. Never use a mutable tag or substitute the Docker config digest for the registry manifest digest. Save plans, source/build receipt, outputs and smoke-test records outside Git.
 
 Bind outputs `queue`, `definition`, and `bucket` to the application stack's `batch_job_queue`, `batch_job_definition`, and `batch_job_bucket`. Production enrollment is deferred: the migration smoke image was checksummed but not attested and is deliberately absent from the release registry. Before enrolling a new schema-v3 release, publish the AWS target from the solver attested release workflow, verify its GitHub build-provenance attestation and source commit, and copy the identical manifest into ECR with a digest-preserving registry copy. Verify both registry digests match; a local Docker load/push receipt is not a provenance attestation. Historical descriptors are immutable. The coordinator refuses a changed image, retry count, timeout, instance type or capacity before paid submission.
 
 Run one bounded public fixture through the deployed revision; never retry an uncertain SubmitJob response (the API has no idempotency token). Record intent before submit, reconcile the original request name/tag through Batch/CloudTrail if uncertain, collect output/logs, CPU-check every candidate, and verify the job is terminal and EC2 capacity returns to zero. Do not activate wallet operations or broadcast a transaction as a migration test.
 
 Legacy persisted `runpodId` is retained as a storage field for compatibility; `computeProvider=aws-batch` distinguishes new jobs. Existing legacy-provider jobs pause for operator reconciliation instead of being polled or replayed on AWS. No automatic fallback calls Runpod. The parked historical stacks remain paused until their separately authorized removal.
+
+## Local boundary validation (no AWS calls)
+
+```sh
+terraform -chdir=terraform/gpu init -backend=false -input=false
+terraform -chdir=terraform/gpu validate
+terraform -chdir=terraform/gpu test
+```
+
+These mocked-provider plans assert the boundary on every GPU role, the retained
+role path and zero minimum capacity, and reject empty, cross-account or wrong-path
+boundary values. They do not certify live operator authorization, bootstrap policy
+contents or deployment success.

@@ -118,8 +118,15 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     return { ...event, done: true };
   }
   if (!computeConfigured() || !process.env.REFERENCE_FUNCTION) {
+    if (job.status === "searching" && !job.runpodId) {
+      if (!job.error?.includes("Submission outcome unknown"))
+        job.error = `Submission outcome unknown. Reconcile compute provider before resuming.${job.error ? ` ${job.error}` : ""}`;
+      delete job.oneSubmissionAllowed;
+    }
     job.status = "paused";
-    job.error = "Compute and verification configuration required.";
+    const reason = "Compute and verification configuration required.";
+    if (!job.error?.includes(reason))
+      job.error = `${reason}${job.error ? ` ${job.error}` : ""}`;
     await save();
     return { ...event, done: true };
   }
@@ -262,6 +269,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     job.status = "searching";
     job.computeProvider = "aws-batch";
     job.batchSubmission = submit.identity;
+    delete job.batchReplacementFor;
     job.submissionStartedAt = new Date().toISOString();
     delete job.retryRequested;
     delete job.oneSubmissionAllowed;

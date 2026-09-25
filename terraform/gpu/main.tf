@@ -20,6 +20,14 @@ variable "aws_account_id" {
     error_message = "Use an exact AWS account ID."
   }
 }
+variable "gpu_permissions_boundary_arn" {
+  type        = string
+  description = "Existing administrator-managed GPU permissions boundary; provisioned separately by the access bootstrap."
+  validation {
+    condition     = can(regex("^arn:aws:iam::${var.aws_account_id}:policy/qsb/bootstrap/qsb-gpu-boundary$", var.gpu_permissions_boundary_arn))
+    error_message = "Use this account's exact policy/qsb/bootstrap/qsb-gpu-boundary ARN."
+  }
+}
 variable "source_commit" {
   type = string
   validation {
@@ -149,6 +157,7 @@ resource "aws_security_group" "gpu" {
 
 }
 resource "aws_iam_role" "instance" {
+  permissions_boundary = var.gpu_permissions_boundary_arn
 
   name = "qsb-gpu-instance"
   path = "/qsb/runtime/"
@@ -173,6 +182,7 @@ resource "aws_iam_instance_profile" "gpu" {
   role = aws_iam_role.instance.name
 }
 resource "aws_iam_role" "job" {
+  permissions_boundary = var.gpu_permissions_boundary_arn
 
   name = "qsb-gpu-job"
   path = "/qsb/runtime/"
@@ -207,6 +217,7 @@ resource "aws_iam_role_policy" "job" {
 
 }
 resource "aws_iam_role" "execution" {
+  permissions_boundary = var.gpu_permissions_boundary_arn
 
   name               = "qsb-gpu-execution"
   path               = "/qsb/runtime/"

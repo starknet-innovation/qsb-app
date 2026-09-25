@@ -4,9 +4,10 @@ data "archive_file" "watchdog" {
   output_path = "${path.module}/.build/watchdog.zip"
 }
 resource "aws_iam_role" "watchdog" {
-  name               = "qsb-gpu-watchdog"
-  path               = "/qsb/runtime/"
-  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "lambda.amazonaws.com" } }] })
+  permissions_boundary = var.gpu_permissions_boundary_arn
+  name                 = "qsb-gpu-watchdog"
+  path                 = "/qsb/runtime/"
+  assume_role_policy   = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "lambda.amazonaws.com" } }] })
 }
 resource "aws_cloudwatch_log_group" "watchdog" {
   name              = "/aws/lambda/qsb-gpu-watchdog"

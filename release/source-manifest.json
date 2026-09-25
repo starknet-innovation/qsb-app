@@ -51,10 +51,10 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "5cad3e0336fab1abfd82472e2a4683bbd7f34fe233ab3421e67ff2baaa4bf96c",
+      "api": "bbacb3ee447db28732178227ac61cfe8e46376a587e3512cda410f66075517d0",
       "build-metadata": "2c4804c98f40b16adda8fde8e13f053d59cc53e26f951906064834edd469b1c6",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
-      "dispatcher": "53faad087d46655405f31fa9921bc182dc01b7c4773e2fdbd5801c0a9dbc33b8",
+      "dispatcher": "8c276496b523e301ce420596c7c9c6c414445adedce6f4927cb7fc8ec6ceb25b",
       "evidence-reader": "768e7c8098ff9d9b473f5c7a0a77ff272d679b1e9cab801dfd0145832ce88c58",
       "fresh-proof": "7c322f9603a117ad2ad0dd88dc102ec63e57d04082643f24530e9bd9aef115af",
       "runtime": "abf6187a18afa8eda9db85cca21a4149696c27315e65ee3fc25c35901837d60c"
@@ -115,7 +115,7 @@
       "server/chain.ts": "36c38bd382f0b865f58e951ff9d006cdfb92e358930bec0267f986c1e1707bd2",
       "server/compute-provider.ts": "5eb7b180e3dfa7b89a22aaf5f70b6c1ec4544fef4e924e3ce9f8838838e5b6fb",
       "server/consensus.ts": "2684a00a3a53a942d3cc0815b8f9aa5fd659439f6811ceac465d38cbd08377a8",
-      "server/coordinator.ts": "e8ade17069e34ec8b8c887e5e2a9e4016dc388c576ead4618047c509de5905af",
+      "server/coordinator.ts": "f0fa8c555ebc81e9189bbb8bbdf76d63f0e0cfb4e48cb41227ec4825e90252ce",
       "server/exact-submit-permit.ts": "1c98f8a75da77cfbe501c86bcee1c6d1b44adf3d84bd2ab446562a2a6e1509cf",
       "server/gpu-spend.json": "df8fba56d88c1f2c645e3babdcd59b28702938c300a8bef8734a760cfe79ecda",
       "server/gpu-spend.ts": "1dd9c62c06160de89347a8907a1365ef814f5bf1c359fa0428c6a94bbadb0d47",
@@ -155,7 +155,7 @@
       "server/withdrawal-status.ts": "35c35fa0666985dbed95df056094f2a36dae2348723c4c2e0176146f59f0880a",
       "src/lib/api.ts": "b7d24b75c3305f5254ad7a9e9989bd390efd74a17b13862c39764d434854c22e",
       "src/lib/backup.ts": "bc8be06c10e970dad3ef335f9f2788bb58628c350490052155cf37a54840c572",
-      "src/lib/model.ts": "de844a1a6fa9013e9ff64a8ebaf9c133ba1377f07c42f10f8de40e6288fd6568",
+      "src/lib/model.ts": "e988581383b8556420829f8c0ab6edee80a2c83ccaa87de5ba841ff661b2781b",
       "src/lib/network.ts": "9e395ac12ee9af3fb4eccd3e56078ca081a0a903983fac35fec038f0aab9455b",
       "src/lib/provenance.ts": "7206167a10b39f729c51317b6845f16e029219754453fd35149846e6434b0249",
       "src/lib/qsb-worker.ts": "a4e7b2665c9311e791336c3ec6afaf7070fba31388a76d108437ccdf2cba5bfa",

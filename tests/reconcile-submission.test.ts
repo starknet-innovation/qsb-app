@@ -396,7 +396,7 @@ it("grants one bounded Batch replacement, preserving reservations and budget", a
   await run(batchReplacement());
   expect(await job()).toMatchObject({
     oneSubmissionAllowed: true,
-    batchReplacementUsed: true,
+    batchReplacementFor: (await job()).batchSubmission!.jobName,
     computeSeconds: 900,
     revision: 4,
   });
@@ -414,7 +414,6 @@ it.each([
   "invalid",
   "2026-09-25T00:25:00.001Z",
   "2026-09-26T00:00:00Z",
-  "2026-09-18T01:00:00Z",
 ])(
   "refuses Batch replacement outside evidence window: %s",
   async (submissionStartedAt) => {
@@ -434,7 +433,7 @@ it.each([
   lookup.findRequest = vi.fn(async () => null);
   lookup.health = vi.fn(async () => ({ jobs }));
   await expect(run(batchReplacement())).rejects.toThrow("EndpointNotDrained");
-  expect((await job()).batchReplacementUsed).toBeUndefined();
+  expect((await job()).batchReplacementFor).toBeUndefined();
 });
 it("attaches discovered Batch job instead of granting replacement", async () => {
   lookup.findRequest = vi.fn(async () => "provider-1");
@@ -460,7 +459,7 @@ it("atomically limits competing Batch window decisions to one allowance", async 
   ]);
   expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
   expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(1);
-  expect((await job()).batchReplacementUsed).toBe(true);
+  expect((await job()).batchReplacementFor).toBe((await job()).batchSubmission!.jobName);
 });
 it("permits only one concurrent recorded-ID polling restart", async () => {
   await change({ status: "searching", runpodId: "provider-1" });
@@ -498,4 +497,50 @@ it("rejects a recorded job stored under the wrong owner before provider reads", 
   await expect(run()).rejects.toThrow("JobIdentityMismatch");
   expect(lookup.status).not.toHaveBeenCalled();
   expect(resumePolling).not.toHaveBeenCalled();
+});
+
+it("permits one replacement for each separate uncertain request, never twice for the same request", async () => {
+  lookup.findRequest = vi.fn(async () => null);
+  const original = (await job()).batchSubmission!;
+  await run(batchReplacement());
+  await expect(run(batchReplacement())).rejects.toThrow("DecisionAlreadyRecorded");
+  // Resume consumes the allowance; the next paid intent replaces the identity and
+  // clears its pending marker. Its separate lost response needs its own recovery.
+  await change({ oneSubmissionAllowed: undefined, batchReplacementFor: undefined,
+    batchSubmission: { ...original, jobName: "qsb-second-request" }, gpuBudgetReservedSeconds: 1800 });
+  await run(batchReplacement());
+  expect((await job()).gpuBudgetReservedSeconds).toBe(1800);
+  await expect(run(batchReplacement())).rejects.toThrow("DecisionAlreadyRecorded");
+  await change({ oneSubmissionAllowed: undefined, batchReplacementFor: undefined });
+  await expect(run(batchReplacement())).rejects.toThrow("BatchReplacementAlreadyUsed");
+  await change({ batchSubmission: original });
+  await expect(run(batchReplacement())).rejects.toThrow("BatchReplacementAlreadyUsed");
+  const audits = await store.list(pk, `RECONCILIATION_REQUEST#${jobId}#`);
+  expect(audits).toHaveLength(2);
+  for (const audit of audits) expect(audit).not.toHaveProperty("expiresAt");
+  expect(audits.map((row) => (row.request as typeof original).jobName).sort()).toEqual([original.jobName, "qsb-second-request"].sort());
+});
+it.each(["2026-09-18T01:00:00Z", "2025-09-18T01:00:00Z"])("permits an older request after drain despite expired retention: %s", async (submissionStartedAt) => {
+  lookup.findRequest = vi.fn(async () => null);
+  await change({ submissionStartedAt });
+  await run(batchReplacement());
+  expect(lookup.health).toHaveBeenCalledOnce();
+  expect((await job()).oneSubmissionAllowed).toBe(true);
+});
+it("does not waive drain for requests older than retention", async () => {
+  lookup.findRequest = vi.fn(async () => null);
+  lookup.health = vi.fn(async () => ({ jobs: { inQueue: 0, inProgress: 1 } }));
+  await change({ submissionStartedAt: "2025-09-18T01:00:00Z" });
+  await expect(run(batchReplacement())).rejects.toThrow("EndpointNotDrained");
+  expect(await store.list(pk, "RECONCILIATION_REQUEST#")).toHaveLength(0);
+});
+it("rejects concurrent identity mutation without spending an allowance", async () => {
+  lookup.findRequest = vi.fn(async () => null);
+  lookup.health = vi.fn(async () => {
+    await change({ batchSubmission: { ...(await job()).batchSubmission!, jobName: "qsb-new-intent" } });
+    return { jobs: { inQueue: 0, inProgress: 0 } };
+  });
+  await expect(run(batchReplacement())).rejects.toThrow();
+  expect(await store.list(pk, "RECONCILIATION_REQUEST#")).toHaveLength(0);
+  expect((await job()).oneSubmissionAllowed).toBeUndefined();
 });
