@@ -208,10 +208,20 @@ def main(a):
                   flush=True)
             report['cleanupComplete'] = not failed
         report['passed'] = bool(report['checks']) and all(c['passed'] for c in report['checks'])
+        # Inconclusive, not failed: the role couldn't act at all, or AWS didn't say which policy denied a call.
+        # Never a pass; rerun once, and if it repeats the attribution method needs a reviewed change.
+        control = next((c for c in report['checks'] if c['check'].startswith('control')), None)
+        unattributed = any(s.get('denial') == 'unattributed' for s in report['steps'])
+        report['outcome'] = ('passed' if report['passed'] else
+                             'inconclusive' if (control and not control['passed']) or unattributed else 'failed')
         evidence.parent.mkdir(parents=True, exist_ok=True)
         evidence.write_text(json.dumps(report, indent=2) + '\n')
         evidence.chmod(0o600)
     print(json.dumps({'passed': report['passed'], 'checks': len(report['checks']), 'evidence': str(evidence)}), flush=True)
+    if report['outcome'] == 'inconclusive':
+        raise SystemExit('Sandbox result is INCONCLUSIVE (the control step failed, or a denial was unattributed): do not '
+                         'deposit. Rerun once; if it repeats, change the attribution method through review. An '
+                         'unattributed denial never counts as a pass.')
     if not report['passed']:
         raise SystemExit('Sandbox checks failed: do not deposit, and do not loosen the app policy. A denial the '
                          'evidence attributes to the permissions boundary means the boundary is missing something the '

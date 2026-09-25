@@ -20,10 +20,10 @@ APP_DENY = {'ok': False, 'code': 'AccessDeniedException', 'denial': 'explicit-de
 
 class SandboxRunner(unittest.TestCase):
     def run_sandbox(self, behaviour=None, fail=None, keep=False, function_error=None, propagation=0,
-                    delete_fails=()):
+                    delete_fails=(), leaky=()):
         """behaviour maps a step to the Lambda's result; defaults model the documented AWS evaluation.
         The mock table applies each step's effect, so the runner's row reads see what really happened."""
-        self.calls, self.gets, rows = [], [], set()
+        self.calls, self.gets, self.deleted_names, rows = [], [], [], set()
         results = {'control-owner-put': {'ok': True}, 'denied-transaction': APP_DENY,
                    'allowed-transaction': {'ok': True},
                    'outpoint-put-again': {'ok': False, 'code': 'ConditionalCheckFailedException'},
@@ -52,6 +52,10 @@ class SandboxRunner(unittest.TestCase):
                 return error(command, 'AccessDeniedException')
             opt = lambda flag: args[args.index(flag) + 1]
             out = {}
+            if operation.startswith('delete') and operation != 'delete-item':
+                self.deleted_names.append(next(args[i + 1] for i, x in enumerate(args)
+                                               if x in ('--function-name', '--role-name', '--table-name',
+                                                        '--log-group-name')))
             if (service, operation) == ('sts', 'get-caller-identity'):
                 out = {'Account': ACCOUNT, 'Arn': f'arn:aws:sts::{ACCOUNT}:assumed-role/qsb-operator/adrien-session'}
             elif (service, operation) == ('iam', 'create-role'):
@@ -67,6 +71,8 @@ class SandboxRunner(unittest.TestCase):
                 if step == function_error:
                     return subprocess.CompletedProcess(command, 0, json.dumps({'FunctionError': 'Unhandled'}), '')
                 result = results[step]
+                if step in leaky:  # a table that writes despite the denial, to prove the row checks stand alone
+                    rows.update(effects.get(step, set()))
                 if result.get('ok'):
                     rows.update(effects.get(step, set()))
                     if step == 'outpoint-put-again':
@@ -129,7 +135,6 @@ class SandboxRunner(unittest.TestCase):
     def test_any_mismatch_fails_but_still_cleans_up(self):
         boundary = {'ok': False, 'code': 'AccessDeniedException', 'denial': 'no-boundary-allow'}
         cases = {
-            'control-owner-put': APP_DENY,                              # the role can't write at all
             'allowed-transaction': boundary,                            # the ConditionCheckItem boundary gap
             'denied-transaction': {'ok': True},                         # SYSTEM# write allowed
             'outpoint-put-again': {'ok': True},                         # the creation guard is missing
@@ -147,6 +152,30 @@ class SandboxRunner(unittest.TestCase):
             with self.subTest(reason=reason), self.assertRaises(SystemExit):
                 self.run_sandbox({'denied-transaction': {'ok': False, 'code': 'AccessDeniedException', 'denial': reason}})
             self.assertFalse(self.check('mixed transaction')['passed'])
+
+    def test_row_checks_fail_on_their_own(self):
+        for step, label in (('denied-transaction', 'denied transaction wrote'), ('denied-batch', 'denied batch wrote')):
+            with self.subTest(step=step), self.assertRaisesRegex(SystemExit, 'do not loosen the app policy'):
+                self.run_sandbox(leaky=(step,))
+            self.assertTrue(next(c for c in self.report['checks'] if c['check'].startswith('mixed')
+                                 and (step == 'denied-transaction') == ('transaction' in c['check']))['passed'])
+            self.assertFalse(self.check(label)['passed'])
+            self.assertEqual(self.report['outcome'], 'failed')
+
+    def test_cleanup_targets_only_the_sandbox_resources(self):
+        self.run_sandbox()
+        self.assertEqual(len(self.deleted_names), 5)
+        self.assertTrue(all(n.startswith('qsb-iam-sandbox-') or n.startswith('/aws/lambda/qsb-iam-sandbox-')
+                            for n in self.deleted_names), self.deleted_names)
+        self.assertEqual(len({n.rsplit('/', 1)[-1] for n in self.deleted_names}), 1)
+
+    def test_control_failure_or_unattributed_denial_is_inconclusive(self):
+        for behaviour in ({'control-owner-put': APP_DENY},
+                          {'denied-transaction': {'ok': False, 'code': 'AccessDeniedException', 'denial': 'unattributed'}}):
+            with self.subTest(behaviour=list(behaviour)), self.assertRaisesRegex(SystemExit, 'INCONCLUSIVE'):
+                self.run_sandbox(behaviour)
+            self.assertEqual(self.report['outcome'], 'inconclusive')
+            self.assertFalse(self.report['passed'])
 
     def test_row_evidence_records_what_was_seen(self):
         with self.assertRaises(SystemExit):
@@ -219,6 +248,23 @@ class SandboxHandler(unittest.TestCase):
 
     def run_step(self, step):
         return self.handler.handler({'table': 'qsb-iam-sandbox-x', 'suffix': 'abc', 'step': step}, None)
+
+    def test_each_step_uses_the_documented_keys(self):
+        # A wrong key would let a step "pass" without exercising the deny it is meant to test.
+        keys = lambda call: sorted(
+            k['pk']['S'] for k in
+            [call[1].get('Item'), call[1].get('Key')] +
+            [next(iter(i.values())).get('Item') or next(iter(i.values())).get('Key') for i in call[1].get('TransactItems', [])] +
+            [r['PutRequest']['Item'] for r in next(iter(call[1].get('RequestItems', {}).values()), [])]
+            if k)
+        expected = {'control-owner-put': ['OWNER#abc'], 'denied-transaction': ['OWNER#abc', 'SYSTEM#abc'],
+                    'allowed-transaction': ['OUTPOINT#abc', 'OWNER#abc', 'SYSTEM#abc'],
+                    'outpoint-put-again': ['OUTPOINT#abc'], 'outpoint-delete': ['OUTPOINT#abc'],
+                    'denied-batch': ['OWNER#abc', 'SYSTEM#abc']}
+        for step, want in expected.items():
+            self.calls.clear()
+            self.run_step(step)
+            self.assertEqual(keys(self.calls[0]), want, step)
 
     def test_each_step_makes_the_documented_call(self):
         expected = {'control-owner-put': 'put_item', 'denied-transaction': 'transact_write_items',
