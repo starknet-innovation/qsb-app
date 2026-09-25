@@ -60,10 +60,11 @@ print(json.dumps(plan, indent=2), flush=True)
 if not a.apply:
     raise SystemExit()
 
-# Fail closed if anything already exists; inspect and reconcile it separately.
-roles = {r['RoleName'] for r in aws('iam', 'list-roles', '--path-prefix', '/qsb/')['Roles']}
-policies = {x['PolicyName'] for x in aws('iam', 'list-policies', '--scope', 'Local', '--path-prefix', '/qsb/')['Policies']}
-users = {u['UserName'] for u in aws('iam', 'list-users', '--path-prefix', '/qsb/')['Users']}
+# Fail closed if anything already exists; inspect and reconcile it separately. Role, user
+# and customer-managed policy names are unique account-wide, whatever their path.
+roles = {r['RoleName'] for r in aws('iam', 'list-roles')['Roles']}
+policies = {x['PolicyName'] for x in aws('iam', 'list-policies', '--scope', 'Local')['Policies']}
+users = {u['UserName'] for u in aws('iam', 'list-users')['Users']}
 clash = ({'qsb-viewonly', 'qsb-operator'} & roles) | ({'qsb-gpu-boundary', *viewonly_names, *operator_names} & policies) \
     | ({out['user']['name']} & users)
 if clash:

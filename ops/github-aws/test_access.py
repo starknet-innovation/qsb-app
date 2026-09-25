@@ -43,7 +43,8 @@ class HumanAccess(unittest.TestCase):
             [statement] = self.out[role]['trust']['Statement']
             self.assertEqual(statement['Principal'], {'AWS': f'arn:aws:iam::{ACCOUNT}:user/qsb/operators/qsb-operator-user'})
             self.assertEqual(statement['Action'], 'sts:AssumeRole')
-            self.assertEqual(statement['Condition'], {'Bool': {'aws:MultiFactorAuthPresent': 'true'}})
+            self.assertEqual(statement['Condition'], {'Bool': {'aws:MultiFactorAuthPresent': 'true'},
+                                                      'NumericLessThanIfExists': {'aws:MultiFactorAuthAge': '3600'}})
         self.assertEqual(self.out['operator']['max_session'], 3600)
 
     def test_user_can_only_sign_in_and_assume_the_two_roles(self):
@@ -62,9 +63,13 @@ class HumanAccess(unittest.TestCase):
             self.assertTrue(verb.startswith(('Describe', 'List', 'Get', 'Simulate')), action)
             self.assertFalse(verb in ('GetObject', 'GetItem', 'GetSecretValue'), action)
         denied = self.denied(self.viewonly)
-        for action in ('s3:GetObject', 'dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan',
-                       'secretsmanager:GetSecretValue', 'kms:Decrypt', 'logs:GetLogEvents', 'lambda:GetFunction'):
-            self.assertIn(action, denied)
+        for action in ('s3:GetObject', 's3:GetObjectVersion', 's3:GetObjectTorrent', 'dynamodb:GetItem',
+                       'dynamodb:Query', 'dynamodb:Scan', 'dynamodb:GetRecords', 'secretsmanager:GetSecretValue',
+                       'secretsmanager:BatchGetSecretValue', 'ssm:GetParameterHistory', 'kms:Decrypt',
+                       'logs:GetLogEvents', 'logs:GetLogRecord', 'logs:StartLiveTail', 'lambda:GetFunction',
+                       'lambda:GetLayerVersion', 'athena:GetQueryResults', 'cloudformation:GetTemplate',
+                       'ec2:GetConsoleOutput', 'sts:AssumeRole'):
+            self.assertTrue(matches(action, denied), action)
 
     def test_operator_never_grants_ingress_instances_users_or_keys(self):
         forbidden = ['ec2:AuthorizeSecurityGroupIngress', 'ec2:RunInstances', 'ec2:CreateVpc', 'iam:CreateUser',
@@ -97,6 +102,34 @@ class HumanAccess(unittest.TestCase):
         for action, statement in self.allowed(self.operator):
             if action in ('iam:CreateRole', 'iam:PutRolePolicy', 'iam:AttachRolePolicy'):
                 self.assertIn('iam:PermissionsBoundary', statement['Condition']['StringEquals'], statement['Sid'])
+
+    def test_gpu_roles_can_only_carry_the_gpu_boundary(self):
+        # The inherited deploy grant (qsb-* with the runtime boundary) also matches qsb-gpu-*.
+        guard = self.sid(self.operator, 'GpuRolesOnlyWithGpuBoundary')
+        self.assertEqual(guard['Effect'], 'Deny')
+        self.assertEqual(guard['Resource'], [f'arn:aws:iam::{ACCOUNT}:role/qsb/runtime/qsb-gpu-*'])
+        self.assertEqual(set(guard['Action']), {'iam:CreateRole', 'iam:PutRolePermissionsBoundary', 'iam:PutRolePolicy',
+                                                'iam:AttachRolePolicy', 'iam:UpdateAssumeRolePolicy'})
+        self.assertEqual(guard['Condition'], {'StringNotEquals': {
+            'iam:PermissionsBoundary': f'arn:aws:iam::{ACCOUNT}:policy/qsb/bootstrap/qsb-gpu-boundary'}})
+
+    def test_operator_cannot_chain_into_other_roles(self):
+        guard = self.sid(self.operator, 'NoRoleChaining')
+        self.assertEqual((guard['Effect'], guard['Action'], guard['Resource']), ('Deny', ['sts:AssumeRole'], ['*']))
+
+    def test_smoke_jobs_and_role_passing_stay_exact(self):
+        smoke = self.sid(self.operator, 'GpuSmokeJobs')
+        self.assertEqual(smoke['Resource'], [f'arn:aws:batch:eu-west-1:{ACCOUNT}:job/*'])
+        self.assertEqual(smoke['Condition'], {'StringEquals': {'aws:ResourceTag/Project': 'qsb-gpu'}})
+        tags = self.sid(self.operator, 'GpuSmokeJobTags')
+        self.assertEqual(tags['Condition'], {'StringEquals': {'aws:RequestTag/Project': 'qsb-gpu'}})
+        passing = self.sid(self.operator, 'PassGpuRoles')
+        self.assertEqual((passing['Action'], passing['Resource']),
+                         (['iam:PassRole'], [f'arn:aws:iam::{ACCOUNT}:role/qsb/runtime/qsb-gpu-*']))
+        for action, statement in self.allowed(self.operator):
+            if action == 'iam:PassRole':
+                self.assertIn('iam:PassedToService', statement['Condition']['StringEquals'], statement['Sid'])
+                self.assertNotIn('*', statement['Resource'], statement['Sid'])
 
     def test_network_objects_need_the_gpu_tag(self):
         self.assertEqual(self.sid(self.operator, 'CreateTaggedSecurityGroup')['Condition'],

@@ -69,7 +69,9 @@ def access(c):
 
     trust = {'Version': '2012-10-17', 'Statement': [{
         'Effect': 'Allow', 'Principal': {'AWS': user_arn}, 'Action': 'sts:AssumeRole',
-        'Condition': {'Bool': {'aws:MultiFactorAuthPresent': 'true'}}}]}
+        'Condition': {'Bool': {'aws:MultiFactorAuthPresent': 'true'},
+                      # A fresh MFA code per role session; an older sign-in's MFA context is not enough.
+                      'NumericLessThanIfExists': {'aws:MultiFactorAuthAge': '3600'}}}]}
 
     # The user can sign in (console, `aws login`) and assume the two roles; nothing else.
     user_policy = {'Version': '2012-10-17', 'Statement': [
@@ -89,7 +91,10 @@ def access(c):
             'ce:GetCostAndUsage', 'ce:GetCostForecast'], ['*']),
         # ViewOnlyAccess is metadata-only today; keep data reads denied even if AWS widens it.
         deny('NoDataReads', [
-            's3:GetObject', 's3:GetObjectVersion', 's3:GetObjectAttributes',
+            's3:GetObject*', 'athena:GetQueryResults', 'cloudformation:GetTemplate', 'ec2:GetConsoleOutput',
+            'ec2:GetConsoleScreenshot', 'dynamodb:GetRecords', 'ssm:GetParameterHistory',
+            'secretsmanager:BatchGetSecretValue', 'logs:StartLiveTail', 'logs:GetLogRecord', 'logs:Unmask',
+            'lambda:GetLayerVersion',
             'dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Query', 'dynamodb:Scan',
             'dynamodb:PartiQLSelect', 'dynamodb:ExportTableToPointInTime',
             'secretsmanager:GetSecretValue', 'ssm:GetParameter', 'ssm:GetParameters',
@@ -97,6 +102,7 @@ def access(c):
             'logs:StartQuery', 'logs:GetQueryResults', 'lambda:GetFunction',
             'states:DescribeExecution', 'states:GetExecutionHistory',
             'ecr:BatchGetImage', 'ecr:GetDownloadUrlForLayer', 'ecr:GetAuthorizationToken'], ['*']),
+        deny('NoRoleChaining', ['sts:AssumeRole'], ['*']),
     ]}
 
     deploy = [s for s in render(c)['deploy']['Statement'] if s['Effect'] == 'Allow']
@@ -144,6 +150,13 @@ def access(c):
         deny('ProtectBootstrapIdentities', ['iam:*'], [iam('role/qsb/bootstrap/*'), iam('policy/qsb/bootstrap/*'),
                                                         iam('user/qsb/*')]),
         deny('NeverRemoveBoundaries', ['iam:DeleteRolePermissionsBoundary'], [iam('role/qsb/runtime/*')]),
+        # The inherited deploy grant also matches qsb-gpu-*; GPU roles may carry only the GPU boundary.
+        dict(Sid='GpuRolesOnlyWithGpuBoundary', Effect='Deny',
+             Action=['iam:CreateRole', 'iam:PutRolePermissionsBoundary', 'iam:PutRolePolicy', 'iam:AttachRolePolicy',
+                     'iam:UpdateAssumeRolePolicy'], Resource=[gpu_roles],
+             Condition={'StringNotEquals': {'iam:PermissionsBoundary': gpu_boundary}}),
+        # Editing a runtime role's trust must not let the operator become that role.
+        deny('NoRoleChaining', ['sts:AssumeRole'], ['*']),
         deny('NoStaticCredentialsOrUsers', [
             'iam:CreateUser', 'iam:CreateAccessKey', 'iam:UpdateAccessKey', 'iam:CreateLoginProfile',
             'iam:UpdateLoginProfile', 'iam:CreateServiceSpecificCredential', 'iam:UploadSSHPublicKey',

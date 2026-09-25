@@ -109,14 +109,28 @@ name) and `gpu_vpc` (the VPC of the `terraform/gpu` security group):
 | `qsb-viewonly` | `/qsb/bootstrap/` | AWS `ViewOnlyAccess`, plus Batch/Scheduler/IAM describe, IAM simulation and Cost Explorer reads | read data: S3 objects, DynamoDB items, secrets, parameters, KMS decrypt, log events, Lambda code, execution input/output |
 | `qsb-operator` | `/qsb/bootstrap/` | everything `qsb-github-deploy` can, plus the `terraform/gpu` stack and its smoke jobs | ingress rules, `RunInstances`, VPC/gateway creation, users, access keys or MFA devices, editing any `/qsb/bootstrap/` identity or policy, removing a boundary |
 
-Both roles trust only that user, and only with MFA (`aws:MultiFactorAuthPresent`).
-Sessions last at most 1 hour for `qsb-operator` and 4 hours for `qsb-viewonly`.
+Both roles trust only that user, only with MFA (`aws:MultiFactorAuthPresent`),
+and only when that MFA is under an hour old (`aws:MultiFactorAuthAge`). An older
+sign-in session can't mint role sessions without a fresh code. Neither role can
+assume other roles, so editing a runtime role's trust doesn't let the operator
+become that role. Sessions last at most 1 hour for `qsb-operator` and 4 hours
+for `qsb-viewonly`.
 GPU runtime roles (`/qsb/runtime/qsb-gpu-*`) can be created or changed only with
 the new `qsb-gpu-boundary`. It allows the ECS instance agent, pulling the
 `qsb-solver` image, the GPU log streams, reading job inputs, writing job outputs,
 and the watchdog's list/describe/terminate of `qsb-gpu`-tagged jobs. It does not
 allow submitting paid jobs, passing roles, reading secrets or broad S3 access.
 `terraform/gpu` must set `permissions_boundary` on its four roles to that policy.
+The operator is denied creating or changing a `qsb-gpu-*` role with any other
+boundary, including `qsb-runtime-boundary`.
+
+**GPU spend under `qsb-operator`.** The app's GPU-time budget only covers jobs
+the coordinator submits. The operator can submit smoke jobs to the `qsb-gpu`
+queue directly. It can also change the compute environment: raise max vCPUs,
+switch the AMI or launch template version, attach an existing security group,
+or disable the watchdog rule. The effective hard cap is the account's EC2
+G-instance vCPU quota (4 vCPUs, one `g5.xlarge`, today). Keep that quota at 4,
+and set an AWS Budgets alert on the account.
 
 ### Create them once, as root
 
@@ -164,6 +178,6 @@ session that you started. They never see or type the code. Then:
 - keep root for break-glass only.
 
 **Verify** before relying on these, against current AWS docs:
-- whether `aws login` sessions carry the MFA context (the `mfa_serial` profiles don't depend on it);
+- whether `aws login` sessions carry MFA context. The `mfa_serial` profiles don't depend on it, and the age limit stops an older login's MFA from assuming the roles;
 - Batch's `PassRole` service names for compute-environment instance roles;
 - whether the Terraform AWS provider sends `default_tags` as create-time tags for security groups and launch templates.

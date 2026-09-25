@@ -47,6 +47,13 @@ operator_cases = [
     ('other rule', 'events:PutRule', arn('events', 'rule/other'), False, []),
     ('bounded gpu role', 'iam:CreateRole', gpu_role, True, gpu_bound),
     ('unbounded gpu role', 'iam:CreateRole', gpu_role, False, []),
+    ('gpu role with runtime boundary', 'iam:CreateRole', gpu_role, False,
+     [ctx('iam:PermissionsBoundary', iam('policy/qsb/bootstrap/qsb-runtime-boundary'))]),
+    ('assume a runtime role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-api'), False, []),
+    ('terminate job with other tag', 'batch:TerminateJob', arn('batch', 'job/abc'), False,
+     [ctx('aws:ResourceTag/Project', 'other')]),
+    ('pass gpu role to lambda', 'iam:PassRole', gpu_role, True, [ctx('iam:PassedToService', 'lambda.amazonaws.com')]),
+    ('pass gpu role to batch', 'iam:PassRole', gpu_role, False, [ctx('iam:PassedToService', 'batch.amazonaws.com')]),
     ('add gpu boundary', 'iam:PutRolePermissionsBoundary', gpu_role, True, gpu_bound),
     ('remove boundary', 'iam:DeleteRolePermissionsBoundary', gpu_role, False, []),
     ('pass gpu role to tasks', 'iam:PassRole', gpu_role, True, [ctx('iam:PassedToService', 'ecs-tasks.amazonaws.com')]),
@@ -70,6 +77,9 @@ viewonly_cases = [
     ('read secret', 'secretsmanager:GetSecretValue', arn('secretsmanager', 'secret:any'), False, []),
     ('read logs', 'logs:GetLogEvents', arn('logs', 'log-group:any:*'), False, []),
     ('submit job', 'batch:SubmitJob', queue, False, []),
+    ('read object version', 's3:GetObjectVersion', 'arn:aws:s3:::any/x', False, []),
+    ('read stack template', 'cloudformation:GetTemplate', arn('cloudformation', 'stack/any/*'), False, []),
+    ('assume any role', 'sts:AssumeRole', iam('role/any'), False, []),
 ]
 gpu_cases = [
     ('boundary: job input read', 's3:GetObject', f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/inputs/x', True, []),
