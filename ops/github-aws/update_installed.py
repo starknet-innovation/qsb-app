@@ -10,16 +10,23 @@ administrator-managed QSB document with what this commit renders:
   inline policy, and the two roles' trust and session length (access.py).
 
 Without --apply it prints the plan: for each target `identical`, `missing` or `differs`,
-with the statement IDs added, removed or changed. With --apply (administrator profile,
-today the account root) it updates only what differs, then re-reads each change. It
-never creates or deletes an identity, never deletes a policy version, and refuses when
-a managed policy already has the IAM maximum of five versions or when the number of
-rendered access policies changed. It prints names and statement IDs only.
+with the statements added, removed or changed and, for changed ones, the actions,
+resources and principals that differ (account numbers masked). With --apply, from `main`
+only and with an administrator profile (today the account root), it asks for a typed
+confirmation, updates only what differs, and reads back every change. To skip the prompt,
+pass --yes --plan-hash with the plan_hash that a reviewed plan-mode run printed; any
+difference from that run, including a target plan mode couldn't read, is refused. It never
+changes who a role trusts: moving a principal or an OIDC sub/aud is refused. It never creates or deletes an identity, never attaches or
+detaches a policy, and never deletes a policy version. It refuses before any write when a
+changed managed policy already has IAM's five versions, the number of rendered access
+policies changed, something is missing, or a role carries policies this commit doesn't render.
 """
 import argparse
+import hashlib
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from access import access
@@ -29,6 +36,8 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--profile', required=True)
 p.add_argument('--inventory', type=Path, required=True)
 p.add_argument('--apply', action='store_true')
+p.add_argument('--yes', action='store_true', help='skip the typed confirmation; requires --plan-hash')
+p.add_argument('--plan-hash', help='with --yes: the plan_hash printed by a plan-mode run whose plan you reviewed')
 a = p.parse_args()
 c = json.loads(a.inventory.read_text())
 root = Path(__file__).resolve().parents[2]
@@ -39,6 +48,8 @@ branch = subprocess.check_output(['git', 'branch', '--show-current'], cwd=root, 
 remote = subprocess.check_output(['git', 'ls-remote', 'origin', 'refs/heads/' + branch], cwd=root, text=True).split()
 if not remote or remote[0] != commit:
     raise SystemExit('Commit is not pushed to the matching remote branch')
+if a.apply and branch != 'main':
+    raise SystemExit('--apply runs only from a clean main that matches origin; plan mode works on any pushed branch')
 
 
 def aws(*args, readable=False):
@@ -54,12 +65,66 @@ def aws(*args, readable=False):
     return json.loads(r.stdout) if r.stdout.strip() else {}
 
 
+def mask(value):
+    """Replace 12-digit account numbers, in strings or as JSON numbers, with <ACCOUNT>."""
+    if isinstance(value, str):
+        return re.sub(r'\d{12}', '<ACCOUNT>', value)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and len(str(abs(value))) == 12:
+        return '<ACCOUNT>'
+    if isinstance(value, list):
+        return [mask(v) for v in value]
+    if isinstance(value, dict):
+        return {mask(k): mask(v) for k, v in value.items()}
+    return value
+
+
+def listed_set(value):
+    return {json.dumps(v, sort_keys=True) if not isinstance(v, str) else v
+            for v in (value if isinstance(value, list) else [value] if value is not None else [])}
+
+
 def statement_diff(installed, rendered):
-    """Statement IDs added, removed and changed between two policy documents."""
+    """Statements added, removed and changed, and for changed ones what exactly differs.
+
+    Values come from the inventory as well as the code, so the detail is what a reviewer
+    compares with the reviewed diff: an unexpected principal or resource shows up here.
+    """
     sid = lambda doc: {s.get('Sid', f'#{i}'): s for i, s in enumerate(doc.get('Statement', []))}
     old, new = sid(installed or {}), sid(rendered)
-    return {'added': sorted(set(new) - set(old)), 'removed': sorted(set(old) - set(new)),
-            'changed': sorted(k for k in set(old) & set(new) if old[k] != new[k])}
+    changed = {}
+    for k in sorted(set(old) & set(new)):
+        if old[k] == new[k]:
+            continue
+        detail = {}
+        for field in ('Action', 'NotAction', 'Resource', 'NotResource'):
+            before, after = listed_set(old[k].get(field)), listed_set(new[k].get(field))
+            if before != after:
+                detail[field] = {'added': mask(sorted(after - before)), 'removed': mask(sorted(before - after))}
+        compared = {'Sid', 'Action', 'NotAction', 'Resource', 'NotResource'}
+        # Every other field (Effect, Principal, NotPrincipal, Condition, anything new) is shown whole.
+        for field in sorted((set(old[k]) | set(new[k])) - compared):
+            if old[k].get(field) != new[k].get(field):
+                detail[field] = {'installed': mask(old[k].get(field)), 'rendered': mask(new[k].get(field))}
+        changed[k] = detail or 'reordered only'
+    return {'added': sorted(set(new) - set(old)), 'removed': sorted(set(old) - set(new)), 'changed': changed}
+
+
+def trusted(document):
+    """Who a trust policy lets in: each statement's principal, and any OIDC audience/subject it pins."""
+    out = []
+    for s in (document or {}).get('Statement', []):
+        pinned = {k: v for k, v in (s.get('Condition', {}).get('StringEquals', {})).items()
+                  if k.endswith((':sub', ':aud'))}
+        out.append(json.dumps({'Principal': s.get('Principal'), 'NotPrincipal': s.get('NotPrincipal'),
+                               'pinned': pinned}, sort_keys=True))
+    return sorted(out)
+
+
+def read_back(label, read, wanted):
+    if read() != wanted:
+        raise SystemExit(f'{label}: the update does not read back as rendered; inspect it')
 
 
 if aws('sts', 'get-caller-identity')['Account'] != c['account']:
@@ -100,12 +165,20 @@ def managed(name, document):
 managed('qsb-runtime-boundary', rendered['boundary'])
 managed('qsb-gpu-boundary', human['gpu_boundary']['document'])
 for role in ('viewonly', 'operator'):
-    for name, document in zip(names[role], human[role]['policies']):
-        managed(name, document)
+    # Rendered names, so a role whose access policies are all gone shows as missing, not skipped.
+    for i, document in enumerate(human[role]['policies'], 1):
+        managed(f'qsb-{role}-{i}', document)
+
+
+def attached(role_name):
+    return {x['PolicyArn'] for x in aws('iam', 'list-attached-role-policies', '--role-name', role_name)['AttachedPolicies']}
 
 deploy_policies = aws('iam', 'list-role-policies', '--role-name', 'qsb-github-deploy')['PolicyNames']
 if deploy_policies != ['qsb-terraform-deployment']:
     raise SystemExit('qsb-github-deploy has unexpected inline policies; inspect it')
+if attached('qsb-github-deploy'):
+    raise SystemExit('qsb-github-deploy has attached managed policies this commit does not render; inspect it')
+live_deploy_role = aws('iam', 'get-role', '--role-name', 'qsb-github-deploy')['Role']
 live_deploy = aws('iam', 'get-role-policy', '--role-name', 'qsb-github-deploy',
                   '--policy-name', 'qsb-terraform-deployment')['PolicyDocument']
 
@@ -120,6 +193,18 @@ def update_deploy():
 
 targets.append(('qsb-github-deploy/qsb-terraform-deployment', 'policy', live_deploy, rendered['deploy'], update_deploy))
 
+
+def update_deploy_trust():
+    aws('iam', 'update-assume-role-policy', '--role-name', 'qsb-github-deploy',
+        '--policy-document', json.dumps(rendered['trust']))
+    read_back('qsb-github-deploy trust',
+              lambda: aws('iam', 'get-role', '--role-name', 'qsb-github-deploy')['Role']['AssumeRolePolicyDocument'],
+              rendered['trust'])
+
+
+targets.append(('qsb-github-deploy trust', 'policy', live_deploy_role['AssumeRolePolicyDocument'], rendered['trust'],
+                update_deploy_trust))
+
 user = human['user']
 live_user = aws('iam', 'get-user-policy', '--user-name', user['name'], '--policy-name', 'assume-qsb-roles', readable=True)
 live_user = UNREADABLE if live_user is None else live_user['PolicyDocument']
@@ -128,19 +213,43 @@ live_user = UNREADABLE if live_user is None else live_user['PolicyDocument']
 def update_user():
     aws('iam', 'put-user-policy', '--user-name', user['name'], '--policy-name', 'assume-qsb-roles',
         '--policy-document', json.dumps(user['inline']))
+    read_back(f"{user['name']}/assume-qsb-roles",
+              lambda: aws('iam', 'get-user-policy', '--user-name', user['name'],
+                          '--policy-name', 'assume-qsb-roles')['PolicyDocument'], user['inline'])
 
 
 targets.append((f"{user['name']}/assume-qsb-roles", 'policy', live_user, user['inline'], update_user))
 
+def update_trust(spec):
+    aws('iam', 'update-assume-role-policy', '--role-name', spec['name'], '--policy-document', json.dumps(spec['trust']))
+    read_back(f"{spec['name']} trust",
+              lambda: aws('iam', 'get-role', '--role-name', spec['name'])['Role']['AssumeRolePolicyDocument'], spec['trust'])
+
+
+def update_session(spec):
+    aws('iam', 'update-role', '--role-name', spec['name'], '--max-session-duration', str(spec['max_session']))
+    read_back(f"{spec['name']} max session",
+              lambda: aws('iam', 'get-role', '--role-name', spec['name'])['Role']['MaxSessionDuration'], spec['max_session'])
+
+
 for role in ('viewonly', 'operator'):
     spec = human[role]
     live = aws('iam', 'get-role', '--role-name', spec['name'])['Role']
+    expected = set(spec['managed']) | {listed[f'qsb-{role}-{i}']['Arn'] for i in range(1, len(spec['policies']) + 1)
+                                       if f'qsb-{role}-{i}' in listed}
+    if not attached(spec['name']) <= expected or aws('iam', 'list-role-policies', '--role-name', spec['name'])['PolicyNames']:
+        raise SystemExit(f"{spec['name']} carries policies this commit does not render; inspect it")
     targets.append((f"{spec['name']} trust", 'policy', live['AssumeRolePolicyDocument'], spec['trust'],
-                    lambda spec=spec: aws('iam', 'update-assume-role-policy', '--role-name', spec['name'],
-                                          '--policy-document', json.dumps(spec['trust']))))
+                    lambda spec=spec: update_trust(spec)))
     targets.append((f"{spec['name']} max session", 'value', live['MaxSessionDuration'], spec['max_session'],
-                    lambda spec=spec: aws('iam', 'update-role', '--role-name', spec['name'],
-                                          '--max-session-duration', str(spec['max_session']))))
+                    lambda spec=spec: update_session(spec)))
+
+# The updater corrects documents; it never moves who a role trusts. That comes from the inventory
+# (operator_user, subject) and needs its own reviewed step.
+for label, kind, installed, wanted, _ in targets:
+    if label.endswith(' trust') and installed is not UNREADABLE and installed != wanted \
+            and trusted(installed) != trusted(wanted):
+        blockers.append(f'{label}: the trusted principal would change; do that as a separately reviewed step')
 
 plan = []
 for label, kind, installed, wanted, _ in targets:
@@ -154,17 +263,34 @@ for label, kind, installed, wanted, _ in targets:
         plan.append({'target': label, 'status': 'differs', 'installed': installed, 'rendered': wanted})
     else:
         plan.append({'target': label, 'status': 'differs', **statement_diff(installed, wanted)})
-print(json.dumps({'commit': commit, 'apply': a.apply, 'plan': plan}, indent=2), flush=True)
+# A digest of everything this run would compare and write. --yes must quote the digest of a plan-mode run
+# that was reviewed; an unreadable target changes it, so nothing is written that the reviewer didn't see.
+plan_hash = hashlib.sha256(json.dumps(
+    {'commit': commit, 'targets': [[label, kind, '<unreadable>' if installed is UNREADABLE else installed, wanted]
+                                   for label, kind, installed, wanted, _ in targets]},
+    sort_keys=True, default=str).encode()).hexdigest()[:16]
+# Only plan mode prints the hash, so an apply can't be re-run with a hash it produced itself.
+header = {'commit': commit, 'apply': a.apply, **({} if a.apply else {'plan_hash': plan_hash}), 'plan': plan}
+print(json.dumps(header, indent=2), flush=True)
 if any(t[1] == 'missing' for t in targets):
     raise SystemExit('Some identities are missing; run the bootstrap first')
 if blockers:
     raise SystemExit('; '.join(blockers))
 if not a.apply:
     raise SystemExit()
+changes = [t for t in targets if t[2] != t[3]]
+if a.yes and a.plan_hash != plan_hash:
+    raise SystemExit('--yes needs --plan-hash from a reviewed plan-mode run of this exact state; '
+                     'run plan mode, review it, and quote its plan_hash. Nothing was changed')
+if changes and not a.yes:
+    if not sys.stdin.isatty():
+        raise SystemExit('Review the plan above, then confirm interactively or rerun with --yes; nothing was changed')
+    if input(f'Apply {len(changes)} change(s) to installed IAM? Type "apply" to continue: ').strip() != 'apply':
+        raise SystemExit('Not confirmed; nothing was changed')
 for label, kind, installed, wanted, update in targets:
     if installed != wanted:
         update()
         print('updated ' + label, flush=True)
-print(json.dumps({'done': True, 'commit': commit,
+print(json.dumps({'done': True, 'commit': commit, 'changes': len(changes),
                   'next': 'run verify.py --role-arn and verify_access.py --live against the installed identities'}),
       flush=True)
