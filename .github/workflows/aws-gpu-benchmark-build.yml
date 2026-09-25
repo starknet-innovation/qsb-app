@@ -23,7 +23,9 @@ jobs:
       - name: Build sm86 benchmark only
         run: docker build --platform linux/amd64 --build-arg CUDA_ARCH=86 -f ops/aws-gpu-benchmark/Dockerfile -t qsb-aws-benchmark:sm86 .
       - name: Export image and build identity
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p benchmark-artifacts
           cp ops/aws-gpu-benchmark/.build/source-manifest.json benchmark-artifacts/
           docker image inspect qsb-aws-benchmark:sm86 > benchmark-artifacts/image.json
