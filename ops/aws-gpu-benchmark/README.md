@@ -119,7 +119,10 @@ no presigned credential URLs or cloud credentials enter the container.
    compares time, state, window, target, role and input. Enrollment taking more
    than two minutes or any mismatch/error triggers immediate exact-instance
    termination and fails before setup. AWS subprocess calls are bounded to 20s.
-   If termination fails too, the receipt retains the ID for urgent reconciliation.
+   IAM propagation can also cause enrollment to fail; this fails closed with
+   termination, not an automatic retry or permission expansion. This path has
+   only mocked local tests, not live IAM/Scheduler delivery evidence. If
+   termination fails too, the receipt retains the ID for urgent reconciliation.
 4. Only after `cleanup-enrolled`, use SSM to verify
    `test -f /run/qsb-shutdown-armed`, `shutdown --show`, and
    `systemctl list-timers qsb-benchmark-expire.timer --all` on the host. Compare
@@ -236,3 +239,11 @@ No inbound security-group port is opened; SSH packets travel inside SSM channels
 No S3 grant, registry token, GitHub credential or presigned URL is needed on the
 host. Transfer/setup time counts against the same absolute deadline. If it does
 not fit, terminate; do not reset the deadline or relaunch automatically.
+
+Estimate transfer feasibility before launch from the downloaded artifact's actual
+byte count and a separately measured SSM throughput. For example, 2.2 GiB at
+100 Mbit/s is about 3.2 minutes of payload transfer, while 10 Mbit/s is about
+31.5 minutes, excluding protocol, load and setup overhead. These are arithmetic
+examples, not measured SSM bandwidth or a claim about the current artifact size.
+Reserve enough of the fixed 55-minute window for loading, the 30-minute wrapper,
+result copy and teardown; slow transfer means abort/terminate, not an extended cap.
