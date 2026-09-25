@@ -131,3 +131,5 @@ decryption is scoped to the configured key through Secrets Manager. A configured
 boundary and the key policy must also allow it; this change does not broaden
 administrator-managed boundaries. A future provider replacement changes the
 provider credential grant, not record or workflow authority.
+
+Mainnet funding/search is controlled by `mainnet_enabled` (default false), wired identically to API and coordinator. Exact submission additionally needs `exact_submit_enabled` (default false). Enablement requires explicit issue #22 approval; no source toggle or frontend rebuild is needed. See [switch matrix and deployment checks](../docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches).

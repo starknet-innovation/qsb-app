@@ -942,7 +942,7 @@ export default function App() {
               <span className="amber-dot" />
               <strong>
                 {operationsAllowed(config)
-                  ? `${NETWORK_CONFIG.label} rehearsal operations are enabled.`
+                  ? `${NETWORK_CONFIG.label} funding and search are enabled.`
                   : `${NETWORK_CONFIG.label} funding is not enabled yet.`}
               </strong>
               <span>Wallet and transaction validation are in progress.</span>

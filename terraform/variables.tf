@@ -105,3 +105,13 @@ variable "exact_submit_enabled" {
     error_message = "Exact submission is implemented for mainnet only."
   }
 }
+
+variable "mainnet_enabled" {
+  description = "Enable mainnet funding/search routes and coordinator. Requires explicit approval for issue #22; exact submission has a separate switch."
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.mainnet_enabled || var.network == "mainnet"
+    error_message = "mainnet_enabled is only supported on mainnet."
+  }
+}

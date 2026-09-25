@@ -42,7 +42,7 @@ These are the funds-safety invariants:
   - it targets `main`;
   - CI passes;
   - no review threads are open.
-- **Mainnet switch.** Any change that turns on `release.mainnetEnabled` or `broadcastAuthorized`, or that implements #22, needs the user's explicit approval before it's merged.
+- **Mainnet switch.** Any change that turns on `mainnet_enabled`, `exact_submit_enabled`, `QSB_MAINNET_ENABLED`, `QSB_EXACT_SUBMIT_ENABLED`, `release.mainnetEnabled` or `broadcastAuthorized` (including changing an off default), or that implements #22, needs the user's explicit approval before it's merged.
 
 ## Deployment rule
 

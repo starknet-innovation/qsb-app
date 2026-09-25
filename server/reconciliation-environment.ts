@@ -14,4 +14,9 @@ export function reconciliationEnvironmentError(
     if (!env[name]?.trim()) return reason;
   if (!["mainnet", "testnet4"].includes(env.QSB_NETWORK!))
     return "QsbNetworkInvalid";
+  if (env.QSB_NETWORK === "mainnet") {
+    if (!env.QSB_MAINNET_ENABLED?.trim()) return "QsbMainnetEnabledRequired";
+    if (!["true", "false"].includes(env.QSB_MAINNET_ENABLED))
+      return "QsbMainnetEnabledInvalid";
+  }
 }

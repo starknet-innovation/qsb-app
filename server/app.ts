@@ -161,6 +161,7 @@ export function createApp(
         mainnetUiRoutes,
       )),
       network: NETWORK_ID,
+      mainnetEnabled: NETWORK_ID === "mainnet" && enabled,
       operationsEnabled: enabled,
       exactSubmitEnabled: dependencies.exactSubmit ?? exactSubmitEnabled(),
       billing: "not_configured",
