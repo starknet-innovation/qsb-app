@@ -120,12 +120,12 @@ it("attaches an operator-identified live request without requiring echoed input 
   expect((await store.list(pk, "RECONCILIATION#")).length).toBe(1);
   expect(lookup.health).not.toHaveBeenCalled();
 });
-it("restarts polling idempotently after attachment without granting another submission", async () => {
+it("restarts polling with a new audited revision after attachment without granting another submission", async () => {
   resumePolling.mockRejectedValueOnce(Error("workflow unavailable"));
   await expect(run()).rejects.toThrow("workflow unavailable");
   await run();
-  expect((await store.list(pk, "RECONCILIATION#")).length).toBe(1);
-  expect((await job()).revision).toBe(4);
+  expect((await store.list(pk, "RECONCILIATION#")).length).toBe(2);
+  expect((await job()).revision).toBe(5);
 });
 it.each(["IN_QUEUE", "FAILED", "CANCELLED", "TIMED_OUT"])(
   "records an attested %s provider id without submitting",
@@ -461,4 +461,41 @@ it("atomically limits competing Batch window decisions to one allowance", async 
   expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
   expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(1);
   expect((await job()).batchReplacementUsed).toBe(true);
+});
+it("permits only one concurrent recorded-ID polling restart", async () => {
+  await change({ status: "searching", runpodId: "provider-1" });
+  const results = await Promise.allSettled([run(), run()]);
+  expect(
+    results.filter((result) => result.status === "fulfilled"),
+  ).toHaveLength(1);
+  expect(resumePolling).toHaveBeenCalledTimes(1);
+  expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(1);
+  expect(await job()).toMatchObject({ revision: 4, runpodId: "provider-1" });
+});
+it.each([
+  { revision: 99, status: "paused" as const },
+  { owner: "different-owner" },
+])(
+  "does not overwrite a concurrent recorded job change: %j",
+  async (update) => {
+    await change({ status: "searching", runpodId: "provider-1" });
+    lookup.status = vi.fn(async (id) => {
+      await change(update);
+      return { id, status: "IN_PROGRESS" };
+    });
+    await expect(run()).rejects.toThrow();
+    expect(await job()).toMatchObject(update);
+    expect(await store.list(pk, "RECONCILIATION#")).toHaveLength(0);
+    expect(resumePolling).not.toHaveBeenCalled();
+  },
+);
+it("rejects a recorded job stored under the wrong owner before provider reads", async () => {
+  await change({
+    status: "searching",
+    runpodId: "provider-1",
+    owner: "different-owner",
+  });
+  await expect(run()).rejects.toThrow("JobIdentityMismatch");
+  expect(lookup.status).not.toHaveBeenCalled();
+  expect(resumePolling).not.toHaveBeenCalled();
 });
