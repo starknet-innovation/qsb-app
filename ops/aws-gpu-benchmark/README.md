@@ -5,8 +5,11 @@ on A10G and measures fixed-range wall-clock throughput. It does not activate the
 application, submit a transaction, enroll a solver release, or establish the cost
 of a complete search/withdrawal.
 
-The source remains verified against `worker/optimized/source-lock.json`. Only
-the benchmark build's CUDA target changes from sm89 to sm86. The production
+The source is verified against a benchmark manifest generated from a clean Git
+checkout by `manifest.py`. The receipt records the commit and deviations from
+the historical `worker/optimized/source-lock.json`; current main includes ranked
+range failure checks absent from that lock. Build flags come from the historical
+lock, with only the CUDA target changed from sm89 to sm86. The production
 Dockerfile, lock, descriptors and solver flags remain unchanged. The resulting
 binary has its own receipt and `BENCHMARK_ONLY` status. Build on native Linux
 without a GPU using `aws-gpu-benchmark-build.yml` (no AWS credentials). The same
