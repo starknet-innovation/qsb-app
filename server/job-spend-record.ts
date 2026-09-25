@@ -102,7 +102,10 @@ export function buildStoredSpendRecord(job: Job): StoredSpendRecord {
   };
 }
 
-/** The check issue #20's submit path calls. It does not broadcast or grant a permit. */
+/** Local stored-intent binding only; it does not authorize, check job readiness,
+ * or read the chain. Issue #20's submit path must call checkWithdrawal, which
+ * adds the awaiting_authorization and unspent-input checks before submission.
+ */
 export function assertStoredJobSpend(job: Job, rawTxHex: string): void {
   buildStoredSpendRecord(job);
   assertWithdrawalSpendAgainstJob(job, rawTxHex);
