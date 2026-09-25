@@ -32,6 +32,7 @@ HANDLER = Path(__file__).resolve().with_name('handler.py')
 # A denial counts only if AWS attributes it to the role's own identity policy (app-records.json). A denial
 # from the permissions boundary or an SCP would mean the check isn't testing what it claims to.
 APP_POLICY_DENIALS = ('explicit-deny-identity', 'no-identity-allow')
+EXPECTED_CHECKS = 10  # a pass needs every documented check, so an aborted run can never read as passed
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--profile', required=True, help='the qsb-operator profile (or an exported session: use "")')
@@ -108,8 +109,9 @@ def main(a):
         print(f"{step}: {'ok' if result.get('ok') else result.get('code')}", flush=True)
         return result
 
-    def check(label, passed, observed):
-        report['checks'].append({'check': label, 'passed': bool(passed), 'observed': observed})
+    def check(label, passed, observed, denial=None):
+        report['checks'].append({'check': label, 'passed': bool(passed), 'observed': observed,
+                                 **({'denial': denial} if denial is not None else {})})
         print(f"  [{'PASS' if passed else 'FAIL'}] {label}: {observed}", flush=True)
 
     denied = lambda r: (not r.get('ok') and r.get('code') == 'AccessDeniedException'
@@ -157,7 +159,7 @@ def main(a):
             '--key', json.dumps({'pk': {'S': 'OWNER#' + suffix}, 'sk': {'S': 'IAM_TEST'}}))
         # Step 2: a transaction with a denied SYSTEM# Put must write nothing.
         r = invoke('denied-transaction')
-        check('mixed transaction with a SYSTEM# Put is denied by the app policy', denied(r), shown(r))
+        check('mixed transaction with a SYSTEM# Put is denied by the app policy', denied(r), shown(r), r.get('denial'))
         seen = rows('OWNER#', 'SYSTEM#')
         check('denied transaction wrote neither row', not any(seen.values()), seen)
         # The reservation shape: allowed Puts plus a SYSTEM# ConditionCheck.
@@ -169,7 +171,7 @@ def main(a):
         r = invoke('outpoint-put-again')
         check('conditional re-create of the outpoint fails', r.get('code') == 'ConditionalCheckFailedException', shown(r))
         r = invoke('outpoint-delete')
-        check('outpoint delete is denied by the app policy', denied(r), shown(r))
+        check('outpoint delete is denied by the app policy', denied(r), shown(r), r.get('denial'))
         seen = rows('OUTPOINT#')
         check('outpoint reservation remains', seen == {'outpoint': True}, seen)
         # Step 3: a mixed BatchWriteItem must be denied with no partial write.
@@ -177,9 +179,10 @@ def main(a):
             '--key', json.dumps({'pk': {'S': 'OWNER#' + suffix}, 'sk': {'S': 'IAM_TEST'}}))
         r = invoke('denied-batch')
         check('mixed BatchWriteItem is denied by the app policy', denied(r),
-              shown(r) + (', unprocessed items' if r.get('unprocessed') else ''))
+              shown(r) + (', unprocessed items' if r.get('unprocessed') else ''), r.get('denial'))
         seen = rows('OWNER#', 'SYSTEM#')
         check('denied batch wrote neither row', not any(seen.values()), seen)
+        report['completed'] = True
     finally:
         if a.keep:
             print(f'kept sandbox resources named {name}', flush=True)
@@ -207,17 +210,23 @@ def main(a):
             print(f"cleanup: {outcome}" + (f"; delete these by hand: {name} ({', '.join(failed)})" if failed else ''),
                   flush=True)
             report['cleanupComplete'] = not failed
-        report['passed'] = bool(report['checks']) and all(c['passed'] for c in report['checks'])
-        # Inconclusive, not failed: the role couldn't act at all, or AWS didn't say which policy denied a call.
-        # Never a pass; rerun once, and if it repeats the attribution method needs a reviewed change.
-        control = next((c for c in report['checks'] if c['check'].startswith('control')), None)
-        unattributed = any(s.get('denial') == 'unattributed' for s in report['steps'])
-        report['outcome'] = ('passed' if report['passed'] else
-                             'inconclusive' if (control and not control['passed']) or unattributed else 'failed')
+        completed = report.setdefault('completed', False)
+        report['passed'] = (completed and len(report['checks']) == EXPECTED_CHECKS
+                            and all(c['passed'] for c in report['checks']))
+        # aborted: the run stopped before every check ran. inconclusive: the role couldn't act at all, or every
+        # failure is a denial AWS didn't attribute. Neither is ever a pass. Anything else that fails is failed.
+        failing = [c for c in report['checks'] if not c['passed']]
+        control_failed = any(c['check'].startswith('control') for c in failing)
+        attribution_only = bool(failing) and all(c.get('denial') == 'unattributed' for c in failing)
+        report['outcome'] = ('aborted' if not completed else 'passed' if report['passed'] else
+                             'inconclusive' if control_failed or attribution_only else 'failed')
         evidence.parent.mkdir(parents=True, exist_ok=True)
         evidence.write_text(json.dumps(report, indent=2) + '\n')
         evidence.chmod(0o600)
     print(json.dumps({'passed': report['passed'], 'checks': len(report['checks']), 'evidence': str(evidence)}), flush=True)
+    if report['outcome'] == 'aborted':
+        raise SystemExit('Sandbox run ABORTED before every check ran: the evidence is incomplete and is not a pass. '
+                         'Do not deposit; fix the cause and rerun.')
     if report['outcome'] == 'inconclusive':
         raise SystemExit('Sandbox result is INCONCLUSIVE (the control step failed, or a denial was unattributed): do not '
                          'deposit. Rerun once; if it repeats, change the attribution method through review. An '

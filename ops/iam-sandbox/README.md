@@ -44,6 +44,8 @@ A denial from the boundary or an SCP fails the check, because it would mean the 
 
 **Cleanup.** It deletes what it created, including anything whose create call errored, unless `--keep` is given. It reports each deletion as deleted, not found or failed. It exits with an error if any deletion failed, and names what to delete by hand.
 
+The evidence records one of four `outcome` values: `passed`, `failed`, `inconclusive` or `aborted`. Only `passed` allows a deposit, and it requires a completed run with all 10 checks passing. **If the run was aborted,** meaning it stopped before every check ran (a Lambda error, an expired session, an interruption), the evidence is incomplete. Fix the cause and rerun.
+
 **If the result is inconclusive,** stop and don't deposit. That means the control step failed, or AWS didn't say which policy denied a call. Rerun once. If it repeats, the denial-attribution method needs a reviewed change: an unattributed denial never counts as a pass.
 
 **If any check fails:** stop, don't deposit, and don't loosen the app policy to make it pass. If the evidence attributes a denial to the permissions boundary, the boundary is missing something the app policy grants. Fix `qsb-runtime-boundary` in `ops/github-aws/render.py` through review, as #66 did for `ConditionCheckItem`, then install it with `update_installed.py`. Keep the evidence and investigate.

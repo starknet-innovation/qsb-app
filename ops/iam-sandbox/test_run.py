@@ -169,6 +169,17 @@ class SandboxRunner(unittest.TestCase):
                             for n in self.deleted_names), self.deleted_names)
         self.assertEqual(len({n.rsplit('/', 1)[-1] for n in self.deleted_names}), 1)
 
+    def test_a_definite_failure_is_not_masked_as_inconclusive(self):
+        unattributed = {'ok': False, 'code': 'AccessDeniedException', 'denial': 'unattributed'}
+        with self.assertRaisesRegex(SystemExit, 'do not loosen the app policy'):
+            self.run_sandbox({'denied-transaction': unattributed}, leaky=('denied-batch',))
+        self.assertEqual(self.report['outcome'], 'failed')
+
+    def test_a_pass_needs_every_documented_check(self):
+        self.run_sandbox()
+        self.assertEqual((self.report['outcome'], self.report['completed'], len(self.report['checks'])),
+                         ('passed', True, 10))
+
     def test_control_failure_or_unattributed_denial_is_inconclusive(self):
         for behaviour in ({'control-owner-put': APP_DENY},
                           {'denied-transaction': {'ok': False, 'code': 'AccessDeniedException', 'denial': 'unattributed'}}):
@@ -186,6 +197,10 @@ class SandboxRunner(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, 'sandbox Lambda failed'):
             self.run_sandbox(function_error='allowed-transaction')
         self.assertTrue(self.report['cleanupComplete'])
+        # Every check recorded so far passed, but the run stopped: the evidence must not read as a pass.
+        self.assertTrue(self.report['checks'] and all(c['passed'] for c in self.report['checks']))
+        self.assertEqual((self.report['passed'], self.report['outcome'], self.report['completed']),
+                         (False, 'aborted', False))
         with self.assertRaisesRegex(SystemExit, 'put-role-policy failed'):
             self.run_sandbox(fail=('iam', 'put-role-policy'))
         self.assertEqual(set(self.report['cleanup']), {'role-policy', 'role', 'table'})
