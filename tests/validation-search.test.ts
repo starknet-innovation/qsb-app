@@ -704,11 +704,11 @@ it("rejects an unsupported pinned release before any provider request", async ()
 
 it("rejects image preflight without allocating or losing a retry intent", async () => {
   const row = (await store.get(pk, sk))!;
-  await store.put({...row,version:row.version+1,validation:{...row.validation,retry:[7]}},row.version);
+  await store.put({...row,version:row.version+1,validation:{...(row.validation as Record<string, unknown>),retry:[7]}},row.version);
   provider.prepareRun.mockRejectedValue(new Error("ProviderImageUnconfirmed"));
   await expect(tick()).rejects.toThrow("ProviderImageUnconfirmed");
   expect(provider.run).not.toHaveBeenCalled();
   const saved = (await store.get(pk, sk))!;
   expect(saved.validation).toMatchObject({nextAttempt:0,retry:[7],active:[]});
-  expect(saved.job.status).toBe("queued");
+  expect(saved.job).toMatchObject({status:"queued"});
 });
