@@ -81,6 +81,7 @@ run "reject_mainnet_supervised_runtime" {
 run "ci_runtime_roles_are_bounded" {
   command = plan
   variables {
+    network                      = "mainnet"
     iam_role_path                = "/qsb/runtime/"
     iam_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary"
   }
