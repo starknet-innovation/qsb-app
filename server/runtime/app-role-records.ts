@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 /**
  * Partition-key prefixes written on the coordinator path.
  * Condition checks are not writes: the API condition-checks
- * SYSTEM#QSB_MAINNET_SERVICE and SYSTEM#RESERVATION_AUTHORITY and does not put them.
+ * SYSTEM#RESERVATION_AUTHORITY and does not put them.
  * No operator role is granted here, so those system rows stay unwritable by these roles.
  */
 export const coordinatorPathWrites = {
@@ -14,7 +14,6 @@ export const coordinatorPathWrites = {
     { prefix: "SESSION#", actions: ["PutItem"] },
     { prefix: "OWNER#", actions: ["PutItem"] },
     { prefix: "OUTPOINT#", actions: ["PutItem"] },
-    { prefix: "OUTBOX#", actions: ["PutItem"] },
   ],
   coordinator: [{ prefix: "OWNER#", actions: ["PutItem"] }],
 } as const;
@@ -27,15 +26,21 @@ type PolicyStatement = {
   Action: string | string[];
   Condition?: {
     "ForAnyValue:StringLike"?: { "dynamodb:LeadingKeys"?: string[] };
+    "ForAllValues:StringLike"?: { "dynamodb:LeadingKeys"?: string[] };
+    Null?: { "dynamodb:LeadingKeys"?: string };
   };
 };
 
-const policyPath = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../terraform/policies/app-records.json",
-);
-
-export function appRoleRecordStatements(): PolicyStatement[] {
+export function appRoleRecordStatements(
+  role: AppRole = "api",
+): PolicyStatement[] {
+  const filename =
+    role === "api" ? "app-records.json" : "coordinator-records.json";
+  const policyPath = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../terraform/policies",
+    filename,
+  );
   return JSON.parse(readFileSync(policyPath, "utf8")) as PolicyStatement[];
 }
 
@@ -47,21 +52,43 @@ function stringLike(value: string, pattern: string): boolean {
   return new RegExp(expression).test(value);
 }
 
-function matches(statement: PolicyStatement, action: string, leadingKeys: string[]): boolean {
-  const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+function matches(
+  statement: PolicyStatement,
+  action: string,
+  leadingKeys: string[],
+): boolean {
+  const actions = Array.isArray(statement.Action)
+    ? statement.Action
+    : [statement.Action];
   if (!actions.includes(action)) return false;
-  const patterns = statement.Condition?.["ForAnyValue:StringLike"]?.["dynamodb:LeadingKeys"];
+  const patterns =
+    statement.Condition?.["ForAnyValue:StringLike"]?.["dynamodb:LeadingKeys"];
+  if (
+    statement.Condition?.Null?.["dynamodb:LeadingKeys"] === "false" &&
+    leadingKeys.length === 0
+  )
+    return false;
+  const all =
+    statement.Condition?.["ForAllValues:StringLike"]?.["dynamodb:LeadingKeys"];
+  if (
+    all &&
+    !leadingKeys.every((key) => all.some((pattern) => stringLike(key, pattern)))
+  )
+    return false;
   if (!patterns) return true;
-  return leadingKeys.some((key) => patterns.some((pattern) => stringLike(key, pattern)));
+  return leadingKeys.some((key) =>
+    patterns.some((pattern) => stringLike(key, pattern)),
+  );
 }
 
-/** Local evaluation of the shared API and coordinator record policy. Not a live IAM call. */
+/** Local evaluation of the selected API or coordinator record policy. Not a live IAM call. */
 export function decideAppRoleAccess(
   action: string,
   leadingKeys: string[],
+  role: AppRole = "api",
 ): "allow" | "deny" {
   let allowed = false;
-  for (const statement of appRoleRecordStatements()) {
+  for (const statement of appRoleRecordStatements(role)) {
     if (!matches(statement, action, leadingKeys)) continue;
     if (statement.Effect === "Deny") return "deny";
     allowed = true;

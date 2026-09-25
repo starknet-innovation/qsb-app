@@ -11,17 +11,17 @@ describe("app role record access", () => {
       "SESSION#",
       "OWNER#",
       "OUTPOINT#",
-      "OUTBOX#",
     ]);
     expect(coordinatorPathWrites.coordinator).toEqual([
       { prefix: "OWNER#", actions: ["PutItem"] },
     ]);
     expect(
-      coordinatorPathWrites.api.find((entry) => entry.prefix === "OUTPOINT#")?.actions,
+      coordinatorPathWrites.api.find((entry) => entry.prefix === "OUTPOINT#")
+        ?.actions,
     ).toEqual(["PutItem"]);
     expect(
-      [...coordinatorPathWrites.api, ...coordinatorPathWrites.coordinator].some((entry) =>
-        entry.prefix.startsWith("SYSTEM#"),
+      [...coordinatorPathWrites.api, ...coordinatorPathWrites.coordinator].some(
+        (entry) => entry.prefix.startsWith("SYSTEM#"),
       ),
     ).toBe(false);
   });
@@ -29,11 +29,20 @@ describe("app role record access", () => {
   it("lets the API create a reservation and refuses to delete one", () => {
     const reservation = [`OUTPOINT#${"ab".repeat(32)}:0`];
     expect(decideAppRoleAccess("dynamodb:PutItem", reservation)).toBe("allow");
-    expect(decideAppRoleAccess("dynamodb:DeleteItem", reservation)).toBe("deny");
-    expect(decideAppRoleAccess("dynamodb:UpdateItem", reservation)).toBe("deny");
-    expect(decideAppRoleAccess("dynamodb:BatchWriteItem", reservation)).toBe("deny");
+    expect(decideAppRoleAccess("dynamodb:DeleteItem", reservation)).toBe(
+      "deny",
+    );
+    expect(decideAppRoleAccess("dynamodb:UpdateItem", reservation)).toBe(
+      "deny",
+    );
+    expect(decideAppRoleAccess("dynamodb:BatchWriteItem", reservation)).toBe(
+      "deny",
+    );
     expect(
-      decideAppRoleAccess("dynamodb:DeleteItem", ["OWNER#wallet", reservation[0]!]),
+      decideAppRoleAccess("dynamodb:DeleteItem", [
+        "OWNER#wallet",
+        reservation[0]!,
+      ]),
     ).toBe("deny");
   });
 
@@ -41,13 +50,54 @@ describe("app role record access", () => {
     const authority = ["SYSTEM#RESERVATION_AUTHORITY"];
     expect(decideAppRoleAccess("dynamodb:PutItem", authority)).toBe("deny");
     expect(decideAppRoleAccess("dynamodb:DeleteItem", authority)).toBe("deny");
-    expect(decideAppRoleAccess("dynamodb:ConditionCheckItem", authority)).toBe("allow");
+    expect(decideAppRoleAccess("dynamodb:ConditionCheckItem", authority)).toBe(
+      "allow",
+    );
     expect(decideAppRoleAccess("dynamodb:GetItem", authority)).toBe("allow");
-    expect(decideAppRoleAccess("dynamodb:PutItem", ["SYSTEM#QSB_MAINNET_SERVICE"])).toBe(
+    expect(
+      decideAppRoleAccess("dynamodb:PutItem", ["SYSTEM#QSB_MAINNET_SERVICE"]),
+    ).toBe("deny");
+    expect(
+      decideAppRoleAccess("dynamodb:DeleteItem", ["CHALLENGE#nonce"]),
+    ).toBe("allow");
+    expect(decideAppRoleAccess("dynamodb:PutItem", ["OWNER#wallet"])).toBe(
+      "allow",
+    );
+  });
+});
+
+it("restricts coordinator writes including mixed and empty keys", () => {
+  expect(
+    decideAppRoleAccess(
+      "dynamodb:GetItem",
+      ["SYSTEM#RESERVATION_AUTHORITY"],
+      "coordinator",
+    ),
+  ).toBe("allow");
+  expect(
+    decideAppRoleAccess("dynamodb:PutItem", ["OWNER#wallet"], "coordinator"),
+  ).toBe("allow");
+  for (const keys of [
+    [],
+    ["OUTPOINT#x"],
+    ["SYSTEM#x"],
+    ["OWNER#wallet", "OUTPOINT#x"],
+  ])
+    expect(decideAppRoleAccess("dynamodb:PutItem", keys, "coordinator")).toBe(
       "deny",
     );
-    expect(decideAppRoleAccess("dynamodb:PutItem", ["OUTBOX#QSB_DISPATCH"])).toBe("allow");
-    expect(decideAppRoleAccess("dynamodb:DeleteItem", ["CHALLENGE#nonce"])).toBe("allow");
-    expect(decideAppRoleAccess("dynamodb:PutItem", ["OWNER#wallet"])).toBe("allow");
-  });
+  for (const action of [
+    "DeleteItem",
+    "UpdateItem",
+    "BatchWriteItem",
+    "Query",
+    "ConditionCheckItem",
+  ])
+    expect(
+      decideAppRoleAccess(
+        `dynamodb:${action}`,
+        ["OWNER#wallet"],
+        "coordinator",
+      ),
+    ).toBe("deny");
 });

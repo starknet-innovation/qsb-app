@@ -13,18 +13,25 @@ resource "aws_iam_role_policy" "logs" {
   role     = aws_iam_role.lambda[each.key].id
   policy   = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = ["logs:CreateLogStream", "logs:PutLogEvents"], Resource = "${aws_cloudwatch_log_group.lambda[each.key].arn}:*" }] })
 }
-# API and coordinator share one table policy. PutItem may create OUTPOINT# reservations.
-# DeleteItem, UpdateItem, and BatchWriteItem are denied on OUTPOINT#*. Writes are denied on
-# SYSTEM#*. ConditionCheckItem stays allowed, so an authority or capability fence is a condition
-# check. ForAnyValue is required on these denies: ForAllValues is true when LeadingKeys is
-# absent, and a mixed batch must not skip the deny. No operator role is granted system-row writes.
+# API reservations remain conditional creates; coordinator writes only OWNER rows.
 resource "aws_iam_role_policy" "records" {
-  for_each = toset(["api", "coordinator"])
+  for_each = toset(["api"])
   role     = aws_iam_role.lambda[each.key].id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       for statement in jsondecode(file("${path.module}/policies/app-records.json")) : merge(statement, {
+        Resource = "arn:${data.aws_partition.current.partition}:dynamodb:${var.region}:${var.aws_account_id}:table/${aws_dynamodb_table.records.name}"
+      })
+    ]
+  })
+}
+resource "aws_iam_role_policy" "coordinator_records" {
+  role = aws_iam_role.lambda["coordinator"].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      for statement in jsondecode(file("${path.module}/policies/coordinator-records.json")) : merge(statement, {
         Resource = "arn:${data.aws_partition.current.partition}:dynamodb:${var.region}:${var.aws_account_id}:table/${aws_dynamodb_table.records.name}"
       })
     ]
@@ -73,7 +80,7 @@ resource "aws_lambda_function" "coordinator" {
   environment {
     variables = merge({ TABLE_NAME = aws_dynamodb_table.records.name, QSB_NETWORK = var.network, QSB_REHEARSAL_ENABLED = "false", REFERENCE_FUNCTION = aws_lambda_function.reference.function_name }, local.runpod ? { RUNPOD_ENDPOINT_ID = var.runpod_endpoint_id, RUNPOD_SECRET_ARN = var.runpod_secret_arn } : {})
   }
-  depends_on = [terraform_data.release, aws_iam_role_policy.logs, aws_iam_role_policy.records, aws_iam_role_policy.reference, aws_iam_role_policy.runpod]
+  depends_on = [terraform_data.release, aws_iam_role_policy.logs, aws_iam_role_policy.coordinator_records, aws_iam_role_policy.reference, aws_iam_role_policy.runpod]
 }
 resource "aws_lambda_function" "api" {
   function_name                  = "${var.name}-api"
