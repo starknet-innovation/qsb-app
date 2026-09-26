@@ -38,10 +38,13 @@ The plan names all of these alerts: `cost-cap`, `deadline`, `uncertain-paid-outc
 ### Deterministic pinning failures
 
 The combined optimized release can stop a pinning work unit on `QSB_RANGE_INCOMPLETE`, a hit-capacity overflow, or a repeatable publication or CUDA failure. How this app records it depends on what the worker published:
-- **Paused, "Incomplete work unit"**, where the worker exited 2 with no candidates: the app offers resume, and a resume repeats the same bounded range as a new paid job. Treat it as a stopped work unit anyway.
+- **Paused, "Incomplete work unit"**, where the worker exited 2 without any CPU-valid candidate (no candidates, or only DER-only ones): the app offers resume, and a resume repeats the same bounded range as a new paid job. Treat it as a stopped work unit anyway.
   - Preserve the exact range, image and logs.
   - Resume only after the cause is diagnosed and corrected.
-- **Failed, "GPU hit output exceeds supported capacity"**, where the output reached the host hit capacity (the `HOST_HIT_CAPACITY` check in `server/coordinator.ts`): this is terminal in this app. `/api/jobs/:id/resume` accepts only paused jobs, and there is no reviewed recovery path.
+  - The repaired pinning stops before publishing when a single batch overflows, so a genuine overflow normally lands here.
+- **Paused, "GPU candidates failed independent CPU verification"**: `/api/jobs/:id/resume` refuses it, because it needs operator review. The repaired pinning publishes hits batch by batch, so a later batch can still fail after an earlier one has published. A candidate that passes CPU verification is credited as a hit as usual.
+- **Failed, "GPU hit output exceeds supported capacity"**, where at least `HOST_HIT_CAPACITY` (64) records were published in total (checked in `server/coordinator.ts`): this is terminal in this app. `/api/jobs/:id/resume` accepts only paused jobs, and there is no reviewed recovery path.
+  - The withdrawal's funding and helper outpoint reservations stay in place, because the app role can only create `OUTPOINT#` rows, never delete them. So that deposit can't be withdrawn through the app until a reviewed recovery change lands. The funds aren't lost: they stay in the vault.
   - Stop and preserve the evidence.
   - Don't work around it by hand. A recovery path needs its own reviewed change.
 
