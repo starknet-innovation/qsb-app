@@ -106,6 +106,28 @@ select that served release. A mismatched explicit request, missing configuration
 unbound external descriptor or archived placeholder refuses before reservations.
 Historical pins remain readable. The enrolled AWS release below is available for explicit build/deployment selection. An unconfigured deployment still refuses new jobs before reservations.
 
+## AWS release enrollment: combined-aws-sm86-v0.2.0 (optimized subset, repaired pinning)
+
+The producer release asset
+[`combined-aws-sm86-v0.2.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/combined-aws-sm86-v0.2.0)
+is enrolled verbatim as `src/lib/releases/qsb-solver-combined-aws-sm86-v0-2-0.json`.
+
+- **What it is:** the already tested image, built from source `43c77084…` by `candidate.yml` (tag `candidate-sm86-20260925-1`). It was not rebuilt.
+- **Gates:** qsb-solver#2 recorded its release gates: native sm86 A10G checks, and a matched A10G performance check against `aws-v0.1.0`. Subset round 1 is about +31–32%, round 2 about +1.6–1.7%, and pinning is unchanged.
+- **Compatibility:** it uses the same protocol, generator commit and ranked-v2 search contract as `aws-v0.1.0`, so vaults are unaffected. Each withdrawal job pins the release the deployment serves when the job is created.
+- **Selection:** `aws-v0.1.0` remains enrolled. Select the combined release explicitly with `--solver-release`, and serve it through its own job definition revision, never alongside the other release.
+
+```sh
+gh attestation verify "oci://$(node -p 'require("./src/lib/releases/qsb-solver-combined-aws-sm86-v0-2-0.json").image')" \
+  --repo starknet-innovation/qsb-solver \
+  --signer-workflow starknet-innovation/qsb-solver/.github/workflows/candidate.yml \
+  --source-ref refs/tags/candidate-sm86-20260925-1 \
+  --source-digest "$(node -p 'require("./src/lib/releases/qsb-solver-combined-aws-sm86-v0-2-0.json").solverCommit')" \
+  --deny-self-hosted-runners
+gh release download combined-aws-sm86-v0.2.0 -R starknet-innovation/qsb-solver -p solver.json -O - \
+  | cmp - src/lib/releases/qsb-solver-combined-aws-sm86-v0-2-0.json
+```
+
 ## AWS release enrollment: aws-v0.1.0
 
 The verbatim [producer release asset](https://github.com/starknet-innovation/qsb-solver/releases/tag/aws-v0.1.0)
