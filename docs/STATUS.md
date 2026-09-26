@@ -13,20 +13,24 @@ The plan of record is #8, and the first mainnet run is #22. Where this section a
 
 **Deployed** (details in #22's pre-flight status):
 - The lean app stack from #25.
-- The AWS Batch GPU stack. It runs at most one On-Demand `g5.xlarge` (A10G) and scales to zero. Jobs have a 900-second limit, and a watchdog stops anything past 30 minutes. It runs the attested `aws-v0.1.0` release, built for sm86 from `qsb-solver`'s historical-baseline `worker/Dockerfile`.
+- The AWS Batch GPU stack. It runs at most one On-Demand `g5.xlarge` (A10G) and scales to zero. Jobs have a 900-second limit, and a watchdog stops anything past 30 minutes. It runs the attested `aws-v0.1.0` release, built for sm86 from `qsb-solver`'s historical-baseline `worker/Dockerfile`. Until the deployment below is done, it keeps serving that release.
 - IAM: APP-ROLE-SANDBOX steps 2 and 3 passed live (`ops/iam-sandbox`, #65). The installed runtime boundary and deploy role match `main`.
 
 **Solver:**
-- The optimized sm86 candidate is qsb-solver#2. Its release gate is the native sm86 A10G checks of the repaired pinning (pinning, exceptions, curve and memory), plus a matched A10G performance check against `aws-v0.1.0`. The fresh regtest proof search is not required.
-- Measured so far (qsb-solver#2): on one sm89 GPU, the earlier sm89 candidate's subset kernel had about 76–81% higher round-one and 3–4% higher round-two throughput than the published `v0.1.0`. These figures are for the subset component only, not a whole-withdrawal estimate, and pinning wasn't benchmarked. The matched A10G check, which covers pinning too, is pending. The 77% and 4–5% figures in the snapshot below are from an earlier 23 September measurement.
-- After it merges, the steps are:
-  1. a release from the tested image, without rebuilding;
-  2. enrollment in this repository;
-  3. copying the image into the `qsb-solver` ECR repository;
-  4. a new `terraform/gpu` job definition revision;
-  5. an app-stack apply that points `batch_job_definition` and `solver_release_id` at them.
+- **The optimized sm86 release is published and enrolled.** qsb-solver#2 met its release gates and was squash-merged on 26 September:
+  - native sm86 A10G checks of the repaired pinning (pinning, exceptions, curve, memory);
+  - a matched A10G performance check against `aws-v0.1.0`, covering both subset rounds and pinning. The fresh regtest proof is not required.
+- **The release** is `combined-aws-sm86-v0.2.0`: the already tested image `e22afc72…` from source `43c7708`, not rebuilt. It's enrolled here as `src/lib/releases/qsb-solver-combined-aws-sm86-v0-2-0.json`, and `aws-v0.1.0` remains enrolled.
+- **Measured on the A10G (qsb-solver `docs/promotion/2026-09-26-a10g-performance.md`):**
+  - subset round 1: about 31–32% higher throughput;
+  - round 2: about 1.6–1.7%;
+  - pinning: unchanged.
 
-  Each step needs explicit approval.
+  All candidate full-range projections are under the 840-second worker limit. These are component timings, not a whole-withdrawal estimate. The earlier sm89 figures (76–81% and 3–4%) and the 77% and 4–5% in the snapshot below come from other GPUs and measurements.
+- **Deployment is still to do**, and each step needs explicit approval:
+  1. copy the image into the `qsb-solver` ECR repository, with the digest unchanged;
+  2. create a new `terraform/gpu` job definition revision;
+  3. build and apply the app stack with `--solver-release` and `solver_release_id` set to the new release, and `batch_job_definition` set to the new revision.
 - A vault binds only its QSB configuration. A withdrawal job pins the release the app is serving when the job is created, which is the deployed `SOLVER_RELEASE_ID` (`src/lib/provenance.ts`, `server/solver-deployment.ts`). So a deposit can be made at any time. Create the withdrawal only once an uncached `GET /api/config` reports the optimized release's `solverReleaseId`. Enrolling the release isn't enough.
 
 **Remaining for #22:**
