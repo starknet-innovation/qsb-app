@@ -2,7 +2,7 @@
 
 ## Current status, 25 September 2026
 
-The plan of record is #8, and the first mainnet run is #22. Where this section and the 23 September research snapshot below differ, this section applies.
+The plan of record is #8, and the first mainnet run is #22. Where this section and the 23 September research snapshot below differ, this section applies. Updated 26 September 2026: the optimized solver release is deployed.
 
 **Decisions** (by @adrienlacombe):
 - GPU work runs on AWS Batch only. Runpod is neither the default nor a fallback.
@@ -13,11 +13,11 @@ The plan of record is #8, and the first mainnet run is #22. Where this section a
 
 **Deployed** (details in #22's pre-flight status):
 - The lean app stack from #25.
-- The AWS Batch GPU stack. It runs at most one On-Demand `g5.xlarge` (A10G) and scales to zero. Jobs have a 900-second limit, and a watchdog stops anything past 30 minutes. It runs the attested `aws-v0.1.0` release, built for sm86 from `qsb-solver`'s historical-baseline `worker/Dockerfile`. Until the deployment below is done, it keeps serving that release.
+- The AWS Batch GPU stack. It runs at most one On-Demand `g5.xlarge` (A10G) and scales to zero. Jobs have a 900-second limit, and a watchdog stops anything past 30 minutes. Since 26 September it runs the attested optimized release `combined-aws-sm86-v0.2.0` (`qsb-ranked-v2-43c77084648a-e22afc720df1`) on job definition revision 4. The historical-baseline `aws-v0.1.0` stays enrolled but is no longer served.
 - IAM: APP-ROLE-SANDBOX steps 2 and 3 passed live (`ops/iam-sandbox`, #65). The installed runtime boundary and deploy role match `main`.
 
 **Solver:**
-- **The optimized sm86 release is published and enrolled.** qsb-solver#2 met its release gates and was squash-merged on 26 September:
+- **The optimized sm86 release is published, enrolled and deployed.** qsb-solver#2 met its release gates and was squash-merged on 26 September:
   - native sm86 A10G checks of the repaired pinning (pinning, exceptions, curve, memory);
   - a matched A10G performance check against `aws-v0.1.0`, covering both subset rounds and pinning. The fresh regtest proof is not required.
 - **The release** is `combined-aws-sm86-v0.2.0`: the already tested image `e22afc72…` from source `43c7708`, not rebuilt. It's enrolled here as `src/lib/releases/qsb-solver-combined-aws-sm86-v0-2-0.json`, and `aws-v0.1.0` remains enrolled.
@@ -27,14 +27,17 @@ The plan of record is #8, and the first mainnet run is #22. Where this section a
   - pinning: unchanged.
 
   All candidate full-range projections are under the 840-second worker limit. These are component timings, not a whole-withdrawal estimate. The earlier sm89 figures (76–81% and 3–4%) and the 77% and 4–5% in the snapshot below come from other GPUs and measurements.
-- **Deployment is still to do**, and each step needs explicit approval:
-  1. copy the image into the `qsb-solver` ECR repository, with the digest unchanged;
-  2. create a new `terraform/gpu` job definition revision;
-  3. build and apply the app stack with `--solver-release` and `solver_release_id` set to the new release, and `batch_job_definition` set to the new revision.
-- A vault binds only its QSB configuration. A withdrawal job pins the release the app is serving when the job is created, which is the deployed `SOLVER_RELEASE_ID` (`src/lib/provenance.ts`, `server/solver-deployment.ts`). So a deposit can be made at any time. Create the withdrawal only once an uncached `GET /api/config` reports the optimized release's `solverReleaseId`. Enrolling the release isn't enough.
+- **Deployed on 26 September.** Each step had explicit approval, and the mainnet switches stayed off throughout:
+  1. The image was copied into the `qsb-solver` ECR repository with its digest (`e22afc72…`) unchanged.
+  2. `terraform/gpu` created job definition revision 4 and deregistered revision 3. No withdrawal existed, so none was in flight, and admission and resume stayed closed throughout because the mainnet switches were off. That is what "Job-definition revision changes and recovery" in the runbook requires.
+  3. The app stack was built and applied at `82331e9` with `--solver-release`, with `solver_release_id` set to the new release and `batch_job_definition` set to revision 4.
+
+  An uncached `GET /api/config` now reports `solverReleaseId` `qsb-ranked-v2-43c77084648a-e22afc720df1`.
+- A vault binds only its QSB configuration. A withdrawal job pins the release the app is serving when the job is created, which is the deployed `SOLVER_RELEASE_ID` (`src/lib/provenance.ts`, `server/solver-deployment.ts`). So a deposit can be made at any time. Because `/api/config` now reports the optimized release, a withdrawal created now pins it. Don't change `batch_job_definition` or its container properties while any withdrawal is searching, has a nonterminal provider job, or is paused with an unknown submission. See "Job-definition revision changes and recovery" in `docs/OPERATIONAL-RUNBOOK.md`.
 
 **Remaining for #22:**
 - the deposit;
+- turning mainnet on for the withdrawal session, with explicit approval;
 - the withdrawal and its search, which also confirms that Batch pulls the solver image by digest;
 - local signing;
 - exact-submit approval;
