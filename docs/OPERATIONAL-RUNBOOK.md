@@ -35,6 +35,16 @@ The plan names all of these alerts: `cost-cap`, `deadline`, `uncertain-paid-outc
 3. Do not enable mainnet or authorize a spend as part of incident response.
 4. Keep the backup, passphrase, and runtime credentials out of the incident record. Record public identifiers only.
 
+### Deterministic pinning failures
+
+The combined optimized release can stop a pinning work unit on `QSB_RANGE_INCOMPLETE`, a hit-capacity overflow, or a repeatable publication or CUDA failure. Treat that as a stopped work unit, even though this app may present the exit-2 result as a resumable incomplete range:
+- Preserve the exact range, image and logs.
+- Don't blindly resume or retry. Each resume is another paid job.
+- Diagnose and correct the cause before authorizing another paid attempt.
+- A failed or truncated range never receives completion credit.
+
+The producer's guidance is "Deterministic pinning failures" in [`qsb-solver` `docs/promotion/COMBINED-RELEASE.md`](https://github.com/starknet-innovation/qsb-solver/blob/8fe127790397b6903640f8949219c1ef34a92db2/docs/promotion/COMBINED-RELEASE.md#deterministic-pinning-failures).
+
 ## Safe stop and rollback
 
 Stop new submissions. Loss of a local process is not proof that remote GPU work stopped. Do not clear an unknown provider result by submitting it again.
