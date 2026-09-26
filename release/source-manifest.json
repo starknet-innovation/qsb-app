@@ -51,7 +51,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "1a1946da6cef160787f01f6e55ae0005f9b90c86cb572c9df09237715a064597",
+      "api": "038c2a17137e8e602199d8c82182d8d04f4594ffffd7c120a18e4ba5279f362b",
       "build-metadata": "2c4804c98f40b16adda8fde8e13f053d59cc53e26f951906064834edd469b1c6",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "8c276496b523e301ce420596c7c9c6c414445adedce6f4927cb7fc8ec6ceb25b",
@@ -163,8 +163,9 @@
       "src/lib/readiness.ts": "39e2b789e24fbb7ea9978460f34928384fb30a16ef740b8b8baaa1be99a58d13",
       "src/lib/releases/qsb-config-a-ranked-v2.json": "76cec4ab084e3c40501ecb8245a7b2968dadc7d587840a82adc5382544255c59",
       "src/lib/releases/qsb-solver-aws-v0-1-0.json": "fcb1077d6287c29afa336201e2a22f32b8053bbe61adb895b7eb03ce1ed5b2e6",
+      "src/lib/releases/qsb-solver-combined-aws-sm86-v0-2-0.json": "cf891d87c11f4e4d6d23417f7251fc455939dcbf38669cdccb0c3bc47072fdef",
       "src/lib/releases/qsb-solver-v0-1-0.json": "682c68f53f059717b51d3457d3eb1ad2d1b0023eca4bed0e5c60f9d863275c8e",
-      "src/lib/releases/registry.generated.ts": "a7454e5b1222b99e0c8790e58521c17283380ddbade12bd026e3fd33aae69b8f",
+      "src/lib/releases/registry.generated.ts": "ed2adaeaafe68f866a3c7cb584d404fcdbd560f20eb6757fa69aa22ddd26f748",
       "src/lib/session.ts": "d323b192bcde1a5980a73221554eac670a7bfc07b509b55dbdef2008c91722ba",
       "src/lib/transactions.ts": "c730f432e9f2ec80a9449abdc31c8b4f2e703f4b2a9abf5ba030a097565ba81c",
       "src/mainnet/admissionClient.ts": "11fe2d36d16329a4b51f15cb0b4d534e3e9338f2bf2f707c8dece04f7765a89b",
