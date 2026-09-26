@@ -29,11 +29,11 @@ The plan of record is #8, and the first mainnet run is #22. Where this section a
   All candidate full-range projections are under the 840-second worker limit. These are component timings, not a whole-withdrawal estimate. The earlier sm89 figures (76–81% and 3–4%) and the 77% and 4–5% in the snapshot below come from other GPUs and measurements.
 - **Deployed on 26 September.** Each step had explicit approval, and the mainnet switches stayed off throughout:
   1. The image was copied into the `qsb-solver` ECR repository with its digest (`e22afc72…`) unchanged.
-  2. `terraform/gpu` created job definition revision 4 and deregistered revision 3. No withdrawal existed, as "Job-definition revision changes and recovery" in the runbook requires.
+  2. `terraform/gpu` created job definition revision 4 and deregistered revision 3. No withdrawal existed, so none was in flight, and admission and resume stayed closed throughout because the mainnet switches were off. That is what "Job-definition revision changes and recovery" in the runbook requires.
   3. The app stack was built and applied at `82331e9` with `--solver-release`, with `solver_release_id` set to the new release and `batch_job_definition` set to revision 4.
 
   An uncached `GET /api/config` now reports `solverReleaseId` `qsb-ranked-v2-43c77084648a-e22afc720df1`.
-- A vault binds only its QSB configuration. A withdrawal job pins the release the app is serving when the job is created, which is the deployed `SOLVER_RELEASE_ID` (`src/lib/provenance.ts`, `server/solver-deployment.ts`). So a deposit can be made at any time. Because `/api/config` now reports the optimized release, a withdrawal created now pins it. Don't change `batch_job_definition` while a withdrawal is in flight.
+- A vault binds only its QSB configuration. A withdrawal job pins the release the app is serving when the job is created, which is the deployed `SOLVER_RELEASE_ID` (`src/lib/provenance.ts`, `server/solver-deployment.ts`). So a deposit can be made at any time. Because `/api/config` now reports the optimized release, a withdrawal created now pins it. Don't change `batch_job_definition` or its container properties while any withdrawal is searching, has a nonterminal provider job, or is paused with an unknown submission. See "Job-definition revision changes and recovery" in `docs/OPERATIONAL-RUNBOOK.md`.
 
 **Remaining for #22:**
 - the deposit;

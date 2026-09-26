@@ -37,11 +37,15 @@ The plan names all of these alerts: `cost-cap`, `deadline`, `uncertain-paid-outc
 
 ### Deterministic pinning failures
 
-The combined optimized release can stop a pinning work unit on `QSB_RANGE_INCOMPLETE`, a hit-capacity overflow, or a repeatable publication or CUDA failure. Treat that as a stopped work unit, even though this app may present the exit-2 result as a resumable incomplete range:
-- Preserve the exact range, image and logs.
-- Don't blindly resume or retry. Each resume is another paid job.
-- Diagnose and correct the cause before authorizing another paid attempt.
-- A failed or truncated range never receives completion credit.
+The combined optimized release can stop a pinning work unit on `QSB_RANGE_INCOMPLETE`, a hit-capacity overflow, or a repeatable publication or CUDA failure. How this app records it depends on what the worker published:
+- **Paused, "Incomplete work unit"**, where the worker exited 2 with no candidates: the app offers resume, and a resume repeats the same bounded range as a new paid job. Treat it as a stopped work unit anyway.
+  - Preserve the exact range, image and logs.
+  - Resume only after the cause is diagnosed and corrected.
+- **Failed, "GPU hit output exceeds supported capacity"**, where the output reached the host hit capacity (the `HOST_HIT_CAPACITY` check in `server/coordinator.ts`): this is terminal in this app. `/api/jobs/:id/resume` accepts only paused jobs, and there is no reviewed recovery path.
+  - Stop and preserve the evidence.
+  - Don't work around it by hand. A recovery path needs its own reviewed change.
+
+A failed or truncated range never receives completion credit.
 
 The producer's guidance is "Deterministic pinning failures" in [`qsb-solver` `docs/promotion/COMBINED-RELEASE.md`](https://github.com/starknet-innovation/qsb-solver/blob/8fe127790397b6903640f8949219c1ef34a92db2/docs/promotion/COMBINED-RELEASE.md#deterministic-pinning-failures).
 
