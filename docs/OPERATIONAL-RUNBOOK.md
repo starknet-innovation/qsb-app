@@ -41,6 +41,7 @@ The combined optimized release can stop a pinning work unit on `QSB_RANGE_INCOMP
 - **Paused, "Incomplete work unit"**, where the worker exited 2 without any CPU-valid candidate (no candidates, or only DER-only ones): the app offers resume, and a resume repeats the same bounded range as a new paid job. Treat it as a stopped work unit anyway.
   - Preserve the exact range, image and logs.
   - Resume only after the cause is diagnosed and corrected.
+  - If the fix needs a new solver release, resume can't use it. The withdrawal keeps the release it pinned when it was created, and the next submission checks the image against that release, so it pauses again without submitting. There's no recovery path for that case yet, as with the failed case below.
   - The repaired pinning stops before publishing when a single batch overflows, so a genuine overflow normally lands here.
 - **Paused, "GPU candidates failed independent CPU verification"**: `/api/jobs/:id/resume` refuses it, because it needs operator review. The repaired pinning publishes hits batch by batch, so a later batch can still fail after an earlier one has published. A candidate that passes CPU verification is credited as a hit as usual.
 - **Failed, "GPU hit output exceeds supported capacity"**, where at least `HOST_HIT_CAPACITY` (64) records were published in total (checked in `server/coordinator.ts`): this is terminal in this app. `/api/jobs/:id/resume` accepts only paused jobs, and there is no reviewed recovery path.
