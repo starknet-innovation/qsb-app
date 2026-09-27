@@ -266,6 +266,25 @@ describe("Slipstream deposit transport", () => {
     await expect(miner().status(id)).rejects.toThrow();
   });
 
+  it("accepts only the observed pending acknowledgement, without transaction details", async () => {
+    const id = "ab".repeat(32);
+    const pending = { is_success: true, submission_type: "tx_submission" };
+    // Any other acknowledgement type fails closed rather than counting as seen.
+    for (const submission_type of ["other", ""]) {
+      respond(200, { ...pending, submission_type });
+      await expect(miner().seen(id)).rejects.toThrow();
+    }
+    respond(200, { ...pending, transaction: null });
+    await expect(miner().seen(id)).rejects.toThrow();
+    // With transaction details present, the full answer is validated as before.
+    respond(200, { ...pending, transaction: { txid: "ef".repeat(32), status: { confirmed: false } } });
+    await expect(miner().status(id)).rejects.toThrow("hash mismatch");
+    respond(200, { ...pending, transaction: { txid: id, status: { confirmed: true } } });
+    const full = await miner().status(id);
+    expect(full).toMatchObject({ transaction: { txid: id, status: { confirmed: true } } });
+    expect(full).not.toHaveProperty("pending");
+  });
+
   it("reads MARA's 'Transaction not found' as unseen", async () => {
     respond(400, { is_success: false, message: "Transaction not found" });
     expect(await miner().seen("00".repeat(32))).toBe(false);

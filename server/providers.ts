@@ -60,10 +60,11 @@ export const slipstreamStatusSchema = z.object({
   }),
 });
 // MARA answers a transaction it holds but hasn't mined yet (e.g. a Slipstream submission) with
-// only this acknowledgement, no transaction details. Observed live on 2026-09-27.
+// only this acknowledgement, no transaction details. Observed live on 2026-09-27; any other
+// acknowledgement fails closed.
 export const slipstreamPendingSchema = z.object({
   is_success: z.literal(true),
-  submission_type: z.string().min(1),
+  submission_type: z.literal("tx_submission"),
 });
 const feeRate = z.number().finite().nonnegative();
 export const slipstreamRatesSchema = z.object({
@@ -137,7 +138,7 @@ export class Slipstream {
     minerTxid.parse(id);
     const body = await this.request(`/api/transactions/status?tx_id=${id}`);
     // Held but not mined: MARA knows it, so report it seen and unconfirmed.
-    if (slipstreamPendingSchema.safeParse(body).success && !(body as { transaction?: unknown }).transaction)
+    if (slipstreamPendingSchema.safeParse(body).success && !("transaction" in body))
       return { transaction: { txid: id.toLowerCase(), status: { confirmed: false } }, pending: true as const };
     const result = slipstreamStatusSchema.parse(body);
     if (result.transaction.txid.toLowerCase() !== id.toLowerCase())
