@@ -1,6 +1,7 @@
 import { deployedSolver, deployedSolverId } from "./solver-deployment";
 import { observeWithdrawal } from "./withdrawal-status";
 import { submitExact, SubmitDisabled } from "./submit-exact";
+import { submitFunding } from "./submit-funding";
 import {
   CoreConsensus,
   ConsensusError,
@@ -364,6 +365,34 @@ export function createApp(
     await store.put({ ...row, vault, version: row.version + 1 }, row.version);
     return c.json({ vault }, 201);
   });
+  // Deposits pay a bare, non-standard QSB script that public relay refuses, so the signed
+  // deposit is submitted to MARA Slipstream. The intent is recorded before the POST.
+  app.post("/api/vaults/:id/fund/submit", async (c) => {
+    if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
+      return c.json(
+        { error: `${NETWORK_ID} funding is disabled pending validation and operator configuration.` },
+        503,
+      );
+    if (!(dependencies.exactSubmit ?? exactSubmitEnabled()))
+      return c.json({ error: "Deposit submission to the miner is disabled." }, 503);
+    const body = z
+      .object({
+        rawTxHex: z.string().regex(/^(?:[0-9a-fA-F]{2})+$/).max(200000),
+        amount: sats,
+        costAccepted: z.literal(true),
+      })
+      .strict()
+      .parse(await c.req.json());
+    const result = await submitFunding(
+      c.get("owner"),
+      c.req.param("id"),
+      body.rawTxHex,
+      BigInt(body.amount),
+      { store, miner, enabled: dependencies.exactSubmit ?? exactSubmitEnabled() },
+    );
+    // 201 for every outcome: `submission` says whether MARA accepted, refused or is unknown.
+    return c.json(result, 201);
+  });
   // Reconcile the durable intent without submitting it again. Private miner
   // visibility is distinct from independent canonical-chain confirmation.
   app.get("/api/transactions/:id/status", async (c) => {
@@ -460,7 +489,15 @@ export function createApp(
         409,
       );
     if (!vault.funding) return c.json({ error: "Vault is not funded" }, 409);
-    const status = await ledger.status(vault.funding.txid);
+    // A Slipstream deposit isn't visible to the public chain API until it is mined. The
+    // stored signed bytes stand in until then; they never count as confirmation.
+    const stored =
+      typeof row.fundingRawTxHex === "string" && row.fundingRawTxHex ? row.fundingRawTxHex : undefined;
+    const unseen = (error: unknown) => stored !== undefined && error instanceof ChainError;
+    const status = await ledger.status(vault.funding.txid).catch((error) => {
+      if (unseen(error)) return { confirmed: false, confirmations: 0 };
+      throw error;
+    });
     if (vault.status !== "spent") {
       const next = status.confirmed ? "confirmed" : "submitted";
       if (next !== vault.status) {
@@ -474,9 +511,14 @@ export function createApp(
     return c.json({
       vault,
       status,
+      ...(stored ? { submission: row.fundingSubmission } : {}),
       ...(await ledger
         .raw(vault.funding.txid)
-        .then((x) => ({ previousTxHex: x.raw }))),
+        .then((x) => ({ previousTxHex: x.raw }))
+        .catch((error) => {
+          if (unseen(error)) return { previousTxHex: stored! };
+          throw error;
+        })),
     });
   });
   app.get("/api/jobs", async (c) =>

@@ -70,6 +70,14 @@ export const slipstreamRatesSchema = z.object({
   effective_rate: feeRate,
 });
 export class MinerAuthenticationError extends Error {}
+/** A non-2xx miner response. `detail` is the miner's own message, when it sent one. */
+export class MinerHttpError extends Error {
+  constructor(readonly status: number, readonly detail?: string) {
+    super(`Miner request failed (${status})`);
+  }
+}
+/** The miner definitively refused a submission (HTTP 400, status "error"); nothing was accepted. */
+export class MinerRejection extends Error {}
 export class Slipstream {
   constructor(
     private base = minerBase,
@@ -100,8 +108,14 @@ export class Slipstream {
       throw new MinerAuthenticationError(
         "Miner API authorization is unavailable. Contact the service operator before signing or submitting.",
       );
-    if (!response.ok)
-      throw new Error(`Miner request failed (${response.status})`);
+    if (!response.ok) {
+      let detail: string | undefined;
+      try {
+        const body = (await response.json()) as { message?: unknown };
+        if (typeof body.message === "string") detail = body.message.slice(0, 300);
+      } catch { /* A body that isn't JSON carries no detail. */ }
+      throw new MinerHttpError(response.status, detail);
+    }
     return response.json();
   }
   async rates() {
@@ -115,6 +129,51 @@ export class Slipstream {
     if (result.transaction.txid.toLowerCase() !== id.toLowerCase())
       throw new Error("Miner transaction hash mismatch");
     return result;
+  }
+  /** Whether the miner knows this transaction. It answers 400 "Transaction not found" for unknown ones. */
+  async seen(id: string): Promise<boolean> {
+    try {
+      await this.status(id);
+      return true;
+    } catch (error) {
+      if (error instanceof MinerHttpError && error.status === 400 && /not found/i.test(error.detail ?? ""))
+        return false;
+      throw error;
+    }
+  }
+  /** POST exact bytes under a live permit, only to mainnet Slipstream with both switches on. */
+  private async postExact(hex: string, permit: unknown) {
+    consumeExactSubmitPermit(permit, hex);
+    if (!exactSubmitEnabled()) throw new Error("ExactSubmitDisabled");
+    if (this.base !== "https://slipstream.mara.com")
+      throw new Error("ExactSubmitMinerMismatch");
+    const result = z
+      .object({ status: z.literal("success"), message: minerTxid })
+      .parse(
+        await this.request("/api/transactions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tx_hex: hex }),
+        }),
+      );
+    if (result.message.toLowerCase() !== transactionId(hex))
+      throw new Error("Miner transaction hash mismatch");
+    return result;
+  }
+  /**
+   * Submit a signed deposit. Its bare QSB output is non-standard, so public relay refuses it.
+   * A 400 with status "error" is a definite refusal and throws MinerRejection. Any other
+   * failure leaves the outcome unknown.
+   */
+  async submitFunding(hex: string, permit: unknown) {
+    if (!isExactSubmitPermit(permit)) throw new Error("ExactSubmitPermitRequired");
+    try {
+      return await this.postExact(hex, permit);
+    } catch (error) {
+      if (error instanceof MinerHttpError && error.status === 400)
+        throw new MinerRejection(error.detail ?? "The miner refused the transaction.");
+      throw error;
+    }
   }
   private async assertNetwork() {
     if (this.base !== "https://teststream.mara.com") return;
@@ -135,24 +194,7 @@ export class Slipstream {
     });
   }
   async submit(hex: string, permit: unknown) {
-    if (isExactSubmitPermit(permit)) {
-      consumeExactSubmitPermit(permit, hex);
-      if (!exactSubmitEnabled()) throw new Error("ExactSubmitDisabled");
-      if (this.base !== "https://slipstream.mara.com")
-        throw new Error("ExactSubmitMinerMismatch");
-      const result = z
-        .object({ status: z.literal("success"), message: minerTxid })
-        .parse(
-          await this.request("/api/transactions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tx_hex: hex }),
-          }),
-        );
-      if (result.message.toLowerCase() !== transactionId(hex))
-        throw new Error("Miner transaction hash mismatch");
-      return result;
-    }
+    if (isExactSubmitPermit(permit)) return this.postExact(hex, permit);
 
     // Exact spend authorization is required before any miner HTTP, including
     // the chain probe. A missing permit must not reach the network. The

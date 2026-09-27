@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-for (const scenario of ["success", "post-broadcast-failure", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor"]) {
-  const failAfterBroadcast = scenario === "post-broadcast-failure";
+for (const scenario of ["success", "uncertain-submission", "miner-rejected", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor"]) {
+  const uncertain = scenario === "uncertain-submission";
   test(`deposit dialog preserves one-deposit guard (${scenario})`, async ({
     page,
   }) => {
@@ -27,6 +27,12 @@ for (const scenario of ["success", "post-broadcast-failure", "server-submitted",
           if(window.guardDuringFetch)localStorage.setItem('qsb-funding:'+f.vault.id,JSON.stringify({txid:'ab'.repeat(32),amount:'50000'}));
           return {vaults:window.serverVaults??[f.vault]};
         }
+        if(path.endsWith('/fund/submit')){
+          window.submitCalls=(window.submitCalls||0)+1;(window.submitted=window.submitted||[]).push(body);
+          const outcome=(window.minerOutcomes||[]).shift()??'submitted';
+          if(outcome==='rejected')return {vault:f.vault,submission:'rejected',reason:'min relay fee not met'};
+          return {vault:{...f.vault,status:'submitted',funding:{txid:'cd'.repeat(32),vout:0,value:body.amount}},submission:outcome};
+        }
         if(path.endsWith('/fund')){window.recordCalls++;return {vault:{...f.vault,status:'submitted',funding:{txid:body.txid}}};}
         throw Error('Unexpected API '+path);
       }`,
@@ -36,11 +42,9 @@ for (const scenario of ["success", "post-broadcast-failure", "server-submitted",
       r.fulfill({
         contentType: "text/javascript",
         body: `
-      export async function fundFromXverse(address,psbt,indices,remember){
-        window.walletCalls++;const receipt=window.signFunding(psbt);remember(receipt.txid);
-        if(${failAfterBroadcast})throw Error('POST_BROADCAST_CHECK_FAILED');return receipt;
-      }
-      export async function signPsbt(){throw Error('No withdrawal');} export async function connectWallet(){} export async function signMessage(){}
+      export async function fundFromXverse(){throw Error('A deposit must not be broadcast through Xverse');}
+      export async function signPsbt(address,psbt,indices){window.walletCalls++;return window.signFunding(psbt).psbt;}
+      export async function connectWallet(){} export async function signMessage(){}
     `,
       }),
     );
@@ -80,6 +84,8 @@ for (const scenario of ["success", "post-broadcast-failure", "server-submitted",
         localStorage.setItem("qsb-funding:" + vault.id, scenario === "malformed-guard" ? "{" : JSON.stringify({txid: scenario === "unknown-guard" ? "" : "ab".repeat(32), amount:"50000"}));
       if (scenario === "local-guard-during-fetch") w.guardDuringFetch = true;
       if (scenario === "below-floor") w.minerFloor = 5;
+      if (scenario === "uncertain-submission") w.minerOutcomes = ["uncertain", "submitted"];
+      if (scenario === "miner-rejected") w.minerOutcomes = ["rejected"];
     }, scenario);
     await dialog
       .getByRole("button", { name: "Review deposit in Xverse" })
@@ -90,7 +96,16 @@ for (const scenario of ["success", "post-broadcast-failure", "server-submitted",
       expect(await page.evaluate(() => (window as any).recordCalls)).toBe(0);
       return;
     }
-    if (scenario !== "success" && !failAfterBroadcast) {
+    const guard = () =>
+      page.evaluate(() => localStorage.getItem("qsb-funding:11111111-1111-4111-8111-111111111111"));
+    if (scenario === "miner-rejected") {
+      await expect(dialog).toContainText("MARA refused the deposit: min relay fee not met. Nothing was sent to the network.");
+      expect(await guard()).toBeNull();
+      expect(await page.evaluate(() => (window as any).walletCalls)).toBe(1);
+      expect(await page.evaluate(() => (window as any).recordCalls)).toBe(0);
+      return;
+    }
+    if (scenario !== "success" && !uncertain) {
       await expect(dialog).toContainText(scenario === "server-read-failure" ? "SERVER_READ_FAILED" : "do not deposit again.");
       expect(await page.evaluate(() => (window as any).walletCalls)).toBe(0);
       expect(await page.evaluate(() => (window as any).recordCalls)).toBe(0);
@@ -105,24 +120,21 @@ for (const scenario of ["success", "post-broadcast-failure", "server-submitted",
       }
       return;
     }
-    if (failAfterBroadcast) {
-      await expect(dialog).toContainText("POST_BROADCAST_CHECK_FAILED");
-      expect(
-        await page.evaluate(
-          () =>
-            JSON.parse(
-              localStorage.getItem(
-                "qsb-funding:11111111-1111-4111-8111-111111111111",
-              )!,
-            ).txid,
-        ),
-      ).toMatch(/^[0-9a-f]{64}$/);
-      await dialog
-        .getByRole("button", { name: "Record deposit", exact: true })
-        .click();
+    if (uncertain) {
+      await expect(dialog).toContainText("was lost. Don't deposit again");
+      const kept = JSON.parse((await guard())!);
+      expect(kept.txid).toMatch(/^[0-9a-f]{64}$/);
+      expect(kept.rawTxHex).toMatch(/^[0-9a-f]+$/);
+      await dialog.getByRole("button", { name: "Submit deposit again", exact: true }).click();
     }
-    await expect(dialog).toContainText("Deposit submitted:");
+    await expect(dialog).toContainText("Deposit submitted to MARA Slipstream:");
+    expect(await guard()).toBeNull();
     expect(await page.evaluate(() => (window as any).walletCalls)).toBe(1);
-    expect(await page.evaluate(() => (window as any).recordCalls)).toBe(1);
+    expect(await page.evaluate(() => (window as any).recordCalls)).toBe(0);
+    const submitted = await page.evaluate(() => (window as any).submitted);
+    expect(submitted).toHaveLength(uncertain ? 2 : 1);
+    // A retry resends exactly the signed bytes.
+    expect(new Set(submitted.map((b: { rawTxHex: string }) => b.rawTxHex)).size).toBe(1);
+    expect(submitted[0]).toMatchObject({ amount: "50000", costAccepted: true });
   });
 }
