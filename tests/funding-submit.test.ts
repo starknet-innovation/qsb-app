@@ -205,7 +205,7 @@ describe("Slipstream deposit transport", () => {
   });
   const miner = () => new Slipstream("https://slipstream.mara.com", async () => undefined);
   const respond = (status: number, body: unknown) =>
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
 
   it("posts the exact bytes and checks the returned txid", async () => {
     const raw = deposit();
@@ -246,6 +246,43 @@ describe("Slipstream deposit transport", () => {
     process.env.QSB_EXACT_SUBMIT_ENABLED = "false";
     await expect(miner().submitFunding(raw, issueExactSubmitPermit(raw))).rejects.toThrow("ExactSubmitDisabled");
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("reads MARA's pending-submission answer as seen and unconfirmed", async () => {
+    // The shape MARA returned on 2026-09-27 for a Slipstream transaction it held but hadn't mined.
+    respond(200, { is_success: true, submission_type: "tx_submission", support_email: "foundation@mara.com" });
+    const id = "ab".repeat(32);
+    expect(await miner().seen(id)).toBe(true);
+    expect(await miner().status(id)).toMatchObject({ transaction: { txid: id, status: { confirmed: false } }, pending: true });
+  });
+
+  it("still validates a full status answer", async () => {
+    const id = "cd".repeat(32);
+    respond(200, { message: "Transaction confirmed in block 1", transaction: { txid: id, status: { confirmed: true } } });
+    expect(await miner().status(id)).toMatchObject({ transaction: { txid: id, status: { confirmed: true } } });
+    respond(200, { message: "x", transaction: { txid: "ef".repeat(32), status: { confirmed: true } } });
+    await expect(miner().status(id)).rejects.toThrow("hash mismatch");
+    respond(200, { is_success: false, message: "?" });
+    await expect(miner().status(id)).rejects.toThrow();
+  });
+
+  it("accepts only the observed pending acknowledgement, without transaction details", async () => {
+    const id = "ab".repeat(32);
+    const pending = { is_success: true, submission_type: "tx_submission" };
+    // Any other acknowledgement type fails closed rather than counting as seen.
+    for (const submission_type of ["other", ""]) {
+      respond(200, { ...pending, submission_type });
+      await expect(miner().seen(id)).rejects.toThrow();
+    }
+    respond(200, { ...pending, transaction: null });
+    await expect(miner().seen(id)).rejects.toThrow();
+    // With transaction details present, the full answer is validated as before.
+    respond(200, { ...pending, transaction: { txid: "ef".repeat(32), status: { confirmed: false } } });
+    await expect(miner().status(id)).rejects.toThrow("hash mismatch");
+    respond(200, { ...pending, transaction: { txid: id, status: { confirmed: true } } });
+    const full = await miner().status(id);
+    expect(full).toMatchObject({ transaction: { txid: id, status: { confirmed: true } } });
+    expect(full).not.toHaveProperty("pending");
   });
 
   it("reads MARA's 'Transaction not found' as unseen", async () => {
