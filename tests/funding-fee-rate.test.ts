@@ -192,6 +192,17 @@ describe("transactionVsize", () => {
     const raw = tx.toBytes(true, false);
     expect(transactionVsize(Buffer.from(raw).toString("hex"))).toBe(raw.length);
   });
+  it("counts witness bytes at a quarter, matching btc-signer's weight", () => {
+    // A one-byte OP_1 witness item: the weight formula ignores what witness items contain.
+    const payment = new Uint8Array([0x00, 0x14, ...new Uint8Array(20)]);
+    const tx = new btc.Transaction({ ...opts, version: 2 });
+    tx.addInput({ txid: new Uint8Array(32).fill(5), index: 0, witnessUtxo: { amount: 5_000n, script: payment } });
+    tx.addOutput({ amount: 1_000n, script: payment });
+    tx.updateInput(0, { finalScriptWitness: [Uint8Array.of(0x51)] }, true);
+    const full = Buffer.from(tx.toBytes(true, true)).toString("hex");
+    expect(transactionVsize(full)).toBe(Math.ceil(tx.weight / 4));
+    expect(tx.toBytes(true, true).length).toBeGreaterThan(tx.toBytes(true, false).length);
+  });
 });
 
 describe("belowMinerFloor", () => {
@@ -201,6 +212,13 @@ describe("belowMinerFloor", () => {
     expect(belowMinerFloor(1_500n, 1.5)).toBe(false);
     expect(belowMinerFloor(1_000n, 1.0001)).toBe(true);
     expect(belowMinerFloor(1n, 0)).toBe(false);
+  });
+  it("accepts a rate equal to a floor that isn't exact in binary", () => {
+    for (let cents = 1; cents <= 10_000; cents++) {
+      const floor = cents / 100;
+      expect(belowMinerFloor(BigInt(cents) * 10n, floor)).toBe(false);
+      expect(belowMinerFloor(BigInt(cents) * 10n - 1n, floor)).toBe(true);
+    }
   });
   it("refuses an invalid floor", () => {
     expect(() => belowMinerFloor(1_000n, Number.NaN)).toThrow("Invalid miner fee floor");

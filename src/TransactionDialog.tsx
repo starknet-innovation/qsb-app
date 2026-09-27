@@ -19,6 +19,7 @@ import {
   parseFeeRate,
   transactionVsize,
   withdrawalFeeForRate,
+  withdrawalVsize,
   verifySignedPsbt,
   verifyWithdrawalCommitment,
   outputScript,
@@ -438,7 +439,13 @@ export default function TransactionDialog({
           const saved = unlocked.authorization
             ? withdrawalSchema.parse(JSON.parse(unlocked.authorization.manifestJson))
             : undefined;
-          if (saved) return BigInt(saved.fee);
+          if (saved) {
+            // The saved fee can't change. Refuse to start a paid search MARA wouldn't accept.
+            const vsize = withdrawalVsize(nestedPaymentAddress(wallet.address), saved.outputScript.length / 2);
+            await assertMinerFloor((BigInt(saved.fee) * 1000n) / BigInt(vsize));
+            check();
+            return BigInt(saved.fee);
+          }
           const rate = parseFeeRate(feeRate);
           await assertMinerFloor(rate);
           check();
