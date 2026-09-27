@@ -116,6 +116,11 @@ export function parseFeeRate(value: string): bigint {
   if (rate > 1_000_000n) throw new Error("The miner fee rate is above 1,000 sat/vB. Check the rate.");
   return rate;
 }
+/** Whether a rate (millisatoshis per vB) is below MARA's submission floor (sat/vB), rounding the floor up. */
+export function belowMinerFloor(milliSatPerVb: bigint, floorSatPerVb: number): boolean {
+  if (!Number.isFinite(floorSatPerVb) || floorSatPerVb < 0) throw new Error("Invalid miner fee floor.");
+  return milliSatPerVb < BigInt(Math.ceil(floorSatPerVb * 1000));
+}
 /**
  * The miner fee fundingPsbt should use for a sat/vB rate. With change, the fee is
  * rate × vsize rounded up. If the change would be below the 546-sat dust limit, the

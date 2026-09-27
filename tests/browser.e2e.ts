@@ -108,6 +108,9 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
   await page.route("**/api/config", (route) =>
     route.fulfill({ json: { network: "mainnet", operationsEnabled: true, solverReleaseId: "browser-served-test" } }),
   );
+  await page.route("**/api/rates", (route) =>
+    route.fulfill({ json: { submit_fee_rate: 1 } }),
+  );
   await page.route("**/api/payment-utxos", (route) =>
     route.fulfill({
       json: { utxos: [{ txid: "22".repeat(32), vout: 0, value: "10000" }] },

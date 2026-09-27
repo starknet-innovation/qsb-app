@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   QSB_CONFIG_A_MAX_SCRIPTSIG,
+  belowMinerFloor,
   fundingFeeForRate,
   fundingVsize,
   nestedPaymentAddress,
@@ -190,5 +191,19 @@ describe("transactionVsize", () => {
     tx.addOutput({ amount: 1_000n, script: new Uint8Array(22).fill(0x51) });
     const raw = tx.toBytes(true, false);
     expect(transactionVsize(Buffer.from(raw).toString("hex"))).toBe(raw.length);
+  });
+});
+
+describe("belowMinerFloor", () => {
+  it("compares a rate with MARA's floor, rounding the floor up to a millisatoshi", () => {
+    expect(belowMinerFloor(2_000n, 2)).toBe(false);
+    expect(belowMinerFloor(1_999n, 2)).toBe(true);
+    expect(belowMinerFloor(1_500n, 1.5)).toBe(false);
+    expect(belowMinerFloor(1_000n, 1.0001)).toBe(true);
+    expect(belowMinerFloor(1n, 0)).toBe(false);
+  });
+  it("refuses an invalid floor", () => {
+    expect(() => belowMinerFloor(1_000n, Number.NaN)).toThrow("Invalid miner fee floor");
+    expect(() => belowMinerFloor(1_000n, -1)).toThrow("Invalid miner fee floor");
   });
 });
