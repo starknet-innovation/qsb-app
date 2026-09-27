@@ -9,7 +9,7 @@ import "./styles.css";
 import { CostDisclosure } from "./Costs";
 import { base64, hex } from "@scure/base";
 import { api } from "./lib/api";
-import { fundFromXverse, signPsbt, type Wallet } from "./lib/wallet";
+import { signPsbt, type Wallet } from "./lib/wallet";
 import {
   fundingFeeForRate,
   fundingPsbt,
@@ -112,6 +112,8 @@ export default function TransactionDialog({
     [pendingFunding, setPendingFunding] = useState<{
       txid: string;
       amount: string;
+      /** The signed deposit, kept before submission so a retry can only resend these bytes. */
+      rawTxHex?: string;
     }>();
   const [signedReview, setSignedReview] = useState<{rawTxHex: string; txid: string; manifest: Withdrawal; generation: number; epoch: number}>();
   const [signedDownload, setSignedDownload] = useState<string>();
@@ -178,7 +180,7 @@ export default function TransactionDialog({
   }
   const deposit = vault.status === "unfunded";
   const fundingKey = `qsb-funding:${vault.id}`;
-  function rememberFunding(next?: { txid: string; amount: string }) {
+  function rememberFunding(next?: { txid: string; amount: string; rawTxHex?: string }) {
     setPendingFunding(next);
     if (next) localStorage.setItem(fundingKey, JSON.stringify(next));
     else localStorage.removeItem(fundingKey);
@@ -187,13 +189,20 @@ export default function TransactionDialog({
     const saved = localStorage.getItem(fundingKey);
     if (saved === null) return undefined;
     try {
-      const parsed = JSON.parse(saved) as { txid?: unknown; amount?: unknown };
+      const parsed = JSON.parse(saved) as { txid?: unknown; amount?: unknown; rawTxHex?: unknown };
       if (
         typeof parsed.txid === "string" &&
         (parsed.txid === "" || /^[a-f0-9]{64}$/i.test(parsed.txid)) &&
         typeof parsed.amount === "string" &&
-        /^(0|[1-9][0-9]*)$/.test(parsed.amount)
-      ) return { txid: parsed.txid, amount: parsed.amount };
+        /^(0|[1-9][0-9]*)$/.test(parsed.amount) &&
+        (parsed.rawTxHex === undefined ||
+          (typeof parsed.rawTxHex === "string" && /^(?:[0-9a-f]{2})+$/i.test(parsed.rawTxHex)))
+      )
+        return {
+          txid: parsed.txid,
+          amount: parsed.amount,
+          ...(typeof parsed.rawTxHex === "string" ? { rawTxHex: parsed.rawTxHex } : {}),
+        };
     } catch { /* An unreadable guard must not permit another deposit. */ }
     return { txid: "", amount: "0" };
   }
@@ -332,6 +341,31 @@ export default function TransactionDialog({
     if (!operationsAllowed(await api("/config")))
       throw Error("Transactions are disabled or the server network changed. Reopen the rehearsal after it is enabled.");
   }
+  async function submitDeposit(rawTxHex: string, txid: string, amountSats: string) {
+    let result: { vault: PublicVault; submission: "submitted" | "uncertain" | "rejected"; reason?: string };
+    try {
+      result = await api(`/vaults/${vault.id}/fund/submit`, { rawTxHex, amount: amountSats, costAccepted: true });
+    } catch (error) {
+      setPendingFunding(readFundingGuard());
+      const detail = error instanceof Error ? ` ${error.message}` : "";
+      throw Error(`The deposit is signed, but its submission to MARA isn't confirmed. Don't deposit again; use "Submit deposit again".${detail}`);
+    }
+    if (result.submission === "rejected") {
+      rememberFunding(undefined);
+      setPendingFunding(undefined);
+      throw Error(`MARA refused the deposit: ${result.reason ?? "no reason given"}. Nothing was sent to the network.`);
+    }
+    if (result.submission === "uncertain") {
+      setPendingFunding(readFundingGuard());
+      throw Error(`MARA's response to the deposit ${txid.slice(0, 12)}… was lost. Don't deposit again; use "Submit deposit again", which resends the same transaction.`);
+    }
+    rememberFunding(undefined);
+    setPendingFunding(undefined);
+    setResult(
+      `Deposit submitted to MARA Slipstream: ${txid}. Wait for confirmation before withdrawing.`,
+    );
+    onUpdated();
+  }
   async function recordFunding(txid: string, amountSats: string) {
     const recorded = await api<{ vault: PublicVault }>(
       `/vaults/${vault.id}/fund`,
@@ -347,7 +381,9 @@ export default function TransactionDialog({
     if(supervisedSearch){setError("Supervised search cannot deposit or broadcast.");return;}
     await act(
       pendingFunding
-        ? "Recording the deposit"
+        ? pendingFunding.rawTxHex
+          ? "Submitting the signed deposit to MARA Slipstream"
+          : "Recording the deposit"
         : "Review and sign the deposit in Xverse",
       async (check) => {
         if (!unlocked || !accepted)
@@ -355,6 +391,11 @@ export default function TransactionDialog({
         await assertOperations();
         check();
         if (pendingFunding) {
+          // A signed deposit whose submission is unknown: resend exactly those bytes.
+          if (pendingFunding.rawTxHex) {
+            await submitDeposit(pendingFunding.rawTxHex, pendingFunding.txid, pendingFunding.amount);
+            return;
+          }
           if (!pendingFunding.txid) throw Error("Xverse reported a broadcast without a valid txid. Reconcile it in your wallet before continuing; do not deposit again.");
           await recordFunding(pendingFunding.txid, pendingFunding.amount);
           return;
@@ -395,35 +436,24 @@ export default function TransactionDialog({
         if (!latest || latest.status !== "unfunded" || latest.funding)
           throw Error("This vault already has a deposit or is unavailable. Reopen it to refresh its funding state; do not deposit again.");
         // This preflight cannot serialize prompts approved simultaneously on two devices.
-        let broadcastReported = false;
-        try {
-          const funded = await fundFromXverse(
-            wallet.address,
-            base64.encode(expected.toPSBT()),
-            inputs.map((_, i) => i),
-            (txid) => {
-              broadcastReported = true;
-              rememberFunding({ txid: txid ?? "", amount: amountSats.toString() });
-            },
-          );
-          check();
-          const signed = verifySignedPsbt(expected, base64.decode(funded.psbt));
-          for (let i = 0; i < signed.inputsLength; i++) {
-            const input = signed.getInput(i);
-            if (!input.finalScriptWitness?.length && !input.finalScriptSig?.length) signed.finalizeIdx(i);
-          }
-          if (signed.id !== funded.txid.toLowerCase())
-            throw Error("Xverse reported a different funding transaction.");
-          const broadcast = {
-            txid: signed.id,
-            amount: amountSats.toString(),
-          };
-          await recordFunding(broadcast.txid, broadcast.amount);
-        } catch (error) {
-          if (!broadcastReported) throw error;
-          const detail = error instanceof Error ? error.message.replace(" No transaction was submitted.", "") : "Verification or recording failed.";
-          throw Error(`Deposit sent, not verified or recorded. Do not deposit again. ${detail}`);
+        // The deposit pays a bare QSB script, which public relay refuses as non-standard.
+        // Xverse only signs; the server submits the exact bytes to MARA Slipstream.
+        const returned = await signPsbt(
+          wallet.address,
+          base64.encode(expected.toPSBT()),
+          inputs.map((_, i) => i),
+        );
+        check();
+        const signed = verifySignedPsbt(expected, base64.decode(returned));
+        for (let i = 0; i < signed.inputsLength; i++) {
+          const input = signed.getInput(i);
+          if (!input.finalScriptWitness?.length && !input.finalScriptSig?.length) signed.finalizeIdx(i);
         }
+        const rawTxHex = signed.hex;
+        // Keep the signed bytes before they leave the browser, so an unknown outcome can only be
+        // retried with the same transaction and never becomes a second deposit.
+        rememberFunding({ txid: signed.id, amount: amountSats.toString(), rawTxHex });
+        await submitDeposit(rawTxHex, signed.id, amountSats.toString());
       },
     );
   }
@@ -905,8 +935,10 @@ export default function TransactionDialog({
             )}
             {deposit && pendingFunding && (
               <p role="status">
-                Xverse reported a broadcast {pendingFunding.txid ? pendingFunding.txid.slice(0, 12) + "…" : "without a valid txid"}. Do not deposit again. Record
-                the deposit once it is visible on the network; withdrawal waits for confirmation.
+                {pendingFunding.rawTxHex
+                  ? <>A signed deposit {pendingFunding.txid.slice(0, 12)}… is waiting for MARA Slipstream. Do not deposit again. Submit it again: it resends the same transaction, which can only confirm once.</>
+                  : <>Xverse reported a broadcast {pendingFunding.txid ? pendingFunding.txid.slice(0, 12) + "…" : "without a valid txid"}. Do not deposit again. Record
+                the deposit once it is visible on the network; withdrawal waits for confirmation.</>}
               </p>
             )}
             <CostDisclosure
@@ -984,7 +1016,9 @@ export default function TransactionDialog({
                     : "Save signing backup"
                   : deposit
                     ? pendingFunding
-                      ? "Record deposit"
+                      ? pendingFunding.rawTxHex
+                        ? "Submit deposit again"
+                        : "Record deposit"
                       : "Review deposit in Xverse"
                     : "Save intent and start search")}
             </button>
