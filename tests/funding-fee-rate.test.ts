@@ -7,6 +7,7 @@ import {
   QSB_CONFIG_A_MAX_SCRIPTSIG,
   belowMinerFloor,
   changeDustLimit,
+  minerMinimumRate,
   fundingFeeForRate,
   fundingVsize,
   nestedPaymentAddress,
@@ -226,5 +227,19 @@ describe("belowMinerFloor", () => {
   it("refuses an invalid floor", () => {
     expect(() => belowMinerFloor(1_000n, Number.NaN)).toThrow("Invalid miner fee floor");
     expect(() => belowMinerFloor(1_000n, -1)).toThrow("Invalid miner fee floor");
+  });
+});
+
+describe("minerMinimumRate", () => {
+  it("is the higher of MARA's floor and its current rate", () => {
+    expect(minerMinimumRate({ submit_fee_rate: 1, effective_rate: 2 })).toBe(2);
+    expect(minerMinimumRate({ submit_fee_rate: 3, effective_rate: 2 })).toBe(3);
+    expect(minerMinimumRate({ submit_fee_rate: 1.5 })).toBe(1.5);
+    expect(minerMinimumRate({ submit_fee_rate: 1, effective_rate: Number.NaN })).toBe(1);
+  });
+  it("refuses a missing or invalid floor", () => {
+    expect(() => minerMinimumRate({ submit_fee_rate: Number.NaN })).toThrow("Invalid miner fee floor");
+    expect(() => minerMinimumRate({ submit_fee_rate: -1, effective_rate: 2 })).toThrow("Invalid miner fee floor");
+    expect(() => minerMinimumRate({} as { submit_fee_rate: number })).toThrow("Invalid miner fee floor");
   });
 });

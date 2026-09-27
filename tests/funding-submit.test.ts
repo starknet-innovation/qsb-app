@@ -328,6 +328,20 @@ describe("deposit routes", () => {
     expect(f.submit).toHaveBeenLastCalledWith(raw, expect.anything());
   });
 
+  it("GET /vaults lists only Slipstream deposits the server can resend", async () => {
+    const f = await app();
+    const list = async () => (await (await f.call("/vaults")).json()) as { vaults: PublicVault[]; resendable: string[] };
+    expect((await list()).resendable).toEqual([]);
+    f.submit.mockRejectedValueOnce(new Error("timeout"));
+    await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: deposit(), amount: "50000", costAccepted: true });
+    expect((await list()).resendable).toEqual([f.vault.id]);
+    // A deposit recorded without stored bytes (the legacy path) isn't resendable.
+    const current = (await f.row())!;
+    const { fundingRawTxHex: _drop, ...legacy } = current;
+    await f.store.put({ ...legacy, version: current.version + 1 }, current.version);
+    expect((await list()).resendable).toEqual([]);
+  });
+
   it("GET /funding falls back to the stored bytes only on a 404, without changing status", async () => {
     const notFound = () => Promise.reject(new ChainNotFound("Chain lookup failed (404). Retry before signing."));
     const f = await app(notFound, notFound);

@@ -258,13 +258,21 @@ export function createApp(
     c.set("owner", session.owner);
     await next();
   }
-  app.get("/api/vaults", async (c) =>
-    c.json({
-      vaults: (await store.list(`OWNER#${c.get("owner")}`, "VAULT#")).map(
-        (r) => r.vault,
-      ),
-    }),
-  );
+  app.get("/api/vaults", async (c) => {
+    const rows = await store.list(`OWNER#${c.get("owner")}`, "VAULT#");
+    return c.json({
+      vaults: rows.map((r) => r.vault),
+      // Vaults whose unconfirmed deposit the server can resend: stored Slipstream bytes only.
+      resendable: rows
+        .filter(
+          (r) =>
+            typeof r.fundingRawTxHex === "string" &&
+            r.fundingRawTxHex !== "" &&
+            (r.vault as PublicVault).status === "submitted",
+        )
+        .map((r) => (r.vault as PublicVault).id),
+    });
+  });
   app.get("/api/payment-utxos", async (c) =>
     c.json({ utxos: await ledger.paymentUtxos(c.get("owner")) }),
   );

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-for (const scenario of ["success", "uncertain-submission", "miner-rejected", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor"]) {
+for (const scenario of ["success", "uncertain-submission", "miner-rejected", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor", "below-current-rate", "submit-disabled"]) {
   const uncertain = scenario === "uncertain-submission";
   test(`deposit dialog preserves one-deposit guard (${scenario})`, async ({
     page,
@@ -18,9 +18,9 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
       export function clearSession(){} export function authenticate(){}
       export async function api(path,body){
         const f=window.fundingFixture;
-        if(path==='/config')return {network:'mainnet',operationsEnabled:true};
+        if(path==='/config')return {network:'mainnet',operationsEnabled:true,exactSubmitEnabled:window.exactSubmit??true};
         if(path==='/payment-utxos')return {utxos:[f.point]};
-        if(path==='/rates')return {submit_fee_rate:window.minerFloor??1};
+        if(path==='/rates')return window.minerRates??{submit_fee_rate:window.minerFloor??1};
         if(path==='/payment-input')return {previousTxHex:f.previousTxHex};
         if(path==='/vaults'){
           if(window.serverReadFailure)throw Error('SERVER_READ_FAILED');
@@ -83,14 +83,23 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
         localStorage.setItem("qsb-funding:" + vault.id, scenario === "malformed-guard" ? "{" : JSON.stringify({txid: scenario === "unknown-guard" ? "" : "ab".repeat(32), amount:"50000"}));
       if (scenario === "local-guard-during-fetch") w.guardDuringFetch = true;
       if (scenario === "below-floor") w.minerFloor = 5;
+      // MARA's minimum is the higher of its floor and its current rate.
+      if (scenario === "below-current-rate") w.minerRates = { submit_fee_rate: 1, effective_rate: 5 };
+      if (scenario === "submit-disabled") w.exactSubmit = false;
       if (scenario === "uncertain-submission") w.minerOutcomes = ["uncertain", "submitted"];
       if (scenario === "miner-rejected") w.minerOutcomes = ["rejected"];
     }, scenario);
     await dialog
       .getByRole("button", { name: "Review deposit in Xverse" })
       .click();
-    if (scenario === "below-floor") {
-      await expect(dialog).toContainText("below MARA's current submission floor of 5 sat/vB");
+    if (scenario === "submit-disabled") {
+      await expect(dialog).toContainText("switched off right now. Nothing was signed.");
+      expect(await page.evaluate(() => (window as any).walletCalls)).toBe(0);
+      expect(await page.evaluate(() => (window as any).recordCalls)).toBe(0);
+      return;
+    }
+    if (scenario === "below-floor" || scenario === "below-current-rate") {
+      await expect(dialog).toContainText("below MARA's current minimum of 5 sat/vB");
       expect(await page.evaluate(() => (window as any).walletCalls)).toBe(0);
       expect(await page.evaluate(() => (window as any).recordCalls)).toBe(0);
       return;
@@ -124,6 +133,10 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
       const kept = JSON.parse((await guard())!);
       expect(kept.txid).toMatch(/^[0-9a-f]{64}$/);
       expect(kept.rawTxHex).toMatch(/^[0-9a-f]+$/);
+      // The manual fallback shows exactly the kept bytes and links to MARA's portal.
+      await dialog.getByText("Submit it yourself on MARA Slipstream").click();
+      await expect(dialog.getByLabel("Signed deposit transaction (hex)")).toHaveValue(kept.rawTxHex);
+      await expect(dialog.getByRole("link", { name: "slipstream.mara.com" })).toHaveAttribute("href", "https://slipstream.mara.com/");
       await dialog.getByRole("button", { name: "Submit deposit again", exact: true }).click();
     }
     await expect(dialog).toContainText("Deposit submitted to MARA Slipstream:");

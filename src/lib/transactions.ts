@@ -123,6 +123,19 @@ export function parseFeeRate(value: string): bigint {
   if (rate > 1_000_000n) throw new Error("The miner fee rate is above 1,000 sat/vB. Check the rate.");
   return rate;
 }
+/**
+ * MARA's minimum acceptable rate in sat/vB. Its site says the minimum is "the higher of either
+ * 1x the current mempool priority fee rate or 1 sats/vByte": /api/rates' `submit_fee_rate` is
+ * the absolute floor and `effective_rate` the current rate, so the minimum is the higher of the two.
+ */
+export function minerMinimumRate(rates: { submit_fee_rate: number; effective_rate?: number }): number {
+  if (!Number.isFinite(rates.submit_fee_rate) || rates.submit_fee_rate < 0)
+    throw new Error("Invalid miner fee floor.");
+  const current = rates.effective_rate;
+  return typeof current === "number" && Number.isFinite(current) && current > rates.submit_fee_rate
+    ? current
+    : rates.submit_fee_rate;
+}
 /** Whether a rate (millisatoshis per vB) is below MARA's submission floor (sat/vB), rounding the floor up. */
 export function belowMinerFloor(milliSatPerVb: bigint, floorSatPerVb: number): boolean {
   if (!Number.isFinite(floorSatPerVb) || floorSatPerVb < 0) throw new Error("Invalid miner fee floor.");

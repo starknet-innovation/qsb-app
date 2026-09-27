@@ -51,7 +51,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "28aeb3fc0ca773a0fe14e7936ce43fa2a529b01262b6b68454ac1a19d5e1c9fd",
+      "api": "e7e2eea3f17cea5f08bd7f1d669ad05490498a8d0670df33e87fb8d0cd44462d",
       "build-metadata": "2c4804c98f40b16adda8fde8e13f053d59cc53e26f951906064834edd469b1c6",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "8c276496b523e301ce420596c7c9c6c414445adedce6f4927cb7fc8ec6ceb25b",
@@ -109,7 +109,7 @@
       "scripts/generate-solver-registry.mjs": "e88dcd1462fb6a8fe4e66efffab9c96345f656b22cd11e40b3f865257a9a1b8c",
       "scripts/package-release.ts": "5b1d0d9e5169c8e83a1b9259033c710011a3d8cf46b02824a1c73708de4d2031",
       "scripts/storage-inventory.ts": "c8ecc1d3ed239f444efd50ab8bb704be13408f609aba1e80d16a5325d5e4603e",
-      "server/app.ts": "f994b6a79e98fef7679039b0a50aeb11ccb735d1fd4f8b765b2341974e0ee613",
+      "server/app.ts": "4c1439c17c25de9c2c32dfaf1e67f3380d2ebeb221455290bbbefe11be00836e",
       "server/aws-batch-command.json": "5a4544d33c5744dbc438c0d515a84e3bb2c8e80d8662020c4a7c765ed5267881",
       "server/aws-batch.ts": "02253b0784f88631ed26f38dbd1d76604acf271632f99c35b04929366641485b",
       "server/chain.ts": "d3f6ff738005b2c057a4445887da393d752820a15a89d394bb745e9cf140c686",
@@ -168,7 +168,7 @@
       "src/lib/releases/qsb-solver-v0-1-0.json": "682c68f53f059717b51d3457d3eb1ad2d1b0023eca4bed0e5c60f9d863275c8e",
       "src/lib/releases/registry.generated.ts": "ed2adaeaafe68f866a3c7cb584d404fcdbd560f20eb6757fa69aa22ddd26f748",
       "src/lib/session.ts": "d323b192bcde1a5980a73221554eac670a7bfc07b509b55dbdef2008c91722ba",
-      "src/lib/transactions.ts": "2985b5c2bab29d30670d49582434b5c25992edbe49ef2802745da82c4e140a83",
+      "src/lib/transactions.ts": "1b69ecf5af57051ba2239e4795166d56ee9d8099201f87a78ad67cee4526aa08",
       "src/mainnet/admissionClient.ts": "11fe2d36d16329a4b51f15cb0b4d534e3e9338f2bf2f707c8dece04f7765a89b",
       "src/mainnet/assembly.ts": "2fe5b22102907bfcfd921d413444f8f25fdd58a117b958951a553ed463403960",
       "src/mainnet/chain.ts": "9bfc2b5ba33057a6df12e9c85b984859756be532d50c09471ca116a7998d91f1",

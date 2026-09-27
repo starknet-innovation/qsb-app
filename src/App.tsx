@@ -60,6 +60,9 @@ export default function App() {
     [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
     [vaults, setVaults] = useState<PublicVault[]>([]),
+    // Vaults whose unconfirmed deposit has stored Slipstream bytes the server can resend.
+    [resendable, setResendable] = useState<Set<string>>(new Set()),
+    [manualDeposit, setManualDeposit] = useState<{ vaultId: string; rawTxHex: string }>(),
     [jobs, setJobs] = useState<Job[]>([]),
     [modal, setModal] = useState<"create" | "readiness" | null>(null),
     [step, setStep] = useState(1),
@@ -104,6 +107,17 @@ export default function App() {
   }, []);
   // An unconfirmed Slipstream deposit whose MARA answer was lost stays "submitted"; this resends
   // the server's stored signed bytes. It never creates another deposit.
+  // If the API route fails, the same signed deposit can be pasted into slipstream.mara.com.
+  async function showManualDeposit(v: PublicVault) {
+    setError("");
+    try {
+      const f = await api<{ previousTxHex?: string }>(`/vaults/${v.id}/funding`);
+      if (!f.previousTxHex) throw Error("The signed deposit isn't available.");
+      setManualDeposit({ vaultId: v.id, rawTxHex: f.previousTxHex });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The signed deposit isn't available.");
+    }
+  }
   async function resendDeposit(v: PublicVault) {
     setError("");
     setNotice("");
@@ -131,11 +145,12 @@ export default function App() {
     const refresh = async () => {
       try {
         const [v, j] = await Promise.all([
-          api<{ vaults: PublicVault[] }>("/vaults"),
+          api<{ vaults: PublicVault[]; resendable?: string[] }>("/vaults"),
           api<{ jobs: Job[] }>("/jobs"),
         ]);
         if (!disposed) {
           setVaults(v.vaults);
+          setResendable(new Set(v.resendable ?? []));
           setJobs(j.jobs);
         }
       } catch {}
@@ -593,7 +608,7 @@ export default function App() {
                         )}{" "}
                         {v.status === "unfunded" ? "Deposit" : "Withdraw"}
                       </button>
-                      {v.status === "submitted" && operationsAllowed(config) && (
+                      {v.status === "submitted" && resendable.has(v.id) && operationsAllowed(config) && (
                         <button
                           className="secondary"
                           title="Resends the same signed deposit to MARA Slipstream. It can only confirm once."
@@ -602,9 +617,36 @@ export default function App() {
                           Resend deposit to MARA
                         </button>
                       )}
+                      {v.status === "submitted" && resendable.has(v.id) && (
+                        <button
+                          className="secondary"
+                          title="Shows the signed deposit so you can submit it on slipstream.mara.com yourself."
+                          onClick={() => void showManualDeposit(v)}
+                        >
+                          Submit manually on MARA
+                        </button>
+                      )}
                     </article>
                   ))}
                 </div>
+              )}
+              {manualDeposit && (
+                <section className="panel manual-slipstream" aria-label="Submit a deposit on MARA Slipstream">
+                  <h3>Submit the deposit yourself on MARA Slipstream</h3>
+                  <p>
+                    Paste this signed deposit into the "Transaction/Package Hex" field on{" "}
+                    <a href="https://slipstream.mara.com/" target="_blank" rel="noreferrer">slipstream.mara.com</a> and submit it
+                    there (that means accepting MARA's terms). It's the same deposit the app recorded, so it can only confirm
+                    once: don't create another. The vault shows as confirmed once it's mined.
+                  </p>
+                  <textarea readOnly rows={4} aria-label="Signed deposit transaction (hex)" value={manualDeposit.rawTxHex} />
+                  <button type="button" className="secondary" onClick={() => void navigator.clipboard?.writeText(manualDeposit.rawTxHex)}>
+                    Copy transaction
+                  </button>
+                  <button type="button" className="secondary" onClick={() => setManualDeposit(undefined)}>
+                    Close
+                  </button>
+                </section>
               )}
               <div className="foot-grid">
                 <div>

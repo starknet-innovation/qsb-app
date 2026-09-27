@@ -15,6 +15,7 @@ import {
   fundingPsbt,
   helperPsbt,
   belowMinerFloor,
+  minerMinimumRate,
   nestedPaymentAddress,
   parseFeeRate,
   transactionVsize,
@@ -226,8 +227,8 @@ export default function TransactionDialog({
     }
     if (!job) {
       const active = generation.current;
-      api<{ submit_fee_rate: number }>("/rates")
-        .then((r) => { if (active === generation.current) setMinerFloor(Number.isFinite(r.submit_fee_rate) ? r.submit_fee_rate : null); })
+      api<{ submit_fee_rate: number; effective_rate?: number }>("/rates")
+        .then((r) => { if (active === generation.current) setMinerFloor(minerMinimumRate(r)); })
         .catch(() => { if (active === generation.current) setMinerFloor(null); });
     }
     if (!job)
@@ -240,18 +241,18 @@ export default function TransactionDialog({
     };
   }, [fundingKey]);
   const key = (p: Point) => `${p.txid}:${p.vout}`;
-  // MARA refuses a rate below its submission floor. The floor is re-read right before a
-  // fee is fixed, and nothing proceeds without it.
+  // MARA refuses a rate below its current minimum. It's re-read right before a fee is fixed,
+  // and nothing proceeds without it.
   async function assertMinerFloor(milliSatPerVb: bigint) {
     let floor: number;
     try {
-      floor = (await api<{ submit_fee_rate: number }>("/rates")).submit_fee_rate;
+      floor = minerMinimumRate(await api<{ submit_fee_rate: number; effective_rate?: number }>("/rates"));
     } catch {
-      throw Error("MARA's fee quote is unavailable, so the rate can't be checked against its submission floor. Nothing was submitted; try again shortly.");
+      throw Error("MARA's fee quote is unavailable, so the rate can't be checked against its minimum. Nothing was submitted; try again shortly.");
     }
     setMinerFloor(floor);
     if (belowMinerFloor(milliSatPerVb, floor))
-      throw Error(`The fee rate is below MARA's current submission floor of ${floor} sat/vB. Nothing was submitted.`);
+      throw Error(`The fee rate is below MARA's current minimum of ${floor} sat/vB. Nothing was submitted.`);
   }
   // Deposit fee from a sat/vB rate and the transaction's worst-case signed size.
   const depositQuote = (() => {
@@ -400,6 +401,11 @@ export default function TransactionDialog({
           await recordFunding(pendingFunding.txid, pendingFunding.amount);
           return;
         }
+        // Deposits are submitted to MARA Slipstream; don't ask Xverse to sign one that can't be.
+        const submission = await api<{ exactSubmitEnabled?: boolean }>("/config");
+        check();
+        if (submission.exactSubmitEnabled !== true)
+          throw Error("Deposits are submitted to MARA Slipstream, which is switched off right now. Nothing was signed.");
         const selected = points.filter((p) => selection.includes(key(p)));
         if (!selected.length || selected.length > 8)
           throw Error("Select between one and eight payment outputs.");
@@ -914,9 +920,9 @@ export default function TransactionDialog({
                             ? "Select payment outputs and enter an amount and a fee rate to see the miner fee."
                             : "Enter a fee rate to see the miner fee. It's fixed when you save the intent, before the search.")}
                       {minerFloor === null
-                        ? " MARA's submission floor is unavailable right now; nothing can be submitted until it is."
+                        ? " MARA's minimum rate is unavailable right now; nothing can be submitted until it is."
                         : minerFloor !== undefined
-                          ? ` MARA's current submission floor: ${minerFloor} sat/vB.` +
+                          ? ` MARA's current minimum: ${minerFloor} sat/vB.` +
                             (() => {
                               try {
                                 return feeRate.trim() && belowMinerFloor(parseFeeRate(feeRate), minerFloor)
@@ -940,6 +946,21 @@ export default function TransactionDialog({
                   : <>Xverse reported a broadcast {pendingFunding.txid ? pendingFunding.txid.slice(0, 12) + "…" : "without a valid txid"}. Do not deposit again. Record
                 the deposit once it is visible on the network; withdrawal waits for confirmation.</>}
               </p>
+            )}
+            {deposit && pendingFunding?.rawTxHex && (
+              <details className="manual-slipstream">
+                <summary>Submit it yourself on MARA Slipstream</summary>
+                <p>
+                  If the app can't reach MARA, paste this signed deposit into the "Transaction/Package Hex" field on{" "}
+                  <a href="https://slipstream.mara.com/" target="_blank" rel="noreferrer">slipstream.mara.com</a> and submit it
+                  there (that means accepting MARA's terms). It's the same deposit, so it can only confirm once: don't create
+                  another. Afterwards, press "Submit deposit again" here so the app records it.
+                </p>
+                <textarea readOnly rows={4} aria-label="Signed deposit transaction (hex)" value={pendingFunding.rawTxHex} />
+                <button type="button" className="secondary" onClick={() => void navigator.clipboard?.writeText(pendingFunding.rawTxHex!)}>
+                  Copy transaction
+                </button>
+              </details>
             )}
             <CostDisclosure
               feeBtc={
