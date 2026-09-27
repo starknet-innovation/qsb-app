@@ -102,7 +102,8 @@ export default function TransactionDialog({
     // Manual Slipstream submission needs both: deposits switched on, and the server holding
     // these exact signed bytes as the vault's intent (so no other device can start a deposit).
     [submissionOpen, setSubmissionOpen] = useState(false),
-    [manualReady, setManualReady] = useState(false),
+    // The exact bytes the server last confirmed it holds as this vault's intent.
+    [confirmedRaw, setConfirmedRaw] = useState<string>(),
     [destination, setDestination] = useState(wallet.address),
     [solverId, setSolverId] = useState<string | null>(null),
     [accepted, setAccepted] = useState(false),
@@ -186,6 +187,7 @@ export default function TransactionDialog({
   const deposit = vault.status === "unfunded";
   const fundingKey = `qsb-funding:${vault.id}`;
   function rememberFunding(next?: { txid: string; amount: string; rawTxHex?: string }) {
+    setConfirmedRaw(undefined);
     setPendingFunding(next);
     if (next) localStorage.setItem(fundingKey, JSON.stringify(next));
     else localStorage.removeItem(fundingKey);
@@ -253,6 +255,7 @@ export default function TransactionDialog({
     };
   }, [fundingKey]);
   const key = (p: Point) => `${p.txid}:${p.vout}`;
+  const manualReady = !!pendingFunding?.rawTxHex && confirmedRaw === pendingFunding.rawTxHex.toLowerCase();
   // MARA refuses a rate below its current minimum. It's re-read right before a fee is fixed,
   // and nothing proceeds without it.
   async function assertMinerFloor(milliSatPerVb: bigint) {
@@ -355,14 +358,26 @@ export default function TransactionDialog({
       throw Error("Transactions are disabled or the server network changed. Reopen the rehearsal after it is enabled.");
   }
   // Enable manual submission only once the server confirms it stores exactly these bytes.
-  async function confirmRecorded(rawTxHex: string) {
+  async function confirmRecorded(rawTxHex: string): Promise<boolean> {
     const active = generation.current;
+    let held = false;
     try {
       const r = await api<{ rawTxHex?: string }>(`/vaults/${vault.id}/fund/signed`);
-      if (active === generation.current) setManualReady(r.rawTxHex?.toLowerCase() === rawTxHex.toLowerCase());
-    } catch {
-      if (active === generation.current) setManualReady(false);
+      held = r.rawTxHex?.toLowerCase() === rawTxHex.toLowerCase();
+    } catch { /* Unknown means not confirmed. */ }
+    if (active === generation.current) setConfirmedRaw(held ? rawTxHex.toLowerCase() : undefined);
+    return held && active === generation.current;
+  }
+  // Copy only after re-checking: a still-running server request may have cleared the intent.
+  async function copyRecorded(rawTxHex: string) {
+    if (!(await confirmRecorded(rawTxHex))) {
+      setError("The app no longer has this signed deposit recorded, so don't submit it manually. Press \"Submit deposit again\" first.");
+      return;
     }
+    await navigator.clipboard?.writeText(rawTxHex).then(
+      () => setResult("Copied the signed deposit."),
+      () => setError("Couldn't copy. Select the text and copy it yourself."),
+    );
   }
   async function submitDeposit(rawTxHex: string, txid: string, amountSats: string) {
     let result: { vault: PublicVault; submission: "submitted" | "uncertain" | "rejected"; reason?: string };
@@ -979,7 +994,10 @@ export default function TransactionDialog({
               </p>
             )}
             {deposit && pendingFunding?.rawTxHex && manualReady && submissionOpen && (
-              <details className="manual-slipstream">
+              <details
+                className="manual-slipstream"
+                onToggle={(e) => { if ((e.currentTarget as HTMLDetailsElement).open) void confirmRecorded(pendingFunding.rawTxHex!); }}
+              >
                 <summary>Submit it yourself on MARA Slipstream</summary>
                 <p>
                   If the app can't reach MARA, paste this signed deposit into the "Transaction/Package Hex" field on{" "}
@@ -988,7 +1006,7 @@ export default function TransactionDialog({
                   another. Afterwards, press "Submit deposit again" here so the app records it.
                 </p>
                 <textarea readOnly rows={4} aria-label="Signed deposit transaction (hex)" value={pendingFunding.rawTxHex} />
-                <button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(pendingFunding.rawTxHex!).then(() => setResult("Copied the signed deposit."), () => setError("Couldn't copy. Select the text and copy it yourself."))}>
+                <button type="button" className="secondary" onClick={() => void copyRecorded(pendingFunding.rawTxHex!)}>
                   Copy transaction
                 </button>
               </details>

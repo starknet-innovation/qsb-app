@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-for (const scenario of ["success", "uncertain-submission", "miner-rejected", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor", "below-current-rate", "submit-disabled", "unrecorded-failure", "disabled-after-sign"]) {
+for (const scenario of ["success", "uncertain-submission", "miner-rejected", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor", "below-current-rate", "submit-disabled", "unrecorded-failure", "disabled-after-sign", "different-bytes"]) {
   const uncertain = scenario === "uncertain-submission";
   test(`deposit dialog preserves one-deposit guard (${scenario})`, async ({
     page,
@@ -29,7 +29,7 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
         }
         if(path.endsWith('/fund/signed')){
           if(window.exactSubmit===false||!window.serverSigned)throw Error('NOT_RECORDED');
-          return {rawTxHex:window.serverSigned};
+          return {rawTxHex:window.serverSignedOverride??window.serverSigned};
         }
         if(path.endsWith('/fund/submit')){
           window.submitCalls=(window.submitCalls||0)+1;(window.submitted=window.submitted||[]).push(body);
@@ -95,6 +95,8 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
       if (scenario === "submit-disabled") w.exactSubmit = false;
       if (scenario === "unrecorded-failure") w.minerOutcomes = ["throw"];
       if (scenario === "disabled-after-sign") { w.minerOutcomes = ["uncertain"]; w.disableAfterSubmit = true; }
+      // The server holds a different deposit for this vault (another device's).
+      if (scenario === "different-bytes") { w.minerOutcomes = ["uncertain"]; w.serverSignedOverride = "02" + "00".repeat(60); }
       if (scenario === "uncertain-submission") w.minerOutcomes = ["uncertain", "submitted"];
       if (scenario === "miner-rejected") w.minerOutcomes = ["rejected"];
     }, scenario);
@@ -115,7 +117,7 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
     }
     const guard = () =>
       page.evaluate(() => localStorage.getItem("qsb-funding:11111111-1111-4111-8111-111111111111"));
-    if (scenario === "unrecorded-failure" || scenario === "disabled-after-sign") {
+    if (scenario === "unrecorded-failure" || scenario === "disabled-after-sign" || scenario === "different-bytes") {
       // The signed deposit is kept, but manual submission stays hidden: the server hasn't
       // recorded these bytes, or deposits were switched off.
       await expect(dialog).toContainText("Don't deposit again");
