@@ -3,11 +3,14 @@ import { readFile } from "node:fs/promises";
 
 async function fixture(
   page: Page,
-  options: { enabled?: boolean; submitDisabled?: boolean } = {},
+  options: { enabled?: boolean; submitDisabled?: boolean; minerFloor?: number } = {},
 ) {
   const bodies: string[] = [];
   let submitted = 0;
   let lastBody: { rawTxHex: string } | undefined;
+  await page.route("**/api/rates", (route) =>
+    route.fulfill({ json: { submit_fee_rate: options.minerFloor ?? 1 } }),
+  );
   await page.route("**/api/config", (route) =>
     route.fulfill({ json: { exactSubmitEnabled: options.enabled === true } }),
   );
@@ -141,7 +144,7 @@ test("browser signs a coordinator solved result in Xverse without broadcasting o
 
 async function signForReview(
   page: Page,
-  options: { enabled?: boolean; submitDisabled?: boolean } = {},
+  options: { enabled?: boolean; submitDisabled?: boolean; minerFloor?: number } = {},
 ) {
   const f = await fixture(page, options);
   const backupEvent = page.waitForEvent("download");
@@ -250,5 +253,13 @@ test("wallet session change after signing prevents approval from posting", async
   await expect(f.dialog.getByRole("alert")).toContainText(
     "Wallet session changed",
   );
+  expect(f.submitted()).toBe(0);
+});
+
+test("a signed rate below MARA's current floor submits nothing", async ({ page }) => {
+  const f = await signForReview(page, { enabled: true, minerFloor: 1000 });
+  await expect(f.dialog).toContainText(/Signed size: [\d,]+ vB · about [\d.]+ sat\/vB/);
+  await f.dialog.getByRole("button", { name: "Approve exact transaction and submit" }).click();
+  await expect(f.dialog).toContainText("below MARA's current submission floor of 1000 sat/vB. Nothing was submitted.");
   expect(f.submitted()).toBe(0);
 });

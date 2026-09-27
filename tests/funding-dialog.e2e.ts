@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-for (const scenario of ["success", "post-broadcast-failure", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard"]) {
+for (const scenario of ["success", "post-broadcast-failure", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor"]) {
   const failAfterBroadcast = scenario === "post-broadcast-failure";
   test(`deposit dialog preserves one-deposit guard (${scenario})`, async ({
     page,
@@ -20,6 +20,7 @@ for (const scenario of ["success", "post-broadcast-failure", "server-submitted",
         const f=window.fundingFixture;
         if(path==='/config')return {network:'mainnet',operationsEnabled:true};
         if(path==='/payment-utxos')return {utxos:[f.point]};
+        if(path==='/rates')return {submit_fee_rate:window.minerFloor??1};
         if(path==='/payment-input')return {previousTxHex:f.previousTxHex};
         if(path==='/vaults'){
           if(window.serverReadFailure)throw Error('SERVER_READ_FAILED');
@@ -64,7 +65,8 @@ for (const scenario of ["success", "post-broadcast-failure", "server-submitted",
       .getByLabel("I have reviewed the itemized costs", { exact: false })
       .check();
     await dialog.getByLabel("Deposit amount (BTC)").fill("0.0005");
-    await dialog.getByLabel("Miner fee (BTC, exact amount)").fill("0.0001");
+    await dialog.getByLabel("Miner fee rate (sat/vB)").fill("2");
+    await expect(dialog).toContainText(/Estimated size \d+ vB · miner fee \d+ sats/);
     // Change another device/tab's state only after this dialog has opened.
     await page.evaluate((scenario) => {
       const w = window as any, vault = w.fundingFixture.vault;
@@ -77,10 +79,17 @@ for (const scenario of ["success", "post-broadcast-failure", "server-submitted",
       if (["local-guard", "unknown-guard", "malformed-guard"].includes(scenario))
         localStorage.setItem("qsb-funding:" + vault.id, scenario === "malformed-guard" ? "{" : JSON.stringify({txid: scenario === "unknown-guard" ? "" : "ab".repeat(32), amount:"50000"}));
       if (scenario === "local-guard-during-fetch") w.guardDuringFetch = true;
+      if (scenario === "below-floor") w.minerFloor = 5;
     }, scenario);
     await dialog
       .getByRole("button", { name: "Review deposit in Xverse" })
       .click();
+    if (scenario === "below-floor") {
+      await expect(dialog).toContainText("below MARA's current submission floor of 5 sat/vB");
+      expect(await page.evaluate(() => (window as any).walletCalls)).toBe(0);
+      expect(await page.evaluate(() => (window as any).recordCalls)).toBe(0);
+      return;
+    }
     if (scenario !== "success" && !failAfterBroadcast) {
       await expect(dialog).toContainText(scenario === "server-read-failure" ? "SERVER_READ_FAILED" : "do not deposit again.");
       expect(await page.evaluate(() => (window as any).walletCalls)).toBe(0);

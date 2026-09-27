@@ -108,6 +108,9 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
   await page.route("**/api/config", (route) =>
     route.fulfill({ json: { network: "mainnet", operationsEnabled: true, solverReleaseId: "browser-served-test" } }),
   );
+  await page.route("**/api/rates", (route) =>
+    route.fulfill({ json: { submit_fee_rate: 1 } }),
+  );
   await page.route("**/api/payment-utxos", (route) =>
     route.fulfill({
       json: { utxos: [{ txid: "22".repeat(32), vout: 0, value: "10000" }] },
@@ -149,8 +152,11 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
   await dialog.getByRole("button", { name: "Verify backup locally" }).click();
   await expect(dialog).toContainText("Recovery backup verified");
   await dialog.getByRole("radio").check();
-  await dialog.getByLabel("Miner fee (BTC, exact amount)").fill("0.0001");
-  await expect(dialog).toContainText("Payout: 0.001");
+  await dialog.getByLabel("Miner fee rate (sat/vB)").fill("2");
+  const estimate = (await dialog.locator(".fee-estimate").textContent()) ?? "";
+  const fee = Number(/miner fee ([\d,]+) sats/.exec(estimate)?.[1].replace(/,/g, ""));
+  expect(fee).toBeGreaterThan(0);
+  await expect(dialog).toContainText("Payout: ");
   await dialog.getByRole("checkbox").check();
   const downloaded = page.waitForEvent("download");
   await dialog
@@ -159,7 +165,8 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
   const download = await downloaded;
   await expect(dialog).toContainText("Keep the updated withdrawal backup");
   expect(submitted.solverReleaseId).toBe("browser-served-test");
-  expect(submitted.outputValue).toBe("100000");
+  expect(submitted.fee).toBe(String(fee));
+  expect(submitted.outputValue).toBe(String(110_000 - fee));
   expect(submitted.destination).toBe(address);
   expect(JSON.stringify(submitted)).not.toContain("hors_secrets");
   const fs = await import("node:fs/promises");

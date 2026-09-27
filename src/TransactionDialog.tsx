@@ -11,8 +11,15 @@ import { base64, hex } from "@scure/base";
 import { api } from "./lib/api";
 import { fundFromXverse, signPsbt, type Wallet } from "./lib/wallet";
 import {
+  fundingFeeForRate,
   fundingPsbt,
   helperPsbt,
+  belowMinerFloor,
+  nestedPaymentAddress,
+  parseFeeRate,
+  transactionVsize,
+  withdrawalFeeForRate,
+  withdrawalVsize,
   verifySignedPsbt,
   verifyWithdrawalCommitment,
   outputScript,
@@ -88,7 +95,9 @@ export default function TransactionDialog({
   const [points, setPoints] = useState<Point[]>([]),
     [selection, setSelection] = useState<string[]>([]),
     [amount, setAmount] = useState(""),
-    [fee, setFee] = useState(""),
+    [feeRate, setFeeRate] = useState(""),
+    // MARA's submission floor in sat/vB: undefined while loading, null if unavailable.
+    [minerFloor, setMinerFloor] = useState<number | null>(),
     [destination, setDestination] = useState(wallet.address),
     [solverId, setSolverId] = useState<string | null>(null),
     [accepted, setAccepted] = useState(false),
@@ -141,6 +150,16 @@ export default function TransactionDialog({
         setResult("Submission is disabled. Keep the downloaded signed result; nothing was broadcast.");
         return;
       }
+      // MARA refuses a rate below its floor, and a refused exact submission is never retried
+      // automatically. The floor may have risen during the search, so check the signed rate now.
+      try {
+        const vsize = transactionVsize(signedReview.rawTxHex);
+        await assertMinerFloor((BigInt(signedReview.manifest.fee) * 1000n) / BigInt(vsize));
+      } catch (error) {
+        submitAttempted.current = false;
+        throw error;
+      }
+      assertCurrent();
       try {
         const response = await api<{txid: string; status: string}>(`/jobs/${job.id}/submit`, {rawTxHex: signedReview.rawTxHex});
         assertCurrent();
@@ -196,6 +215,12 @@ export default function TransactionDialog({
           setSolverId(typeof config.solverReleaseId === "string" ? config.solverReleaseId : null);
       }).catch(() => { if (active === generation.current) setSolverId(null); });
     }
+    if (!job) {
+      const active = generation.current;
+      api<{ submit_fee_rate: number }>("/rates")
+        .then((r) => { if (active === generation.current) setMinerFloor(Number.isFinite(r.submit_fee_rate) ? r.submit_fee_rate : null); })
+        .catch(() => { if (active === generation.current) setMinerFloor(null); });
+    }
     if (!job)
       api<{ utxos: Point[] }>("/payment-utxos")
         .then((x) => setPoints(x.utxos))
@@ -206,6 +231,63 @@ export default function TransactionDialog({
     };
   }, [fundingKey]);
   const key = (p: Point) => `${p.txid}:${p.vout}`;
+  // MARA refuses a rate below its submission floor. The floor is re-read right before a
+  // fee is fixed, and nothing proceeds without it.
+  async function assertMinerFloor(milliSatPerVb: bigint) {
+    let floor: number;
+    try {
+      floor = (await api<{ submit_fee_rate: number }>("/rates")).submit_fee_rate;
+    } catch {
+      throw Error("MARA's fee quote is unavailable, so the rate can't be checked against its submission floor. Nothing was submitted; try again shortly.");
+    }
+    setMinerFloor(floor);
+    if (belowMinerFloor(milliSatPerVb, floor))
+      throw Error(`The fee rate is below MARA's current submission floor of ${floor} sat/vB. Nothing was submitted.`);
+  }
+  // Deposit fee from a sat/vB rate and the transaction's worst-case signed size.
+  const depositQuote = (() => {
+    if (!deposit || job) return undefined;
+    const selected = points.filter((p) => selection.includes(key(p)));
+    if (!selected.length || !amount.trim() || !feeRate.trim()) return undefined;
+    try {
+      return fundingFeeForRate(
+        selected.map((p) => BigInt(p.value)),
+        nestedPaymentAddress(wallet.address),
+        vault.scriptHex.length / 2,
+        parseBtc(amount),
+        parseFeeRate(feeRate),
+      );
+    } catch (e) {
+      return e instanceof Error ? e.message : "Unable to estimate the miner fee.";
+    }
+  })();
+  // Withdrawal fee from a sat/vB rate and the upper-bound size of the signed QSB spend.
+  // A saved intent already fixed its fee, so reopening it reuses that fee.
+  const savedIntentFee = (() => {
+    if (deposit || !unlocked?.authorization) return undefined;
+    try {
+      return BigInt(withdrawalSchema.parse(JSON.parse(unlocked.authorization.manifestJson)).fee);
+    } catch {
+      return undefined;
+    }
+  })();
+  const withdrawalQuote = (() => {
+    if (deposit || job) return undefined;
+    if (savedIntentFee !== undefined) return { fee: savedIntentFee, vsize: 0, saved: true as const };
+    if (!feeRate.trim()) return undefined;
+    let script: Uint8Array;
+    try {
+      script = outputScript(destination);
+    } catch {
+      return "Enter a valid destination address to see the miner fee.";
+    }
+    try {
+      return withdrawalFeeForRate(nestedPaymentAddress(wallet.address), script.length, parseFeeRate(feeRate));
+    } catch (e) {
+      return e instanceof Error ? e.message : "Unable to estimate the miner fee.";
+    }
+  })();
+  const feeQuote = deposit ? depositQuote : withdrawalQuote;
   async function act(label: string, fn: (check: () => void) => Promise<void>) {
     const active = generation.current;
     const check = () => {
@@ -282,7 +364,17 @@ export default function TransactionDialog({
           throw Error("Select between one and eight payment outputs.");
         const inputs = await Promise.all(selected.map(input));
         const amountSats = parseBtc(amount),
-          feeSats = parseBtc(fee);
+          rate = parseFeeRate(feeRate);
+        await assertMinerFloor(rate);
+        check();
+        const quote = fundingFeeForRate(
+            inputs.map((i) => i.value),
+            nestedPaymentAddress(wallet.address),
+            vault.scriptHex.length / 2,
+            amountSats,
+            rate,
+          ),
+          feeSats = quote.fee;
         const expected = fundingPsbt(
           inputs,
           vault.scriptHex,
@@ -290,6 +382,8 @@ export default function TransactionDialog({
           feeSats,
           wallet.address,
         );
+        if (expected.outputsLength !== (quote.change ? 2 : 1))
+          throw Error("The deposit fee estimate doesn't match the transaction. No transaction was submitted.");
         check();
         refusePendingDeposit();
         const latest = (await api<{ vaults: PublicVault[] }>("/vaults")).vaults.find(
@@ -351,7 +445,31 @@ export default function TransactionDialog({
       if (!confirmed.status.confirmed || !confirmed.vault.funding)
         throw Error("Wait for the deposit to confirm.");
       const funding = confirmed.vault.funding,
-        feeSats = parseBtc(fee),
+        feeSats = await (async () => {
+          const saved = unlocked.authorization
+            ? withdrawalSchema.parse(JSON.parse(unlocked.authorization.manifestJson))
+            : undefined;
+          // The parked supervised handoff doesn't submit through MARA from here; keep /rates out of it.
+          if (saved) {
+            // The saved fee can't change. Refuse to start a paid search MARA wouldn't accept.
+            if (!supervisedSearch) {
+              const vsize = withdrawalVsize(nestedPaymentAddress(wallet.address), saved.outputScript.length / 2);
+              await assertMinerFloor((BigInt(saved.fee) * 1000n) / BigInt(vsize));
+              check();
+            }
+            return BigInt(saved.fee);
+          }
+          const rate = parseFeeRate(feeRate);
+          if (!supervisedSearch) {
+            await assertMinerFloor(rate);
+            check();
+          }
+          return withdrawalFeeForRate(
+            nestedPaymentAddress(wallet.address),
+            outputScript(destination).length,
+            rate,
+          ).fee;
+        })(),
         outputValue = BigInt(funding.value) + BigInt(helper.value) - feeSats;
       if (outputValue <= 0n)
         throw Error("The miner fee exceeds the available amount.");
@@ -562,8 +680,9 @@ export default function TransactionDialog({
     try {
       const helper = points.find((p) => selection.includes(key(p)));
       if (!helper) return undefined;
+      if (typeof withdrawalQuote !== "object") return undefined;
       const value =
-        BigInt(vault.funding.value) + BigInt(helper.value) - parseBtc(fee);
+        BigInt(vault.funding.value) + BigInt(helper.value) - withdrawalQuote.fee;
       return value > 0n ? formatBtc(value.toString()) : undefined;
     } catch {
       return undefined;
@@ -608,7 +727,15 @@ export default function TransactionDialog({
               <p>Transaction ID: {signedReview.txid}<br />
                 Destination: {signedReview.manifest.destination}<br />
                 Payout: {formatBtc(signedReview.manifest.outputValue)} BTC<br />
-                Miner fee: {formatBtc(signedReview.manifest.fee)} BTC</p>
+                Miner fee: {formatBtc(signedReview.manifest.fee)} BTC<br />
+                {(() => {
+                  try {
+                    const vsize = transactionVsize(signedReview.rawTxHex);
+                    return `Signed size: ${vsize.toLocaleString()} vB · about ${(Number(signedReview.manifest.fee) / vsize).toFixed(2)} sat/vB`;
+                  } catch {
+                    return "Signed size unavailable.";
+                  }
+                })()}</p>
               {signedDownload && job && <button className="secondary" onClick={() => downloadPublicResult(signedDownload, job.id)}>Download signed result again</button>}
               <button disabled={!!busy || !submitAllowed || submitAttempted.current || signedReview.generation !== generation.current || signedReview.epoch !== readSessionEpoch()} onClick={approveSigned}>Approve exact transaction and submit</button>
               <button className="secondary" disabled={!!busy} onClick={onClose}>Cancel submission</button>
@@ -731,14 +858,49 @@ export default function TransactionDialog({
                     <input value={solverId || "No runnable solver is configured"} readOnly />
                   </label>
                 )}
-                <label>
-                  Miner fee (BTC, exact amount)
-                  <input
-                    inputMode="decimal"
-                    value={fee}
-                    onChange={(e) => setFee(e.target.value)}
-                  />
-                </label>
+                {typeof feeQuote === "object" && "saved" in feeQuote ? (
+                  <p className="fee-estimate">
+                    Miner fee {feeQuote.fee.toLocaleString()} sats ({formatBtc(feeQuote.fee)} BTC), fixed by the saved intent.
+                  </p>
+                ) : (
+                  <>
+                    <label>
+                      Miner fee rate (sat/vB)
+                      <input
+                        inputMode="decimal"
+                        aria-describedby="fee-estimate"
+                        value={feeRate}
+                        onChange={(e) => setFeeRate(e.target.value)}
+                      />
+                    </label>
+                    <p className="fee-estimate" id="fee-estimate">
+                      {typeof feeQuote === "object"
+                        ? `${deposit ? "Estimated size" : "Size at most"} ${feeQuote.vsize.toLocaleString()} vB · miner fee ${feeQuote.fee.toLocaleString()} sats (${formatBtc(feeQuote.fee)} BTC)` +
+                          ("change" in feeQuote && !feeQuote.change
+                            ? ` · no change output: the change would be below the dust limit, so the leftover goes to the fee, about ${(Number(feeQuote.fee) / feeQuote.vsize).toFixed(2)} sat/vB`
+                            : "")
+                        : feeQuote ??
+                          (deposit
+                            ? "Select payment outputs and enter an amount and a fee rate to see the miner fee."
+                            : "Enter a fee rate to see the miner fee. It's fixed when you save the intent, before the search.")}
+                      {minerFloor === null
+                        ? " MARA's submission floor is unavailable right now; nothing can be submitted until it is."
+                        : minerFloor !== undefined
+                          ? ` MARA's current submission floor: ${minerFloor} sat/vB.` +
+                            (() => {
+                              try {
+                                return feeRate.trim() && belowMinerFloor(parseFeeRate(feeRate), minerFloor)
+                                  ? " This rate is below it."
+                                  : "";
+                              } catch {
+                                return "";
+                              }
+                            })() +
+                            (deposit ? "" : " Leave a margin: the search can take hours before the withdrawal is submitted.")
+                          : ""}
+                    </p>
+                  </>
+                )}
               </>
             )}
             {deposit && pendingFunding && (
@@ -747,7 +909,16 @@ export default function TransactionDialog({
                 the deposit once it is visible on the network; withdrawal waits for confirmation.
               </p>
             )}
-            <CostDisclosure feeBtc={job ? formatBtc(job.manifest.fee) : fee || undefined} job={job} />
+            <CostDisclosure
+              feeBtc={
+                job
+                  ? formatBtc(job.manifest.fee)
+                  : typeof feeQuote === "object"
+                    ? formatBtc(feeQuote.fee)
+                    : undefined
+              }
+              job={job}
+            />
             {payoutPreview && (
               <p role="status">
                 Payout: {payoutPreview} BTC to {destination}. The selected
