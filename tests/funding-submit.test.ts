@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { MemoryStore } from "../server/store";
-import { ChainError } from "../server/chain";
+import { ChainError, ChainNotFound, Esplora } from "../server/chain";
 import { submitFunding } from "../server/submit-funding";
 import { SubmitDisabled } from "../server/submit-exact";
 import { MinerHttpError, MinerRejection, Slipstream } from "../server/providers";
@@ -196,4 +196,21 @@ describe("Slipstream deposit transport", () => {
     respond(400, { is_success: false, message: "Transaction not found" });
     expect(await miner().seen("00".repeat(32))).toBe(false);
   });
+});
+
+describe("chain lookup errors", () => {
+  // The funding status fallback trusts only a definitive 404, never a provider failure.
+  const read = (status: number) =>
+    (new Esplora("https://chain.test", async () => new Response("", { status })) as unknown as {
+      read(path: string): Promise<string>;
+    }).read("/tx/" + "00".repeat(32) + "/status");
+  it("raises ChainNotFound for a 404", async () => {
+    await expect(read(404)).rejects.toBeInstanceOf(ChainNotFound);
+  });
+  for (const status of [429, 500, 503])
+    it(`raises a plain ChainError for ${status}`, async () => {
+      const error = await read(status).catch((e) => e);
+      expect(error).toBeInstanceOf(ChainError);
+      expect(error).not.toBeInstanceOf(ChainNotFound);
+    });
 });

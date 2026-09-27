@@ -18,6 +18,8 @@ const statusSchema = z.object({
   block_hash: txid.optional(),
 });
 export class ChainError extends Error {}
+/** The chain API answered 404: it doesn't know this transaction (yet). */
+export class ChainNotFound extends ChainError {}
 export class Esplora {
   constructor(
     private base = chainBase,
@@ -28,7 +30,7 @@ export class Esplora {
       signal: AbortSignal.timeout(15000),
     });
     if (!r.ok)
-      throw new ChainError(
+      throw new (r.status === 404 ? ChainNotFound : ChainError)(
         `Chain lookup failed (${r.status}). Retry before signing.`,
       );
     const text = await r.text();

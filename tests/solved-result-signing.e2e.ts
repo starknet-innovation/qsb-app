@@ -38,7 +38,6 @@ async function fixture(
       if (!indices || indices.length !== 1 || indices[0] !== 0) throw new Error("wrong helper input");
       return window.signSolvedPsbt(psbt);
     }
-    export async function fundFromXverse(){throw new Error('No deposit in withdrawal test');}
     export async function connectWallet(){throw new Error('No wallet');}
     export async function signMessage(){throw new Error('No wallet');}
   `,

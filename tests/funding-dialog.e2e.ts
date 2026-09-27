@@ -42,7 +42,6 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
       r.fulfill({
         contentType: "text/javascript",
         body: `
-      export async function fundFromXverse(){throw Error('A deposit must not be broadcast through Xverse');}
       export async function signPsbt(address,psbt,indices){window.walletCalls++;return window.signFunding(psbt).psbt;}
       export async function connectWallet(){} export async function signMessage(){}
     `,

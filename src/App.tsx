@@ -102,6 +102,25 @@ export default function App() {
       })
       .catch(() => {});
   }, []);
+  // An unconfirmed Slipstream deposit whose MARA answer was lost stays "submitted"; this resends
+  // the server's stored signed bytes. It never creates another deposit.
+  async function resendDeposit(v: PublicVault) {
+    setError("");
+    setNotice("");
+    try {
+      const r = await api<{ submission: "submitted" | "uncertain" | "rejected"; reason?: string }>(
+        `/vaults/${v.id}/fund/resubmit`,
+        {},
+      );
+      setNotice(
+        r.submission === "submitted"
+          ? "MARA has the deposit. Wait for confirmation before withdrawing; don't deposit again."
+          : `MARA's answer is still unclear${r.reason ? ` (${r.reason})` : ""}. The same deposit can be resent again; don't make another deposit.`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Resend failed. Don't make another deposit.");
+    }
+  }
   useEffect(() => {
     if (modal) dialog.current?.showModal();
     else dialog.current?.close();
@@ -574,6 +593,15 @@ export default function App() {
                         )}{" "}
                         {v.status === "unfunded" ? "Deposit" : "Withdraw"}
                       </button>
+                      {v.status === "submitted" && operationsAllowed(config) && (
+                        <button
+                          className="secondary"
+                          title="Resends the same signed deposit to MARA Slipstream. It can only confirm once."
+                          onClick={() => void resendDeposit(v)}
+                        >
+                          Resend deposit to MARA
+                        </button>
+                      )}
                     </article>
                   ))}
                 </div>

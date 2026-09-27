@@ -36,7 +36,7 @@ import {
 import { Conflict, store as defaultStore, type Store } from "./store";
 import { slipstream, MinerAuthenticationError } from "./providers";
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
-import { chain, ChainError, type Esplora } from "./chain";
+import { chain, ChainError, ChainNotFound, type Esplora } from "./chain";
 import { matchVaultFunding } from "./transaction-checks";
 import { coordinatorPublicSolvedResult } from "../src/mainnet/coordinatorResult";
 import { outputScript } from "../src/lib/transactions";
@@ -393,6 +393,31 @@ export function createApp(
     // 201 for every outcome: `submission` says whether MARA accepted, refused or is unknown.
     return c.json(result, 201);
   });
+  // Resend a stored Slipstream deposit, exactly the same bytes, e.g. after an unknown
+  // outcome and a reload. It can only confirm once; a second deposit is never created.
+  app.post("/api/vaults/:id/fund/resubmit", async (c) => {
+    if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
+      return c.json(
+        { error: `${NETWORK_ID} funding is disabled pending validation and operator configuration.` },
+        503,
+      );
+    if (!(dependencies.exactSubmit ?? exactSubmitEnabled()))
+      return c.json({ error: "Deposit submission to the miner is disabled." }, 503);
+    z.object({}).strict().parse(await c.req.json().catch(() => ({})));
+    const row = await store.get(`OWNER#${c.get("owner")}`, `VAULT#${c.req.param("id")}`);
+    if (!row) return c.json({ error: "Vault not found" }, 404);
+    const vault = row.vault as PublicVault;
+    if (!vault.funding || typeof row.fundingRawTxHex !== "string" || !row.fundingRawTxHex)
+      return c.json({ error: "This vault has no stored Slipstream deposit to resend." }, 409);
+    const result = await submitFunding(
+      c.get("owner"),
+      c.req.param("id"),
+      row.fundingRawTxHex,
+      BigInt(vault.funding.value),
+      { store, miner, enabled: dependencies.exactSubmit ?? exactSubmitEnabled() },
+    );
+    return c.json(result, 201);
+  });
   // Reconcile the durable intent without submitting it again. Private miner
   // visibility is distinct from independent canonical-chain confirmation.
   app.get("/api/transactions/:id/status", async (c) => {
@@ -493,12 +518,16 @@ export function createApp(
     // stored signed bytes stand in until then; they never count as confirmation.
     const stored =
       typeof row.fundingRawTxHex === "string" && row.fundingRawTxHex ? row.fundingRawTxHex : undefined;
-    const unseen = (error: unknown) => stored !== undefined && error instanceof ChainError;
+    // Only a definitive 404 falls back; provider failures (429, 5xx, network) propagate.
+    const unseen = (error: unknown) => stored !== undefined && error instanceof ChainNotFound;
+    let fromChain = true;
     const status = await ledger.status(vault.funding.txid).catch((error) => {
-      if (unseen(error)) return { confirmed: false, confirmations: 0 };
-      throw error;
+      if (!unseen(error)) throw error;
+      fromChain = false;
+      return { confirmed: false, confirmations: 0 };
     });
-    if (vault.status !== "spent") {
+    // The fallback never changes the vault's durable status.
+    if (vault.status !== "spent" && fromChain) {
       const next = status.confirmed ? "confirmed" : "submitted";
       if (next !== vault.status) {
         vault.status = next;
