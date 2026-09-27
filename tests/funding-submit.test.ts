@@ -256,13 +256,20 @@ describe("Slipstream deposit transport", () => {
 
 describe("chain lookup errors", () => {
   // The funding status fallback trusts only a definitive 404, never a provider failure.
-  const read = (status: number) =>
+  const read = (status: number, path = "/tx/" + "00".repeat(32) + "/status") =>
     (new Esplora("https://chain.test", async () => new Response("", { status })) as unknown as {
       read(path: string): Promise<string>;
-    }).read("/tx/" + "00".repeat(32) + "/status");
-  it("raises ChainNotFound for a 404", async () => {
+    }).read(path);
+  it("raises ChainNotFound for a 404 from the transaction lookup", async () => {
     await expect(read(404)).rejects.toBeInstanceOf(ChainNotFound);
+    await expect(read(404, "/tx/" + "ab".repeat(32) + "/hex")).rejects.toBeInstanceOf(ChainNotFound);
   });
+  for (const path of ["/block-height/0", "/block-height/840000", "/blocks/tip/height", "/tx/" + "ab".repeat(32) + "/outspend/0"])
+    it(`raises a plain ChainError for a 404 from ${path}`, async () => {
+      const error = await read(404, path).catch((e) => e);
+      expect(error).toBeInstanceOf(ChainError);
+      expect(error).not.toBeInstanceOf(ChainNotFound);
+    });
   for (const status of [429, 500, 503])
     it(`raises a plain ChainError for ${status}`, async () => {
       const error = await read(status).catch((e) => e);

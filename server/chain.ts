@@ -18,8 +18,11 @@ const statusSchema = z.object({
   block_hash: txid.optional(),
 });
 export class ChainError extends Error {}
-/** The chain API answered 404: it doesn't know this transaction (yet). */
+/** A 404 from the transaction lookup itself: the chain API doesn't know this transaction (yet). */
 export class ChainNotFound extends ChainError {}
+// Only these lookups can mean "unknown transaction". A 404 from the network check, a block
+// height or anything else is a provider failure, not evidence about the transaction.
+const transactionLookup = /^\/tx\/[0-9a-f]{64}\/(?:hex|status)$/;
 export class Esplora {
   constructor(
     private base = chainBase,
@@ -30,7 +33,7 @@ export class Esplora {
       signal: AbortSignal.timeout(15000),
     });
     if (!r.ok)
-      throw new (r.status === 404 ? ChainNotFound : ChainError)(
+      throw new (r.status === 404 && transactionLookup.test(path) ? ChainNotFound : ChainError)(
         `Chain lookup failed (${r.status}). Retry before signing.`,
       );
     const text = await r.text();
