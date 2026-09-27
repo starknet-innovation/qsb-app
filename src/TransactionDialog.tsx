@@ -479,16 +479,21 @@ export default function TransactionDialog({
           const saved = unlocked.authorization
             ? withdrawalSchema.parse(JSON.parse(unlocked.authorization.manifestJson))
             : undefined;
+          // The parked supervised handoff doesn't submit through MARA from here; keep /rates out of it.
           if (saved) {
             // The saved fee can't change. Refuse to start a paid search MARA wouldn't accept.
-            const vsize = withdrawalVsize(nestedPaymentAddress(wallet.address), saved.outputScript.length / 2);
-            await assertMinerFloor((BigInt(saved.fee) * 1000n) / BigInt(vsize));
-            check();
+            if (!supervisedSearch) {
+              const vsize = withdrawalVsize(nestedPaymentAddress(wallet.address), saved.outputScript.length / 2);
+              await assertMinerFloor((BigInt(saved.fee) * 1000n) / BigInt(vsize));
+              check();
+            }
             return BigInt(saved.fee);
           }
           const rate = parseFeeRate(feeRate);
-          await assertMinerFloor(rate);
-          check();
+          if (!supervisedSearch) {
+            await assertMinerFloor(rate);
+            check();
+          }
           return withdrawalFeeForRate(
             nestedPaymentAddress(wallet.address),
             outputScript(destination).length,
@@ -902,7 +907,7 @@ export default function TransactionDialog({
                       {typeof feeQuote === "object"
                         ? `${deposit ? "Estimated size" : "Size at most"} ${feeQuote.vsize.toLocaleString()} vB · miner fee ${feeQuote.fee.toLocaleString()} sats (${formatBtc(feeQuote.fee)} BTC)` +
                           ("change" in feeQuote && !feeQuote.change
-                            ? ` · no change output: the change would be under 546 sats, so the leftover goes to the fee, about ${(Number(feeQuote.fee) / feeQuote.vsize).toFixed(2)} sat/vB`
+                            ? ` · no change output: the change would be below the dust limit, so the leftover goes to the fee, about ${(Number(feeQuote.fee) / feeQuote.vsize).toFixed(2)} sat/vB`
                             : "")
                         : feeQuote ??
                           (deposit
