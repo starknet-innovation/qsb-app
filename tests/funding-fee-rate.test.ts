@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import {
   QSB_CONFIG_A_MAX_SCRIPTSIG,
   belowMinerFloor,
+  changeDustLimit,
   fundingFeeForRate,
   fundingVsize,
   nestedPaymentAddress,
@@ -85,20 +86,22 @@ describe("fundingFeeForRate", () => {
     expect(quote).toEqual({ fee: BigInt(Math.ceil(vsize * 1.5)), vsize, change: true });
   });
 
-  it("drops change below 546 sats and adds it to the fee", () => {
-    const feeWithChange = BigInt(fundingVsize(1, false, script, true) * 2);
-    const amount = 100_000n - feeWithChange - 545n;
-    const quote = fundingFeeForRate([100_000n], false, script, amount, 2_000n);
-    expect(quote.change).toBe(false);
-    expect(quote.fee).toBe(100_000n - amount);
-    expect(quote.vsize).toBe(fundingVsize(1, false, script, false));
-  });
-
-  it("keeps change at exactly 546 sats", () => {
-    const feeWithChange = BigInt(fundingVsize(1, false, script, true) * 2);
-    const amount = 100_000n - feeWithChange - 546n;
-    expect(fundingFeeForRate([100_000n], false, script, amount, 2_000n).change).toBe(true);
-  });
+  for (const [nested, dust] of [[false, 294n], [true, 540n]] as const) {
+    it(`drops ${nested ? "nested" : "native"} change below ${dust} sats and adds it to the fee`, () => {
+      expect(changeDustLimit(nested)).toBe(dust);
+      const feeWithChange = BigInt(fundingVsize(1, nested, script, true) * 2);
+      const amount = 100_000n - feeWithChange - (dust - 1n);
+      const quote = fundingFeeForRate([100_000n], nested, script, amount, 2_000n);
+      expect(quote.change).toBe(false);
+      expect(quote.fee).toBe(100_000n - amount);
+      expect(quote.vsize).toBe(fundingVsize(1, nested, script, false));
+    });
+    it(`keeps ${nested ? "nested" : "native"} change of exactly ${dust} sats`, () => {
+      const feeWithChange = BigInt(fundingVsize(1, nested, script, true) * 2);
+      const amount = 100_000n - feeWithChange - dust;
+      expect(fundingFeeForRate([100_000n], nested, script, amount, 2_000n)).toMatchObject({ fee: feeWithChange, change: true });
+    });
+  }
 
   it("refuses inputs that can't cover the amount and the fee", () => {
     expect(() => fundingFeeForRate([50_100n], false, script, 50_000n, 2_000n)).toThrow("Insufficient funds");

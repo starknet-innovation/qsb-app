@@ -68,7 +68,7 @@ export function fundingPsbt(
   }
   const change = total - amount - fee;
   if (change < 0n) throw new Error("Insufficient funds, including miner fee.");
-  if (change > 0n && change < 546n)
+  if (change > 0n && change < changeDustLimit(nestedPaymentAddress(changeAddress)))
     throw new Error("Change is too small. Adjust amount or inputs.");
   tx.addOutput({ amount, script });
   if (change > 0n) tx.addOutputAddress(changeAddress, change, BITCOIN_NETWORK);
@@ -107,6 +107,13 @@ export function fundingVsize(
   const witness = 2 + inputCount * (1 + 1 + 72 + 1 + 33);
   return Math.ceil((base * 4 + witness) / 4);
 }
+/**
+ * Bitcoin Core's dust limit, at its default 3 sat/vB dust relay fee, for change back to an
+ * Xverse payment address: 294 sats for P2WPKH, 540 for nested SegWit (P2SH).
+ */
+export function changeDustLimit(nested: boolean): bigint {
+  return nested ? 540n : 294n;
+}
 /** A sat/vB rate as integer millisatoshis per vB: positive, at most 3 decimals and 1,000 sat/vB. */
 export function parseFeeRate(value: string): bigint {
   const match = /^(\d{1,4})(?:\.(\d{1,3}))?$/.exec(value.trim());
@@ -124,7 +131,7 @@ export function belowMinerFloor(milliSatPerVb: bigint, floorSatPerVb: number): b
 }
 /**
  * The miner fee fundingPsbt should use for a sat/vB rate. With change, the fee is
- * rate × vsize rounded up. If the change would be below the 546-sat dust limit, the
+ * rate × vsize rounded up. If the change would be below the dust limit, the
  * transaction has no change output and that remainder is added to the fee, so the
  * effective rate is higher than requested (vsize and fee are both reported).
  */
@@ -140,7 +147,7 @@ export function fundingFeeForRate(
   const feeAt = (vsize: number) => (BigInt(vsize) * milliSatPerVb + 999n) / 1000n;
   const withChange = fundingVsize(inputValues.length, nested, vaultScriptLength, true);
   const feeWithChange = feeAt(withChange);
-  if (total - amount - feeWithChange >= 546n)
+  if (total - amount - feeWithChange >= changeDustLimit(nested))
     return { fee: feeWithChange, vsize: withChange, change: true };
   const withoutChange = fundingVsize(inputValues.length, nested, vaultScriptLength, false);
   if (total - amount < feeAt(withoutChange))
