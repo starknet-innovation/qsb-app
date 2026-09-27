@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./lib/api";
+import { minerMinimumRate } from "./lib/transactions";
 import type { Job } from "./lib/model";
 
 export function CostDisclosure({ feeBtc, job }: { feeBtc?: string; job?: Job }) {
@@ -20,7 +21,7 @@ export function CostDisclosure({ feeBtc, job }: { feeBtc?: string; job?: Job }) 
   </section>;
 }
 
-type Rates = { effective_rate: number; submit_fee_rate: number };
+type Rates = { effective_rate: number; submit_fee_rate: number; market_rate?: number };
 export default function Costs() {
   const [rates, setRates] = useState<Rates>();
   const [checked, setChecked] = useState("");
@@ -70,7 +71,7 @@ export default function Costs() {
       <h3>Bitcoin fee reference</h3>
       <button className="secondary" disabled={loading} onClick={() => void refresh()}>{loading ? "Checking MARA rates…" : "Refresh MARA rates"}</button>
       {error && <p role="alert">{error}</p>}
-      {rates && <p>MARA effective rate: <strong>{rates.effective_rate} sat/vB</strong>. Submission floor: {rates.submit_fee_rate} sat/vB. Retrieved {checked}; this rate is not locked and can change immediately. Admission does not guarantee mining.</p>}
+      {rates && <p>MARA effective rate: <strong>{rates.effective_rate} sat/vB</strong>. Minimum accepted now: {minerMinimumRate(rates)} sat/vB. Retrieved {checked}; this rate is not locked and can change immediately. Admission does not guarantee mining.</p>}
       <label>Assumed transaction virtual size (vB)<input inputMode="numeric" value={size} onChange={e => setSize(e.target.value)} placeholder="Not the locking-script size" /></label>
       <p role="status">Illustrative miner fee: <strong>{miner !== undefined && Number.isSafeInteger(miner) ? `${miner.toLocaleString()} sats` : "Requires a rate and a positive whole-number size"}</strong>. Calculate funding and withdrawal separately; verify the final signed transaction's weight.</p>
       <p>A fee change during search may require waiting or recomputing a newly authorized transaction. We will not silently change your payout or reuse one-time signing material.</p>

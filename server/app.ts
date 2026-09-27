@@ -258,13 +258,21 @@ export function createApp(
     c.set("owner", session.owner);
     await next();
   }
-  app.get("/api/vaults", async (c) =>
-    c.json({
-      vaults: (await store.list(`OWNER#${c.get("owner")}`, "VAULT#")).map(
-        (r) => r.vault,
-      ),
-    }),
-  );
+  app.get("/api/vaults", async (c) => {
+    const rows = await store.list(`OWNER#${c.get("owner")}`, "VAULT#");
+    return c.json({
+      vaults: rows.map((r) => r.vault),
+      // Vaults whose unconfirmed deposit the server can resend: stored Slipstream bytes only.
+      resendable: rows
+        .filter(
+          (r) =>
+            typeof r.fundingRawTxHex === "string" &&
+            r.fundingRawTxHex !== "" &&
+            (r.vault as PublicVault).status === "submitted",
+        )
+        .map((r) => (r.vault as PublicVault).id),
+    });
+  });
   app.get("/api/payment-utxos", async (c) =>
     c.json({ utxos: await ledger.paymentUtxos(c.get("owner")) }),
   );
@@ -392,6 +400,23 @@ export function createApp(
     );
     // 201 for every outcome: `submission` says whether MARA accepted, refused or is unknown.
     return c.json(result, 201);
+  });
+  // The stored signed deposit, for manual submission on slipstream.mara.com. No chain lookup,
+  // so it works while the chain API is down. It's offered only while deposits are switched on,
+  // so disabling submission during an incident also stops the manual path.
+  app.get("/api/vaults/:id/fund/signed", async (c) => {
+    if (!enabled || !rehearsalAddressAllowed(c.get("owner")) || !(dependencies.exactSubmit ?? exactSubmitEnabled()))
+      return c.json({ error: "Deposit submission is switched off." }, 503);
+    const row = await store.get(`OWNER#${c.get("owner")}`, `VAULT#${c.req.param("id")}`);
+    const vault = row?.vault as PublicVault | undefined;
+    if (!row || !vault?.funding || typeof row.fundingRawTxHex !== "string" || !row.fundingRawTxHex)
+      return c.json({ error: "This vault has no stored signed deposit." }, 404);
+    return c.json({
+      txid: vault.funding.txid,
+      rawTxHex: row.fundingRawTxHex,
+      status: vault.status,
+      submission: row.fundingSubmission,
+    });
   });
   // Resend a stored Slipstream deposit, exactly the same bytes, e.g. after an unknown
   // outcome and a reload. It can only confirm once; a second deposit is never created.
