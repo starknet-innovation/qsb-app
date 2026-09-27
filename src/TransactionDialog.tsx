@@ -11,8 +11,13 @@ import { base64, hex } from "@scure/base";
 import { api } from "./lib/api";
 import { fundFromXverse, signPsbt, type Wallet } from "./lib/wallet";
 import {
+  fundingFeeForRate,
   fundingPsbt,
   helperPsbt,
+  nestedPaymentAddress,
+  parseFeeRate,
+  transactionVsize,
+  withdrawalFeeForRate,
   verifySignedPsbt,
   verifyWithdrawalCommitment,
   outputScript,
@@ -88,7 +93,7 @@ export default function TransactionDialog({
   const [points, setPoints] = useState<Point[]>([]),
     [selection, setSelection] = useState<string[]>([]),
     [amount, setAmount] = useState(""),
-    [fee, setFee] = useState(""),
+    [feeRate, setFeeRate] = useState(""),
     [destination, setDestination] = useState(wallet.address),
     [solverId, setSolverId] = useState<string | null>(null),
     [accepted, setAccepted] = useState(false),
@@ -206,6 +211,37 @@ export default function TransactionDialog({
     };
   }, [fundingKey]);
   const key = (p: Point) => `${p.txid}:${p.vout}`;
+  // Deposit fee from a sat/vB rate and the transaction's worst-case signed size.
+  const depositQuote = (() => {
+    if (!deposit || job) return undefined;
+    const selected = points.filter((p) => selection.includes(key(p)));
+    if (!selected.length || !amount.trim() || !feeRate.trim()) return undefined;
+    try {
+      return fundingFeeForRate(
+        selected.map((p) => BigInt(p.value)),
+        nestedPaymentAddress(wallet.address),
+        vault.scriptHex.length / 2,
+        parseBtc(amount),
+        parseFeeRate(feeRate),
+      );
+    } catch (e) {
+      return e instanceof Error ? e.message : "Unable to estimate the miner fee.";
+    }
+  })();
+  // Withdrawal fee from a sat/vB rate and the upper-bound size of the signed QSB spend.
+  const withdrawalQuote = (() => {
+    if (deposit || job || !feeRate.trim()) return undefined;
+    try {
+      return withdrawalFeeForRate(
+        nestedPaymentAddress(wallet.address),
+        outputScript(destination).length,
+        parseFeeRate(feeRate),
+      );
+    } catch (e) {
+      return e instanceof Error ? e.message : "Unable to estimate the miner fee.";
+    }
+  })();
+  const feeQuote = deposit ? depositQuote : withdrawalQuote;
   async function act(label: string, fn: (check: () => void) => Promise<void>) {
     const active = generation.current;
     const check = () => {
@@ -282,7 +318,14 @@ export default function TransactionDialog({
           throw Error("Select between one and eight payment outputs.");
         const inputs = await Promise.all(selected.map(input));
         const amountSats = parseBtc(amount),
-          feeSats = parseBtc(fee);
+          quote = fundingFeeForRate(
+            inputs.map((i) => i.value),
+            nestedPaymentAddress(wallet.address),
+            vault.scriptHex.length / 2,
+            amountSats,
+            parseFeeRate(feeRate),
+          ),
+          feeSats = quote.fee;
         const expected = fundingPsbt(
           inputs,
           vault.scriptHex,
@@ -290,6 +333,8 @@ export default function TransactionDialog({
           feeSats,
           wallet.address,
         );
+        if (expected.outputsLength !== (quote.change ? 2 : 1))
+          throw Error("The deposit fee estimate doesn't match the transaction. No transaction was submitted.");
         check();
         refusePendingDeposit();
         const latest = (await api<{ vaults: PublicVault[] }>("/vaults")).vaults.find(
@@ -351,7 +396,11 @@ export default function TransactionDialog({
       if (!confirmed.status.confirmed || !confirmed.vault.funding)
         throw Error("Wait for the deposit to confirm.");
       const funding = confirmed.vault.funding,
-        feeSats = parseBtc(fee),
+        feeSats = withdrawalFeeForRate(
+          nestedPaymentAddress(wallet.address),
+          outputScript(destination).length,
+          parseFeeRate(feeRate),
+        ).fee,
         outputValue = BigInt(funding.value) + BigInt(helper.value) - feeSats;
       if (outputValue <= 0n)
         throw Error("The miner fee exceeds the available amount.");
@@ -562,8 +611,9 @@ export default function TransactionDialog({
     try {
       const helper = points.find((p) => selection.includes(key(p)));
       if (!helper) return undefined;
+      if (typeof withdrawalQuote !== "object") return undefined;
       const value =
-        BigInt(vault.funding.value) + BigInt(helper.value) - parseBtc(fee);
+        BigInt(vault.funding.value) + BigInt(helper.value) - withdrawalQuote.fee;
       return value > 0n ? formatBtc(value.toString()) : undefined;
     } catch {
       return undefined;
@@ -608,7 +658,15 @@ export default function TransactionDialog({
               <p>Transaction ID: {signedReview.txid}<br />
                 Destination: {signedReview.manifest.destination}<br />
                 Payout: {formatBtc(signedReview.manifest.outputValue)} BTC<br />
-                Miner fee: {formatBtc(signedReview.manifest.fee)} BTC</p>
+                Miner fee: {formatBtc(signedReview.manifest.fee)} BTC<br />
+                {(() => {
+                  try {
+                    const vsize = transactionVsize(signedReview.rawTxHex);
+                    return `Signed size: ${vsize.toLocaleString()} vB · about ${(Number(signedReview.manifest.fee) / vsize).toFixed(2)} sat/vB`;
+                  } catch {
+                    return "Signed size unavailable.";
+                  }
+                })()}</p>
               {signedDownload && job && <button className="secondary" onClick={() => downloadPublicResult(signedDownload, job.id)}>Download signed result again</button>}
               <button disabled={!!busy || !submitAllowed || submitAttempted.current || signedReview.generation !== generation.current || signedReview.epoch !== readSessionEpoch()} onClick={approveSigned}>Approve exact transaction and submit</button>
               <button className="secondary" disabled={!!busy} onClick={onClose}>Cancel submission</button>
@@ -732,13 +790,24 @@ export default function TransactionDialog({
                   </label>
                 )}
                 <label>
-                  Miner fee (BTC, exact amount)
+                  Miner fee rate (sat/vB)
                   <input
                     inputMode="decimal"
-                    value={fee}
-                    onChange={(e) => setFee(e.target.value)}
+                    value={feeRate}
+                    onChange={(e) => setFeeRate(e.target.value)}
                   />
                 </label>
+                <p className="fee-estimate" aria-live="polite">
+                  {typeof feeQuote === "object"
+                    ? `${deposit ? "Estimated size" : "Size at most"} ${feeQuote.vsize.toLocaleString()} vB · miner fee ${feeQuote.fee.toLocaleString()} sats (${formatBtc(feeQuote.fee)} BTC)` +
+                      ("change" in feeQuote && !feeQuote.change
+                        ? ` · no change output: the remainder below 546 sats is added to the fee, about ${(Number(feeQuote.fee) / feeQuote.vsize).toFixed(2)} sat/vB`
+                        : "")
+                    : feeQuote ??
+                      (deposit
+                        ? "Select payment outputs and enter an amount and a fee rate to see the miner fee."
+                        : "Enter a fee rate to see the miner fee. It's fixed when you save the intent, before the search.")}
+                </p>
               </>
             )}
             {deposit && pendingFunding && (
@@ -747,7 +816,16 @@ export default function TransactionDialog({
                 the deposit once it is visible on the network; withdrawal waits for confirmation.
               </p>
             )}
-            <CostDisclosure feeBtc={job ? formatBtc(job.manifest.fee) : fee || undefined} job={job} />
+            <CostDisclosure
+              feeBtc={
+                job
+                  ? formatBtc(job.manifest.fee)
+                  : typeof feeQuote === "object"
+                    ? formatBtc(feeQuote.fee)
+                    : undefined
+              }
+              job={job}
+            />
             {payoutPreview && (
               <p role="status">
                 Payout: {payoutPreview} BTC to {destination}. The selected

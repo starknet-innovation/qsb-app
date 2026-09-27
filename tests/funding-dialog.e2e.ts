@@ -64,7 +64,8 @@ for (const scenario of ["success", "post-broadcast-failure", "server-submitted",
       .getByLabel("I have reviewed the itemized costs", { exact: false })
       .check();
     await dialog.getByLabel("Deposit amount (BTC)").fill("0.0005");
-    await dialog.getByLabel("Miner fee (BTC, exact amount)").fill("0.0001");
+    await dialog.getByLabel("Miner fee rate (sat/vB)").fill("2");
+    await expect(dialog).toContainText(/Estimated size \d+ vB · miner fee \d+ sats/);
     // Change another device/tab's state only after this dialog has opened.
     await page.evaluate((scenario) => {
       const w = window as any, vault = w.fundingFixture.vault;

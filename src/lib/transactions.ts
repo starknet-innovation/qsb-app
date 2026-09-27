@@ -74,6 +74,116 @@ export function fundingPsbt(
   if (change > 0n) tx.addOutputAddress(changeAddress, change, BITCOIN_NETWORK);
   return tx;
 }
+const varintSize = (n: number) => (n < 0xfd ? 1 : n <= 0xffff ? 3 : 5);
+/** Whether an Xverse payment address is nested SegWit (P2SH-P2WPKH) rather than native P2WPKH. */
+export function nestedPaymentAddress(address: string): boolean {
+  const decoded = btc.Address(BITCOIN_NETWORK).decode(address);
+  if (decoded.type === "sh") return true;
+  if (decoded.type === "wpkh") return false;
+  throw new Error("Only Xverse P2WPKH and nested SegWit payment inputs are supported.");
+}
+/**
+ * Virtual size of the funding transaction from fundingPsbt once Xverse has signed it.
+ * Every input spends the wallet's P2WPKH or nested-SegWit payment output. Its witness is
+ * [DER signature, compressed key], counted at the 72-byte DER maximum, so the size is an
+ * upper bound and the paid rate is never below the requested one. Nested inputs also
+ * carry a 23-byte scriptSig pushing the P2WPKH redeem script.
+ */
+export function fundingVsize(
+  inputCount: number,
+  nested: boolean,
+  vaultScriptLength: number,
+  change: boolean,
+): number {
+  if (!Number.isSafeInteger(inputCount) || inputCount < 1)
+    throw new Error("Select at least one confirmed payment UTXO.");
+  const changeScript = nested ? 23 : 22;
+  const outputs =
+    8 + varintSize(vaultScriptLength) + vaultScriptLength +
+    (change ? 8 + 1 + changeScript : 0);
+  const base =
+    4 + varintSize(inputCount) + inputCount * (41 + (nested ? 23 : 0)) +
+    varintSize(change ? 2 : 1) + outputs + 4;
+  const witness = 2 + inputCount * (1 + 1 + 72 + 1 + 33);
+  return Math.ceil((base * 4 + witness) / 4);
+}
+/** A sat/vB rate as integer millisatoshis per vB: positive, at most 3 decimals and 1,000 sat/vB. */
+export function parseFeeRate(value: string): bigint {
+  const match = /^(\d{1,4})(?:\.(\d{1,3}))?$/.exec(value.trim());
+  if (!match) throw new Error("Enter the miner fee rate in sat/vB, for example 2 or 1.5.");
+  const rate = BigInt(match[1]) * 1000n + BigInt((match[2] ?? "").padEnd(3, "0"));
+  if (rate <= 0n) throw new Error("The miner fee rate must be above 0 sat/vB.");
+  if (rate > 1_000_000n) throw new Error("The miner fee rate is above 1,000 sat/vB. Check the rate.");
+  return rate;
+}
+/**
+ * The miner fee fundingPsbt should use for a sat/vB rate. With change, the fee is
+ * rate × vsize rounded up. If the change would be below the 546-sat dust limit, the
+ * transaction has no change output and that remainder is added to the fee, so the
+ * effective rate is higher than requested (vsize and fee are both reported).
+ */
+export function fundingFeeForRate(
+  inputValues: bigint[],
+  nested: boolean,
+  vaultScriptLength: number,
+  amount: bigint,
+  milliSatPerVb: bigint,
+): { fee: bigint; vsize: number; change: boolean } {
+  if (amount <= 0n) throw new Error("Amount and fee must be positive.");
+  const total = inputValues.reduce((sum, value) => sum + value, 0n);
+  const feeAt = (vsize: number) => (BigInt(vsize) * milliSatPerVb + 999n) / 1000n;
+  const withChange = fundingVsize(inputValues.length, nested, vaultScriptLength, true);
+  const feeWithChange = feeAt(withChange);
+  if (total - amount - feeWithChange >= 546n)
+    return { fee: feeWithChange, vsize: withChange, change: true };
+  const withoutChange = fundingVsize(inputValues.length, nested, vaultScriptLength, false);
+  if (total - amount < feeAt(withoutChange))
+    throw new Error("Insufficient funds, including miner fee.");
+  return { fee: total - amount, vsize: withoutChange, change: false };
+}
+/**
+ * Upper bound on a Config A QSB scriptSig, from cmd_assemble in public/qsb/qsb_pipeline.py.
+ * For each round it pushes the puzzle and nonce keys (33-byte compressed keys), one dummy
+ * key per subset index (t = 9 in both rounds), one 20-byte HORS preimage per signed index
+ * (8, then 7) and the t witness index numbers. Each index number is at most a 3-byte push,
+ * because stack positions are below Bitcoin's 1,000-item limit. The pinning keys come last.
+ * Round 1: 2*34 + 9*34 + 8*21 + 9*3 = 569. Round 2: 2*34 + 9*34 + 7*21 + 9*3 = 548. Pin: 68.
+ */
+export const QSB_CONFIG_A_MAX_SCRIPTSIG = 1185;
+/**
+ * Virtual size of a signed two-input QSB withdrawal: input 0 is the wallet's helper payment
+ * output (P2WPKH or nested SegWit, witness counted at the 72-byte DER maximum), input 1 is
+ * the legacy QSB input whose scriptSig is at most QSB_CONFIG_A_MAX_SCRIPTSIG, and the single
+ * output pays the destination script. With the default scriptSig bound it's an upper bound.
+ */
+export function withdrawalVsize(
+  nestedHelper: boolean,
+  outputScriptLength: number,
+  scriptSigLength = QSB_CONFIG_A_MAX_SCRIPTSIG,
+): number {
+  const base =
+    4 + 1 + 41 + (nestedHelper ? 23 : 0) +
+    32 + 4 + varintSize(scriptSigLength) + scriptSigLength + 4 +
+    1 + 8 + varintSize(outputScriptLength) + outputScriptLength + 4;
+  // Segwit marker and flag, the helper's witness, and the QSB input's empty witness.
+  const witness = 2 + (1 + 1 + 72 + 1 + 33) + 1;
+  return Math.ceil((base * 4 + witness) / 4);
+}
+/** Withdrawal miner fee for a sat/vB rate: rate × the upper-bound vsize, rounded up. */
+export function withdrawalFeeForRate(
+  nestedHelper: boolean,
+  outputScriptLength: number,
+  milliSatPerVb: bigint,
+): { fee: bigint; vsize: number } {
+  const vsize = withdrawalVsize(nestedHelper, outputScriptLength);
+  return { fee: (BigInt(vsize) * milliSatPerVb + 999n) / 1000n, vsize };
+}
+/** Virtual size of a raw transaction: weight = 3 × size without witnesses + full size. */
+export function transactionVsize(rawTxHex: string): number {
+  const tx = btc.Transaction.fromRaw(hex.decode(rawTxHex), opts);
+  const weight = 3 * tx.toBytes(true, false).length + tx.toBytes(true, true).length;
+  return Math.ceil(weight / 4);
+}
 function assertSighashAll(input: ReturnType<btc.Transaction["getInput"]>) {
   // SIGHASH_ALL is 0x01. NONE|ANYONECANPAY (0x82) and every other type are refused.
   if (input.sighashType !== undefined && input.sighashType !== 1)
