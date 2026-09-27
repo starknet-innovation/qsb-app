@@ -328,6 +328,22 @@ describe("deposit routes", () => {
     expect(f.submit).toHaveBeenLastCalledWith(raw, expect.anything());
   });
 
+  it("GET /fund/signed returns the stored bytes with no chain lookup, and only while deposits are on", async () => {
+    // app()'s chain API answers 500 to everything, so any lookup would fail.
+    const f = await app();
+    expect((await f.call(`/vaults/${f.vault.id}/fund/signed`)).status).toBe(404);
+    const raw = deposit();
+    f.submit.mockRejectedValueOnce(new Error("timeout"));
+    await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
+    const response = await f.call(`/vaults/${f.vault.id}/fund/signed`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ rawTxHex: raw, txid: transactionId(raw), status: "submitted", submission: "uncertain" });
+    const off = createApp(f.store, { enabled: true, exactSubmit: false });
+    const token = "A".repeat(43);
+    const disabled = await off.request(new Request(`http://localhost/api/vaults/${f.vault.id}/fund/signed`, { headers: { authorization: "Bearer " + token } }));
+    expect(disabled.status).toBe(503);
+  });
+
   it("GET /vaults lists only Slipstream deposits the server can resend", async () => {
     const f = await app();
     const list = async () => (await (await f.call("/vaults")).json()) as { vaults: PublicVault[]; resendable: string[] };

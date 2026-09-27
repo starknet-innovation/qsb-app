@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-for (const scenario of ["success", "uncertain-submission", "miner-rejected", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor", "below-current-rate", "submit-disabled"]) {
+for (const scenario of ["success", "uncertain-submission", "miner-rejected", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor", "below-current-rate", "submit-disabled", "unrecorded-failure", "disabled-after-sign"]) {
   const uncertain = scenario === "uncertain-submission";
   test(`deposit dialog preserves one-deposit guard (${scenario})`, async ({
     page,
@@ -27,9 +27,16 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
           if(window.guardDuringFetch)localStorage.setItem('qsb-funding:'+f.vault.id,JSON.stringify({txid:'ab'.repeat(32),amount:'50000'}));
           return {vaults:window.serverVaults??[f.vault]};
         }
+        if(path.endsWith('/fund/signed')){
+          if(window.exactSubmit===false||!window.serverSigned)throw Error('NOT_RECORDED');
+          return {rawTxHex:window.serverSigned};
+        }
         if(path.endsWith('/fund/submit')){
           window.submitCalls=(window.submitCalls||0)+1;(window.submitted=window.submitted||[]).push(body);
           const outcome=(window.minerOutcomes||[]).shift()??'submitted';
+          if(outcome==='throw')throw Error('NETWORK_DOWN');
+          if(outcome!=='rejected')window.serverSigned=body.rawTxHex;
+          if(window.disableAfterSubmit)window.exactSubmit=false;
           if(outcome==='rejected')return {vault:f.vault,submission:'rejected',reason:'min relay fee not met'};
           return {vault:{...f.vault,status:'submitted',funding:{txid:'cd'.repeat(32),vout:0,value:body.amount}},submission:outcome};
         }
@@ -84,8 +91,10 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
       if (scenario === "local-guard-during-fetch") w.guardDuringFetch = true;
       if (scenario === "below-floor") w.minerFloor = 5;
       // MARA's minimum is the higher of its floor and its current rate.
-      if (scenario === "below-current-rate") w.minerRates = { submit_fee_rate: 1, effective_rate: 5 };
+      if (scenario === "below-current-rate") w.minerRates = { submit_fee_rate: 1, market_rate: 5, effective_rate: 5 };
       if (scenario === "submit-disabled") w.exactSubmit = false;
+      if (scenario === "unrecorded-failure") w.minerOutcomes = ["throw"];
+      if (scenario === "disabled-after-sign") { w.minerOutcomes = ["uncertain"]; w.disableAfterSubmit = true; }
       if (scenario === "uncertain-submission") w.minerOutcomes = ["uncertain", "submitted"];
       if (scenario === "miner-rejected") w.minerOutcomes = ["rejected"];
     }, scenario);
@@ -106,6 +115,16 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
     }
     const guard = () =>
       page.evaluate(() => localStorage.getItem("qsb-funding:11111111-1111-4111-8111-111111111111"));
+    if (scenario === "unrecorded-failure" || scenario === "disabled-after-sign") {
+      // The signed deposit is kept, but manual submission stays hidden: the server hasn't
+      // recorded these bytes, or deposits were switched off.
+      await expect(dialog).toContainText("Don't deposit again");
+      expect(JSON.parse((await guard())!).rawTxHex).toMatch(/^[0-9a-f]+$/);
+      await expect(dialog).toContainText("Manual submission on MARA Slipstream becomes available once the app has recorded");
+      await expect(dialog.getByText("Submit it yourself on MARA Slipstream")).toHaveCount(0);
+      expect(await page.evaluate(() => (window as any).walletCalls)).toBe(1);
+      return;
+    }
     if (scenario === "miner-rejected") {
       await expect(dialog).toContainText("MARA refused the deposit: min relay fee not met. Nothing was sent to the network.");
       expect(await guard()).toBeNull();

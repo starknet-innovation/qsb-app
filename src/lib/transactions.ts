@@ -125,15 +125,16 @@ export function parseFeeRate(value: string): bigint {
 }
 /**
  * MARA's minimum acceptable rate in sat/vB. Its site says the minimum is "the higher of either
- * 1x the current mempool priority fee rate or 1 sats/vByte": /api/rates' `submit_fee_rate` is
- * the absolute floor and `effective_rate` the current rate, so the minimum is the higher of the two.
+ * 1x the current mempool priority fee rate or 1 sats/vByte". In /api/rates, `submit_fee_rate` is
+ * the absolute floor and `market_rate` the mempool priority rate. `effective_rate` also carries
+ * Slipstream's premium multiplier, so it isn't used: it could refuse a rate MARA accepts.
  */
-export function minerMinimumRate(rates: { submit_fee_rate: number; effective_rate?: number }): number {
+export function minerMinimumRate(rates: { submit_fee_rate: number; market_rate?: number }): number {
   if (!Number.isFinite(rates.submit_fee_rate) || rates.submit_fee_rate < 0)
     throw new Error("Invalid miner fee floor.");
-  const current = rates.effective_rate;
-  return typeof current === "number" && Number.isFinite(current) && current > rates.submit_fee_rate
-    ? current
+  const market = rates.market_rate;
+  return typeof market === "number" && Number.isFinite(market) && market > rates.submit_fee_rate
+    ? market
     : rates.submit_fee_rate;
 }
 /** Whether a rate (millisatoshis per vB) is below MARA's submission floor (sat/vB), rounding the floor up. */

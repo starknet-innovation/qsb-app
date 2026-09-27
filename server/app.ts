@@ -401,6 +401,23 @@ export function createApp(
     // 201 for every outcome: `submission` says whether MARA accepted, refused or is unknown.
     return c.json(result, 201);
   });
+  // The stored signed deposit, for manual submission on slipstream.mara.com. No chain lookup,
+  // so it works while the chain API is down. It's offered only while deposits are switched on,
+  // so disabling submission during an incident also stops the manual path.
+  app.get("/api/vaults/:id/fund/signed", async (c) => {
+    if (!enabled || !rehearsalAddressAllowed(c.get("owner")) || !(dependencies.exactSubmit ?? exactSubmitEnabled()))
+      return c.json({ error: "Deposit submission is switched off." }, 503);
+    const row = await store.get(`OWNER#${c.get("owner")}`, `VAULT#${c.req.param("id")}`);
+    const vault = row?.vault as PublicVault | undefined;
+    if (!row || !vault?.funding || typeof row.fundingRawTxHex !== "string" || !row.fundingRawTxHex)
+      return c.json({ error: "This vault has no stored signed deposit." }, 404);
+    return c.json({
+      txid: vault.funding.txid,
+      rawTxHex: row.fundingRawTxHex,
+      status: vault.status,
+      submission: row.fundingSubmission,
+    });
+  });
   // Resend a stored Slipstream deposit, exactly the same bytes, e.g. after an unknown
   // outcome and a reload. It can only confirm once; a second deposit is never created.
   app.post("/api/vaults/:id/fund/resubmit", async (c) => {

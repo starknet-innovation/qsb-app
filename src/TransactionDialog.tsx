@@ -99,6 +99,10 @@ export default function TransactionDialog({
     [feeRate, setFeeRate] = useState(""),
     // MARA's submission floor in sat/vB: undefined while loading, null if unavailable.
     [minerFloor, setMinerFloor] = useState<number | null>(),
+    // Manual Slipstream submission needs both: deposits switched on, and the server holding
+    // these exact signed bytes as the vault's intent (so no other device can start a deposit).
+    [submissionOpen, setSubmissionOpen] = useState(false),
+    [manualReady, setManualReady] = useState(false),
     [destination, setDestination] = useState(wallet.address),
     [solverId, setSolverId] = useState<string | null>(null),
     [accepted, setAccepted] = useState(false),
@@ -225,9 +229,17 @@ export default function TransactionDialog({
           setSolverId(typeof config.solverReleaseId === "string" ? config.solverReleaseId : null);
       }).catch(() => { if (active === generation.current) setSolverId(null); });
     }
+    if (deposit && !job) {
+      const active = generation.current;
+      api<{ exactSubmitEnabled?: boolean }>("/config")
+        .then((cfg) => { if (active === generation.current) setSubmissionOpen(operationsAllowed(cfg) && cfg.exactSubmitEnabled === true); })
+        .catch(() => { if (active === generation.current) setSubmissionOpen(false); });
+      const kept = readFundingGuard();
+      if (kept?.rawTxHex) void confirmRecorded(kept.rawTxHex);
+    }
     if (!job) {
       const active = generation.current;
-      api<{ submit_fee_rate: number; effective_rate?: number }>("/rates")
+      api<{ submit_fee_rate: number; market_rate?: number }>("/rates")
         .then((r) => { if (active === generation.current) setMinerFloor(minerMinimumRate(r)); })
         .catch(() => { if (active === generation.current) setMinerFloor(null); });
     }
@@ -246,7 +258,7 @@ export default function TransactionDialog({
   async function assertMinerFloor(milliSatPerVb: bigint) {
     let floor: number;
     try {
-      floor = minerMinimumRate(await api<{ submit_fee_rate: number; effective_rate?: number }>("/rates"));
+      floor = minerMinimumRate(await api<{ submit_fee_rate: number; market_rate?: number }>("/rates"));
     } catch {
       throw Error("MARA's fee quote is unavailable, so the rate can't be checked against its minimum. Nothing was submitted; try again shortly.");
     }
@@ -342,12 +354,24 @@ export default function TransactionDialog({
     if (!operationsAllowed(await api("/config")))
       throw Error("Transactions are disabled or the server network changed. Reopen the rehearsal after it is enabled.");
   }
+  // Enable manual submission only once the server confirms it stores exactly these bytes.
+  async function confirmRecorded(rawTxHex: string) {
+    const active = generation.current;
+    try {
+      const r = await api<{ rawTxHex?: string }>(`/vaults/${vault.id}/fund/signed`);
+      if (active === generation.current) setManualReady(r.rawTxHex?.toLowerCase() === rawTxHex.toLowerCase());
+    } catch {
+      if (active === generation.current) setManualReady(false);
+    }
+  }
   async function submitDeposit(rawTxHex: string, txid: string, amountSats: string) {
     let result: { vault: PublicVault; submission: "submitted" | "uncertain" | "rejected"; reason?: string };
     try {
       result = await api(`/vaults/${vault.id}/fund/submit`, { rawTxHex, amount: amountSats, costAccepted: true });
     } catch (error) {
       setPendingFunding(readFundingGuard());
+      // The server may or may not have recorded the intent before failing; ask it.
+      void confirmRecorded(rawTxHex);
       const detail = error instanceof Error ? ` ${error.message}` : "";
       throw Error(`The deposit is signed, but its submission to MARA isn't confirmed. Don't deposit again; use "Submit deposit again".${detail}`);
     }
@@ -358,6 +382,7 @@ export default function TransactionDialog({
     }
     if (result.submission === "uncertain") {
       setPendingFunding(readFundingGuard());
+      void confirmRecorded(rawTxHex);
       throw Error(`MARA's response to the deposit ${txid.slice(0, 12)}… was lost. Don't deposit again; use "Submit deposit again", which resends the same transaction.`);
     }
     rememberFunding(undefined);
@@ -947,7 +972,13 @@ export default function TransactionDialog({
                 the deposit once it is visible on the network; withdrawal waits for confirmation.</>}
               </p>
             )}
-            {deposit && pendingFunding?.rawTxHex && (
+            {deposit && pendingFunding?.rawTxHex && !(manualReady && submissionOpen) && (
+              <p className="fee-estimate">
+                Manual submission on MARA Slipstream becomes available once the app has recorded this signed deposit and
+                deposits are switched on. Press "Submit deposit again" first.
+              </p>
+            )}
+            {deposit && pendingFunding?.rawTxHex && manualReady && submissionOpen && (
               <details className="manual-slipstream">
                 <summary>Submit it yourself on MARA Slipstream</summary>
                 <p>
@@ -957,7 +988,7 @@ export default function TransactionDialog({
                   another. Afterwards, press "Submit deposit again" here so the app records it.
                 </p>
                 <textarea readOnly rows={4} aria-label="Signed deposit transaction (hex)" value={pendingFunding.rawTxHex} />
-                <button type="button" className="secondary" onClick={() => void navigator.clipboard?.writeText(pendingFunding.rawTxHex!)}>
+                <button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(pendingFunding.rawTxHex!).then(() => setResult("Copied the signed deposit."), () => setError("Couldn't copy. Select the text and copy it yourself."))}>
                   Copy transaction
                 </button>
               </details>
