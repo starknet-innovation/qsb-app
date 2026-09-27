@@ -72,7 +72,12 @@ export const slipstreamRatesSchema = z.object({
 export class MinerAuthenticationError extends Error {}
 /** A non-2xx miner response. `detail` is the miner's own message, when it sent one. */
 export class MinerHttpError extends Error {
-  constructor(readonly status: number, readonly detail?: string) {
+  constructor(
+    readonly status: number,
+    readonly detail?: string,
+    /** The body's own `status` field, e.g. "error" on a Slipstream refusal. */
+    readonly minerStatus?: string,
+  ) {
     super(`Miner request failed (${status})`);
   }
 }
@@ -109,12 +114,13 @@ export class Slipstream {
         "Miner API authorization is unavailable. Contact the service operator before signing or submitting.",
       );
     if (!response.ok) {
-      let detail: string | undefined;
+      let detail: string | undefined, minerStatus: string | undefined;
       try {
-        const body = (await response.json()) as { message?: unknown };
+        const body = (await response.json()) as { message?: unknown; status?: unknown };
         if (typeof body.message === "string") detail = body.message.slice(0, 300);
+        if (typeof body.status === "string") minerStatus = body.status;
       } catch { /* A body that isn't JSON carries no detail. */ }
-      throw new MinerHttpError(response.status, detail);
+      throw new MinerHttpError(response.status, detail, minerStatus);
     }
     return response.json();
   }
@@ -162,7 +168,7 @@ export class Slipstream {
   }
   /**
    * Submit a signed deposit. Its bare QSB output is non-standard, so public relay refuses it.
-   * A 400 with status "error" is a definite refusal and throws MinerRejection. Any other
+   * Only a 400 whose body says status "error" is a refusal (MinerRejection). Any other
    * failure leaves the outcome unknown.
    */
   async submitFunding(hex: string, permit: unknown) {
@@ -170,7 +176,7 @@ export class Slipstream {
     try {
       return await this.postExact(hex, permit);
     } catch (error) {
-      if (error instanceof MinerHttpError && error.status === 400)
+      if (error instanceof MinerHttpError && error.status === 400 && error.minerStatus === "error")
         throw new MinerRejection(error.detail ?? "The miner refused the transaction.");
       throw error;
     }

@@ -5,6 +5,7 @@ import { hex } from "@scure/base";
 import { MemoryStore } from "../server/store";
 import { ChainError, ChainNotFound, Esplora } from "../server/chain";
 import { submitFunding } from "../server/submit-funding";
+import { createApp } from "../server/app";
 import { SubmitDisabled } from "../server/submit-exact";
 import { MinerHttpError, MinerRejection, Slipstream } from "../server/providers";
 import { issueExactSubmitPermit } from "../server/exact-submit-permit";
@@ -146,6 +147,53 @@ describe("submitFunding", () => {
   });
 });
 
+describe("submitFunding refusals and races", () => {
+  it("keeps a fresh intent when MARA has the transaction despite refusing a POST", async () => {
+    const f = await setup();
+    f.miner.submitFunding.mockRejectedValueOnce(new MinerRejection("txn-already-known"));
+    f.miner.seen.mockResolvedValueOnce(true);
+    expect((await submitFunding(owner, f.vault.id, deposit(), 50_000n, f.deps)).submission).toBe("submitted");
+    expect(((await f.row())!.vault as PublicVault).funding).toBeDefined();
+  });
+
+  it("keeps a fresh intent when MARA can't be asked after a refusal", async () => {
+    const f = await setup();
+    f.miner.submitFunding.mockRejectedValueOnce(new MinerRejection("refused"));
+    f.miner.seen.mockRejectedValueOnce(new Error("status unavailable"));
+    expect((await submitFunding(owner, f.vault.id, deposit(), 50_000n, f.deps)).submission).toBe("uncertain");
+    expect(((await f.row())!.vault as PublicVault).funding).toBeDefined();
+  });
+
+  it("a first request refused as a duplicate can't clear an intent while a retry's POST is in flight", async () => {
+    const f = await setup();
+    const raw = deposit();
+    let release!: () => void;
+    let retryStarted!: () => void;
+    const started = new Promise<void>((r) => (retryStarted = r));
+    let retry: Promise<unknown> | undefined;
+    f.miner.seen.mockResolvedValue(false); // MARA's status lags behind its acceptance
+    f.miner.submitFunding
+      .mockImplementationOnce(async () => {
+        // A resend from another tab starts while this first POST is in flight...
+        retry = submitFunding(owner, f.vault.id, raw, 50_000n, f.deps);
+        await started;
+        // ...and this first POST is then refused as a duplicate.
+        throw new MinerRejection("txn-already-known");
+      })
+      .mockImplementationOnce(async (hexTx: string) => {
+        retryStarted();
+        await new Promise<void>((r) => (release = r));
+        return { status: "success", message: transactionId(hexTx) };
+      });
+    const first = await submitFunding(owner, f.vault.id, raw, 50_000n, f.deps);
+    expect(first.submission).toBe("uncertain");
+    expect(((await f.row())!.vault as PublicVault).funding?.txid).toBe(transactionId(raw));
+    release();
+    expect(await retry).toMatchObject({ submission: "submitted" });
+    expect((await f.row())!.fundingRawTxHex).toBe(raw);
+  });
+});
+
 describe("Slipstream deposit transport", () => {
   const env = { ...process.env };
   beforeEach(() => {
@@ -172,6 +220,14 @@ describe("Slipstream deposit transport", () => {
     const raw = deposit();
     respond(400, { status: "error", message: "min relay fee not met" });
     await expect(miner().submitFunding(raw, issueExactSubmitPermit(raw))).rejects.toThrow(new MinerRejection("min relay fee not met"));
+  });
+
+  it("doesn't treat a 400 without status \"error\" as a refusal", async () => {
+    const raw = deposit();
+    respond(400, { is_success: false, message: "unexpected" });
+    const error = await miner().submitFunding(raw, issueExactSubmitPermit(raw)).catch((e) => e);
+    expect(error).toBeInstanceOf(MinerHttpError);
+    expect(error).not.toBeInstanceOf(MinerRejection);
   });
 
   it("leaves other failures unknown", async () => {
@@ -213,4 +269,78 @@ describe("chain lookup errors", () => {
       expect(error).toBeInstanceOf(ChainError);
       expect(error).not.toBeInstanceOf(ChainNotFound);
     });
+});
+
+describe("deposit routes", () => {
+  // A seeded session stands in for sign-in, so no wallet signature is needed.
+  const token = "A".repeat(43);
+  async function app(chainStatus?: () => Promise<unknown>, chainRaw?: () => Promise<unknown>) {
+    const f = await setup();
+    await f.store.put({
+      pk: `SESSION#${createHash("sha256").update(token).digest("hex")}`,
+      sk: "AUTH",
+      version: 0,
+      owner,
+      network: "mainnet",
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    });
+    const chain = new Esplora("https://chain.test", async () => new Response("", { status: 500 }));
+    if (chainStatus) vi.spyOn(chain, "status").mockImplementation(chainStatus as never);
+    if (chainRaw) vi.spyOn(chain, "raw").mockImplementation(chainRaw as never);
+    const miner = new Slipstream("https://slipstream.mara.com", async () => undefined);
+    const submit = vi.spyOn(miner, "submitFunding").mockImplementation(async (raw: string) => ({ status: "success" as const, message: transactionId(raw) }));
+    const seen = vi.spyOn(miner, "seen").mockResolvedValue(false);
+    const server = createApp(f.store, { chain, miner, enabled: true, exactSubmit: true });
+    const call = (path: string, body?: unknown) =>
+      server.request(new Request("http://localhost/api" + path, {
+        method: body === undefined ? "GET" : "POST",
+        headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }));
+    return { ...f, call, submit, seen };
+  }
+
+  it("submits a signed deposit through POST /fund/submit", async () => {
+    const f = await app();
+    const raw = deposit();
+    const response = await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ submission: "submitted", vault: { status: "submitted" } });
+    expect(f.submit).toHaveBeenCalledWith(raw, expect.anything());
+  });
+
+  it("resends the stored bytes through POST /fund/resubmit, and refuses without them", async () => {
+    const f = await app();
+    expect((await f.call(`/vaults/${f.vault.id}/fund/resubmit`, {})).status).toBe(409);
+    const raw = deposit();
+    f.submit.mockRejectedValueOnce(new Error("timeout"));
+    await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
+    const response = await f.call(`/vaults/${f.vault.id}/fund/resubmit`, {});
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ submission: "submitted" });
+    expect(f.submit).toHaveBeenLastCalledWith(raw, expect.anything());
+  });
+
+  it("GET /funding falls back to the stored bytes only on a 404, without changing status", async () => {
+    const notFound = () => Promise.reject(new ChainNotFound("Chain lookup failed (404). Retry before signing."));
+    const f = await app(notFound, notFound);
+    const raw = deposit();
+    await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
+    const current = (await f.row())!;
+    await f.store.put({ ...current, version: current.version + 1, vault: { ...(current.vault as PublicVault), status: "confirmed" } }, current.version);
+    const response = await f.call(`/vaults/${f.vault.id}/funding`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: { confirmed: false }, previousTxHex: raw, submission: "submitted", vault: { status: "confirmed" } });
+    expect(((await f.row())!.vault as PublicVault).status).toBe("confirmed");
+  });
+
+  it("GET /funding propagates a provider failure and leaves the status alone", async () => {
+    const failing = () => Promise.reject(new ChainError("Chain lookup failed (500). Retry before signing."));
+    const f = await app(failing, failing);
+    await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: deposit(), amount: "50000", costAccepted: true });
+    const current = (await f.row())!;
+    await f.store.put({ ...current, version: current.version + 1, vault: { ...(current.vault as PublicVault), status: "confirmed" } }, current.version);
+    expect((await f.call(`/vaults/${f.vault.id}/funding`)).status).toBe(409);
+    expect(((await f.row())!.vault as PublicVault).status).toBe("confirmed");
+  });
 });

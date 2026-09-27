@@ -34,9 +34,11 @@ const opts = { allowUnknownOutputs: true, allowUnknownInputs: true };
  *   never lost and a second, different deposit is refused.
  * - Re-submitting the same bytes is safe: they can only confirm once. A retry first asks the
  *   miner whether it already has the transaction.
- * - A definite refusal of a fresh intent (HTTP 400, status "error") means nothing was accepted,
- *   so the intent is cleared. A refusal on a retry keeps the intent, because the first POST's
- *   outcome was unknown.
+ * - A definite refusal of a fresh intent (HTTP 400, status "error") clears the intent only if
+ *   MARA then says it doesn't have the transaction: a concurrent retry may have been accepted
+ *   first, and the refusal may just be for the duplicate. A refusal on a retry keeps the intent.
+ * - A retry bumps the row's version before its POST, so a racing first request can't clear an
+ *   intent that the retry may have just submitted.
  */
 export async function submitFunding(
   owner: string,
@@ -74,9 +76,9 @@ export async function submitFunding(
         "Vault already has a different funding intent. Reconcile it before depositing again.",
       );
     if (vault.status !== "submitted") return { vault, submission: "submitted" };
-    current = row;
     fresh = false;
-    if (await miner.seen(txid)) return record(store, current, "submitted");
+    if (await miner.seen(txid)) return record(store, row, "submitted");
+    current = await touch(store, row);
   } else {
     if (vault.status !== "unfunded")
       throw new ChainError("Vault already has a funding intent. Reconcile that transaction first.");
@@ -109,11 +111,38 @@ export async function submitFunding(
   try {
     await miner.submitFunding(raw, issueExactSubmitPermit(raw));
   } catch (error) {
-    if (error instanceof MinerRejection && fresh) return clear(store, current, error.message);
+    if (error instanceof MinerRejection && fresh) {
+      // The refusal may be for a duplicate of a concurrent retry that MARA accepted.
+      let known: boolean;
+      try {
+        known = await miner.seen(txid);
+      } catch {
+        return record(store, current, "uncertain");
+      }
+      if (known) return record(store, current, "submitted");
+      return clear(store, current, error.message);
+    }
     // Timeouts, 5xx, malformed responses, or a refusal of a retry: the outcome stays unknown.
     return record(store, current, "uncertain");
   }
   return record(store, current, "submitted");
+}
+
+/** Bump the row's version before a retry POST, so an older request's clear() can't win. */
+async function touch(store: Store, row: Row): Promise<Row> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const latest = (await store.get(row.pk, row.sk)) ?? row;
+    if ((latest.vault as PublicVault).funding?.txid !== (row.vault as PublicVault).funding?.txid)
+      throw new ChainError("Funding intent changed during submission. Refresh the vault.");
+    const next = { ...latest, version: latest.version + 1, fundingResubmittedAt: new Date().toISOString() };
+    try {
+      await store.put(next, latest.version);
+      return next;
+    } catch (error) {
+      if (!(error instanceof Conflict)) throw error;
+    }
+  }
+  throw new ChainError("The vault kept changing during a resubmission. Try again.");
 }
 
 async function record(store: Store, row: Row, outcome: "submitted" | "uncertain") {
