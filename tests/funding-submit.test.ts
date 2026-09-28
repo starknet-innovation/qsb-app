@@ -349,6 +349,10 @@ describe("Slipstream deposit transport", () => {
     const credential = await miner.credential();
     respond(400, { is_success: false, message: "Transaction not found" });
     expect(await miner.seen("00".repeat(32), credential)).toBe(false);
+    // The same for a short Authorization value, which reads do send.
+    const header = new Slipstream("https://slipstream.mara.com", async () => ({ authorization: "n" }));
+    respond(400, { is_success: false, message: "Transaction not found" });
+    expect(await header.seen("00".repeat(32), await header.credential())).toBe(false);
     // A value inside another leaves no fragment of the longer one.
     const nested = new Slipstream("https://slipstream.mara.com", async () => ({
       authorization: "PLACEHOLDER-CODE-LONGER",

@@ -91,6 +91,8 @@ export const slipstreamRatesSchema = z.object({
   effective_rate: feeRate,
 });
 export class MinerAuthenticationError extends Error {}
+/** The shortest credential value redacted from miner error text. */
+const REDACT_MIN = 8;
 const issuing = Symbol("MinerCredential");
 const credentialValues = new WeakMap<MinerCredential, { origin: string } & MinerSecret>();
 /**
@@ -158,9 +160,10 @@ export class Slipstream {
   private async request(path: string, init?: RequestInit, credential?: MinerCredential, clientCodeSent = false) {
     const { authorization, clientCode } = secretFor(credential ?? (await this.credential()), this.base);
     // Redact only what this request sent, longest first, so a value can't leave fragments of
-    // another or rewrite an unrelated message (e.g. "Transaction not found") on a read.
+    // another. Values shorter than REDACT_MIN are left alone: substring redaction of a few
+    // characters would rewrite unrelated text such as "Transaction not found", which seen() reads.
     const sent = [authorization, clientCodeSent ? clientCode : undefined]
-      .filter((value): value is string => Boolean(value))
+      .filter((value): value is string => typeof value === "string" && value.length >= REDACT_MIN)
       .sort((a, b) => b.length - a.length);
     const headers = new Headers(init?.headers);
     if (authorization) headers.set("Authorization", authorization);
