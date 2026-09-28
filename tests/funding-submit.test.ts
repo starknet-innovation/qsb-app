@@ -344,8 +344,9 @@ describe("deposit routes", () => {
     return { ...f, call, submit, seen };
   }
 
-  it("protects manually exported bytes from an in-flight fresh rejection", async () => {
-    const f = await app();
+  it.each(["fund/signed", "funding"])("protects bytes exported by %s from an in-flight fresh rejection", async (endpoint) => {
+    const missing = () => Promise.reject(new ChainNotFound("Transaction not found"));
+    const f = await app(missing, missing);
     const raw = deposit();
     let release!: () => void;
     let started!: () => void;
@@ -357,9 +358,9 @@ describe("deposit routes", () => {
     });
     const first = f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
     await ready;
-    const exported = await f.call(`/vaults/${f.vault.id}/fund/signed`);
+    const exported = await f.call(`/vaults/${f.vault.id}/${endpoint}`);
     expect(exported.status).toBe(200);
-    expect(await exported.json()).toMatchObject({ rawTxHex: raw });
+    expect(await exported.json()).toMatchObject(endpoint === "funding" ? { previousTxHex: raw } : { rawTxHex: raw });
     release();
     expect(await (await first).json()).toMatchObject({ submission: "uncertain" });
     expect((await f.row())!.fundingRawTxHex).toBe(raw);
@@ -372,8 +373,9 @@ describe("deposit routes", () => {
     expect((await f.row())!.fundingRawTxHex).toBe(raw);
   });
 
-  it("does not export stale bytes if rejection cleanup wins the write race", async () => {
-    const f = await app();
+  it.each(["fund/signed", "funding"])("does not export stale bytes from %s if cleanup wins the write race", async (endpoint) => {
+    const missing = () => Promise.reject(new ChainNotFound("Transaction not found"));
+    const f = await app(missing, missing);
     const raw = deposit();
     let release!: () => void;
     let started!: () => void;
@@ -393,10 +395,29 @@ describe("deposit routes", () => {
       }
       return put(row, expected);
     });
-    const exported = await f.call(`/vaults/${f.vault.id}/fund/signed`);
+    const exported = await f.call(`/vaults/${f.vault.id}/${endpoint}`);
     expect(exported.status).toBe(409);
     expect(await exported.text()).not.toContain(raw);
     expect((await f.row())!.fundingRawTxHex).toBeUndefined();
+  });
+
+  it("rejects a fallback if the funding intent changed during the chain lookup", async () => {
+    const missing = () => Promise.reject(new ChainNotFound("Transaction not found"));
+    const replacement = deposit(50_000n, scriptHex, 3);
+    const f = await app(missing, async () => {
+      const row = (await f.row())!;
+      const vault = row.vault as PublicVault;
+      await f.store.put({ ...row, version: row.version + 1,
+        fundingRawTxHex: replacement,
+        vault: { ...vault, funding: { ...vault.funding!, txid: transactionId(replacement) } },
+      }, row.version);
+      throw new ChainNotFound("Transaction not found");
+    });
+    await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: deposit(), amount: "50000", costAccepted: true });
+    const response = await f.call(`/vaults/${f.vault.id}/funding`);
+    expect(response.status).toBe(409);
+    expect(await response.text()).not.toContain(replacement);
+    expect((await f.row())!.fundingExportedAt).toBeUndefined();
   });
 
   it("submits a signed deposit through POST /fund/submit", async () => {

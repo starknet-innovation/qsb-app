@@ -568,9 +568,11 @@ export function createApp(
       ...(await ledger
         .raw(vault.funding.txid)
         .then((x) => ({ previousTxHex: x.raw }))
-        .catch((error) => {
-          if (unseen(error)) return { previousTxHex: stored! };
-          throw error;
+        .catch(async (error) => {
+          if (!unseen(error)) throw error;
+          const exported = await exportFunding(store, c.get("owner"), vault.id, stored);
+          if (!exported) throw new ChainError("Funding intent changed during export. Refresh the vault.");
+          return { previousTxHex: exported.fundingRawTxHex as string };
         })),
     });
   });
