@@ -69,8 +69,9 @@ The direct miner transport follows the official
 [MARA OpenAPI](https://slipstream.mara.com/docs/openapi.json), read 25 September 2026.
 Runtime authorization, if configured, remains confined to the exact MARA origin;
 no operator credentials were retrieved in implementation or testing. The optional
-credential is the administrator-created `qsb/slipstream` secret, readable by the
-API role only; see "MARA Slipstream credential" in `terraform/README.md`.
+credential is the administrator-created `qsb/slipstream` secret. At runtime only
+API roles can read it, but anyone who can deploy runtime code can too; see
+"MARA Slipstream credential" in `terraform/README.md`.
 
 ## Operator recovery without another POST
 

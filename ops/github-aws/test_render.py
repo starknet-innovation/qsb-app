@@ -35,7 +35,8 @@ class SinglePipelinePolicies(unittest.TestCase):
         # The only secret any runtime role may ever read is the API's MARA Slipstream credential.
         secret = [s for s in self.policies['boundary']['Statement'] if any(a.startswith('secretsmanager:') for a in s['Action'])]
         self.assertEqual(secret, [{'Sid': 'MinerCredential', 'Effect': 'Allow', 'Action': ['secretsmanager:GetSecretValue'],
-                                   'Resource': ['arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/slipstream-??????']}])
+                                   'Resource': ['arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/slipstream-??????'],
+                                   'Condition': {'ArnLike': {'aws:PrincipalArn': 'arn:aws:iam::123456789012:role/qsb/runtime/qsb-*-api'}}}])
         self.assertFalse(any(a in ('*', 'kms:*', 'kms:Decrypt') for s in self.policies['boundary']['Statement'] for a in s['Action']))
 
     def test_role_deletion_lookup_is_scoped_without_instance_profile_management(self):

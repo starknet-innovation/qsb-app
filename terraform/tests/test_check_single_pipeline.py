@@ -208,12 +208,97 @@ class DeployChecks(unittest.TestCase):
         next(r for r in doc['planned_values']['root_module']['resources'] if r['name'] == 'coordinator')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = MINER
         self.refused(doc, 'Only the API may receive the miner credential')
 
+    def test_the_miner_credential_policy_must_really_grant_the_secret(self):
+        for statement in ({'Effect': 'Allow', 'Action': 's3:GetObject', 'Resource': '*'}, None):
+            doc = self.with_miner_credential()
+            policy = next(r for r in doc['planned_values']['root_module']['resources'] if r['name'] == 'miner_credential')
+            policy['values']['policy'] = json.dumps({'Statement': [statement] if statement else []})
+            with self.subTest(statement=statement):
+                self.refused(doc, 'exactly one Secrets Manager read')
+        doc = self.with_miner_credential()
+        next(r for r in doc['planned_values']['root_module']['resources'] if r['name'] == 'miner_credential')['values'].pop('policy')
+        self.refused(doc, 'must be known at plan')
+
+    def test_the_miner_credential_policy_must_belong_to_the_api_role(self):
+        doc = self.with_miner_credential()
+        rows = doc['planned_values']['root_module']['resources']
+        lambdas = [r for r in rows if r['type'] == 'aws_iam_role' and r['name'] == 'lambda']
+        for r, index in zip(lambdas, ('api', 'coordinator')):
+            r['index'], r['values']['name'] = index, f'qsb-app-{index}'
+        policy = next(r for r in rows if r['name'] == 'miner_credential')
+        policy['values']['role'] = 'qsb-app-api'
+        self.assertEqual(self.run_check(doc, '--deploy')[0], 0)
+        policy['values']['role'] = 'qsb-app-coordinator'
+        self.refused(doc, 'must belong to the API role')
+
+    def test_not_action_and_pattern_wildcards_are_refused(self):
+        self.refused(self.with_miner_credential(grant={'Effect': 'Allow', 'NotAction': 's3:*', 'Resource': '*'},
+                                                policy_name='start'), 'NotAction is not allowed')
+        for action in ('s*:*', 'secretsmanager:Get*', 'SecretsManager:GetSecretValue', 'secretsmanager:BatchGet*'):
+            with self.subTest(action=action):
+                self.refused(self.with_miner_credential(grant={'Effect': 'Allow', 'Action': action, 'Resource': '*'},
+                                                        policy_name='logs'), 'Only the miner_credential policy')
+
     def test_flags_need_a_saved_plan(self):
         events = [{'type': 'test_run', '@testrun': 'baseline'}, {'type': 'test_summary', 'test_summary': {'status': 'pass'}}]
         code, err = self.run_check(events, '--deploy', jsonl=True)
         self.assertEqual(code, 1)
         self.assertIn('need a saved plan', err)
         self.refused(plan(), 'Usage', '--first-apply')
+
+
+class SourceRules(unittest.TestCase):
+    """static_secret_rules on a copy of the Terraform source: they hold even where plan values are unknown."""
+    def check(self, edit):
+        source = SCRIPT.parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'terraform'
+            (root / 'tests').mkdir(parents=True)
+            (root / 'policies').mkdir()
+            for path in [*source.glob('*.tf'), *(source / 'policies').glob('*.json')]:
+                (root / path.relative_to(source)).write_text(path.read_text())
+            (root / 'tests' / SCRIPT.name).write_text(SCRIPT.read_text())
+            if edit:
+                name, old, new = edit
+                text = (root / name).read_text()
+                self.assertIn(old, text)
+                (root / name).write_text(text.replace(old, new, 1))
+            result = subprocess.run([sys.executable, str(root / 'tests' / SCRIPT.name)], capture_output=True, text=True)
+            return result.returncode, result.stderr
+
+    def refused(self, edit, message):
+        code, err = self.check(edit)
+        self.assertEqual(code, 1, err)
+        self.assertIn(message, err)
+
+    def test_the_current_source_passes(self):
+        self.assertEqual(self.check(None), (0, ''))
+
+    def test_secret_access_outside_the_miner_policy_is_refused(self):
+        logs = 'Action = ["logs:CreateLogStream", "logs:PutLogEvents"]'
+        self.refused(('compute.tf', logs, 'Action = ["logs:CreateLogStream", "secretsmanager:GetSecretValue"]'),
+                     'only aws_iam_role_policy.miner_credential may mention Secrets Manager')
+        self.refused(('compute.tf', logs, 'Action = ["logs:CreateLogStream", "s*:*"]'), 'would grant Secrets Manager access')
+        self.refused(('compute.tf', logs, 'Action = ["logs:CreateLogStream", "*"]'), 'wildcard IAM action')
+        self.refused(('compute.tf', logs, 'Action = "*"'), 'wildcard IAM action')
+        self.refused(('compute.tf', logs, 'NotAction = ["s3:*"]'), 'NotAction is not allowed')
+        self.refused(('policies/app-records.json', '"dynamodb:GetItem"', '"secretsmanager:GetSecretValue"'),
+                     'Secrets Manager access is not allowed')
+        self.refused(('policies/app-records.json', '"dynamodb:GetItem"', '"*"'), 'Secrets Manager access is not allowed')
+
+    def test_the_miner_policy_stays_on_the_api_role_and_secret(self):
+        self.refused(('compute.tf', 'role   = aws_iam_role.lambda["api"].id\n  policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "secretsmanager',
+                      'role   = aws_iam_role.lambda["coordinator"].id\n  policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "secretsmanager'),
+                     'one statement on the API role')
+        self.refused(('compute.tf', 'Resource = var.slipstream_secret_arn', 'Resource = "*"'), 'one statement on the API role')
+
+    def test_only_the_api_receives_the_secret_reference(self):
+        self.refused(('compute.tf', 'REFERENCE_FUNCTION = aws_lambda_function.reference.function_name',
+                      'REFERENCE_FUNCTION = aws_lambda_function.reference.function_name, SLIPSTREAM_SECRET_ARN = var.slipstream_secret_arn'),
+                     'only the API Lambda may receive SLIPSTREAM_SECRET_ARN')
+        self.refused(('compute.tf', 'REFERENCE_FUNCTION = aws_lambda_function.reference.function_name',
+                      'REFERENCE_FUNCTION = aws_lambda_function.reference.function_name, X = var.slipstream_secret_arn'),
+                     'may feed only the API')
 
 
 if __name__ == '__main__':

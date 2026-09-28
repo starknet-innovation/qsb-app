@@ -185,12 +185,18 @@ actions; this stack does not change its policy.
 
 By default the API calls MARA Slipstream without credentials. To send a MARA API key, in this order:
 
-1. **Boundary.** An administrator brings `qsb-runtime-boundary` in line with `main` using `ops/github-aws/update_installed.py` (plan, then `--apply`). Its `MinerCredential` statement allows `secretsmanager:GetSecretValue` on `qsb/slipstream` only. Until then the API can't read the secret, whatever its own grant says.
-2. **Secret.** The key holder creates the secret `qsb/slipstream` in this stack's account and region, encrypted with the default `aws/secretsmanager` key (runtime roles have no KMS grants). Its value is exactly `{"authorization": "<the Authorization header value MARA specifies>"}`, printable ASCII, with no other fields. The deploy role and `qsb-operator` can't create or read secrets. Enter the value only in the AWS console or your own terminal: never in an issue, PR, chat, tfvars file or AI tool.
-3. **Wire it.** Set `slipstream_secret_arn` to the secret's full ARN in the private tfvars, then plan and apply as `qsb-operator` while no deposit or withdrawal is in flight. The plan adds `aws_iam_role_policy.miner_credential` and the API's `SLIPSTREAM_SECRET_ARN`, and nothing else. `check-single-pipeline.py --deploy` refuses any other secret grant, and the variable refuses any other secret, account or region.
-4. **Check.** `GET /api/rates` through the app should still return MARA's rates.
+1. **Boundary.** An administrator brings `qsb-runtime-boundary` in line with `main` using `ops/github-aws/update_installed.py` (plan, then `--apply`). Its `MinerCredential` statement allows `secretsmanager:GetSecretValue` on `qsb/slipstream` only, and only to runtime roles named `qsb-*-api`. Until then the API can't read the secret, whatever its own grant says.
+2. **Secret.** Neither scoped role can call Secrets Manager, so the key holder creates the secret as the administrator (today the account root). Create `qsb/slipstream` in this stack's account and region, encrypted with the default `aws/secretsmanager` key (runtime roles have no KMS grants). Its value is exactly `{"authorization": "<the Authorization header value MARA specifies>"}`, printable ASCII, with no other fields. Enter the value only in the AWS console or your own terminal: never in an issue, PR, chat, tfvars file or AI tool.
+3. **Wire it.** Set `slipstream_secret_arn` to the secret's full ARN in the private tfvars, then plan and apply as `qsb-operator` while no deposit or withdrawal is in flight. The plan adds `aws_iam_role_policy.miner_credential` and the API's `SLIPSTREAM_SECRET_ARN`, and nothing else. The variable refuses any other secret, account or region. `check-single-pipeline.py` refuses any other Secrets Manager grant, `NotAction` or wildcard action in the source, and checks the planned grant against the API's reference.
+4. **Check.** Straight after the apply, `GET /api/rates` through the app should still return MARA's rates. If it doesn't, back out (below).
 
-Once configured, every Slipstream request (rates, status, deposits and withdrawals) carries the header, and only to `https://slipstream.mara.com`. The API reads the secret on each request, so rotating the value needs no deploy. If the secret is unreadable or malformed, or MARA answers 401/403, those requests stop with "Miner API credential is unavailable" before anything is sent. To back out, set `slipstream_secret_arn = ""` and apply; the secret itself is left alone.
+**Who can read the key.** Only API roles can read it at runtime. But anyone who can deploy runtime code can read it through such a role: `qsb-operator`, a workflow trusted by `qsb-github-deploy`, and the administrator. Share the key on that basis.
+
+**Behaviour once configured.** Every Slipstream request (rates, status, deposits and withdrawals) carries the header, and only to `https://slipstream.mara.com`. The API reads the secret on each request, so rotating the value needs no deploy.
+- If the secret can't be read or is malformed, requests stop with "Miner API credential is unavailable" before anything is sent.
+- If MARA answers 401 or 403, the request has already been sent, and it fails with "Miner API authorization is unavailable". Treat a deposit or withdrawal submission that fails this way as uncertain, not unsent: reconcile it, and never sign or submit a different transaction in its place.
+
+To back out, set `slipstream_secret_arn = ""` and apply; the secret itself is left alone.
 
 ### Served solver release
 

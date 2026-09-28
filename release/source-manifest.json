@@ -54,7 +54,7 @@
       "api": "429e66708597315edcfcda212ab604f55afba00b17df6c48de1627894d05191f",
       "build-metadata": "2c4804c98f40b16adda8fde8e13f053d59cc53e26f951906064834edd469b1c6",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
-      "dispatcher": "9dadce500f9562045eeb66d02fd87f27c96e7b6369ee6a4273c0df496f8dd951",
+      "dispatcher": "8c276496b523e301ce420596c7c9c6c414445adedce6f4927cb7fc8ec6ceb25b",
       "evidence-reader": "768e7c8098ff9d9b473f5c7a0a77ff272d679b1e9cab801dfd0145832ce88c58",
       "fresh-proof": "7c322f9603a117ad2ad0dd88dc102ec63e57d04082643f24530e9bd9aef115af",
       "runtime": "abf6187a18afa8eda9db85cca21a4149696c27315e65ee3fc25c35901837d60c"
@@ -143,7 +143,7 @@
       "server/runtime/package-release.ts": "15ba5c94177863d468fc2fac39952a60392011a62928b7e7ae829be4a1881a8a",
       "server/runtime/reservation-guard.ts": "dcb80cd1cdbbfdc5f8807c06eb1ac5216fee28313c5f480f83bf7a92b5bdbad3",
       "server/runtime/solver-review.ts": "a2e943ac55a45e859eac6afc6aff68fa9ddb8f9b5cdb3acbeeeeac98a516daf1",
-      "server/runtime/storage-authority.ts": "c5b013924e4f756e8edb1cbfc0cf4dd91a74df562c5cce7be084ad51e9c1f35a",
+      "server/runtime/storage-authority.ts": "e77464ecbf0a6f9b009bc480c5e567068b0aa5192f56119393428bf425a47033",
       "server/runtime/supervised-routes.ts": "5918f7602158231a692ff7b6ee3d2815f0419be1c919b252eb8d7f19346c72e6",
       "server/runtime/types.ts": "347535de367f83f740cad527f939ab98d60922a68aaa54bd5d79ff8528f49121",
       "server/search-ranges.ts": "fdaacdbe01d95bd1f340db8d99e905e24960cccfa05aa344bbbaa4f5edcea272",

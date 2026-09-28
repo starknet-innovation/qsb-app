@@ -10,6 +10,7 @@ administrator-owned qsb-runtime-boundary, the stack name must be qsb-* (not qsb-
 the reconcile role must trust only the qsb-operator role, so the scoped roles can manage the
 stack afterwards. Add --first-apply as well for an account's first apply: create-only.
 """
+import fnmatch
 import json
 from pathlib import Path
 import re
@@ -56,22 +57,88 @@ API_ENV_REFERENCES = {
 MOCK_RUNS = {'baseline', 'configured_single_pipeline', 'miner_credential_api_only'}
 # The one secret any application role may read: the API's MARA Slipstream credential.
 MINER_SECRET = re.compile(r'^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:qsb/slipstream-[A-Za-z0-9]{6}$')
+MINER_POLICY = ('aws_iam_role_policy', 'miner_credential')
+MINER_GRANT = {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue'}
+
+
+def reads_secrets(action):
+    """Whether an IAM action pattern covers reading a Secrets Manager secret."""
+    pattern = str(action).lower()
+    return any(fnmatch.fnmatchcase(a, pattern) for a in ('secretsmanager:getsecretvalue',
+                                                          'secretsmanager:batchgetsecretvalue'))
+
+
+def as_list(value):
+    return [value] if isinstance(value, str) else list(value or [])
+
+
+def resource_blocks(text):
+    """(type, name, start, end) of each top-level resource or variable block, by brace matching."""
+    for match in re.finditer(r'^(?:resource\s+"([^"]+)"|(variable))\s+"([^"]+)"\s*\{', text, re.M):
+        depth, end = 1, match.end()
+        while depth and end < len(text):
+            depth += {'{': 1, '}': -1}.get(text[end], 0)
+            end += 1
+        yield match.group(1) or match.group(2), match.group(3), match.start(), end
+
+
+def static_secret_rules(root):
+    """Source rules for secrets. Unlike plan values, source is never unknown, so these hold on every plan."""
+    for path in sorted(root.glob('*.tf')):
+        text = path.read_text()
+        blocks = {(kind, name): (start, end) for kind, name, start, end in resource_blocks(text)}
+        inside = lambda key, pos: key in blocks and blocks[key][0] <= pos < blocks[key][1]
+        require('NotAction' not in text, f'{path.name}: NotAction is not allowed in application policies')
+        for match in re.finditer(r'secretsmanager', text, re.I):
+            require(inside(MINER_POLICY, match.start()) or inside(('variable', 'slipstream_secret_arn'), match.start()),
+                    f'{path.name}: only aws_iam_role_policy.miner_credential may mention Secrets Manager')
+        for match in re.finditer(r'SLIPSTREAM_SECRET_ARN', text):
+            require(inside(('aws_lambda_function', 'api'), match.start()),
+                    f'{path.name}: only the API Lambda may receive SLIPSTREAM_SECRET_ARN')
+        if path.name != 'variables.tf':
+            for match in re.finditer(r'var\.slipstream_secret_arn', text):
+                require(inside(MINER_POLICY, match.start()) or inside(('aws_lambda_function', 'api'), match.start()),
+                        f'{path.name}: var.slipstream_secret_arn may feed only the API and its miner credential policy')
+        for match in re.finditer(r'"([A-Za-z0-9*?-]+:[A-Za-z0-9*?]+|\*)"', text):
+            action = match.group(1)
+            if action == '*':
+                # Refuse "*" anywhere in an Action value: `Action = "*"` or inside `Action = [...]`.
+                before = text[:match.start()]
+                segment = before[before.rfind('Action'):] if 'Action' in before else ''
+                require(not re.fullmatch(r'Action\s*=\s*(?:\[[^\]]*)?', segment), f'{path.name}: wildcard IAM action')
+            elif reads_secrets(action):
+                require(inside(MINER_POLICY, match.start()) and action == MINER_GRANT['Action'],
+                        f'{path.name}: {action} would grant Secrets Manager access outside the miner credential policy')
+        if MINER_POLICY in blocks:
+            start, end = blocks[MINER_POLICY]
+            body = text[start:end]
+            require(re.search(r'\brole\s*=\s*aws_iam_role\.lambda\["api"\]\.id\b', body)
+                    and re.search(r'Resource\s*=\s*var\.slipstream_secret_arn\b', body)
+                    and len(re.findall(r'\bEffect\s*=', body)) == 1,
+                    'aws_iam_role_policy.miner_credential must be one statement on the API role for '
+                    'var.slipstream_secret_arn')
+    for path in sorted((root / 'policies').glob('*.json')):
+        for statement in json.loads(path.read_text()):
+            require('NotAction' not in statement, f'policies/{path.name}: NotAction is not allowed')
+            require(not any(reads_secrets(a) for a in as_list(statement.get('Action'))),
+                    f'policies/{path.name}: Secrets Manager access is not allowed')
 
 
 def secret_grants(rows):
-    """(policy name, statement) for every planned role-policy statement that mentions Secrets Manager."""
+    """(policy row, statement) for every known planned role-policy statement that could read a secret."""
     grants = []
     for row in rows:
         if row['type'] != 'aws_iam_role_policy':
             continue
         document = row.get('values', {}).get('policy')
         if not isinstance(document, str):
+            # Unknown at plan (it names a resource created in this apply): static_secret_rules covers its source.
+            require(row['name'] != 'miner_credential', 'the miner credential policy must be known at plan')
             continue
-        for statement in json.loads(document).get('Statement', []):
-            actions = statement.get('Action', [])
-            actions = [actions] if isinstance(actions, str) else actions
-            if any(str(a).lower().startswith('secretsmanager:') or a == '*' for a in actions):
-                grants.append((row['name'], statement))
+        for statement in as_list(json.loads(document).get('Statement')):
+            require('NotAction' not in statement, f'aws_iam_role_policy.{row["name"]}: NotAction is not allowed')
+            if any(reads_secrets(a) for a in as_list(statement.get('Action'))):
+                grants.append((row, statement))
     return grants
 
 
@@ -126,15 +193,24 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
         for name in ('coordinator', 'reference'):
             require('SLIPSTREAM_SECRET_ARN' not in envs[name], 'Only the API may receive the miner credential reference')
         miner = [r for r in rows if r['type'] == 'aws_iam_role_policy' and r['name'] == 'miner_credential']
-        grants = secret_grants(rows)
-        require(all(name == 'miner_credential' for name, _ in grants),
-                'Only the miner_credential policy may grant Secrets Manager access')
         require(len(miner) <= 1, 'At most one miner credential policy')
-        for name, statement in grants:
-            require(statement.get('Effect') == 'Allow' and statement.get('Action') == 'secretsmanager:GetSecretValue'
+        grants = secret_grants(rows)
+        require(all(row['name'] == 'miner_credential' for row, _ in grants),
+                'Only the miner_credential policy may grant Secrets Manager access')
+        for row, statement in grants:
+            require({k: statement.get(k) for k in MINER_GRANT} == MINER_GRANT
                     and isinstance(statement.get('Resource'), str) and MINER_SECRET.match(statement['Resource'])
-                    and not statement.get('Condition'),
+                    and set(statement) <= {'Sid', 'Effect', 'Action', 'Resource'},
                     'The miner credential grant must be GetSecretValue on the qsb/slipstream secret only')
+        if miner:
+            statements = as_list(json.loads(miner[0]['values']['policy']).get('Statement'))
+            require(len(statements) == 1 and len(grants) == 1,
+                    'The miner credential policy must be exactly one Secrets Manager read')
+            api_role = next((r.get('values', {}).get('name') for r in rows
+                             if r['type'] == 'aws_iam_role' and r['name'] == 'lambda' and r.get('index') == 'api'), None)
+            owner = miner[0].get('values', {}).get('role')
+            require(not (isinstance(owner, str) and isinstance(api_role, str)) or owner == api_role,
+                    'The miner credential policy must belong to the API role')
         if 'api' not in whole:
             arn = envs['api'].get('SLIPSTREAM_SECRET_ARN')
             require(bool(miner) == ('SLIPSTREAM_SECRET_ARN' in envs['api']),
@@ -207,8 +283,9 @@ def module_resources(module):
 
 
 def main():
+    root = Path(__file__).resolve().parents[1]
+    static_secret_rules(root)
     if len(sys.argv) == 1:
-        root = Path(__file__).resolve().parents[1]
         rows = [{'type': kind, 'name': name}
                 for file in root.glob('*.tf')
                 for kind, name in re.findall(r'^resource\s+"([^"]+)"\s+"([^"]+)"', file.read_text(), re.M)]
