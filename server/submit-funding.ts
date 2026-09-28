@@ -31,15 +31,24 @@ const opts = { allowUnknownOutputs: true, allowUnknownInputs: true };
  * Same-byte retries never clear an intent, so this fence also protects later retries.
  */
 export async function exportFunding(store: Store, owner: string, vaultId: string, expectedRaw?: string): Promise<Row | undefined> {
-  const row = await store.get(`OWNER#${owner}`, `VAULT#${vaultId}`);
-  const vault = row?.vault as PublicVault | undefined;
-  if (!row || !vault?.funding || typeof row.fundingRawTxHex !== "string" || !row.fundingRawTxHex)
-    return undefined;
-  if (expectedRaw !== undefined && row.fundingRawTxHex !== expectedRaw)
-    throw new ChainError("Funding intent changed during export. Refresh the vault.");
-  const next = { ...row, version: row.version + 1, fundingExportedAt: new Date().toISOString() };
-  await store.put(next, row.version);
-  return next;
+  let boundRaw = expectedRaw;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const row = await store.get(`OWNER#${owner}`, `VAULT#${vaultId}`);
+    const vault = row?.vault as PublicVault | undefined;
+    if (!row || !vault?.funding || typeof row.fundingRawTxHex !== "string" || !row.fundingRawTxHex)
+      return undefined;
+    if (boundRaw !== undefined && row.fundingRawTxHex !== boundRaw)
+      throw new ChainError("Funding intent changed during export. Refresh the vault.");
+    boundRaw = row.fundingRawTxHex;
+    const next = { ...row, version: row.version + 1, fundingExportedAt: new Date().toISOString() };
+    try {
+      await store.put(next, row.version);
+      return next;
+    } catch (error) {
+      if (!(error instanceof Conflict)) throw error;
+    }
+  }
+  throw new Conflict();
 }
 
 /**

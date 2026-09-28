@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import { MemoryStore } from "../server/store";
+import { Conflict, MemoryStore } from "../server/store";
 import { ChainError, ChainNotFound, Esplora } from "../server/chain";
 import { submitFunding } from "../server/submit-funding";
 import { createApp } from "../server/app";
@@ -396,9 +396,43 @@ describe("deposit routes", () => {
       return put(row, expected);
     });
     const exported = await f.call(`/vaults/${f.vault.id}/${endpoint}`);
-    expect(exported.status).toBe(409);
+    expect(exported.status).toBe(endpoint === "fund/signed" ? 404 : 409);
     expect(await exported.text()).not.toContain(raw);
     expect((await f.row())!.fundingRawTxHex).toBeUndefined();
+  });
+
+  it.each(["fund/signed", "funding"])("retries a harmless concurrent write when exporting through %s", async (endpoint) => {
+    const missing = () => Promise.reject(new ChainNotFound("Transaction not found"));
+    const f = await app(missing, missing);
+    const raw = deposit();
+    await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
+    const put = f.store.put.bind(f.store);
+    let exports = 0;
+    vi.spyOn(f.store, "put").mockImplementation(async (row, expected) => {
+      if (row.fundingExportedAt && ++exports === 1) {
+        const current = (await f.row())!;
+        await put({ ...current, version: current.version + 1, concurrentNote: "preserved" }, current.version);
+      }
+      return put(row, expected);
+    });
+    const response = await f.call(`/vaults/${f.vault.id}/${endpoint}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject(endpoint === "funding" ? { previousTxHex: raw } : { rawTxHex: raw });
+    expect(exports).toBe(2);
+    expect((await f.row())!.concurrentNote).toBe("preserved");
+  });
+
+  it("bounds export conflicts and never retries a non-conflict storage error", async () => {
+    const f = await app();
+    await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: deposit(), amount: "50000", costAccepted: true });
+    const put = vi.spyOn(f.store, "put").mockRejectedValue(new Conflict());
+    expect((await f.call(`/vaults/${f.vault.id}/fund/signed`)).status).toBe(409);
+    expect(put).toHaveBeenCalledTimes(5);
+    put.mockClear().mockRejectedValue(new ChainError("storage unavailable"));
+    const response = await f.call(`/vaults/${f.vault.id}/fund/signed`);
+    expect(response.status).toBe(409);
+    expect(await response.text()).not.toContain(deposit());
+    expect(put).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a fallback if the funding intent changed during the chain lookup", async () => {

@@ -51,7 +51,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "431f520fa87b8482410982d8e637551a7a6a171337e00c8bd92cf2fd687815b0",
+      "api": "429e66708597315edcfcda212ab604f55afba00b17df6c48de1627894d05191f",
       "build-metadata": "2c4804c98f40b16adda8fde8e13f053d59cc53e26f951906064834edd469b1c6",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "8c276496b523e301ce420596c7c9c6c414445adedce6f4927cb7fc8ec6ceb25b",
@@ -150,7 +150,7 @@
       "server/solver-deployment.ts": "d1eb57395c927d92904cbda553ceaa4d54ea6c7f9dc68d11c1a29afb24f27a8b",
       "server/store.ts": "6073bcf106a00911ed0921e8ad323db21208e071d16c5089324f686a96fcfd63",
       "server/submit-exact.ts": "d1f1a8a5ff126078e78a53fa0146a57b996d90ae244f73f1fadc8702d9810d2f",
-      "server/submit-funding.ts": "31e6efd84f4d575bd2bd02be02d7072936c9e8d353585d5a8ea1157bcf1ad338",
+      "server/submit-funding.ts": "12f5336b833cc223cf33284b928aee2e51761ba268e806f5b49d18f641afed37",
       "server/transaction-checks.ts": "decb622c8966da65f6ad68b53a4a269093cfd16485de702f85507bd7d139c606",
       "server/validation-search.ts": "0a9df44c9e0562f7fb7ba8614db96f2a72ae874017554fce9f4498500063bdba",
       "server/withdrawal-status.ts": "35c35fa0666985dbed95df056094f2a36dae2348723c4c2e0176146f59f0880a",
