@@ -27,7 +27,8 @@ on the job and vault versions. The POST reuses the credential already read.
 The durable intent stores exact bytes, their hash (including witness), and the
 manifest. The initial outcome is uncertain. A process-local single-use permit
 then allows exactly one POST to https://slipstream.mara.com/api/transactions with
-{tx_hex: rawTxHex}. No policy preflight POST is required: Core checks consensus,
+{tx_hex: rawTxHex}, plus `client_code` when the optional credential holds MARA's
+client code. No policy preflight POST is required: Core checks consensus,
 and the miner decides relay/mining policy. Redirects and automatic HTTP retries
 are disabled. The response must name the expected txid.
 

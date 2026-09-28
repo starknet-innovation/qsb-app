@@ -20,27 +20,34 @@ import {
 const minerSecrets = new SecretsManagerClient({
   region: process.env.AWS_REGION,
 });
+/**
+ * What the miner secret may hold. MARA's privileged submission uses `client_code` in the POST body;
+ * `authorization`, if present, is sent as the Authorization header. At least one is required.
+ */
+export type MinerSecret = { authorization?: string; clientCode?: string };
+const minerSecretSchema = z
+  .object({
+    authorization: z.string().min(1).max(8192).regex(/^[\x20-\x7e]+$/).optional(),
+    client_code: z.string().min(1).max(256).regex(/^[\x21-\x7e]+$/).optional(),
+  })
+  .strict()
+  .refine((value) => value.authorization !== undefined || value.client_code !== undefined);
+/** Parse the stored secret JSON; anything else is a configuration error. */
+export function parseMinerSecret(secretString: string | undefined): MinerSecret {
+  const parsed = minerSecretSchema.safeParse(JSON.parse(secretString || "{}"));
+  if (!parsed.success) throw new Error("InvalidConfiguration");
+  return { authorization: parsed.data.authorization, clientCode: parsed.data.client_code };
+}
 // The service resolves this at request time. The value never leaves this module: callers
 // only hold an opaque MinerCredential, and it never appears in responses or logs.
-async function minerAuthorization(): Promise<string | undefined> {
+async function minerSecret(): Promise<MinerSecret | undefined> {
   const arn = process.env.SLIPSTREAM_SECRET_ARN;
   if (!arn) return undefined;
   try {
     const secret = await minerSecrets.send(
       new GetSecretValueCommand({ SecretId: arn }),
     );
-    const parsed = z
-      .object({
-        authorization: z
-          .string()
-          .min(1)
-          .max(8192)
-          .regex(/^[\x20-\x7e]+$/),
-      })
-      .strict()
-      .safeParse(JSON.parse(secret.SecretString || "{}"));
-    if (!parsed.success) throw new Error("InvalidConfiguration");
-    return parsed.data.authorization;
+    return parseMinerSecret(secret.SecretString);
   } catch {
     throw new MinerAuthenticationError(
       "Miner API credential is unavailable. Contact the service operator.",
@@ -78,16 +85,16 @@ export const slipstreamRatesSchema = z.object({
 });
 export class MinerAuthenticationError extends Error {}
 const issuing = Symbol("MinerCredential");
-const credentialValues = new WeakMap<MinerCredential, { origin: string; authorization: string | undefined }>();
+const credentialValues = new WeakMap<MinerCredential, { origin: string } & MinerSecret>();
 /**
  * A miner credential resolved once for one submission, issued only by Slipstream.credential().
  * It is opaque: the value lives in this module, so callers can't read, spread, log or serialize
  * it, and only a request to the origin it was issued for can use it.
  */
 export class MinerCredential {
-  constructor(key: typeof issuing, origin: string, authorization: string | undefined) {
+  constructor(key: typeof issuing, origin: string, secret: MinerSecret) {
     if (key !== issuing) throw new TypeError("A MinerCredential is issued only by Slipstream.credential().");
-    credentialValues.set(this, { origin, authorization });
+    credentialValues.set(this, { origin, authorization: secret.authorization, clientCode: secret.clientCode });
   }
   toJSON() {
     return "[MinerCredential]";
@@ -96,12 +103,12 @@ export class MinerCredential {
     return "MinerCredential [redacted]";
   }
 }
-/** The Authorization header value for a request to `origin`, if the credential carries one. */
-function authorizationFor(credential: MinerCredential, origin: string) {
+/** What a credential carries, for a request to `origin` only. */
+function secretFor(credential: MinerCredential, origin: string): MinerSecret {
   const value = credentialValues.get(credential);
   if (!value || value.origin !== origin)
     throw new MinerAuthenticationError("Miner credential destination is invalid.");
-  return value.authorization;
+  return { authorization: value.authorization, clientCode: value.clientCode };
 }
 /** A non-2xx miner response. `detail` is the miner's own message, when it sent one. */
 export class MinerHttpError extends Error {
@@ -119,9 +126,8 @@ export class MinerRejection extends Error {}
 export class Slipstream {
   constructor(
     private base = minerBase,
-    private authorization: () => Promise<
-      string | undefined
-    > = minerAuthorization,
+    /** A bare string is an Authorization header value. */
+    private secret: () => Promise<string | MinerSecret | undefined> = minerSecret,
   ) {}
   /**
    * Resolve the miner credential ahead of a submission. Callers read it before recording any
@@ -130,18 +136,19 @@ export class Slipstream {
   async credential(): Promise<MinerCredential> {
     // Teststream is intentionally credential-free. Never resolve or forward the
     // production miner credential to a rehearsal or custom destination.
-    const authorization =
+    const resolved =
       this.base === "https://teststream.mara.com"
         ? undefined
-        : await this.authorization();
-    if (authorization && this.base !== "https://slipstream.mara.com")
+        : await this.secret();
+    const secret: MinerSecret = typeof resolved === "string" ? { authorization: resolved } : (resolved ?? {});
+    if ((secret.authorization || secret.clientCode) && this.base !== "https://slipstream.mara.com")
       throw new MinerAuthenticationError(
         "Miner credential destination is invalid.",
       );
-    return new MinerCredential(issuing, this.base, authorization);
+    return new MinerCredential(issuing, this.base, secret);
   }
   private async request(path: string, init?: RequestInit, credential?: MinerCredential) {
-    const authorization = authorizationFor(credential ?? (await this.credential()), this.base);
+    const { authorization } = secretFor(credential ?? (await this.credential()), this.base);
     const headers = new Headers(init?.headers);
     if (authorization) headers.set("Authorization", authorization);
     const response = await fetch(`${this.base}${path}`, {
@@ -196,14 +203,17 @@ export class Slipstream {
     if (!exactSubmitEnabled()) throw new Error("ExactSubmitDisabled");
     if (this.base !== "https://slipstream.mara.com")
       throw new Error("ExactSubmitMinerMismatch");
+    const resolved = credential ?? (await this.credential());
+    // MARA's client code for privileged submission goes in the body, on this POST only.
+    const { clientCode } = secretFor(resolved, this.base);
     const result = z
       .object({ status: z.literal("success"), message: minerTxid })
       .parse(
         await this.request("/api/transactions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tx_hex: hex }),
-        }, credential),
+          body: JSON.stringify({ ...(clientCode ? { client_code: clientCode } : {}), tx_hex: hex }),
+        }, resolved),
       );
     if (result.message.toLowerCase() !== transactionId(hex))
       throw new Error("Miner transaction hash mismatch");
