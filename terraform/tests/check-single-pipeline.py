@@ -52,6 +52,8 @@ API_ENV_REFERENCES = {
     'local.solver_release_id', 'local.workflow_arn',
     'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network', 'var.slipstream_secret_arn',
 }
+# The mocked `terraform test` plans whose expanded inventory must pass validate().
+MOCK_RUNS = {'baseline', 'configured_single_pipeline', 'miner_credential_api_only'}
 # The one secret any application role may read: the API's MARA Slipstream credential.
 MINER_SECRET = re.compile(r'^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:qsb/slipstream-[A-Za-z0-9]{6}$')
 
@@ -230,14 +232,14 @@ def main():
             result = {'evidence': 'mock-provider-plan-inventory', 'runs': {}}
             for event in events:
                 name = event.get('@testrun')
-                if event.get('type') == 'test_plan' and name in ('baseline', 'configured_single_pipeline'):
+                if event.get('type') == 'test_plan' and name in MOCK_RUNS:
                     rows = [dict(row, values=row['change']['after'])
                             for row in event['test_plan']['resource_changes']
                             if row.get('mode') == 'managed' and row['change']['after'] is not None]
                     result['runs'][name] = validate(rows, True, None,
                                                     unknown_lambda_env(event['test_plan']['resource_changes']))
-            require(set(result['runs']) == {'baseline', 'configured_single_pipeline'},
-                    'Both baseline and configured-provider plans are required')
+            require(set(result['runs']) == MOCK_RUNS,
+                    'The baseline, configured-provider and miner-credential plans are all required')
         else:
             result = validate(module_resources(plan['planned_values']['root_module']), True, plan.get('configuration'),
                               unknown_lambda_env(plan.get('resource_changes', [])))
