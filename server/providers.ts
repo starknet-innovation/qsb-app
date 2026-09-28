@@ -34,7 +34,14 @@ const minerSecretSchema = z
   .refine((value) => value.authorization !== undefined || value.client_code !== undefined);
 /** Parse the stored secret JSON; anything else is a configuration error. */
 export function parseMinerSecret(secretString: string | undefined): MinerSecret {
-  const parsed = minerSecretSchema.safeParse(JSON.parse(secretString || "{}"));
+  let value: unknown;
+  try {
+    value = JSON.parse(secretString || "{}");
+  } catch {
+    // A JSON syntax error can quote the input, so it never propagates.
+    throw new Error("InvalidConfiguration");
+  }
+  const parsed = minerSecretSchema.safeParse(value);
   if (!parsed.success) throw new Error("InvalidConfiguration");
   return { authorization: parsed.data.authorization, clientCode: parsed.data.client_code };
 }
@@ -148,7 +155,7 @@ export class Slipstream {
     return new MinerCredential(issuing, this.base, secret);
   }
   private async request(path: string, init?: RequestInit, credential?: MinerCredential) {
-    const { authorization } = secretFor(credential ?? (await this.credential()), this.base);
+    const { authorization, clientCode } = secretFor(credential ?? (await this.credential()), this.base);
     const headers = new Headers(init?.headers);
     if (authorization) headers.set("Authorization", authorization);
     const response = await fetch(`${this.base}${path}`, {
@@ -165,7 +172,12 @@ export class Slipstream {
       let detail: string | undefined, minerStatus: string | undefined;
       try {
         const body = (await response.json()) as { message?: unknown; status?: unknown };
-        if (typeof body.message === "string") detail = body.message.slice(0, 300);
+        // The miner's message is stored and shown to users, so it never carries the credential.
+        if (typeof body.message === "string") {
+          let text: string = body.message;
+          for (const value of [authorization, clientCode]) if (value) text = text.split(value).join("[redacted]");
+          detail = text.slice(0, 300);
+        }
         if (typeof body.status === "string") minerStatus = body.status;
       } catch { /* A body that isn't JSON carries no detail. */ }
       throw new MinerHttpError(response.status, detail, minerStatus);
