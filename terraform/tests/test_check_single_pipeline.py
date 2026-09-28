@@ -9,6 +9,7 @@ import unittest
 SCRIPT = Path(__file__).resolve().parent / 'check-single-pipeline.py'
 BOUNDARY = 'arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary'
 OPERATOR = 'arn:aws:iam::123456789012:role/qsb/bootstrap/qsb-operator'
+MINER = 'arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/slipstream-AbC123'
 
 
 def role(name, trust=OPERATOR):
@@ -164,6 +165,48 @@ class DeployChecks(unittest.TestCase):
             if r['type'] == 'aws_lambda_function' and r['name'] == 'api':
                 r['values']['environment'][0]['variables']['SUPERVISED_EXECUTION_ENABLED'] = 'true'
         self.refused(doc, 'No supervised routing')
+
+    def with_miner_credential(self, arn=MINER, grant=None, env=True, policy_name='miner_credential'):
+        doc = plan()
+        rows = doc['planned_values']['root_module']['resources']
+        if env:
+            next(r for r in rows if r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = arn
+        statement = grant or {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue', 'Resource': arn}
+        rows.append({'type': 'aws_iam_role_policy', 'name': policy_name, 'mode': 'managed',
+                     'values': {'policy': json.dumps({'Version': '2012-10-17', 'Statement': [statement]})}})
+        return doc
+
+    def test_the_api_miner_credential_passes(self):
+        self.assertEqual(self.run_check(self.with_miner_credential(), '--deploy')[0], 0)
+
+    def test_the_miner_credential_grant_is_exactly_scoped(self):
+        self.refused(self.with_miner_credential(policy_name='records'), 'Only the miner_credential policy')
+        for grant in ({'Effect': 'Allow', 'Action': 'secretsmanager:*', 'Resource': MINER},
+                      {'Effect': 'Allow', 'Action': ['secretsmanager:GetSecretValue'], 'Resource': MINER},
+                      {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue', 'Resource': '*'},
+                      {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue', 'Resource': MINER.replace('slipstream', 'other')},
+                      {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue', 'Resource': [MINER]}):
+            with self.subTest(grant=grant):
+                self.refused(self.with_miner_credential(grant=grant), 'qsb/slipstream secret only')
+
+    def test_a_wildcard_action_counts_as_a_secret_grant(self):
+        self.refused(self.with_miner_credential(grant={'Effect': 'Allow', 'Action': '*', 'Resource': '*'}, policy_name='start'),
+                     'Only the miner_credential policy')
+
+    def test_the_api_gets_the_reference_exactly_with_its_grant(self):
+        self.refused(self.with_miner_credential(env=False), 'exactly when its read grant exists')
+        doc = plan()
+        next(r for r in doc['planned_values']['root_module']['resources'] if r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = MINER
+        self.refused(doc, 'exactly when its read grant exists')
+        other = MINER.replace('AbC123', 'XyZ789')
+        doc = self.with_miner_credential()
+        next(r for r in doc['planned_values']['root_module']['resources'] if r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = other
+        self.refused(doc, 'exactly the secret the API is given')
+
+    def test_only_the_api_receives_the_miner_credential(self):
+        doc = self.with_miner_credential()
+        next(r for r in doc['planned_values']['root_module']['resources'] if r['name'] == 'coordinator')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = MINER
+        self.refused(doc, 'Only the API may receive the miner credential')
 
     def test_flags_need_a_saved_plan(self):
         events = [{'type': 'test_run', '@testrun': 'baseline'}, {'type': 'test_summary', 'test_summary': {'status': 'pass'}}]

@@ -29,7 +29,9 @@ create arbitrary new CDN/API resources or EC2/VPC/backup infrastructure. The rem
 deployment or runtime grants. Roles can be passed only to Lambda and Step
 Functions. The GitHub OIDC trust and authentication-only workflow are unchanged.
 
-The runtime boundary allows QSB data access and the QSB Runpod secret. Workflow
+The runtime boundary allows QSB data access and read-only access to one secret,
+`qsb/slipstream`: the API's optional MARA Slipstream credential (see
+`terraform/README.md`). It allows no other secret and no KMS decrypt. Workflow
 log-delivery control APIs require regional wildcard resources; these are the
 one runtime control-plane exception. Regional metadata discovery also requires
 wildcard resources. Runtime identities have no S3, SQS or ECR grants. KMS customer keys require

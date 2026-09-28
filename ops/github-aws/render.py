@@ -67,6 +67,9 @@ def render(c):
     allow('BatchCancel',['batch:CancelJob','batch:TerminateJob'],[arn('batch','job/*')],{'StringEquals':{'aws:ResourceTag/Project':'qsb-gpu'}},runtime)
     allow('GpuInputs',['s3:PutObject'],[f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/inputs/*'],target=runtime)
     allow('GpuOutputs',['s3:GetObject'],[f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/outputs/*'],target=runtime)
+    # The API's MARA Slipstream credential: read-only, one administrator-created secret. The boundary is a
+    # ceiling: a role still needs its own grant, and Terraform gives one only to the API.
+    allow('MinerCredential',['secretsmanager:GetSecretValue'],[arn('secretsmanager','secret:qsb/slipstream-??????')],target=runtime)
     # AWS log-delivery control APIs have no resource-level authorization.
     allow('WorkflowLogDelivery',['logs:CreateLogDelivery','logs:GetLogDelivery','logs:UpdateLogDelivery','logs:DeleteLogDelivery','logs:ListLogDeliveries','logs:PutResourcePolicy','logs:DescribeResourcePolicies','logs:DescribeLogGroups'],['*'],{'StringEquals':{'aws:RequestedRegion':region}},runtime)
     trust={'Version':'2012-10-17','Statement':[{'Effect':'Allow','Principal':{'Federated':iam('oidc-provider/token.actions.githubusercontent.com')},'Action':'sts:AssumeRoleWithWebIdentity','Condition':{'StringEquals':{'token.actions.githubusercontent.com:aud':'sts.amazonaws.com','token.actions.githubusercontent.com:sub':c['subject']}}}]}

@@ -24,3 +24,7 @@ exact_submit_enabled = false
 # batch_job_queue = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu"
 # batch_job_definition = "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:1"
 # batch_job_bucket = "qsb-gpu-123456789012-eu-west-1-jobs"
+
+# Optional MARA Slipstream credential: the ARN of the administrator-created qsb/slipstream secret.
+# Set it only after the runtime boundary allows that secret (ops/github-aws/update_installed.py).
+# slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/slipstream-AbC123"

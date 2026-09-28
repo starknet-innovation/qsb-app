@@ -50,8 +50,27 @@ API_ENV_REFERENCES = {
     'aws_cloudfront_distribution.web', 'aws_cloudfront_distribution.web.domain_name',
     'aws_dynamodb_table.records', 'aws_dynamodb_table.records.name',
     'local.solver_release_id', 'local.workflow_arn',
-    'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network',
+    'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network', 'var.slipstream_secret_arn',
 }
+# The one secret any application role may read: the API's MARA Slipstream credential.
+MINER_SECRET = re.compile(r'^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:qsb/slipstream-[A-Za-z0-9]{6}$')
+
+
+def secret_grants(rows):
+    """(policy name, statement) for every planned role-policy statement that mentions Secrets Manager."""
+    grants = []
+    for row in rows:
+        if row['type'] != 'aws_iam_role_policy':
+            continue
+        document = row.get('values', {}).get('policy')
+        if not isinstance(document, str):
+            continue
+        for statement in json.loads(document).get('Statement', []):
+            actions = statement.get('Action', [])
+            actions = [actions] if isinstance(actions, str) else actions
+            if any(str(a).lower().startswith('secretsmanager:') or a == '*' for a in actions):
+                grants.append((row['name'], statement))
+    return grants
 
 
 def config_env_references(configuration, name):
@@ -102,6 +121,25 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
                 'No supervised routing in application Lambda environments')
         require('AWS_BATCH_JOB_QUEUE' not in envs['api'] and 'AWS_BATCH_JOB_QUEUE' not in envs['reference'],
                 'Only coordinator may receive the AWS Batch binding reference')
+        for name in ('coordinator', 'reference'):
+            require('SLIPSTREAM_SECRET_ARN' not in envs[name], 'Only the API may receive the miner credential reference')
+        miner = [r for r in rows if r['type'] == 'aws_iam_role_policy' and r['name'] == 'miner_credential']
+        grants = secret_grants(rows)
+        require(all(name == 'miner_credential' for name, _ in grants),
+                'Only the miner_credential policy may grant Secrets Manager access')
+        require(len(miner) <= 1, 'At most one miner credential policy')
+        for name, statement in grants:
+            require(statement.get('Effect') == 'Allow' and statement.get('Action') == 'secretsmanager:GetSecretValue'
+                    and isinstance(statement.get('Resource'), str) and MINER_SECRET.match(statement['Resource'])
+                    and not statement.get('Condition'),
+                    'The miner credential grant must be GetSecretValue on the qsb/slipstream secret only')
+        if 'api' not in whole:
+            arn = envs['api'].get('SLIPSTREAM_SECRET_ARN')
+            require(bool(miner) == ('SLIPSTREAM_SECRET_ARN' in envs['api']),
+                    'The API receives the miner credential reference exactly when its read grant exists')
+            require(arn is None or MINER_SECRET.match(arn), 'SLIPSTREAM_SECRET_ARN must name the qsb/slipstream secret')
+            require(arn is None or all(statement.get('Resource') == arn for _, statement in grants),
+                    'The miner credential grant must cover exactly the secret the API is given')
         policies = [r for r in rows if r['type'] == 'aws_iam_role_policy' and r['name'] == 'batch']
         require(len(policies) == (1 if envs['coordinator'].get('AWS_BATCH_JOB_QUEUE') else 0),
                 'Exactly one AWS Batch binding policy when configured')

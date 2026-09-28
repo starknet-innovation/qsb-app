@@ -99,6 +99,18 @@ variable "exact_submit_enabled" {
     error_message = "Exact submission is implemented for mainnet only."
   }
 }
+variable "slipstream_secret_arn" {
+  description = "Optional existing Secrets Manager secret qsb/slipstream, created by an administrator in this account and region with the default aws/secretsmanager key and holding {\"authorization\": \"...\"}. The API sends it as the Authorization header to MARA Slipstream only. Empty sends no credential. Terraform only references it: the value never enters state or plans."
+  type        = string
+  default     = ""
+  validation {
+    condition = var.slipstream_secret_arn == "" || (
+      can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:qsb/slipstream-[A-Za-z0-9]{6}$", var.slipstream_secret_arn)) &&
+      try(split(":", var.slipstream_secret_arn)[3] == var.region && split(":", var.slipstream_secret_arn)[4] == var.aws_account_id, false)
+    )
+    error_message = "Supply the full ARN of the qsb/slipstream secret in this stack's account and region, or leave it empty."
+  }
+}
 variable "solver_release_id" {
   description = "Enrolled schema-v3 solver release served by the configured endpoint. Empty refuses new jobs."
   type        = string

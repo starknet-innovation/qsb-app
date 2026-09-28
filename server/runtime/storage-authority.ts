@@ -17,6 +17,8 @@ export const permissionModel = {
     api: {
       data: ["GetItem", "PutItem", "DeleteItem", "Query", "ConditionCheckItem"],
       secrets: [],
+      // The API alone reads the MARA Slipstream credential; `secrets` are provider secrets.
+      minerCredential: true,
       evidence: "read-admitted-terminal-evidence",
       mayChangeReservationAuthority: false,
       mayBroadcast: false,
@@ -24,6 +26,7 @@ export const permissionModel = {
     coordinator: {
       data: ["GetItem", "PutItem"],
       secrets: ["GetSecretValue"],
+      minerCredential: false,
       evidence: "cpu-verify-provider-results",
       mayChangeReservationAuthority: false,
       mayBroadcast: false,
@@ -31,6 +34,7 @@ export const permissionModel = {
     "operator-reconcile": {
       data: ["GetItem", "PutItem"],
       secrets: ["GetSecretValue"],
+      minerCredential: false,
       evidence: "write-reconciliation-audit",
       mayChangeReservationAuthority: false,
       mayBroadcast: false,
@@ -38,6 +42,7 @@ export const permissionModel = {
     runtime: {
       data: ["GetItem", "PutItem", "Query", "ConditionCheckItem"],
       secrets: ["GetSecretValue"],
+      minerCredential: false,
       evidence: "write-terminal-evidence",
       mayChangeReservationAuthority: false,
       mayBroadcast: false,
@@ -45,6 +50,7 @@ export const permissionModel = {
     operator: {
       data: ["GetItem", "Query", "Scan", "ConditionCheckItem"],
       secrets: [],
+      minerCredential: false,
       evidence: "read-terminal-evidence",
       mayChangeReservationAuthority: true,
       mayBroadcast: false,
@@ -74,6 +80,7 @@ type PermissionModel = {
 type RolePermissions = {
   data: readonly string[];
   secrets: readonly string[];
+  minerCredential: boolean;
   evidence: string;
   mayChangeReservationAuthority: boolean;
   mayBroadcast: boolean;
@@ -85,6 +92,9 @@ export function assertPermissionSeparation(
   const apiSecrets = new Set<string>(model.roles.api.secrets);
   for (const action of model.roles.runtime.secrets) {
     if (apiSecrets.has(action)) throw new Error("ApiRoleMustNotReadRuntimeSecrets");
+  }
+  for (const [name, role] of Object.entries(model.roles)) {
+    if (role.minerCredential && name !== "api") throw new Error("OnlyApiReadsMinerCredential");
   }
   if (model.roles.api.evidence === model.roles.runtime.evidence)
     throw new Error("EvidenceAccessMustDiffer");

@@ -132,6 +132,19 @@ describe("durable storage authority rehearsal", () => {
     expect(permissionModel.livePermissionsVerified).toBe(false);
     expect(permissionModel.roles.api.secrets).toEqual([]);
     expect(permissionModel.roles.runtime.secrets).toEqual(["GetSecretValue"]);
+    expect(
+      Object.entries(permissionModel.roles).filter(([, role]) => role.minerCredential).map(([name]) => name),
+    ).toEqual(["api"]);
+    for (const name of ["coordinator", "operator-reconcile", "runtime", "operator"] as const)
+      expect(() =>
+        assertPermissionSeparation({
+          ...permissionModel,
+          roles: {
+            ...permissionModel.roles,
+            [name]: { ...permissionModel.roles[name], minerCredential: true },
+          },
+        }),
+      ).toThrow(/OnlyApiReadsMinerCredential/);
     expect(permissionModel.roles.operator.maySetMainnetEnabled).toBe(false);
     expect(() =>
       assertPermissionSeparation({
