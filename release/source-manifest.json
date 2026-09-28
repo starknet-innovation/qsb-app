@@ -51,7 +51,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "2b70f80260bc4badd649ace21aaa6b9a4f5e939a94f955b21b765bbde8dd5de4",
+      "api": "429e66708597315edcfcda212ab604f55afba00b17df6c48de1627894d05191f",
       "build-metadata": "2c4804c98f40b16adda8fde8e13f053d59cc53e26f951906064834edd469b1c6",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "8c276496b523e301ce420596c7c9c6c414445adedce6f4927cb7fc8ec6ceb25b",
@@ -109,7 +109,7 @@
       "scripts/generate-solver-registry.mjs": "e88dcd1462fb6a8fe4e66efffab9c96345f656b22cd11e40b3f865257a9a1b8c",
       "scripts/package-release.ts": "5b1d0d9e5169c8e83a1b9259033c710011a3d8cf46b02824a1c73708de4d2031",
       "scripts/storage-inventory.ts": "c8ecc1d3ed239f444efd50ab8bb704be13408f609aba1e80d16a5325d5e4603e",
-      "server/app.ts": "5e72226e29f7207dba726e09799e2e717a22e312aaf831c100b40e42cf7fc757",
+      "server/app.ts": "70c4d9df1fb509a3b631c155bb2d62e678ea0ec7e459507b4e0bb8285f00f3ed",
       "server/aws-batch-command.json": "5a4544d33c5744dbc438c0d515a84e3bb2c8e80d8662020c4a7c765ed5267881",
       "server/aws-batch.ts": "02253b0784f88631ed26f38dbd1d76604acf271632f99c35b04929366641485b",
       "server/chain.ts": "d3f6ff738005b2c057a4445887da393d752820a15a89d394bb745e9cf140c686",
@@ -150,7 +150,7 @@
       "server/solver-deployment.ts": "d1eb57395c927d92904cbda553ceaa4d54ea6c7f9dc68d11c1a29afb24f27a8b",
       "server/store.ts": "6073bcf106a00911ed0921e8ad323db21208e071d16c5089324f686a96fcfd63",
       "server/submit-exact.ts": "d1f1a8a5ff126078e78a53fa0146a57b996d90ae244f73f1fadc8702d9810d2f",
-      "server/submit-funding.ts": "b493b5e25ef7cc6d87a059193512a36f6e75f7e29df66b1f525cb3cbaac206b0",
+      "server/submit-funding.ts": "12f5336b833cc223cf33284b928aee2e51761ba268e806f5b49d18f641afed37",
       "server/transaction-checks.ts": "decb622c8966da65f6ad68b53a4a269093cfd16485de702f85507bd7d139c606",
       "server/validation-search.ts": "0a9df44c9e0562f7fb7ba8614db96f2a72ae874017554fce9f4498500063bdba",
       "server/withdrawal-status.ts": "35c35fa0666985dbed95df056094f2a36dae2348723c4c2e0176146f59f0880a",

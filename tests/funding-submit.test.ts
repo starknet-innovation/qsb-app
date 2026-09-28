@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import { MemoryStore } from "../server/store";
+import { Conflict, MemoryStore } from "../server/store";
 import { ChainError, ChainNotFound, Esplora } from "../server/chain";
 import { submitFunding } from "../server/submit-funding";
 import { createApp } from "../server/app";
@@ -343,6 +343,116 @@ describe("deposit routes", () => {
       }));
     return { ...f, call, submit, seen };
   }
+
+  it.each(["fund/signed", "funding"])("protects bytes exported by %s from an in-flight fresh rejection", async (endpoint) => {
+    const missing = () => Promise.reject(new ChainNotFound("Transaction not found"));
+    const f = await app(missing, missing);
+    const raw = deposit();
+    let release!: () => void;
+    let started!: () => void;
+    const ready = new Promise<void>(r => started = r);
+    f.submit.mockImplementationOnce(async () => {
+      started();
+      await new Promise<void>(r => release = r);
+      throw new MinerRejection("min relay fee not met");
+    });
+    const first = f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
+    await ready;
+    const exported = await f.call(`/vaults/${f.vault.id}/${endpoint}`);
+    expect(exported.status).toBe(200);
+    expect(await exported.json()).toMatchObject(endpoint === "funding" ? { previousTxHex: raw } : { rawTxHex: raw });
+    release();
+    expect(await (await first).json()).toMatchObject({ submission: "uncertain" });
+    expect((await f.row())!.fundingRawTxHex).toBe(raw);
+    expect((await f.row())!.fundingExportedAt).toEqual(expect.any(String));
+    const second = await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: deposit(50_000n, scriptHex, 3), amount: "50000", costAccepted: true });
+    expect(second.status).toBe(409);
+    expect(f.submit).toHaveBeenCalledTimes(1);
+    f.submit.mockRejectedValueOnce(new MinerRejection("min relay fee not met"));
+    expect(await (await f.call(`/vaults/${f.vault.id}/fund/resubmit`, {})).json()).toMatchObject({ submission: "uncertain" });
+    expect((await f.row())!.fundingRawTxHex).toBe(raw);
+  });
+
+  it.each(["fund/signed", "funding"])("does not export stale bytes from %s if cleanup wins the write race", async (endpoint) => {
+    const missing = () => Promise.reject(new ChainNotFound("Transaction not found"));
+    const f = await app(missing, missing);
+    const raw = deposit();
+    let release!: () => void;
+    let started!: () => void;
+    const ready = new Promise<void>(r => started = r);
+    f.submit.mockImplementationOnce(async () => {
+      started();
+      await new Promise<void>(r => release = r);
+      throw new MinerRejection("min relay fee not met");
+    });
+    const first = f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
+    await ready;
+    const put = f.store.put.bind(f.store);
+    vi.spyOn(f.store, "put").mockImplementation(async (row, expected) => {
+      if (row.fundingExportedAt) {
+        release();
+        await first;
+      }
+      return put(row, expected);
+    });
+    const exported = await f.call(`/vaults/${f.vault.id}/${endpoint}`);
+    expect(exported.status).toBe(endpoint === "fund/signed" ? 404 : 409);
+    expect(await exported.text()).not.toContain(raw);
+    expect((await f.row())!.fundingRawTxHex).toBeUndefined();
+  });
+
+  it.each(["fund/signed", "funding"])("retries a harmless concurrent write when exporting through %s", async (endpoint) => {
+    const missing = () => Promise.reject(new ChainNotFound("Transaction not found"));
+    const f = await app(missing, missing);
+    const raw = deposit();
+    await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
+    const put = f.store.put.bind(f.store);
+    let exports = 0;
+    vi.spyOn(f.store, "put").mockImplementation(async (row, expected) => {
+      if (row.fundingExportedAt && ++exports === 1) {
+        const current = (await f.row())!;
+        await put({ ...current, version: current.version + 1, concurrentNote: "preserved" }, current.version);
+      }
+      return put(row, expected);
+    });
+    const response = await f.call(`/vaults/${f.vault.id}/${endpoint}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject(endpoint === "funding" ? { previousTxHex: raw } : { rawTxHex: raw });
+    expect(exports).toBe(2);
+    expect((await f.row())!.concurrentNote).toBe("preserved");
+  });
+
+  it("bounds export conflicts and never retries a non-conflict storage error", async () => {
+    const f = await app();
+    await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: deposit(), amount: "50000", costAccepted: true });
+    const put = vi.spyOn(f.store, "put").mockRejectedValue(new Conflict());
+    expect((await f.call(`/vaults/${f.vault.id}/fund/signed`)).status).toBe(409);
+    expect(put).toHaveBeenCalledTimes(5);
+    put.mockClear().mockRejectedValue(new ChainError("storage unavailable"));
+    const response = await f.call(`/vaults/${f.vault.id}/fund/signed`);
+    expect(response.status).toBe(409);
+    expect(await response.text()).not.toContain(deposit());
+    expect(put).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a fallback if the funding intent changed during the chain lookup", async () => {
+    const missing = () => Promise.reject(new ChainNotFound("Transaction not found"));
+    const replacement = deposit(50_000n, scriptHex, 3);
+    const f = await app(missing, async () => {
+      const row = (await f.row())!;
+      const vault = row.vault as PublicVault;
+      await f.store.put({ ...row, version: row.version + 1,
+        fundingRawTxHex: replacement,
+        vault: { ...vault, funding: { ...vault.funding!, txid: transactionId(replacement) } },
+      }, row.version);
+      throw new ChainNotFound("Transaction not found");
+    });
+    await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: deposit(), amount: "50000", costAccepted: true });
+    const response = await f.call(`/vaults/${f.vault.id}/funding`);
+    expect(response.status).toBe(409);
+    expect(await response.text()).not.toContain(replacement);
+    expect((await f.row())!.fundingExportedAt).toBeUndefined();
+  });
 
   it("submits a signed deposit through POST /fund/submit", async () => {
     const f = await app();
