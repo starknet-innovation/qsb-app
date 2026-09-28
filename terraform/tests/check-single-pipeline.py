@@ -59,13 +59,19 @@ MOCK_RUNS = {'baseline', 'configured_single_pipeline', 'miner_credential_api_onl
 MINER_SECRET = re.compile(r'^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:qsb/slipstream-[A-Za-z0-9]{6}$')
 MINER_POLICY = ('aws_iam_role_policy', 'miner_credential')
 MINER_GRANT = {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue'}
+# Data sources the stack reads; anything else (an aws_iam_policy_document, say) is unreviewed policy input.
+DATA_SOURCES = {'aws_partition', 'aws_cloudfront_cache_policy', 'aws_cloudfront_origin_request_policy'}
+# Where file-reading functions may read: the reviewed policies, build artifacts, the build manifest
+# override and the GPU spend constants.
+FILE_INPUTS = re.compile(r'(?:"\$\{path\.module\}/policies/[a-z0-9-]+\.json"|"\$\{local\.artifacts\}/'
+                         r'|var\.build_manifest_path\)|"\$\{path\.module\}/\.\./server/gpu-spend\.json")')
 
 
 def reads_secrets(action):
-    """Whether an IAM action pattern covers reading a Secrets Manager secret."""
+    """Whether an IAM action or action pattern touches Secrets Manager, including any pattern covering a read."""
     pattern = str(action).lower()
-    return any(fnmatch.fnmatchcase(a, pattern) for a in ('secretsmanager:getsecretvalue',
-                                                          'secretsmanager:batchgetsecretvalue'))
+    return pattern.startswith('secretsmanager:') or any(
+        fnmatch.fnmatchcase(a, pattern) for a in ('secretsmanager:getsecretvalue', 'secretsmanager:batchgetsecretvalue'))
 
 
 def as_list(value):
@@ -74,7 +80,7 @@ def as_list(value):
 
 def resource_blocks(text):
     """(type, name, start, end) of each top-level resource or variable block, by brace matching."""
-    for match in re.finditer(r'^(?:resource\s+"([^"]+)"|(variable))\s+"([^"]+)"\s*\{', text, re.M):
+    for match in re.finditer(r'^\s*(?:resource\s+"([^"]+)"|(variable))\s+"([^"]+)"\s*\{', text, re.M):
         depth, end = 1, match.end()
         while depth and end < len(text):
             depth += {'{': 1, '}': -1}.get(text[end], 0)
@@ -83,29 +89,40 @@ def resource_blocks(text):
 
 
 def static_secret_rules(root):
-    """Source rules for secrets. Unlike plan values, source is never unknown, so these hold on every plan."""
+    """Source rules for secrets. Unlike plan values, source is never unknown, so these hold on every plan.
+
+    They are a review aid against ordinary mistakes, not a sandbox: deliberately assembled strings can evade
+    any source scan, which is why the runtime boundary also limits the secret to API roles."""
+    require(not list(root.glob('*.tf.json')), 'JSON Terraform files are not reviewed by this check')
     for path in sorted(root.glob('*.tf')):
         text = path.read_text()
         blocks = {(kind, name): (start, end) for kind, name, start, end in resource_blocks(text)}
         inside = lambda key, pos: key in blocks and blocks[key][0] <= pos < blocks[key][1]
-        require('NotAction' not in text, f'{path.name}: NotAction is not allowed in application policies')
+        require(not re.search(r'not_?actions?', text, re.I), f'{path.name}: NotAction is not allowed in application policies')
+        require(not re.search(r'^\s*module\s+"', text, re.M), f'{path.name}: modules are not reviewed by this check')
+        for match in re.finditer(r'^\s*data\s+"([^"]+)"', text, re.M):
+            require(match.group(1) in DATA_SOURCES, f'{path.name}: data source {match.group(1)} is not reviewed')
+        require('templatefile(' not in text, f'{path.name}: templatefile() is not reviewed by this check')
+        for match in re.finditer(r'\bfile[a-z0-9]*\(', text):
+            require(FILE_INPUTS.match(text, match.end()), f'{path.name}: {match.group(0)} reads an unreviewed input')
         for match in re.finditer(r'secretsmanager', text, re.I):
             require(inside(MINER_POLICY, match.start()) or inside(('variable', 'slipstream_secret_arn'), match.start()),
                     f'{path.name}: only aws_iam_role_policy.miner_credential may mention Secrets Manager')
         for match in re.finditer(r'SLIPSTREAM_SECRET_ARN', text):
             require(inside(('aws_lambda_function', 'api'), match.start()),
                     f'{path.name}: only the API Lambda may receive SLIPSTREAM_SECRET_ARN')
-        if path.name != 'variables.tf':
-            for match in re.finditer(r'var\.slipstream_secret_arn', text):
-                require(inside(MINER_POLICY, match.start()) or inside(('aws_lambda_function', 'api'), match.start()),
-                        f'{path.name}: var.slipstream_secret_arn may feed only the API and its miner credential policy')
+        for match in re.finditer(r'var\.slipstream_secret_arn', text):
+            require(any(inside(key, match.start()) for key in
+                        (MINER_POLICY, ('aws_lambda_function', 'api'), ('variable', 'slipstream_secret_arn'))),
+                    f'{path.name}: var.slipstream_secret_arn may feed only the API and its miner credential policy')
         for match in re.finditer(r'"([A-Za-z0-9*?-]+:[A-Za-z0-9*?]+|\*)"', text):
             action = match.group(1)
             if action == '*':
-                # Refuse "*" anywhere in an Action value: `Action = "*"` or inside `Action = [...]`.
-                before = text[:match.start()]
-                segment = before[before.rfind('Action'):] if 'Action' in before else ''
-                require(not re.fullmatch(r'Action\s*=\s*(?:\[[^\]]*)?', segment), f'{path.name}: wildcard IAM action')
+                # Refuse "*" anywhere in an Action value, however the key is written: `Action = "*"`,
+                # `"Action": ["s3:X", "*"]` in a heredoc, `actions = [...]`.
+                keys = list(re.finditer(r'["\']?\bactions?\b["\']?\s*[:=]\s*', text[:match.start()], re.I))
+                require(not keys or not re.fullmatch(r'(?:\[[^\]]*)?', text[keys[-1].end():match.start()]),
+                        f'{path.name}: wildcard IAM action')
             elif reads_secrets(action):
                 require(inside(MINER_POLICY, match.start()) and action == MINER_GRANT['Action'],
                         f'{path.name}: {action} would grant Secrets Manager access outside the miner credential policy')

@@ -234,7 +234,8 @@ class DeployChecks(unittest.TestCase):
     def test_not_action_and_pattern_wildcards_are_refused(self):
         self.refused(self.with_miner_credential(grant={'Effect': 'Allow', 'NotAction': 's3:*', 'Resource': '*'},
                                                 policy_name='start'), 'NotAction is not allowed')
-        for action in ('s*:*', 'secretsmanager:Get*', 'SecretsManager:GetSecretValue', 'secretsmanager:BatchGet*'):
+        for action in ('s*:*', 'secretsmanager:Get*', 'SecretsManager:GetSecretValue', 'secretsmanager:BatchGet*',
+                       'secretsmanager:PutResourcePolicy'):
             with self.subTest(action=action):
                 self.refused(self.with_miner_credential(grant={'Effect': 'Allow', 'Action': action, 'Resource': '*'},
                                                         policy_name='logs'), 'Only the miner_credential policy')
@@ -260,9 +261,13 @@ class SourceRules(unittest.TestCase):
             (root / 'tests' / SCRIPT.name).write_text(SCRIPT.read_text())
             if edit:
                 name, old, new = edit
-                text = (root / name).read_text()
-                self.assertIn(old, text)
-                (root / name).write_text(text.replace(old, new, 1))
+                if old is None:  # append, creating the file if needed
+                    path = root / name
+                    path.write_text((path.read_text() if path.exists() else '') + new)
+                else:
+                    text = (root / name).read_text()
+                    self.assertIn(old, text)
+                    (root / name).write_text(text.replace(old, new, 1))
             result = subprocess.run([sys.executable, str(root / 'tests' / SCRIPT.name)], capture_output=True, text=True)
             return result.returncode, result.stderr
 
@@ -285,6 +290,23 @@ class SourceRules(unittest.TestCase):
         self.refused(('policies/app-records.json', '"dynamodb:GetItem"', '"secretsmanager:GetSecretValue"'),
                      'Secrets Manager access is not allowed')
         self.refused(('policies/app-records.json', '"dynamodb:GetItem"', '"*"'), 'Secrets Manager access is not allowed')
+
+    def test_other_ways_of_writing_a_policy_are_refused(self):
+        logs = 'Action = ["logs:CreateLogStream", "logs:PutLogEvents"]'
+        self.refused(('compute.tf', logs, '"Action" = "*"'), 'wildcard IAM action')
+        self.refused(('compute.tf', logs, 'Action : ["logs:CreateLogStream", "*"]'), 'wildcard IAM action')
+        self.refused(('compute.tf', None, '\nlocals {\n  doc = <<EOT\n{"Statement": [{"Effect": "Allow", "Action": ["s3:GetObject", "*"], "Resource": "*"}]}\nEOT\n}\n'),
+                     'wildcard IAM action')
+        self.refused(('compute.tf', logs, 'not_actions = ["s3:*"]'), 'NotAction is not allowed')
+        self.refused(('compute.tf', None, '\ndata "aws_iam_policy_document" "x" {\n  statement {\n    actions = ["s3:GetObject"]\n    resources = ["*"]\n  }\n}\n'),
+                     'data source aws_iam_policy_document is not reviewed')
+        self.refused(('compute.tf', None, '\nmodule "x" {\n  source = "./x"\n}\n'), 'modules are not reviewed')
+        self.refused(('extra.tf.json', None, '{}'), 'JSON Terraform files are not reviewed')
+        self.refused(('compute.tf', 'file("${path.module}/policies/app-records.json")', 'templatefile("${path.module}/policies/app-records.json", {})'),
+                     'templatefile() is not reviewed')
+        self.refused(('compute.tf', 'file("${path.module}/policies/app-records.json")', 'file("${path.module}/extra.json")'),
+                     'reads an unreviewed input')
+        self.refused(('variables.tf', None, '\nvariable "x" {\n  default = var.slipstream_secret_arn\n}\n'), 'may feed only the API')
 
     def test_the_miner_policy_stays_on_the_api_role_and_secret(self):
         self.refused(('compute.tf', 'role   = aws_iam_role.lambda["api"].id\n  policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "secretsmanager',
