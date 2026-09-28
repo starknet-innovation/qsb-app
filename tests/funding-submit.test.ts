@@ -343,6 +343,23 @@ describe("Slipstream deposit transport", () => {
     expect(error.message).toBe("bad client_code [redacted] with [redacted]");
   });
 
+  it("redacts only what a request sent, so a read's error text stays intact", async () => {
+    // A (pathologically) short code that appears in MARA's "not found" answer.
+    const miner = new Slipstream("https://slipstream.mara.com", async () => ({ clientCode: "found" }));
+    const credential = await miner.credential();
+    respond(400, { is_success: false, message: "Transaction not found" });
+    expect(await miner.seen("00".repeat(32), credential)).toBe(false);
+    // A value inside another leaves no fragment of the longer one.
+    const nested = new Slipstream("https://slipstream.mara.com", async () => ({
+      authorization: "PLACEHOLDER-CODE-LONGER",
+      clientCode: "PLACEHOLDER-CODE",
+    }));
+    const raw = deposit();
+    respond(400, { status: "error", message: "rejected PLACEHOLDER-CODE-LONGER" });
+    const error = await nested.submitFunding(raw, issueExactSubmitPermit(raw), await nested.credential()).catch((e) => e);
+    expect(error.message).toBe("rejected [redacted]");
+  });
+
   it("keeps the credential opaque and bound to its origin", async () => {
     const credential = await credentialFor("Bearer placeholder");
     expect(JSON.stringify({ credential })).not.toContain("placeholder");

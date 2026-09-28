@@ -154,8 +154,14 @@ export class Slipstream {
       );
     return new MinerCredential(issuing, this.base, secret);
   }
-  private async request(path: string, init?: RequestInit, credential?: MinerCredential) {
+  /** `clientCodeSent` marks the one request whose body carries the client code. */
+  private async request(path: string, init?: RequestInit, credential?: MinerCredential, clientCodeSent = false) {
     const { authorization, clientCode } = secretFor(credential ?? (await this.credential()), this.base);
+    // Redact only what this request sent, longest first, so a value can't leave fragments of
+    // another or rewrite an unrelated message (e.g. "Transaction not found") on a read.
+    const sent = [authorization, clientCodeSent ? clientCode : undefined]
+      .filter((value): value is string => Boolean(value))
+      .sort((a, b) => b.length - a.length);
     const headers = new Headers(init?.headers);
     if (authorization) headers.set("Authorization", authorization);
     const response = await fetch(`${this.base}${path}`, {
@@ -175,7 +181,7 @@ export class Slipstream {
         // The miner's message is stored and shown to users, so it never carries the credential.
         if (typeof body.message === "string") {
           let text: string = body.message;
-          for (const value of [authorization, clientCode]) if (value) text = text.split(value).join("[redacted]");
+          for (const value of sent) text = text.split(value).join("[redacted]");
           detail = text.slice(0, 300);
         }
         if (typeof body.status === "string") minerStatus = body.status;
@@ -225,7 +231,7 @@ export class Slipstream {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...(clientCode ? { client_code: clientCode } : {}), tx_hex: hex }),
-        }, resolved),
+        }, resolved, Boolean(clientCode)),
       );
     if (result.message.toLowerCase() !== transactionId(hex))
       throw new Error("Miner transaction hash mismatch");
