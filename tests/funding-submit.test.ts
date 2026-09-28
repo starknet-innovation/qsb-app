@@ -344,11 +344,21 @@ describe("Slipstream deposit transport", () => {
   });
 
   it("redacts only what a request sent, so a read's error text stays intact", async () => {
-    // A (pathologically) short code that appears in MARA's "not found" answer.
-    const miner = new Slipstream("https://slipstream.mara.com", async () => ({ clientCode: "found" }));
+    // Reads never send the client code, so their error text keeps it, even at full length.
+    const miner = new Slipstream("https://slipstream.mara.com", async () => ({ clientCode: "Transaction" }));
     const credential = await miner.credential();
     respond(400, { is_success: false, message: "Transaction not found" });
+    const readError = await miner.status("00".repeat(32), credential).catch((e) => e);
+    expect(readError.detail).toBe("Transaction not found");
+    respond(400, { is_success: false, message: "Transaction not found" });
     expect(await miner.seen("00".repeat(32), credential)).toBe(false);
+    // A submission redacts what it sent, however short, since its refusal text is stored and shown.
+    const short = new Slipstream("https://slipstream.mara.com", async () => ({ clientCode: "abc" }));
+    const shortRaw = deposit();
+    respond(400, { status: "error", message: "unknown client code abc" });
+    const refusal = await short.submitFunding(shortRaw, issueExactSubmitPermit(shortRaw), await short.credential()).catch((e) => e);
+    expect(refusal).toBeInstanceOf(MinerRejection);
+    expect(refusal.message).toBe("unknown client code [redacted]");
     // The same for a short Authorization value, which reads do send.
     const header = new Slipstream("https://slipstream.mara.com", async () => ({ authorization: "n" }));
     respond(400, { is_success: false, message: "Transaction not found" });

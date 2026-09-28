@@ -156,14 +156,15 @@ export class Slipstream {
       );
     return new MinerCredential(issuing, this.base, secret);
   }
-  /** `clientCodeSent` marks the one request whose body carries the client code. */
-  private async request(path: string, init?: RequestInit, credential?: MinerCredential, clientCodeSent = false) {
+  /** `submission` marks the transaction POST, the only request whose body carries the client code. */
+  private async request(path: string, init?: RequestInit, credential?: MinerCredential, submission = false) {
     const { authorization, clientCode } = secretFor(credential ?? (await this.credential()), this.base);
     // Redact only what this request sent, longest first, so a value can't leave fragments of
-    // another. Values shorter than REDACT_MIN are left alone: substring redaction of a few
-    // characters would rewrite unrelated text such as "Transaction not found", which seen() reads.
-    const sent = [authorization, clientCodeSent ? clientCode : undefined]
-      .filter((value): value is string => typeof value === "string" && value.length >= REDACT_MIN)
+    // another. A submission's refusal text is stored and shown but drives no logic, so everything
+    // it sent is redacted. On reads, values shorter than REDACT_MIN are left alone: redacting a few
+    // characters would rewrite text such as "Transaction not found", which seen() matches.
+    const sent = [authorization, submission ? clientCode : undefined]
+      .filter((value): value is string => Boolean(value) && (submission || value!.length >= REDACT_MIN))
       .sort((a, b) => b.length - a.length);
     const headers = new Headers(init?.headers);
     if (authorization) headers.set("Authorization", authorization);
@@ -234,7 +235,7 @@ export class Slipstream {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...(clientCode ? { client_code: clientCode } : {}), tx_hex: hex }),
-        }, resolved, Boolean(clientCode)),
+        }, resolved, true),
       );
     if (result.message.toLowerCase() !== transactionId(hex))
       throw new Error("Miner transaction hash mismatch");
