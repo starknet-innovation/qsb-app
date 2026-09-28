@@ -100,7 +100,7 @@ variable "exact_submit_enabled" {
   }
 }
 variable "slipstream_secret_arn" {
-  description = "Optional existing Secrets Manager secret qsb/slipstream, created by an administrator in this account and region with the default aws/secretsmanager key and holding {\"authorization\": \"...\"}. The API sends it as the Authorization header to MARA Slipstream only. Empty sends no credential. Terraform only references it: the value never enters state or plans."
+  description = "Optional existing Secrets Manager secret qsb/slipstream, created by an administrator in this account and region with the default aws/secretsmanager key and holding a JSON object with client_code (MARA's client code, added to the body of transaction submissions only), authorization (sent as the Authorization header) or both. Both go to MARA Slipstream only. Empty sends no credential. Terraform only references it: the value never enters state or plans."
   type        = string
   default     = ""
   validation {

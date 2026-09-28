@@ -8,7 +8,7 @@ import { ChainError, ChainNotFound, Esplora } from "../server/chain";
 import { submitFunding } from "../server/submit-funding";
 import { createApp } from "../server/app";
 import { SubmitDisabled } from "../server/submit-exact";
-import { MinerAuthenticationError, MinerHttpError, MinerRejection, Slipstream, MinerCredential } from "../server/providers";
+import { MinerAuthenticationError, MinerHttpError, MinerRejection, Slipstream, MinerCredential, parseMinerSecret } from "../server/providers";
 import { issueExactSubmitPermit } from "../server/exact-submit-permit";
 import { transactionId } from "../server/runtime/miner-inclusion";
 import { BITCOIN_NETWORK } from "../src/lib/network";
@@ -281,13 +281,106 @@ describe("Slipstream deposit transport", () => {
     expect(new Headers(fetch.mock.calls[0][1]!.headers).get("authorization")).toBe("Bearer placeholder");
   });
 
+  it("sends MARA's client code in the submission body only, never as a header or on reads", async () => {
+    const raw = deposit();
+    const miner = new Slipstream("https://slipstream.mara.com", async () => ({ clientCode: "PLACEHOLDER-CODE" }));
+    const credential = await miner.credential();
+    expect(JSON.stringify({ credential })).not.toContain("PLACEHOLDER");
+    expect(inspect(credential, { showHidden: true })).not.toContain("PLACEHOLDER");
+    const post = respond(200, { status: "success", message: transactionId(raw) });
+    await miner.submitFunding(raw, issueExactSubmitPermit(raw), credential);
+    const [, init] = post.mock.calls[0];
+    expect(JSON.parse(String(init!.body))).toEqual({ client_code: "PLACEHOLDER-CODE", tx_hex: raw });
+    expect(new Headers(init!.headers).get("authorization")).toBeNull();
+    vi.restoreAllMocks();
+    const read = respond(200, { is_success: true, submission_type: "tx_submission" });
+    await miner.status(transactionId(raw), credential);
+    await expect(miner.rates()).rejects.toThrow(); // this canned body isn't a rates answer
+    expect(read).toHaveBeenCalledTimes(2);
+    for (const [url, readInit] of read.mock.calls) {
+      expect(String(url)).not.toContain("PLACEHOLDER");
+      expect(readInit?.body).toBeUndefined();
+      // No header of any name carries the code.
+      expect([...new Headers(readInit?.headers).values()].join(" ")).not.toContain("PLACEHOLDER");
+    }
+    // A client code is never resolved for another origin.
+    await expect(new Slipstream("https://miner.example", async () => ({ clientCode: "PLACEHOLDER-CODE" })).credential())
+      .rejects.toThrow("destination is invalid");
+  });
+
+  it("sends both fields where each belongs, and a withdrawal carries the code too", async () => {
+    const raw = deposit();
+    const miner = new Slipstream("https://slipstream.mara.com", async () => ({
+      authorization: "Bearer placeholder",
+      clientCode: "PLACEHOLDER-CODE",
+    }));
+    const post = respond(200, { status: "success", message: transactionId(raw) });
+    await miner.submit(raw, issueExactSubmitPermit(raw), await miner.credential());
+    const [, init] = post.mock.calls[0];
+    expect(JSON.parse(String(init!.body))).toEqual({ client_code: "PLACEHOLDER-CODE", tx_hex: raw });
+    const headers = new Headers(init!.headers);
+    expect(headers.get("authorization")).toBe("Bearer placeholder");
+    expect([...headers.values()].join(" ")).not.toContain("PLACEHOLDER-CODE");
+  });
+
+  it("keeps the body exactly {tx_hex} without a client code", async () => {
+    const raw = deposit();
+    const miner = new Slipstream("https://slipstream.mara.com", async () => ({ authorization: "Bearer placeholder" }));
+    const post = respond(200, { status: "success", message: transactionId(raw) });
+    await miner.submitFunding(raw, issueExactSubmitPermit(raw), await miner.credential());
+    expect(String(post.mock.calls[0][1]!.body)).toBe(JSON.stringify({ tx_hex: raw }));
+  });
+
+  it("redacts the credential from the miner's error text before it's stored or shown", async () => {
+    const raw = deposit();
+    const miner = new Slipstream("https://slipstream.mara.com", async () => ({
+      authorization: "Bearer placeholder",
+      clientCode: "PLACEHOLDER-CODE",
+    }));
+    respond(400, { status: "error", message: "bad client_code PLACEHOLDER-CODE with Bearer placeholder" });
+    const error = await miner.submitFunding(raw, issueExactSubmitPermit(raw), await miner.credential()).catch((e) => e);
+    expect(error).toBeInstanceOf(MinerRejection);
+    expect(error.message).toBe("bad client_code [redacted] with [redacted]");
+  });
+
+  it("redacts only what a request sent, so a read's error text stays intact", async () => {
+    // Reads never send the client code, so their error text keeps it, even at full length.
+    const miner = new Slipstream("https://slipstream.mara.com", async () => ({ clientCode: "Transaction" }));
+    const credential = await miner.credential();
+    respond(400, { is_success: false, message: "Transaction not found" });
+    const readError = await miner.status("00".repeat(32), credential).catch((e) => e);
+    expect(readError.detail).toBe("Transaction not found");
+    respond(400, { is_success: false, message: "Transaction not found" });
+    expect(await miner.seen("00".repeat(32), credential)).toBe(false);
+    // A submission redacts what it sent, however short, since its refusal text is stored and shown.
+    const short = new Slipstream("https://slipstream.mara.com", async () => ({ clientCode: "abc" }));
+    const shortRaw = deposit();
+    respond(400, { status: "error", message: "unknown client code abc" });
+    const refusal = await short.submitFunding(shortRaw, issueExactSubmitPermit(shortRaw), await short.credential()).catch((e) => e);
+    expect(refusal).toBeInstanceOf(MinerRejection);
+    expect(refusal.message).toBe("unknown client code [redacted]");
+    // The same for a short Authorization value, which reads do send.
+    const header = new Slipstream("https://slipstream.mara.com", async () => ({ authorization: "n" }));
+    respond(400, { is_success: false, message: "Transaction not found" });
+    expect(await header.seen("00".repeat(32), await header.credential())).toBe(false);
+    // A value inside another leaves no fragment of the longer one.
+    const nested = new Slipstream("https://slipstream.mara.com", async () => ({
+      authorization: "PLACEHOLDER-CODE-LONGER",
+      clientCode: "PLACEHOLDER-CODE",
+    }));
+    const raw = deposit();
+    respond(400, { status: "error", message: "rejected PLACEHOLDER-CODE-LONGER" });
+    const error = await nested.submitFunding(raw, issueExactSubmitPermit(raw), await nested.credential()).catch((e) => e);
+    expect(error.message).toBe("rejected [redacted]");
+  });
+
   it("keeps the credential opaque and bound to its origin", async () => {
     const credential = await credentialFor("Bearer placeholder");
     expect(JSON.stringify({ credential })).not.toContain("placeholder");
     expect(inspect(credential, { showHidden: true })).not.toContain("placeholder");
     expect(Object.keys(credential)).toEqual([]);
     expect(JSON.stringify({ ...credential })).toBe("{}");
-    expect(() => new MinerCredential(Symbol("MinerCredential") as never, "https://slipstream.mara.com", "x")).toThrow(TypeError);
+    expect(() => new MinerCredential(Symbol("MinerCredential") as never, "https://slipstream.mara.com", { authorization: "x" })).toThrow(TypeError);
     const fetch = respond(200, {});
     await expect(new Slipstream("https://miner.example", async () => undefined).status("ab".repeat(32), credential))
       .rejects.toThrow("destination is invalid");
@@ -378,6 +471,17 @@ describe("Slipstream deposit transport", () => {
   it("reads MARA's 'Transaction not found' as unseen", async () => {
     respond(400, { is_success: false, message: "Transaction not found" });
     expect(await miner().seen("00".repeat(32))).toBe(false);
+  });
+});
+
+describe("miner secret", () => {
+  it("accepts a client code, an Authorization value or both, and nothing else", () => {
+    expect(parseMinerSecret('{"client_code":"PLACEHOLDER-CODE"}')).toEqual({ authorization: undefined, clientCode: "PLACEHOLDER-CODE" });
+    expect(parseMinerSecret('{"authorization":"Bearer placeholder"}')).toEqual({ authorization: "Bearer placeholder", clientCode: undefined });
+    expect(parseMinerSecret('{"authorization":"a","client_code":"b"}')).toEqual({ authorization: "a", clientCode: "b" });
+    for (const bad of ["{}", '{"client_code":""}', '{"client_code":"has space"}', '{"clientCode":"x"}',
+      '{"client_code":"x","other":1}', '{"authorization":"\\u0001"}', "not json", "", "{\"client_code\": \"PLACEHOLDER"])
+      expect(() => parseMinerSecret(bad), bad).toThrow(/^InvalidConfiguration$/);
   });
 });
 
