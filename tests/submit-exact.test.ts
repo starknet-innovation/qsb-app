@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createApp } from "../server/app";
-import { MinerAuthenticationError, Slipstream, type MinerCredential } from "../server/providers";
+import { MinerAuthenticationError, Slipstream, MinerCredential } from "../server/providers";
 import { release } from "../src/lib/model";
 import { describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
@@ -15,6 +15,9 @@ import {
 } from "../server/job-spend-record";
 import type { Job, PublicVault, Withdrawal } from "../src/lib/model";
 import { outputScript } from "../src/lib/transactions";
+/** A real, opaque credential for tests; the placeholder is not a real key. */
+const credentialFor = (authorization?: string) =>
+  new Slipstream("https://slipstream.mara.com", async () => authorization).credential();
 
 const address = btc.p2wpkh(
   hex.decode(
@@ -154,7 +157,7 @@ async function fixture() {
     .mockResolvedValue({ previousTxHex: "00", confirmations: 1 });
   const consensus = { verify: vi.fn(async () => {}) };
   const miner = {
-    credential: vi.fn(async (): Promise<MinerCredential> => ({ authorization: undefined })),
+    credential: vi.fn((): Promise<MinerCredential> => credentialFor()),
     submit: vi.fn(async (_raw: string, _permit: unknown, _credential?: MinerCredential): Promise<unknown> => ({
       accepted: true,
     })),
@@ -210,10 +213,11 @@ describe("submitExact durable one-shot submission", () => {
     expect(await f.store.get(f.pk, `TX#${f.id}`)).toBeUndefined();
     expect(((await f.store.get(f.pk, `JOB#${f.stored.id}`))?.job as { txid?: string }).txid).toBeUndefined();
     // Once the credential reads again, the same withdrawal submits exactly once, with that credential.
-    f.miner.credential.mockResolvedValueOnce({ authorization: "Bearer placeholder" });
+    const placeholder = await credentialFor("Bearer placeholder");
+    f.miner.credential.mockResolvedValueOnce(placeholder);
     expect(await submitExact(f.stored.owner, f.stored.id, f.raw, f.deps)).toEqual({ txid: f.id, status: "submitted" });
     expect(f.miner.submit).toHaveBeenCalledOnce();
-    expect(f.miner.submit).toHaveBeenCalledWith(f.raw, expect.anything(), { authorization: "Bearer placeholder" });
+    expect(f.miner.submit.mock.calls[0][2]).toBe(placeholder);
   });
   it("disabled configuration makes no chain, consensus, or miner call", async () => {
     const f = await fixture();

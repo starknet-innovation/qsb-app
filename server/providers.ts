@@ -20,8 +20,8 @@ import {
 const minerSecrets = new SecretsManagerClient({
   region: process.env.AWS_REGION,
 });
-// The service resolves this at request time. Credentials never leave the HTTP
-// transport boundary, appear in responses, or enter application logs.
+// The service resolves this at request time. The value never leaves this module: callers
+// only hold an opaque MinerCredential, and it never appears in responses or logs.
 async function minerAuthorization(): Promise<string | undefined> {
   const arn = process.env.SLIPSTREAM_SECRET_ARN;
   if (!arn) return undefined;
@@ -77,8 +77,32 @@ export const slipstreamRatesSchema = z.object({
   effective_rate: feeRate,
 });
 export class MinerAuthenticationError extends Error {}
-/** A miner credential resolved once for a submission; `undefined` sends no Authorization header. */
-export type MinerCredential = { readonly authorization: string | undefined };
+const issuing = Symbol("MinerCredential");
+const credentialValues = new WeakMap<MinerCredential, { origin: string; authorization: string | undefined }>();
+/**
+ * A miner credential resolved once for one submission, issued only by Slipstream.credential().
+ * It is opaque: the value lives in this module, so callers can't read, spread, log or serialize
+ * it, and only a request to the origin it was issued for can use it.
+ */
+export class MinerCredential {
+  constructor(key: typeof issuing, origin: string, authorization: string | undefined) {
+    if (key !== issuing) throw new TypeError("A MinerCredential is issued only by Slipstream.credential().");
+    credentialValues.set(this, { origin, authorization });
+  }
+  toJSON() {
+    return "[MinerCredential]";
+  }
+  [Symbol.for("nodejs.util.inspect.custom")]() {
+    return "MinerCredential [redacted]";
+  }
+}
+/** The Authorization header value for a request to `origin`, if the credential carries one. */
+function authorizationFor(credential: MinerCredential, origin: string) {
+  const value = credentialValues.get(credential);
+  if (!value || value.origin !== origin)
+    throw new MinerAuthenticationError("Miner credential destination is invalid.");
+  return value.authorization;
+}
 /** A non-2xx miner response. `detail` is the miner's own message, when it sent one. */
 export class MinerHttpError extends Error {
   constructor(
@@ -110,14 +134,14 @@ export class Slipstream {
       this.base === "https://teststream.mara.com"
         ? undefined
         : await this.authorization();
-    return { authorization };
-  }
-  private async request(path: string, init?: RequestInit, credential?: MinerCredential) {
-    const { authorization } = credential ?? (await this.credential());
     if (authorization && this.base !== "https://slipstream.mara.com")
       throw new MinerAuthenticationError(
         "Miner credential destination is invalid.",
       );
+    return new MinerCredential(issuing, this.base, authorization);
+  }
+  private async request(path: string, init?: RequestInit, credential?: MinerCredential) {
+    const authorization = authorizationFor(credential ?? (await this.credential()), this.base);
     const headers = new Headers(init?.headers);
     if (authorization) headers.set("Authorization", authorization);
     const response = await fetch(`${this.base}${path}`, {
@@ -144,9 +168,9 @@ export class Slipstream {
   async rates() {
     return slipstreamRatesSchema.parse(await this.request("/api/rates"));
   }
-  async status(id: string) {
+  async status(id: string, credential?: MinerCredential) {
     minerTxid.parse(id);
-    const body = await this.request(`/api/transactions/status?tx_id=${id}`);
+    const body = await this.request(`/api/transactions/status?tx_id=${id}`, undefined, credential);
     // Held but not mined: MARA knows it, so report it seen and unconfirmed.
     if (slipstreamPendingSchema.safeParse(body).success && !("transaction" in body))
       return { transaction: { txid: id.toLowerCase(), status: { confirmed: false } }, pending: true as const };
@@ -156,9 +180,9 @@ export class Slipstream {
     return result;
   }
   /** Whether the miner knows this transaction. It answers 400 "Transaction not found" for unknown ones. */
-  async seen(id: string): Promise<boolean> {
+  async seen(id: string, credential?: MinerCredential): Promise<boolean> {
     try {
-      await this.status(id);
+      await this.status(id, credential);
       return true;
     } catch (error) {
       if (error instanceof MinerHttpError && error.status === 400 && /not found/i.test(error.detail ?? ""))

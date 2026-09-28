@@ -20,7 +20,7 @@ export type FundingDependencies = {
   miner: {
     credential(): Promise<MinerCredential>;
     submitFunding(raw: string, permit: ExactSubmitPermit, credential: MinerCredential): Promise<unknown>;
-    seen(txid: string): Promise<boolean>;
+    seen(txid: string, credential: MinerCredential): Promise<boolean>;
   };
   /** Trusted server/test configuration; never a request field. */
   enabled?: boolean;
@@ -104,9 +104,10 @@ export async function submitFunding(
       );
     if (vault.status !== "submitted") return { vault, submission: "submitted" };
     fresh = false;
-    if (await miner.seen(txid)) return record(store, row, "submitted");
-    // As for a fresh deposit, a credential failure must come before any write.
+    // As for a fresh deposit, a credential failure must come before any write. One read serves
+    // this check, the POST and any refusal check.
     credential = await miner.credential();
+    if (await miner.seen(txid, credential)) return record(store, row, "submitted");
     current = await touch(store, row);
   } else {
     if (vault.status !== "unfunded")
@@ -147,7 +148,7 @@ export async function submitFunding(
       // The refusal may be for a duplicate of a concurrent retry that MARA accepted.
       let known: boolean;
       try {
-        known = await miner.seen(txid);
+        known = await miner.seen(txid, credential);
       } catch {
         return record(store, current, "uncertain");
       }
