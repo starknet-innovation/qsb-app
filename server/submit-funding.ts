@@ -26,6 +26,20 @@ export type FundingDependencies = {
 };
 const opts = { allowUnknownOutputs: true, allowUnknownInputs: true };
 
+/** Fence an in-flight rejection before exposing bytes that can be submitted manually.
+ * If cleanup wins the version race, return no bytes; the caller must refresh.
+ * Same-byte retries never clear an intent, so this fence also protects later retries.
+ */
+export async function exportFunding(store: Store, owner: string, vaultId: string): Promise<Row | undefined> {
+  const row = await store.get(`OWNER#${owner}`, `VAULT#${vaultId}`);
+  const vault = row?.vault as PublicVault | undefined;
+  if (!row || !vault?.funding || typeof row.fundingRawTxHex !== "string" || !row.fundingRawTxHex)
+    return undefined;
+  const next = { ...row, version: row.version + 1, fundingExportedAt: new Date().toISOString() };
+  await store.put(next, row.version);
+  return next;
+}
+
 /**
  * Record a signed deposit as the vault's funding intent, then submit exactly those bytes to
  * MARA Slipstream. Public relay refuses the bare QSB output, so Slipstream is the only route.

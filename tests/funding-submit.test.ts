@@ -344,6 +344,61 @@ describe("deposit routes", () => {
     return { ...f, call, submit, seen };
   }
 
+  it("protects manually exported bytes from an in-flight fresh rejection", async () => {
+    const f = await app();
+    const raw = deposit();
+    let release!: () => void;
+    let started!: () => void;
+    const ready = new Promise<void>(r => started = r);
+    f.submit.mockImplementationOnce(async () => {
+      started();
+      await new Promise<void>(r => release = r);
+      throw new MinerRejection("min relay fee not met");
+    });
+    const first = f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
+    await ready;
+    const exported = await f.call(`/vaults/${f.vault.id}/fund/signed`);
+    expect(exported.status).toBe(200);
+    expect(await exported.json()).toMatchObject({ rawTxHex: raw });
+    release();
+    expect(await (await first).json()).toMatchObject({ submission: "uncertain" });
+    expect((await f.row())!.fundingRawTxHex).toBe(raw);
+    expect((await f.row())!.fundingExportedAt).toEqual(expect.any(String));
+    const second = await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: deposit(50_000n, scriptHex, 3), amount: "50000", costAccepted: true });
+    expect(second.status).toBe(409);
+    expect(f.submit).toHaveBeenCalledTimes(1);
+    f.submit.mockRejectedValueOnce(new MinerRejection("min relay fee not met"));
+    expect(await (await f.call(`/vaults/${f.vault.id}/fund/resubmit`, {})).json()).toMatchObject({ submission: "uncertain" });
+    expect((await f.row())!.fundingRawTxHex).toBe(raw);
+  });
+
+  it("does not export stale bytes if rejection cleanup wins the write race", async () => {
+    const f = await app();
+    const raw = deposit();
+    let release!: () => void;
+    let started!: () => void;
+    const ready = new Promise<void>(r => started = r);
+    f.submit.mockImplementationOnce(async () => {
+      started();
+      await new Promise<void>(r => release = r);
+      throw new MinerRejection("min relay fee not met");
+    });
+    const first = f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
+    await ready;
+    const put = f.store.put.bind(f.store);
+    vi.spyOn(f.store, "put").mockImplementation(async (row, expected) => {
+      if (row.fundingExportedAt) {
+        release();
+        await first;
+      }
+      return put(row, expected);
+    });
+    const exported = await f.call(`/vaults/${f.vault.id}/fund/signed`);
+    expect(exported.status).toBe(409);
+    expect(await exported.text()).not.toContain(raw);
+    expect((await f.row())!.fundingRawTxHex).toBeUndefined();
+  });
+
   it("submits a signed deposit through POST /fund/submit", async () => {
     const f = await app();
     const raw = deposit();

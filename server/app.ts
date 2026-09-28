@@ -1,7 +1,7 @@
 import { deployedSolver, deployedSolverId } from "./solver-deployment";
 import { observeWithdrawal } from "./withdrawal-status";
 import { submitExact, SubmitDisabled } from "./submit-exact";
-import { submitFunding } from "./submit-funding";
+import { exportFunding, submitFunding } from "./submit-funding";
 import {
   CoreConsensus,
   ConsensusError,
@@ -407,12 +407,11 @@ export function createApp(
   app.get("/api/vaults/:id/fund/signed", async (c) => {
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")) || !(dependencies.exactSubmit ?? exactSubmitEnabled()))
       return c.json({ error: "Deposit submission is switched off." }, 503);
-    const row = await store.get(`OWNER#${c.get("owner")}`, `VAULT#${c.req.param("id")}`);
-    const vault = row?.vault as PublicVault | undefined;
-    if (!row || !vault?.funding || typeof row.fundingRawTxHex !== "string" || !row.fundingRawTxHex)
-      return c.json({ error: "This vault has no stored signed deposit." }, 404);
+    const row = await exportFunding(store, c.get("owner"), c.req.param("id"));
+    if (!row) return c.json({ error: "This vault has no stored signed deposit." }, 404);
+    const vault = row.vault as PublicVault;
     return c.json({
-      txid: vault.funding.txid,
+      txid: vault.funding!.txid,
       rawTxHex: row.fundingRawTxHex,
       status: vault.status,
       submission: row.fundingSubmission,
