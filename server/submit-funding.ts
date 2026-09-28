@@ -11,14 +11,15 @@ import {
   issueExactSubmitPermit,
   type ExactSubmitPermit,
 } from "./exact-submit-permit";
-import { MinerRejection } from "./providers";
+import { MinerRejection, type MinerCredential } from "./providers";
 import { SubmitDisabled } from "./submit-exact";
 
 export type FundingSubmission = "submitted" | "uncertain" | "rejected";
 export type FundingDependencies = {
   store: Store;
   miner: {
-    submitFunding(raw: string, permit: ExactSubmitPermit): Promise<unknown>;
+    credential(): Promise<MinerCredential>;
+    submitFunding(raw: string, permit: ExactSubmitPermit, credential: MinerCredential): Promise<unknown>;
     seen(txid: string): Promise<boolean>;
   };
   /** Trusted server/test configuration; never a request field. */
@@ -95,6 +96,7 @@ export async function submitFunding(
 
   let current: Row;
   let fresh: boolean;
+  let credential: MinerCredential;
   if (vault.funding) {
     if (vault.funding.txid !== txid || row.fundingRawTxHex !== raw)
       throw new ChainError(
@@ -103,10 +105,15 @@ export async function submitFunding(
     if (vault.status !== "submitted") return { vault, submission: "submitted" };
     fresh = false;
     if (await miner.seen(txid)) return record(store, row, "submitted");
+    // As for a fresh deposit, a credential failure must come before any write.
+    credential = await miner.credential();
     current = await touch(store, row);
   } else {
     if (vault.status !== "unfunded")
       throw new ChainError("Vault already has a funding intent. Reconcile that transaction first.");
+    // Read the miner credential before recording the intent: a failure here has sent nothing and
+    // leaves the vault unfunded, so the user can simply try again.
+    credential = await miner.credential();
     const next: Row = {
       ...row,
       version: row.version + 1,
@@ -134,7 +141,7 @@ export async function submitFunding(
   }
 
   try {
-    await miner.submitFunding(raw, issueExactSubmitPermit(raw));
+    await miner.submitFunding(raw, issueExactSubmitPermit(raw), credential);
   } catch (error) {
     if (error instanceof MinerRejection && fresh) {
       // The refusal may be for a duplicate of a concurrent retry that MARA accepted.

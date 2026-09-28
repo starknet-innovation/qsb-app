@@ -77,6 +77,8 @@ export const slipstreamRatesSchema = z.object({
   effective_rate: feeRate,
 });
 export class MinerAuthenticationError extends Error {}
+/** A miner credential resolved once for a submission; `undefined` sends no Authorization header. */
+export type MinerCredential = { readonly authorization: string | undefined };
 /** A non-2xx miner response. `detail` is the miner's own message, when it sent one. */
 export class MinerHttpError extends Error {
   constructor(
@@ -97,13 +99,21 @@ export class Slipstream {
       string | undefined
     > = minerAuthorization,
   ) {}
-  private async request(path: string, init?: RequestInit) {
+  /**
+   * Resolve the miner credential ahead of a submission. Callers read it before recording any
+   * intent, so a failure here has sent nothing, and pass it to the POST so it can't fail later.
+   */
+  async credential(): Promise<MinerCredential> {
     // Teststream is intentionally credential-free. Never resolve or forward the
     // production miner credential to a rehearsal or custom destination.
     const authorization =
       this.base === "https://teststream.mara.com"
         ? undefined
         : await this.authorization();
+    return { authorization };
+  }
+  private async request(path: string, init?: RequestInit, credential?: MinerCredential) {
+    const { authorization } = credential ?? (await this.credential());
     if (authorization && this.base !== "https://slipstream.mara.com")
       throw new MinerAuthenticationError(
         "Miner credential destination is invalid.",
@@ -157,7 +167,7 @@ export class Slipstream {
     }
   }
   /** POST exact bytes under a live permit, only to mainnet Slipstream with both switches on. */
-  private async postExact(hex: string, permit: unknown) {
+  private async postExact(hex: string, permit: unknown, credential?: MinerCredential) {
     consumeExactSubmitPermit(permit, hex);
     if (!exactSubmitEnabled()) throw new Error("ExactSubmitDisabled");
     if (this.base !== "https://slipstream.mara.com")
@@ -169,7 +179,7 @@ export class Slipstream {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tx_hex: hex }),
-        }),
+        }, credential),
       );
     if (result.message.toLowerCase() !== transactionId(hex))
       throw new Error("Miner transaction hash mismatch");
@@ -180,10 +190,10 @@ export class Slipstream {
    * Only a 400 whose body says status "error" is a refusal (MinerRejection). Any other
    * failure leaves the outcome unknown.
    */
-  async submitFunding(hex: string, permit: unknown) {
+  async submitFunding(hex: string, permit: unknown, credential?: MinerCredential) {
     if (!isExactSubmitPermit(permit)) throw new Error("ExactSubmitPermitRequired");
     try {
-      return await this.postExact(hex, permit);
+      return await this.postExact(hex, permit, credential);
     } catch (error) {
       if (error instanceof MinerHttpError && error.status === 400 && error.minerStatus === "error")
         throw new MinerRejection(error.detail ?? "The miner refused the transaction.");
@@ -208,8 +218,8 @@ export class Slipstream {
       body: JSON.stringify({ tx_hexes: [hex] }),
     });
   }
-  async submit(hex: string, permit: unknown) {
-    if (isExactSubmitPermit(permit)) return this.postExact(hex, permit);
+  async submit(hex: string, permit: unknown, credential?: MinerCredential) {
+    if (isExactSubmitPermit(permit)) return this.postExact(hex, permit, credential);
 
     // Exact spend authorization is required before any miner HTTP, including
     // the chain probe. A missing permit must not reach the network. The

@@ -20,8 +20,10 @@ SIGHASH_ALL), requires awaiting_authorization and checks both inputs are confirm
 and unspent. Core then verifies every input against real chain output scripts and
 amounts. A request cannot provide its own verdict or spend record.
 
-Before any miner request, one atomic transaction creates OWNER#/TX#txid and moves
-the job to submitted with that txid, conditional on the job and vault versions.
+Before any miner request, the miner credential, if one is configured, is read; a
+failure refuses the request with nothing written. Then one atomic transaction
+creates OWNER#/TX#txid and moves the job to submitted with that txid, conditional
+on the job and vault versions. The POST reuses the credential already read.
 The durable intent stores exact bytes, their hash (including witness), and the
 manifest. The initial outcome is uncertain. A process-local single-use permit
 then allows exactly one POST to https://slipstream.mara.com/api/transactions with

@@ -193,7 +193,7 @@ By default the API calls MARA Slipstream without credentials. To send a MARA API
 **Who can read the key.** Only API roles can read it at runtime. But anyone who can deploy runtime code can read it through such a role: `qsb-operator`, a workflow trusted by `qsb-github-deploy`, and the administrator. Share the key on that basis.
 
 **Behaviour once configured.** Every Slipstream request (rates, status, deposits and withdrawals) carries the header, and only to `https://slipstream.mara.com`. The API reads the secret on each request, so rotating the value needs no deploy.
-- If the secret can't be read or is malformed, requests stop with "Miner API credential is unavailable" before anything is sent.
+- If the secret can't be read or is malformed, requests stop with "Miner API credential is unavailable" before anything is sent. Deposits and withdrawals read it before recording their intent and reuse that value for the POST, so such a failure leaves nothing recorded and the user can simply retry.
 - If MARA answers 401 or 403, the request has already been sent, and it fails with "Miner API authorization is unavailable". Treat a deposit or withdrawal submission that fails this way as uncertain, not unsent: reconcile it, and never sign or submit a different transaction in its place.
 
 To back out, set `slipstream_secret_arn = ""` and apply; the secret itself is left alone.

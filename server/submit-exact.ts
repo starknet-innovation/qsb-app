@@ -8,6 +8,7 @@ import {
 } from "./job-spend-record";
 import { checkWithdrawal } from "./transaction-checks";
 import { transactionId } from "./runtime/miner-inclusion";
+import type { MinerCredential } from "./providers";
 import {
   exactSubmitEnabled,
   issueExactSubmitPermit,
@@ -18,7 +19,10 @@ export type SubmitDependencies = {
   store: Store;
   chain: Esplora;
   consensus: { verify(raw: string, chain: Esplora): Promise<void> };
-  miner: { submit(raw: string, permit: ExactSubmitPermit): Promise<unknown> };
+  miner: {
+    credential(): Promise<MinerCredential>;
+    submit(raw: string, permit: ExactSubmitPermit, credential: MinerCredential): Promise<unknown>;
+  };
   /** Trusted server/test configuration; never a request field. */
   enabled?: boolean;
 };
@@ -72,6 +76,9 @@ export async function submitExact(
   await checkWithdrawal(raw, vault, job, chain);
   // Every input is checked against real chain outputs by Core, before TX# exists.
   await consensus.verify(raw, chain);
+  // Read the miner credential before any intent exists: a failure here has sent nothing and leaves
+  // nothing to reconcile, so the user can simply try again.
+  const credential = await miner.credential();
   const now = new Date().toISOString();
   const intent: Row = {
     pk,
@@ -113,7 +120,7 @@ export async function submitExact(
   }
   let status = "uncertain";
   try {
-    await miner.submit(raw, issueExactSubmitPermit(raw));
+    await miner.submit(raw, issueExactSubmitPermit(raw), credential);
     status = "submitted";
   } catch {
     // HTTP errors, rejection, timeout or malformed response are never automatic retry authority.
