@@ -55,6 +55,12 @@ resource "aws_iam_role_policy" "reference" {
   role   = aws_iam_role.lambda["coordinator"].id
   policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "lambda:InvokeFunction", Resource = aws_lambda_function.reference.arn }] })
 }
+# Only the API calls MARA Slipstream, so only it may read the one miner credential, when configured.
+resource "aws_iam_role_policy" "miner_credential" {
+  count  = var.slipstream_secret_arn == "" ? 0 : 1
+  role   = aws_iam_role.lambda["api"].id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = var.slipstream_secret_arn }] })
+}
 resource "aws_iam_role_policy" "start" {
   role   = aws_iam_role.lambda["api"].id
   policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "states:StartExecution", Resource = local.workflow_arn }] })
@@ -100,7 +106,7 @@ resource "aws_lambda_function" "api" {
   memory_size                    = 512
   reserved_concurrent_executions = var.lambda_concurrency
   environment {
-    variables = { TABLE_NAME = aws_dynamodb_table.records.name, APP_ORIGIN = "https://${aws_cloudfront_distribution.web.domain_name}", QSB_EXACT_SUBMIT_ENABLED = tostring(var.exact_submit_enabled), WORKFLOW_ARN = local.workflow_arn, QSB_NETWORK = var.network, SOLVER_RELEASE_ID = local.solver_release_id, QSB_MAINNET_ENABLED = tostring(var.mainnet_enabled), QSB_REHEARSAL_ENABLED = "false" }
+    variables = merge({ TABLE_NAME = aws_dynamodb_table.records.name, APP_ORIGIN = "https://${aws_cloudfront_distribution.web.domain_name}", QSB_EXACT_SUBMIT_ENABLED = tostring(var.exact_submit_enabled), WORKFLOW_ARN = local.workflow_arn, QSB_NETWORK = var.network, SOLVER_RELEASE_ID = local.solver_release_id, QSB_MAINNET_ENABLED = tostring(var.mainnet_enabled), QSB_REHEARSAL_ENABLED = "false" }, var.slipstream_secret_arn == "" ? {} : { SLIPSTREAM_SECRET_ARN = var.slipstream_secret_arn })
   }
-  depends_on = [terraform_data.release, aws_iam_role_policy.logs, aws_iam_role_policy.records, aws_iam_role_policy.start]
+  depends_on = [terraform_data.release, aws_iam_role_policy.logs, aws_iam_role_policy.records, aws_iam_role_policy.start, aws_iam_role_policy.miner_credential]
 }

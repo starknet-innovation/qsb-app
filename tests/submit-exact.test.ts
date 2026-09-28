@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createApp } from "../server/app";
-import { Slipstream } from "../server/providers";
+import { MinerAuthenticationError, Slipstream, MinerCredential } from "../server/providers";
 import { release } from "../src/lib/model";
 import { describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
@@ -15,6 +15,9 @@ import {
 } from "../server/job-spend-record";
 import type { Job, PublicVault, Withdrawal } from "../src/lib/model";
 import { outputScript } from "../src/lib/transactions";
+/** A real, opaque credential for tests; the placeholder is not a real key. */
+const credentialFor = (authorization?: string) =>
+  new Slipstream("https://slipstream.mara.com", async () => authorization).credential();
 
 const address = btc.p2wpkh(
   hex.decode(
@@ -154,7 +157,8 @@ async function fixture() {
     .mockResolvedValue({ previousTxHex: "00", confirmations: 1 });
   const consensus = { verify: vi.fn(async () => {}) };
   const miner = {
-    submit: vi.fn(async (_raw: string, _permit: unknown): Promise<unknown> => ({
+    credential: vi.fn((): Promise<MinerCredential> => credentialFor()),
+    submit: vi.fn(async (_raw: string, _permit: unknown, _credential?: MinerCredential): Promise<unknown> => ({
       accepted: true,
     })),
   };
@@ -198,6 +202,22 @@ describe("submitExact durable one-shot submission", () => {
     ).toEqual({ txid: f.id, status: "submitted" });
     expect(f.miner.submit).toHaveBeenCalledOnce();
     expect(f.unspent).toHaveBeenCalledTimes(2);
+  });
+  it("reads the miner credential before any intent, so a failure leaves nothing to reconcile", async () => {
+    const f = await fixture();
+    f.miner.credential.mockRejectedValueOnce(
+      new MinerAuthenticationError("Miner API credential is unavailable. Contact the service operator."),
+    );
+    await expect(submitExact(f.stored.owner, f.stored.id, f.raw, f.deps)).rejects.toThrow(MinerAuthenticationError);
+    expect(f.miner.submit).not.toHaveBeenCalled();
+    expect(await f.store.get(f.pk, `TX#${f.id}`)).toBeUndefined();
+    expect(((await f.store.get(f.pk, `JOB#${f.stored.id}`))?.job as { txid?: string }).txid).toBeUndefined();
+    // Once the credential reads again, the same withdrawal submits exactly once, with that credential.
+    const placeholder = await credentialFor("Bearer placeholder");
+    f.miner.credential.mockResolvedValueOnce(placeholder);
+    expect(await submitExact(f.stored.owner, f.stored.id, f.raw, f.deps)).toEqual({ txid: f.id, status: "submitted" });
+    expect(f.miner.submit).toHaveBeenCalledOnce();
+    expect(f.miner.submit.mock.calls[0][2]).toBe(placeholder);
   });
   it("disabled configuration makes no chain, consensus, or miner call", async () => {
     const f = await fixture();

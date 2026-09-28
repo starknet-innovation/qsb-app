@@ -16,7 +16,7 @@ Recorded local evidence: [single-pipeline mock plan inventory](../docs/SINGLE-PI
 | Search control | Node.js 22 coordinator, Standard Step Functions loop and continuation; no generic retry around paid work |
 | CPU checks | Python 3.13 ARM64 reference Lambda; public inputs only |
 | Operations | Separate service roles, resource-scoped data/compute grants, 30-day log retention and failure alarms |
-| External | Existing AWS Batch endpoint and optional existing Secrets Manager ARN; no secret values in Terraform |
+| External | Existing AWS Batch endpoint and an optional administrator-created `qsb/slipstream` secret (the API's MARA Slipstream credential); no secret values in Terraform |
 
 The `provision_runtime`, `runtime_*` and cleanup-endpoint settings have been removed. No EC2 GPUs, custom DNS or certificates are needed for the default CloudFront hostname. AWS-managed public networking reaches AWS Batch. Custom domains, WAF/rate policy beyond API throttling and regional IAM/cutover review remain separate work. This is the first-deploy layout for a new account, not a migration or teardown procedure. Do not apply it to an existing supervised state: removed resources would be scheduled for destruction. Preserve any old state and infrastructure until a separately reviewed migration and teardown is authorized.
 
@@ -70,6 +70,7 @@ State is kept in the bootstrap state bucket under `qsb/main/terraform.tfstate`, 
 | `operator_principal_arns` | the `qsb-operator` role ARN | reconcile runs as `qsb-operator`; the reconcile role stays dormant |
 | `solver_release_id`, `batch_job_queue`, `batch_job_definition`, `batch_job_bucket` | the enrolled release and the `terraform/gpu` outputs | the served solver and the GPU backend |
 | `mainnet_enabled`, `exact_submit_enabled` | `false` | turned on only under #22 with explicit approval |
+| `slipstream_secret_arn` | empty, or the `qsb/slipstream` secret's ARN | the API's optional MARA Slipstream credential; see [MARA Slipstream credential](#mara-slipstream-credential) |
 
 Getting the role path wrong on the first apply means replacing the roles later, which needs an administrator again. `check-single-pipeline.py --deploy` refuses a plan that breaks the name, path, boundary or reconcile-principal rule.
 
@@ -140,7 +141,7 @@ terraform -chdir=terraform test -json -verbose > /tmp/qsb-terraform-tests.jsonl
 python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-tests.jsonl
 ```
 
-The tests use a mocked AWS provider and plan only. `check-single-pipeline.py` checks both expanded mocked plans (unconfigured preview and configured AWS Batch) or a saved real plan: exactly three application Lambdas, four service roles, one MFA-required reconciliation role, one table, one state machine and one frontend bucket, with no supervised infrastructure or secret-value resources. Counts exclude frontend objects and the separately bootstrapped GitHub OIDC/state infrastructure. They check disabled activation, persistence protection, absence of API provider credentials, no generic paid-work retry, and rejection of network/commit/partial-provider mismatches. They do not call AWS or AWS Batch and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
+The tests use a mocked AWS provider and plan only. `check-single-pipeline.py` checks the expanded mocked plans (unconfigured preview, configured AWS Batch, and configured miner credential) or a saved real plan: exactly three application Lambdas, four service roles, one MFA-required reconciliation role, one table, one state machine and one frontend bucket, with no supervised infrastructure or secret-value resources. Counts exclude frontend objects and the separately bootstrapped GitHub OIDC/state infrastructure. They check disabled activation, persistence protection, that the only secret grant is the API's read of the `qsb/slipstream` miner credential, no generic paid-work retry, and rejection of network/commit/partial-provider mismatches. They do not call AWS or AWS Batch and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
 
 References: [Lambda + HTTP API](https://developer.hashicorp.com/terraform/tutorials/aws/lambda-api-gateway), [fileset build-time semantics](https://developer.hashicorp.com/terraform/language/functions/fileset), [provider resource documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs).
 
@@ -179,6 +180,23 @@ and, when Batch is configured, regional Batch DescribeJobs/ListJobs/DescribeJobQ
 plus GetObject on the configured outputs prefix. It has no provider-secret or
 KMS decrypt grant. The administrator-managed boundary must also permit those
 actions; this stack does not change its policy.
+
+### MARA Slipstream credential
+
+By default the API calls MARA Slipstream without credentials. To send a MARA API key, in this order:
+
+1. **Boundary.** An administrator brings `qsb-runtime-boundary` in line with `main` using `ops/github-aws/update_installed.py` (plan, then `--apply`). Its `MinerCredential` statement allows `secretsmanager:GetSecretValue` on `qsb/slipstream` only, and only to runtime roles named `qsb-*-api`. Until then the API can't read the secret, whatever its own grant says.
+2. **Secret.** Neither scoped role can call Secrets Manager, so the key holder creates the secret as the administrator (today the account root). Create `qsb/slipstream` in this stack's account and region, encrypted with the default `aws/secretsmanager` key (runtime roles have no KMS grants). Its value is exactly `{"authorization": "<the Authorization header value MARA specifies>"}`, printable ASCII, with no other fields. Enter the value only in the AWS console or your own terminal: never in an issue, PR, chat, tfvars file or AI tool.
+3. **Wire it.** Set `slipstream_secret_arn` to the secret's full ARN in the private tfvars, then plan and apply as `qsb-operator` while no deposit or withdrawal is in flight. The plan adds `aws_iam_role_policy.miner_credential` and the API's `SLIPSTREAM_SECRET_ARN`, and nothing else. The variable refuses any other secret, account or region. `check-single-pipeline.py` refuses any other Secrets Manager grant, `NotAction`, wildcard action, module, JSON Terraform file, unreviewed data source or file input in the source, and checks the planned grant against the API's reference. It's a review aid against ordinary mistakes, not a sandbox: the boundary is what limits the secret to API roles.
+4. **Check.** Straight after the apply, `GET /api/rates` through the app should still return MARA's rates. If it doesn't, back out (below).
+
+**Who can read the key.** Only API roles can read it at runtime. But anyone who can deploy runtime code can read it through such a role: `qsb-operator`, a workflow trusted by `qsb-github-deploy`, and the administrator. Share the key on that basis.
+
+**Behaviour once configured.** Every Slipstream request (rates, status, deposits and withdrawals) carries the header, and only to `https://slipstream.mara.com`. The API reads the secret on each request, so rotating the value needs no deploy.
+- If the secret can't be read or is malformed, requests stop with "Miner API credential is unavailable" before anything is sent. Deposits and withdrawals read it before recording their intent and reuse that value for the POST, so such a failure leaves nothing recorded and the user can simply retry.
+- If MARA answers 401 or 403, the request has already been sent, and it fails with "Miner API authorization is unavailable". Treat a deposit or withdrawal submission that fails this way as uncertain, not unsent: reconcile it, and never sign or submit a different transaction in its place.
+
+To back out, set `slipstream_secret_arn = ""` and apply; the secret itself is left alone.
 
 ### Served solver release
 

@@ -1,3 +1,4 @@
+import { inspect } from "node:util";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
@@ -7,11 +8,14 @@ import { ChainError, ChainNotFound, Esplora } from "../server/chain";
 import { submitFunding } from "../server/submit-funding";
 import { createApp } from "../server/app";
 import { SubmitDisabled } from "../server/submit-exact";
-import { MinerHttpError, MinerRejection, Slipstream } from "../server/providers";
+import { MinerAuthenticationError, MinerHttpError, MinerRejection, Slipstream, MinerCredential } from "../server/providers";
 import { issueExactSubmitPermit } from "../server/exact-submit-permit";
 import { transactionId } from "../server/runtime/miner-inclusion";
 import { BITCOIN_NETWORK } from "../src/lib/network";
 import type { PublicVault } from "../src/lib/model";
+/** A real, opaque credential for tests; the placeholder is not a real key. */
+const credentialFor = (authorization?: string) =>
+  new Slipstream("https://slipstream.mara.com", async () => authorization).credential();
 
 // Unsigned transactions only: the server checks what a deposit pays, never its signatures
 // (MARA validates those), so no keys or signatures are needed here.
@@ -42,8 +46,9 @@ async function setup() {
   } as PublicVault;
   await store.put({ pk: "OWNER#" + owner, sk: "VAULT#" + vault.id, version: 0, vault });
   const miner = {
-    submitFunding: vi.fn(async (raw: string) => ({ status: "success", message: transactionId(raw) })),
-    seen: vi.fn(async () => false),
+    credential: vi.fn((): Promise<MinerCredential> => credentialFor()),
+    submitFunding: vi.fn(async (raw: string, _permit?: unknown, _credential?: MinerCredential) => ({ status: "success", message: transactionId(raw) })),
+    seen: vi.fn(async (_txid: string, _credential?: MinerCredential) => false),
   };
   const row = () => store.get("OWNER#" + owner, "VAULT#" + vault.id);
   return { store, vault, miner, row, deps: { store, miner, enabled: true } };
@@ -103,9 +108,55 @@ describe("submitFunding", () => {
     expect(((await f.row())!.vault as PublicVault).funding?.txid).toBe(transactionId(raw));
     const retry = await submitFunding(owner, f.vault.id, raw.toUpperCase(), 50_000n, f.deps);
     expect(retry.submission).toBe("submitted");
-    expect(f.miner.seen).toHaveBeenCalledWith(transactionId(raw));
+    expect(f.miner.seen).toHaveBeenCalledWith(transactionId(raw), expect.any(MinerCredential));
     expect(f.miner.submitFunding).toHaveBeenCalledTimes(2);
     expect(f.miner.submitFunding.mock.calls[1][0]).toBe(raw);
+  });
+
+  it("reads the miner credential before recording anything, so a failure leaves the vault unfunded", async () => {
+    const f = await setup();
+    const raw = deposit();
+    f.miner.credential.mockRejectedValueOnce(new MinerAuthenticationError("Miner API credential is unavailable."));
+    await expect(submitFunding(owner, f.vault.id, raw, 50_000n, f.deps)).rejects.toThrow(MinerAuthenticationError);
+    expect(f.miner.submitFunding).not.toHaveBeenCalled();
+    const after = (await f.row())!;
+    expect((after.vault as PublicVault).status).toBe("unfunded");
+    expect((after.vault as PublicVault).funding).toBeUndefined();
+    expect(after.fundingRawTxHex).toBeUndefined();
+    const placeholder = await credentialFor("Bearer placeholder");
+    f.miner.credential.mockResolvedValueOnce(placeholder);
+    expect((await submitFunding(owner, f.vault.id, raw, 50_000n, f.deps)).submission).toBe("submitted");
+    expect(f.miner.submitFunding.mock.calls[0][2]).toBe(placeholder);
+  });
+
+  it("one credential read serves the POST and the refusal check", async () => {
+    const f = await setup();
+    const raw = deposit();
+    f.miner.submitFunding.mockRejectedValueOnce(new MinerRejection("min relay fee not met"));
+    expect((await submitFunding(owner, f.vault.id, raw, 50_000n, f.deps)).submission).toBe("rejected");
+    expect(f.miner.credential).toHaveBeenCalledOnce();
+    expect(f.miner.seen.mock.calls[0][1]).toBe(f.miner.submitFunding.mock.calls[0][2]);
+    // A retry reads once too, for both its seen() check and the POST.
+    f.miner.submitFunding.mockRejectedValueOnce(new Error("timeout"));
+    await submitFunding(owner, f.vault.id, raw, 50_000n, f.deps);
+    f.miner.credential.mockClear();
+    f.miner.seen.mockClear();
+    f.miner.submitFunding.mockClear();
+    await submitFunding(owner, f.vault.id, raw, 50_000n, f.deps);
+    expect(f.miner.credential).toHaveBeenCalledOnce();
+    expect(f.miner.seen.mock.calls[0][1]).toBe(f.miner.submitFunding.mock.calls[0][2]);
+  });
+
+  it("reads the credential before touching the row on a retry", async () => {
+    const f = await setup();
+    const raw = deposit();
+    f.miner.submitFunding.mockRejectedValueOnce(new Error("timeout"));
+    await submitFunding(owner, f.vault.id, raw, 50_000n, f.deps);
+    const before = (await f.row())!;
+    f.miner.credential.mockRejectedValueOnce(new MinerAuthenticationError("Miner API credential is unavailable."));
+    await expect(submitFunding(owner, f.vault.id, raw, 50_000n, f.deps)).rejects.toThrow(MinerAuthenticationError);
+    expect(f.miner.submitFunding).toHaveBeenCalledTimes(1);
+    expect((await f.row())!.version).toBe(before.version);
   });
 
   it("doesn't POST again when the miner already has the transaction", async () => {
@@ -214,6 +265,45 @@ describe("Slipstream deposit transport", () => {
     const [url, init] = fetch.mock.calls[0];
     expect(url).toBe("https://slipstream.mara.com/api/transactions");
     expect(JSON.parse(String(init!.body))).toEqual({ tx_hex: raw });
+  });
+
+  it("sends the POST with the credential resolved beforehand, without reading the secret again", async () => {
+    const raw = deposit();
+    let reads = 0;
+    const miner = new Slipstream("https://slipstream.mara.com", async () => {
+      if (reads++) throw new Error("secret unavailable");
+      return "Bearer placeholder";
+    });
+    const credential = await miner.credential();
+    const fetch = respond(200, { status: "success", message: transactionId(raw) });
+    await miner.submitFunding(raw, issueExactSubmitPermit(raw), credential);
+    expect(reads).toBe(1);
+    expect(new Headers(fetch.mock.calls[0][1]!.headers).get("authorization")).toBe("Bearer placeholder");
+  });
+
+  it("keeps the credential opaque and bound to its origin", async () => {
+    const credential = await credentialFor("Bearer placeholder");
+    expect(JSON.stringify({ credential })).not.toContain("placeholder");
+    expect(inspect(credential, { showHidden: true })).not.toContain("placeholder");
+    expect(Object.keys(credential)).toEqual([]);
+    expect(JSON.stringify({ ...credential })).toBe("{}");
+    expect(() => new MinerCredential(Symbol("MinerCredential") as never, "https://slipstream.mara.com", "x")).toThrow(TypeError);
+    const fetch = respond(200, {});
+    await expect(new Slipstream("https://miner.example", async () => undefined).status("ab".repeat(32), credential))
+      .rejects.toThrow("destination is invalid");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("never sends a credential to another miner origin", async () => {
+    const fetch = respond(200, {});
+    // Teststream never resolves the credential.
+    expect(await new Slipstream("https://teststream.mara.com", async () => "Bearer placeholder").credential())
+      .toEqual(expect.any(MinerCredential));
+    // Any other origin refuses before any HTTP, whether the credential is read then or passed in.
+    const custom = new Slipstream("https://miner.example", async () => "Bearer placeholder");
+    await expect(custom.status("ab".repeat(32))).rejects.toThrow("destination is invalid");
+    await expect(custom.rates()).rejects.toThrow("destination is invalid");
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("maps a 400 refusal to MinerRejection with MARA's message", async () => {
@@ -460,7 +550,7 @@ describe("deposit routes", () => {
     const response = await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
     expect(response.status).toBe(201);
     expect(await response.json()).toMatchObject({ submission: "submitted", vault: { status: "submitted" } });
-    expect(f.submit).toHaveBeenCalledWith(raw, expect.anything());
+    expect(f.submit).toHaveBeenCalledWith(raw, expect.anything(), expect.any(MinerCredential));
   });
 
   it("resends the stored bytes through POST /fund/resubmit, and refuses without them", async () => {
@@ -472,7 +562,7 @@ describe("deposit routes", () => {
     const response = await f.call(`/vaults/${f.vault.id}/fund/resubmit`, {});
     expect(response.status).toBe(201);
     expect(await response.json()).toMatchObject({ submission: "submitted" });
-    expect(f.submit).toHaveBeenLastCalledWith(raw, expect.anything());
+    expect(f.submit).toHaveBeenLastCalledWith(raw, expect.anything(), expect.any(MinerCredential));
   });
 
   it("GET /fund/signed returns the stored bytes with no chain lookup, and only while deposits are on", async () => {

@@ -10,6 +10,7 @@ administrator-owned qsb-runtime-boundary, the stack name must be qsb-* (not qsb-
 the reconcile role must trust only the qsb-operator role, so the scoped roles can manage the
 stack afterwards. Add --first-apply as well for an account's first apply: create-only.
 """
+import fnmatch
 import json
 from pathlib import Path
 import re
@@ -50,8 +51,112 @@ API_ENV_REFERENCES = {
     'aws_cloudfront_distribution.web', 'aws_cloudfront_distribution.web.domain_name',
     'aws_dynamodb_table.records', 'aws_dynamodb_table.records.name',
     'local.solver_release_id', 'local.workflow_arn',
-    'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network',
+    'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network', 'var.slipstream_secret_arn',
 }
+# The mocked `terraform test` plans whose expanded inventory must pass validate().
+MOCK_RUNS = {'baseline', 'configured_single_pipeline', 'miner_credential_api_only'}
+# The one secret any application role may read: the API's MARA Slipstream credential.
+MINER_SECRET = re.compile(r'^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:qsb/slipstream-[A-Za-z0-9]{6}$')
+MINER_POLICY = ('aws_iam_role_policy', 'miner_credential')
+MINER_GRANT = {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue'}
+# Data sources the stack reads; anything else (an aws_iam_policy_document, say) is unreviewed policy input.
+DATA_SOURCES = {'aws_partition', 'aws_cloudfront_cache_policy', 'aws_cloudfront_origin_request_policy'}
+# Where file-reading functions may read: the reviewed policies, build artifacts, the build manifest
+# override and the GPU spend constants.
+FILE_INPUTS = re.compile(r'(?:"\$\{path\.module\}/policies/[a-z0-9-]+\.json"|"\$\{local\.artifacts\}/'
+                         r'|var\.build_manifest_path\)|"\$\{path\.module\}/\.\./server/gpu-spend\.json")')
+
+
+def reads_secrets(action):
+    """Whether an IAM action or action pattern touches Secrets Manager, including any pattern covering a read."""
+    pattern = str(action).lower()
+    return pattern.startswith('secretsmanager:') or any(
+        fnmatch.fnmatchcase(a, pattern) for a in ('secretsmanager:getsecretvalue', 'secretsmanager:batchgetsecretvalue'))
+
+
+def as_list(value):
+    return [value] if isinstance(value, str) else list(value or [])
+
+
+def resource_blocks(text):
+    """(type, name, start, end) of each top-level resource or variable block, by brace matching."""
+    for match in re.finditer(r'^\s*(?:resource\s+"([^"]+)"|(variable))\s+"([^"]+)"\s*\{', text, re.M):
+        depth, end = 1, match.end()
+        while depth and end < len(text):
+            depth += {'{': 1, '}': -1}.get(text[end], 0)
+            end += 1
+        yield match.group(1) or match.group(2), match.group(3), match.start(), end
+
+
+def static_secret_rules(root):
+    """Source rules for secrets. Unlike plan values, source is never unknown, so these hold on every plan.
+
+    They are a review aid against ordinary mistakes, not a sandbox: deliberately assembled strings can evade
+    any source scan, which is why the runtime boundary also limits the secret to API roles."""
+    require(not list(root.glob('*.tf.json')), 'JSON Terraform files are not reviewed by this check')
+    for path in sorted(root.glob('*.tf')):
+        text = path.read_text()
+        blocks = {(kind, name): (start, end) for kind, name, start, end in resource_blocks(text)}
+        inside = lambda key, pos: key in blocks and blocks[key][0] <= pos < blocks[key][1]
+        require(not re.search(r'not_?actions?', text, re.I), f'{path.name}: NotAction is not allowed in application policies')
+        require(not re.search(r'^\s*module\s+"', text, re.M), f'{path.name}: modules are not reviewed by this check')
+        for match in re.finditer(r'^\s*data\s+"([^"]+)"', text, re.M):
+            require(match.group(1) in DATA_SOURCES, f'{path.name}: data source {match.group(1)} is not reviewed')
+        require('templatefile(' not in text, f'{path.name}: templatefile() is not reviewed by this check')
+        for match in re.finditer(r'\bfile[a-z0-9]*\(', text):
+            require(FILE_INPUTS.match(text, match.end()), f'{path.name}: {match.group(0)} reads an unreviewed input')
+        for match in re.finditer(r'secretsmanager', text, re.I):
+            require(inside(MINER_POLICY, match.start()) or inside(('variable', 'slipstream_secret_arn'), match.start()),
+                    f'{path.name}: only aws_iam_role_policy.miner_credential may mention Secrets Manager')
+        for match in re.finditer(r'SLIPSTREAM_SECRET_ARN', text):
+            require(inside(('aws_lambda_function', 'api'), match.start()),
+                    f'{path.name}: only the API Lambda may receive SLIPSTREAM_SECRET_ARN')
+        for match in re.finditer(r'var\.slipstream_secret_arn', text):
+            require(any(inside(key, match.start()) for key in
+                        (MINER_POLICY, ('aws_lambda_function', 'api'), ('variable', 'slipstream_secret_arn'))),
+                    f'{path.name}: var.slipstream_secret_arn may feed only the API and its miner credential policy')
+        for match in re.finditer(r'"([A-Za-z0-9*?-]+:[A-Za-z0-9*?]+|\*)"', text):
+            action = match.group(1)
+            if action == '*':
+                # Refuse "*" anywhere in an Action value, however the key is written: `Action = "*"`,
+                # `"Action": ["s3:X", "*"]` in a heredoc, `actions = [...]`.
+                keys = list(re.finditer(r'["\']?\bactions?\b["\']?\s*[:=]\s*', text[:match.start()], re.I))
+                require(not keys or not re.fullmatch(r'(?:\[[^\]]*)?', text[keys[-1].end():match.start()]),
+                        f'{path.name}: wildcard IAM action')
+            elif reads_secrets(action):
+                require(inside(MINER_POLICY, match.start()) and action == MINER_GRANT['Action'],
+                        f'{path.name}: {action} would grant Secrets Manager access outside the miner credential policy')
+        if MINER_POLICY in blocks:
+            start, end = blocks[MINER_POLICY]
+            body = text[start:end]
+            require(re.search(r'\brole\s*=\s*aws_iam_role\.lambda\["api"\]\.id\b', body)
+                    and re.search(r'Resource\s*=\s*var\.slipstream_secret_arn\b', body)
+                    and len(re.findall(r'\bEffect\s*=', body)) == 1,
+                    'aws_iam_role_policy.miner_credential must be one statement on the API role for '
+                    'var.slipstream_secret_arn')
+    for path in sorted((root / 'policies').glob('*.json')):
+        for statement in json.loads(path.read_text()):
+            require('NotAction' not in statement, f'policies/{path.name}: NotAction is not allowed')
+            require(not any(reads_secrets(a) for a in as_list(statement.get('Action'))),
+                    f'policies/{path.name}: Secrets Manager access is not allowed')
+
+
+def secret_grants(rows):
+    """(policy row, statement) for every known planned role-policy statement that could read a secret."""
+    grants = []
+    for row in rows:
+        if row['type'] != 'aws_iam_role_policy':
+            continue
+        document = row.get('values', {}).get('policy')
+        if not isinstance(document, str):
+            # Unknown at plan (it names a resource created in this apply): static_secret_rules covers its source.
+            require(row['name'] != 'miner_credential', 'the miner credential policy must be known at plan')
+            continue
+        for statement in as_list(json.loads(document).get('Statement')):
+            require('NotAction' not in statement, f'aws_iam_role_policy.{row["name"]}: NotAction is not allowed')
+            if any(reads_secrets(a) for a in as_list(statement.get('Action'))):
+                grants.append((row, statement))
+    return grants
 
 
 def config_env_references(configuration, name):
@@ -102,6 +207,34 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
                 'No supervised routing in application Lambda environments')
         require('AWS_BATCH_JOB_QUEUE' not in envs['api'] and 'AWS_BATCH_JOB_QUEUE' not in envs['reference'],
                 'Only coordinator may receive the AWS Batch binding reference')
+        for name in ('coordinator', 'reference'):
+            require('SLIPSTREAM_SECRET_ARN' not in envs[name], 'Only the API may receive the miner credential reference')
+        miner = [r for r in rows if r['type'] == 'aws_iam_role_policy' and r['name'] == 'miner_credential']
+        require(len(miner) <= 1, 'At most one miner credential policy')
+        grants = secret_grants(rows)
+        require(all(row['name'] == 'miner_credential' for row, _ in grants),
+                'Only the miner_credential policy may grant Secrets Manager access')
+        for row, statement in grants:
+            require({k: statement.get(k) for k in MINER_GRANT} == MINER_GRANT
+                    and isinstance(statement.get('Resource'), str) and MINER_SECRET.match(statement['Resource'])
+                    and set(statement) <= {'Sid', 'Effect', 'Action', 'Resource'},
+                    'The miner credential grant must be GetSecretValue on the qsb/slipstream secret only')
+        if miner:
+            statements = as_list(json.loads(miner[0]['values']['policy']).get('Statement'))
+            require(len(statements) == 1 and len(grants) == 1,
+                    'The miner credential policy must be exactly one Secrets Manager read')
+            api_role = next((r.get('values', {}).get('name') for r in rows
+                             if r['type'] == 'aws_iam_role' and r['name'] == 'lambda' and r.get('index') == 'api'), None)
+            owner = miner[0].get('values', {}).get('role')
+            require(not (isinstance(owner, str) and isinstance(api_role, str)) or owner == api_role,
+                    'The miner credential policy must belong to the API role')
+        if 'api' not in whole:
+            arn = envs['api'].get('SLIPSTREAM_SECRET_ARN')
+            require(bool(miner) == ('SLIPSTREAM_SECRET_ARN' in envs['api']),
+                    'The API receives the miner credential reference exactly when its read grant exists')
+            require(arn is None or MINER_SECRET.match(arn), 'SLIPSTREAM_SECRET_ARN must name the qsb/slipstream secret')
+            require(arn is None or all(statement.get('Resource') == arn for _, statement in grants),
+                    'The miner credential grant must cover exactly the secret the API is given')
         policies = [r for r in rows if r['type'] == 'aws_iam_role_policy' and r['name'] == 'batch']
         require(len(policies) == (1 if envs['coordinator'].get('AWS_BATCH_JOB_QUEUE') else 0),
                 'Exactly one AWS Batch binding policy when configured')
@@ -167,8 +300,9 @@ def module_resources(module):
 
 
 def main():
+    root = Path(__file__).resolve().parents[1]
+    static_secret_rules(root)
     if len(sys.argv) == 1:
-        root = Path(__file__).resolve().parents[1]
         rows = [{'type': kind, 'name': name}
                 for file in root.glob('*.tf')
                 for kind, name in re.findall(r'^resource\s+"([^"]+)"\s+"([^"]+)"', file.read_text(), re.M)]
@@ -192,14 +326,14 @@ def main():
             result = {'evidence': 'mock-provider-plan-inventory', 'runs': {}}
             for event in events:
                 name = event.get('@testrun')
-                if event.get('type') == 'test_plan' and name in ('baseline', 'configured_single_pipeline'):
+                if event.get('type') == 'test_plan' and name in MOCK_RUNS:
                     rows = [dict(row, values=row['change']['after'])
                             for row in event['test_plan']['resource_changes']
                             if row.get('mode') == 'managed' and row['change']['after'] is not None]
                     result['runs'][name] = validate(rows, True, None,
                                                     unknown_lambda_env(event['test_plan']['resource_changes']))
-            require(set(result['runs']) == {'baseline', 'configured_single_pipeline'},
-                    'Both baseline and configured-provider plans are required')
+            require(set(result['runs']) == MOCK_RUNS,
+                    'The baseline, configured-provider and miner-credential plans are all required')
         else:
             result = validate(module_resources(plan['planned_values']['root_module']), True, plan.get('configuration'),
                               unknown_lambda_env(plan.get('resource_changes', [])))
