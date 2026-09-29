@@ -8,7 +8,7 @@ import * as btc from "@scure/btc-signer";
 import { base64 } from "@scure/base";
 import awsRelease from "../src/lib/releases/qsb-solver-aws-v0-1-0.json";
 import { decryptRecovery } from "../src/lib/backup";
-import { withdrawalSchema, type Job } from "../src/lib/model";
+import { formatBtc, withdrawalSchema, type Job } from "../src/lib/model";
 import { loopbackTestSigner, type PendingDeposit } from "../sdk";
 import { runCli } from "../sdk/cli";
 import { API, createdVault, fundedVault, localQsb, solvedWithdrawal, wallet, world } from "./sdk-fixture";
@@ -332,6 +332,35 @@ describe("deposits.submit", () => {
 });
 
 describe("CLI outcomes", () => {
+  it("warns that --approve-txid is non-interactive, shows every value, and still needs the exact txid", async () => {
+    const s = await solvedWithdrawal(passphrase);
+    const c = cli(s.w, s.owner.wif);
+    writeFileSync(c.file("withdrawal.json"), s.backups[1]);
+    expect((await c.run("withdraw", "assemble", s.job.id, "--backup", "withdrawal.json", "--out-backup", "signing.json", "--out", "signed.json")).code).toBe(0);
+    const { txid, rawTxHex } = JSON.parse(readFileSync(c.file("signed.json"), "utf8"));
+    const tx = btc.Transaction.fromRaw(Buffer.from(rawTxHex, "hex"), opts);
+    const payout = tx.getOutput(0).amount!;
+    const fee = BigInt(s.job.manifest.funding.value) + BigInt(s.job.manifest.helper.value) - payout;
+    const shown = (err: string) => {
+      expect(err).toContain("--approve-txid approves non-interactively");
+      expect(err).toContain(`Transaction ID: ${txid}`);
+      expect(err).toContain(`Destination:    ${s.destination}`);
+      expect(err).toContain(`Payout:         ${formatBtc(payout)} BTC (${payout.toLocaleString("en-US")} sats)`);
+      expect(err).toContain(`Miner fee:      ${formatBtc(fee)} BTC (${fee.toLocaleString("en-US")} sats)`);
+      expect(err).toMatch(/Fee rate: {7}\d+\.\d{2} sat\/vB over \d+ vB/);
+    };
+    const wrong = await c.run("withdraw", "submit", "--signed", "signed.json", "--approve-txid", txid.replace(/^./, (x: string) => (x === "0" ? "1" : "0")));
+    expect(wrong.code).toBe(1);
+    expect(wrong.err).toContain("not approved");
+    shown(wrong.err);
+    expect(posts(s.w, `/jobs/${s.job.id}/submit`)).toBe(0);
+    const right = await c.run("withdraw", "submit", "--signed", "signed.json", "--approve-txid", txid);
+    expect(right.code).toBe(0);
+    shown(right.err);
+    expect(right.err.indexOf("non-interactively")).toBeLessThan(right.err.indexOf("submitted:"));
+    expect(posts(s.w, `/jobs/${s.job.id}/submit`)).toBe(1);
+  }, 120000);
+
   it("exits non-zero while a deposit's outcome is unclear, and says when a resume wrote no backup", async () => {
     const w = world();
     const owner = wallet(w.chain);

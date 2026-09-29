@@ -100,7 +100,9 @@ npm run qsb -- withdraw submit --signed signed.json   # shows the transaction; t
 
 `npm run qsb -- --help` lists every command and option. Output on stdout is JSON; prompts and explanations go to stderr. Exit codes: 0 done, 1 refused, failed or not final (for example, MARA's answer was lost), 2 usage, 3 waiting for an external signature.
 
-The default signer is external: the CLI writes each request (the sign-in message to stderr and `--message-out`, PSBTs to files) and reads the signature back from stdin or `--signed-psbt`, so any wallet can sign. `withdraw submit` prints the destination, payout, fee, fee rate and transaction ID, then submits only when you type that transaction ID (or pass it as `--approve-txid` after reviewing it).
+The default signer is external: the CLI writes each request (the sign-in message to stderr and `--message-out`, PSBTs to files) and reads the signature back from stdin or `--signed-psbt`, so any wallet can sign. `withdraw submit` prints the destination, payout, fee, fee rate and transaction ID, then submits only when you type that transaction ID.
+
+`--approve-txid <txid>` answers that question in advance. It bypasses a person at the terminal, so it is meant for integrators who run their own approval gate first. The CLI still prints every value and a warning that approval is non-interactive, and it submits only if the ID matches the transaction exactly.
 
 `--signer test-key` uses a raw WIF key from `QSB_TEST_SIGNER_KEY`, for tests and local development against `npm run dev`. It refuses any API URL that isn't loopback (127.0.0.1, localhost or [::1]). With `npm run dev`, use `--api http://127.0.0.1:5173`: Vite proxies `/api`, and the challenge names that origin.
 

@@ -46,6 +46,9 @@ Withdrawals
   withdraw list | status <job> | pause <job> | resume <job>
   withdraw assemble <job> --backup <file> [--out-backup <new file>] --out <file> [--signed-psbt <file>]
   withdraw submit --signed <file> [--approve-txid <txid>]
+                  Shows the destination, payout, fee, fee rate and transaction ID, then asks you to type
+                  the ID. --approve-txid skips that question: it bypasses a person at the terminal and is
+                  meant for integrators with their own approval gate. It still submits only that exact ID.
 
 Options
   --api <url>            API origin (or QSB_API_URL)
@@ -406,7 +409,10 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
         const result = await client.withdrawals.submit(signed, {
           approve: async (review) => {
             say(reviewText(review));
-            if (values["approve-txid"] !== undefined) return values["approve-txid"];
+            if (values["approve-txid"] !== undefined) {
+              say("Warning: --approve-txid approves non-interactively; no one confirms at this terminal. It submits only if it names the transaction ID above.");
+              return values["approve-txid"];
+            }
             if (!io.interactive)
               throw new UsageError("Review the transaction above, then re-run with --approve-txid <its transaction ID>.");
             return (await prompts.line("Type the transaction ID to approve and submit it: ")).trim();
