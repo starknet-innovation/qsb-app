@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
+import { z } from "zod";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { Conflict, type Row, type Store } from "./store";
 import { apiError } from "./api-errors";
@@ -17,7 +18,8 @@ export const idempotentPosts = [
   "/jobs/:id/pause",
   "/jobs/:id/resume",
 ];
-const keyPattern = /^[A-Za-z0-9_-]{8,128}$/;
+/** The Idempotency-Key header's value. */
+export const idempotencyKey = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/);
 const retentionSeconds = 24 * 3600;
 /** Longer than the API Lambda's timeout (terraform/compute.tf), so a live request is never taken over. */
 export const leaseSeconds = 150;
@@ -54,7 +56,7 @@ export function idempotency(
   return async (c, next) => {
     const key = c.req.header("Idempotency-Key");
     if (key === undefined) return next();
-    if (!keyPattern.test(key))
+    if (!idempotencyKey.safeParse(key).success)
       return apiError(c, 400, "invalid_request", "Invalid request", {
         issues: [{ path: ["Idempotency-Key"], message: "Use 8 to 128 letters, digits, '-' or '_'." }],
       });
