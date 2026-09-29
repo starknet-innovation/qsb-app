@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
@@ -12,6 +13,7 @@ import {
   withApiErrorCode,
   type ApiErrorCode,
 } from "../server/api-errors";
+import { apiRoutes, routeErrors } from "../server/openapi";
 import { Conflict, MemoryStore } from "../server/store";
 import { ChainError, Esplora } from "../server/chain";
 import { ConsensusError } from "../server/consensus";
@@ -147,6 +149,7 @@ async function setup() {
     exactSubmit: true,
     apiKeys: false,
   };
+  const calls: { method: string; path: string }[] = [];
   const call = (
     method: "GET" | "POST",
     path: string,
@@ -154,6 +157,7 @@ async function setup() {
     // `raw` sends a body as is; `stream` sends it without a length, so bodyLimit counts it.
     options: { auth?: string | null; app?: Partial<typeof deps>; raw?: string; stream?: string } = {},
   ) => {
+    calls.push({ method: method.toLowerCase(), path: "/api" + path });
     const auth = options.auth === undefined ? token : options.auth;
     return createApp(store, { ...deps, ...options.app }).request(
       new Request("http://localhost/api" + path, {
@@ -174,7 +178,7 @@ async function setup() {
     store.put({ pk, sk: `VAULT#${vaultId}`, version: 0, vault: vault(overrides), ...extra });
   const putJob = (overrides: Partial<Job> & Record<string, unknown> = {}, extra = {}) =>
     store.put({ pk, sk: `JOB#${jobId}`, version: 0, job: job(overrides), ...extra });
-  return { store, routes, chain, miner, consensus, call, putVault, putJob };
+  return { store, routes, chain, miner, consensus, calls, call, putVault, putJob };
 }
 type Fixture = Awaited<ReturnType<typeof setup>>;
 const genesis = (f: Fixture, hash = NETWORK_CONFIG.genesisHash) =>
@@ -433,19 +437,49 @@ function where(node: ts.Node): string {
       (ts.isArrowFunction(at.initializer) || ts.isFunctionExpression(at.initializer))
     )
       return at.name.text;
-    if (ts.isCallExpression(at) && ts.isIdentifier(at.expression) && at.expression.text !== "apiError") return at.expression.text;
+    // withApiErrorCode only wraps: a site inside it belongs to the function around it.
+    if (ts.isCallExpression(at) && ts.isIdentifier(at.expression) && !["apiError", "withApiErrorCode"].includes(at.expression.text))
+      return at.expression.text;
   }
   return "module";
 }
+/** server/app.ts and the server modules it imports, directly or not, relative to server/. */
+function appModules(): string[] {
+  const seen = new Set<string>();
+  const pending = ["server/app.ts"];
+  while (pending.length) {
+    const file = pending.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    parse(file).forEachChild((node) => {
+      if (!ts.isImportDeclaration(node) || node.importClause?.isTypeOnly) return;
+      const specifier = (node.moduleSpecifier as ts.StringLiteral).text;
+      const resolved = path.posix.join(path.posix.dirname(file), `${specifier}.ts`);
+      if (specifier.startsWith(".") && resolved.startsWith("server/") && existsSync(new URL(`../${resolved}`, import.meta.url)))
+        pending.push(resolved);
+    });
+  }
+  return [...seen].map((file) => file.slice("server/".length)).sort();
+}
 /**
  * Every error site on the default routes, as "file | where | status | code | message":
- * each apiError call in app.ts, each thrown ChainError (and subclass), and each code
- * attached with withApiErrorCode in server/.
+ * each apiError call in app.ts, each code attached with withApiErrorCode, and each
+ * thrown class app.onError answers for (ChainError and its subclasses, Conflict,
+ * ConsensusError, SubmitDisabled, MinerAuthenticationError, MinerInclusionError), in
+ * app.ts and the server modules it imports.
  */
 function errorSites(): string[] {
   const sites: string[] = [];
   const chainErrors: Record<string, string> = { ChainError: "chain_error", ChainNotFound: "chain_transaction_not_found", WithdrawalConflict: "chain_error" };
-  const files = readdirSync(new URL("../server/", import.meta.url)).filter((name) => name.endsWith(".ts")).sort();
+  // The code app.onError gives each class; a MinerInclusionError's depends on its message.
+  const classCodes: Record<string, (message: string) => ApiErrorCode> = {
+    Conflict: () => "state_conflict",
+    ConsensusError: () => "consensus_rejected",
+    SubmitDisabled: () => "submit_disabled",
+    MinerAuthenticationError: () => "miner_unavailable",
+    MinerInclusionError: (message) => (message === "ExactSpendMismatch" ? "exact_spend_mismatch" : "inclusion_check_failed"),
+  };
+  const files = appModules();
   for (const name of files) {
     const file = `server/${name}`;
     const visit = (node: ts.Node) => {
@@ -460,6 +494,11 @@ function errorSites(): string[] {
         const [message, code] = node.arguments ?? [];
         const className = node.expression.getText();
         sites.push([name, where(node), className, code ? text(code) : chainErrors[className], text(message)].join(" | "));
+      }
+      if (ts.isNewExpression(node) && node.expression.getText() in classCodes) {
+        const [message] = node.arguments ?? [];
+        const className = node.expression.getText();
+        sites.push([name, where(node), className, classCodes[className](text(message)), text(message)].join(" | "));
       }
       ts.forEachChild(node, visit);
     };
@@ -526,6 +565,17 @@ const unchanged: [ApiErrorCode, number, string, (f: Fixture) => Response | Promi
     return f.call("POST", `/vaults/${vaultId}/fund/submit`, { rawTxHex: deposit(), amount: "50000", costAccepted: true }, { app: { miner } });
   }],
 ];
+
+/** The OpenAPI document lists this status and code for the route the last call reached. */
+function expectDocumented(f: Fixture, status: number, code: ApiErrorCode) {
+  const last = f.calls[f.calls.length - 1];
+  const route = apiRoutes.find(
+    (r) =>
+      r.method === last.method &&
+      new RegExp(`^${r.path.replace(/:\w+/g, "[^/]+")}$`).test(last.path),
+  );
+  expect(route && (routeErrors(route) as Record<number, readonly string[]>)[status]).toContain(code);
+}
 
 // Refusals whose status is new in this change. Each happens before any store write,
 // reservation, workflow start, chain read or miner call.
@@ -610,13 +660,16 @@ describe("API error codes", () => {
     expect(body.error).toEqual(expect.any(String));
     if (code === "invalid_request") expect(body.issues).toEqual(expect.any(Array));
     if (code === "operations_disabled") expect(body.checks).toEqual(expect.any(Array));
+    expectDocumented(f, status, code);
   });
   it.each(unchanged)("returns %s with the unchanged HTTP %i and message %j", async (code, status, error, run) => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const response = await run(await setup());
+    const f = await setup();
+    const response = await run(f);
     const body = await response.json();
     expect({ status: response.status, code: body.code, error: body.error }).toEqual({ status, code, error });
     if (status === 400) expect(body.issues).toEqual(expect.any(Array));
+    expectDocumented(f, status, code);
   });
   it("attaches a code without changing the error callers catch", async () => {
     const f = await setup();

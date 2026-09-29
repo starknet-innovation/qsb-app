@@ -16,8 +16,17 @@ export const apiKeyScopes = [
 ] as const;
 export type ApiKeyScope = (typeof apiKeyScopes)[number];
 export const maxActiveApiKeys = 10;
-const defaultDays = 30,
-  maxDays = 90;
+export const defaultApiKeyDays = 30;
+export const apiKeyRequest = z
+  .object({
+    name: z.string().trim().min(1).max(64),
+    scopes: z.array(z.enum(apiKeyScopes)).min(1).max(apiKeyScopes.length),
+    expiresInDays: z.number().int().min(1).max(90).optional(),
+  })
+  .strict();
+/** The body is optional; a missing or unparsable body counts as `{}`. */
+export const apiKeyRevokeRequest = z.object({}).strict();
+export const apiKeyIdParam = z.string().uuid();
 
 /**
  * The scope an API key needs on each authenticated route, by method and route
@@ -126,8 +135,9 @@ export async function authorizeApiKey(
   c.set("owner", row.owner as string);
 }
 
+export type ApiKeyMetadata = ReturnType<typeof metadata>;
 function metadata(row: Row, now: number) {
-  const status =
+  const status: "active" | "expired" | "revoked" =
     row.revoked === true
       ? "revoked"
       : (row.expiresAt as number) <= now
@@ -156,19 +166,7 @@ export function installApiKeyRoutes(
 ) {
   app.post("/api/api-keys", async (c) => {
     if (!enabled) return disabled(c);
-    const body = z
-      .object({
-        name: z.string().trim().min(1).max(64),
-        scopes: z.array(z.enum(apiKeyScopes)).min(1).max(apiKeyScopes.length),
-        expiresInDays: z
-          .number()
-          .int()
-          .min(1)
-          .max(maxDays)
-          .default(defaultDays),
-      })
-      .strict()
-      .parse(await c.req.json());
+    const body = apiKeyRequest.parse(await c.req.json());
     const owner = c.get("owner"),
       pk = `OWNER#${owner}`,
       now = Math.floor(Date.now() / 1000);
@@ -191,7 +189,7 @@ export function installApiKeyRoutes(
       scopes: apiKeyScopes.filter((s) => body.scopes.includes(s)),
       network: NETWORK_ID,
       createdAt: new Date(now * 1000).toISOString(),
-      expiresAt: now + body.expiresInDays * 86400,
+      expiresAt: now + (body.expiresInDays ?? defaultApiKeyDays) * 86400,
       revoked: false,
     };
     const listing: Row = {
@@ -231,10 +229,8 @@ export function installApiKeyRoutes(
     return c.json({ apiKeys: keys });
   });
   app.post("/api/api-keys/:id/revoke", async (c) => {
-    const id = z.string().uuid().parse(c.req.param("id"));
-    z.object({})
-      .strict()
-      .parse(await c.req.json().catch(() => ({})));
+    const id = apiKeyIdParam.parse(c.req.param("id"));
+    apiKeyRevokeRequest.parse(await c.req.json().catch(() => ({})));
     const now = Math.floor(Date.now() / 1000);
     const pk = `OWNER#${c.get("owner")}`,
       sk = `APIKEY#${id}`;
