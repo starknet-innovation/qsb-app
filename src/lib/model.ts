@@ -5,6 +5,15 @@ export type BatchSubmissionIdentity = {
   queue: string;
   definition: string;
 };
+/** One paid chunk submission in a parallel search. Saved before its POST; never replayed. */
+export type SearchSlot = {
+  stage: "pinning" | "round1" | "round2";
+  attempt: number;
+  batchSubmission?: BatchSubmissionIdentity;
+  submissionStartedAt: string;
+  /** Set once SubmitJob returns. A slot without one has an unknown paid outcome. */
+  runpodId?: string;
+};
 import type { SolverPin } from "./provenance";
 import { NETWORK_ID } from "./network";
 import { z } from "zod";
@@ -123,6 +132,11 @@ export type Job = {
   batchReplacementFor?: string;
   submissionStartedAt?: string;
   batchSubmission?: BatchSubmissionIdentity;
+  /** Parallel search only (workersMax > 1): the in-flight paid submissions. When present,
+   * the single-submission fields runpodId, batchSubmission and submissionStartedAt are unused. */
+  parallelSlots?: SearchSlot[];
+  /** Parallel search only: chunks of the current stage finished out of order, above `attempt`. */
+  completedAttempts?: number[];
   submissionReconciliation?: {
     kind: "provider-id" | "not-submitted";
     operator: string;

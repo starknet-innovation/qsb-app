@@ -745,7 +745,10 @@ export function createApp(
       );
     if (!["searching", "queued"].includes(job.status))
       return c.json({ error: "This job cannot be paused." }, 409);
-    if (job.status === "searching" && !job.runpodId)
+    const unknownPost = job.parallelSlots
+      ? job.parallelSlots.some((s) => !s.runpodId)
+      : !job.runpodId;
+    if (job.status === "searching" && unknownPost)
       job.error =
         "Submission outcome unknown. Reconcile compute provider before resuming.";
     job.status = "paused";

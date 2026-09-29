@@ -13,7 +13,9 @@ import { configuredCompute, computeConfigured } from "./compute-provider";
 import { release, type Job, type PublicVault } from "../src/lib/model";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { z } from "zod";
-import { searchVersion, workRange, subsetRank } from "./search-ranges";
+import { searchVersion, workRange } from "./search-ranges";
+import { candidateOutput, applyVerifiedHit } from "./candidate-output";
+import { parallelTick } from "./parallel-search";
 import { gpuSpendLimits, nextGpuReservation } from "./gpu-spend";
 import {
   HOST_HIT_CAPACITY,
@@ -21,25 +23,6 @@ import {
 } from "./runtime/coverage-ledger";
 const cpuClient = new LambdaClient({ region: process.env.AWS_REGION });
 type Event = { owner: string; jobId: string; revision: number; polls?: number };
-const candidateOutput = z.object({
-  status: z.enum(["completed", "interrupted", "failed", "exhausted"]),
-  stage: z.string(),
-  manifestHash: z.string(),
-  attempt: z.number().int(),
-  candidates: z.array(z.string().max(16384)).max(32),
-  kernelCommit: z.string().regex(/^[a-f0-9]{40}$/),
-  checkpoint: z.enum(["range-complete", "requires-verification-or-resume"]),
-  workRange: z
-    .object({
-      version: z.literal(searchVersion),
-      start: z.string().regex(/^\d+$/),
-      count: z.number().int().positive(),
-      sequence: z.number().int().optional(),
-      sequenceCount: z.number().int().optional(),
-      locktime: z.number().int().optional(),
-    })
-    .strict(),
-});
 async function cpu(payload: unknown) {
   const response = await cpuClient.send(
     new InvokeCommand({
@@ -90,6 +73,9 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     job.computeProvider = "aws-batch";
     return validationTick(event, row, store, await configuredCompute(), cpu);
   }
+  // More than one GPU per withdrawal, or a job already carrying parallel slots.
+  if (gpuSpendLimits.workersMax > 1 || job.parallelSlots)
+    return parallelTick(event, row, store, cpu);
   const save = () =>
     store.put({ ...row, version: row.version + 1, job }, row.version);
   if (
@@ -332,46 +318,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       });
       if (checked.valid === true) {
         delete job.retryRequested;
-        if (job.stage === "pinning") {
-          const hit = z
-            .object({
-              sequence: z
-                .number()
-                .int()
-                .min(expectedRange.sequence!)
-                .max(
-                  expectedRange.sequence! + expectedRange.sequenceCount! - 1,
-                ),
-              locktime: z
-                .number()
-                .int()
-                .min(expectedRange.locktime!)
-                .max(1744600000 - 1),
-            })
-            .parse(checked);
-          job.solution = { ...hit, round1: [], round2: [] };
-          job.stage = "round1";
-        } else {
-          const indices = z
-            .array(z.number().int().min(0).max(149))
-            .length(9)
-            .parse(checked.indices);
-          const rank = subsetRank(indices);
-          if (
-            rank < BigInt(expectedRange.start) ||
-            rank >= BigInt(expectedRange.start) + BigInt(expectedRange.count)
-          )
-            throw new Error("CandidateOutsideAssignedRange");
-          if (!job.solution || new Set(indices).size !== 9)
-            throw new Error("InvalidReferenceResult");
-          if (job.stage === "round1") {
-            job.solution.round1 = indices;
-            job.stage = "round2";
-          } else if (job.stage === "round2") {
-            job.solution.round2 = indices;
-            job.stage = "verification";
-          } else throw new Error("UnexpectedStage");
-        }
+        applyVerifiedHit(job, checked, expectedRange);
         job.attempt = 0;
         delete job.runpodId;
         job.status =
