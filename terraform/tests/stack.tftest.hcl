@@ -288,6 +288,25 @@ run "reject_batch_binding_other_account" {
   }
   expect_failures = [var.batch_job_queue, var.batch_job_definition, var.batch_job_bucket]
 }
+run "freeze_throttles_every_function" {
+  command = plan
+  variables {
+    network            = "mainnet"
+    lambda_concurrency = 0
+  }
+  assert {
+    condition     = aws_lambda_function.api.reserved_concurrent_executions == 0 && aws_lambda_function.coordinator.reserved_concurrent_executions == 0 && aws_lambda_function.reference.reserved_concurrent_executions == 0
+    error_message = "A freeze must throttle every application function, so nothing writes the records table."
+  }
+}
+run "reject_negative_concurrency" {
+  command = plan
+  variables {
+    network            = "mainnet"
+    lambda_concurrency = -1
+  }
+  expect_failures = [var.lambda_concurrency]
+}
 run "region_is_pinned" {
   command = plan
   variables { network = "mainnet" }

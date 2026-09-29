@@ -133,9 +133,13 @@ Nothing live changes in this phase.
 
 10. **Freeze** (operator, old account).
     - Confirm the GPU queue is empty and no withdrawal or deposit is in flight.
-    - Switch the old app's mainnet switches off: set `mainnet_enabled` and `exact_submit_enabled` to false, then
-      plan, check and apply.
-    - From here, nothing writes to the old table except sign-ins.
+    - Freeze the old app: set `mainnet_enabled` and `exact_submit_enabled` to false **and `lambda_concurrency` to 0**,
+      then plan, check and apply. The switches alone don't stop writes: creating a vault and the status reads still
+      write to the table. With no concurrency, every function is throttled, so nothing reads or writes the old
+      table.
+    - Confirm the freeze: `curl -s -o /dev/null -w '%{http_code}' <old URL>/api/config` returns a throttling error
+      (429 or 5xx), not 200. From here only DynamoDB's own TTL deletes of challenges and sessions touch the old table,
+      and the copy ignores those rows.
     - Then take an on-demand backup of the old records table
       (`aws dynamodb create-backup --region eu-west-1 --table-name <name>-records --backup-name qsb-pre-move`).
 11. **Copy the data** (operator, both accounts). Use one profile per account:
@@ -164,8 +168,8 @@ Nothing live changes in this phase.
 
 ## Rollback
 
-- **Before step 13:** switch the old app back on. Its table hasn't changed since the freeze, and nothing in the new
-  stack has taken a deposit.
+- **Before step 13:** restore the old app's `lambda_concurrency` (2) and its switches, then plan and apply. Its table
+  hasn't changed since the freeze, and nothing in the new stack has taken a deposit.
 - **After step 13:** new deposits live only in the new account, so don't roll back. Fix forward. Step 14 removes
   the old services, so the old stack can't be switched on by mistake.
 
@@ -184,9 +188,10 @@ after the new stack has run a full deposit and withdrawal.
    - Then run `terraform destroy`. It removes CloudFront, the Lambdas and the roles; the old URL stops working.
 3. **Cleanup** (old account's administrator). Delete these permanently, checking each against this list first:
    - the old records table (disable deletion protection first) and its on-demand backup;
-   - the system backup DynamoDB creates automatically when a table with point-in-time recovery is deleted. It's
-     kept for 35 days in eu-west-1: find it with `aws dynamodb list-backups --region eu-west-1 --backup-type SYSTEM`
-     and delete it too;
+   - note that deleting a table with point-in-time recovery makes DynamoDB keep a system backup of it for 35 days.
+     It can't be deleted early (`DeleteBackup` removes only on-demand backups), so the old account holds QSB data
+     until then. After 35 days, confirm it has expired: `aws dynamodb list-backups --region eu-west-1 --backup-type SYSTEM`
+     should list nothing for the old table;
    - the `qsb-solver` repository;
    - the job and frontend buckets;
    - the old `qsb/slipstream` secret;

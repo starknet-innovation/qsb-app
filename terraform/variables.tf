@@ -70,11 +70,12 @@ variable "batch_job_bucket" {
   }
 }
 variable "lambda_concurrency" {
-  type    = number
-  default = 2
+  description = "Reserved concurrency for each application function. 0 freezes the stack: every function is throttled, so nothing reads or writes the records table (the region-move freeze, docs/REGION-MIGRATION.md)."
+  type        = number
+  default     = 2
   validation {
-    condition     = var.lambda_concurrency >= 1 && var.lambda_concurrency <= 10 && floor(var.lambda_concurrency) == var.lambda_concurrency
-    error_message = "Concurrency must be an integer from 1 to 10 (AWS account quota must also permit it)."
+    condition     = var.lambda_concurrency >= 0 && var.lambda_concurrency <= 10 && floor(var.lambda_concurrency) == var.lambda_concurrency
+    error_message = "Concurrency must be an integer from 0 (frozen) to 10 (AWS account quota must also permit it)."
   }
 }
 variable "alarm_actions" {

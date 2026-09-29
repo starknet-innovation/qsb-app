@@ -141,7 +141,8 @@ region = eu-west-2
 
 [sso-session qsb]
 sso_start_url = https://YOUR-PORTAL.awsapps.com/start
-sso_region = eu-west-2
+# The region hosting the organisation's Identity Center instance, which may not be eu-west-2.
+sso_region = YOUR-IDENTITY-CENTER-REGION
 ```
 
 Sign in with `aws sso login --sso-session qsb`.
