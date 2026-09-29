@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   enabled: true,
   health: vi.fn(),
@@ -7,6 +7,15 @@ const mocks = vi.hoisted(() => ({
   status: vi.fn(),
   cancel: vi.fn(),
   cpu: vi.fn(),
+  // Webhook HTTP and DNS: synthetic, never the network.
+  transport: vi.fn(async (): Promise<{ status: number }> => {
+    throw Error("Unexpected webhook request");
+  }),
+  resolve: vi.fn(async () => [{ address: "93.184.215.14", family: 4 }]),
+}));
+vi.mock("../server/webhook-transport", () => ({
+  httpsTransport: mocks.transport,
+  systemResolver: mocks.resolve,
 }));
 vi.mock("../src/lib/releases/registry.generated", async () => {
   const { servedFixture, otherFixture } = await import("./solver-fixture");
@@ -67,6 +76,9 @@ import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
+import { EVENT_SETTLE_MS, SETTLE_CAP_MS, listOwnerEvents } from "../server/owner-events";
+import { registerWebhook } from "../server/webhooks";
+import { decideAppRoleAccess } from "../server/runtime/app-role-records";
 const event = { owner: "test", jobId: "test-job", revision: 0 };
 const pk = "OWNER#test",
   sk = "JOB#test-job";
@@ -749,4 +761,76 @@ it.each(["configuration", "prepare"])("retains pending request allowance during 
   await handler(event);
   expect(((await store.get(pk, sk))!.job as Job).batchReplacementFor).toBe("qsb-prior-request");
   expect(mocks.run).not.toHaveBeenCalled();
+});
+
+describe("owner events and webhooks", () => {
+  const events = async () =>
+    (await listOwnerEvents(store, event.owner, { limit: 100 }, Date.now() + EVENT_SETTLE_MS + 1000)).events;
+  async function tick(hooked: boolean) {
+    (store as MemoryStore).rows.clear();
+    mocks.run.mockClear();
+    await seed();
+    if (hooked) await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    const result = await handler(event);
+    const { updatedAt, submissionStartedAt, ...job } = (await store.get(pk, sk))!.job as Job;
+    return { result, job, runs: mocks.run.mock.calls.length };
+  }
+
+  it("records the tick's status change once", async () => {
+    await seed();
+    await handler(event);
+    mocks.status.mockResolvedValue({ status: "IN_PROGRESS" });
+    await handler(event);
+    expect((await events()).map((e) => [e.type, e.subjectId, e.stage])).toEqual([
+      ["withdrawal.searching", event.jobId, "pinning"],
+    ]);
+  });
+
+  it.each(["throws", "hangs"])("a webhook receiver that %s changes nothing in a tick", async (mode) => {
+    mocks.transport.mockImplementation(
+      mode === "hangs" ? () => new Promise(() => {}) : async () => { throw Error("ECONNRESET"); },
+    );
+    const plain = await tick(false);
+    const started = Date.now();
+    const hooked = await tick(true);
+    expect(Date.now() - started).toBeLessThan(SETTLE_CAP_MS + 500);
+    expect(hooked).toEqual(plain);
+    expect(mocks.transport).toHaveBeenCalledTimes(1);
+    expect((await events()).map((e) => e.type)).toEqual(["withdrawal.searching"]);
+  }, 15_000);
+
+  it("a tick that throws still throws the same error after recording", async () => {
+    await seed();
+    await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    mocks.transport.mockResolvedValue({ status: 204 });
+    mocks.run.mockRejectedValueOnce(Error("lost response"));
+    await expect(handler(event)).rejects.toThrow("lost response");
+    expect((await store.get(pk, sk))!.job).toMatchObject({ status: "searching" });
+    expect(mocks.transport).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses only GetItem and PutItem on OWNER rows, as the coordinator role already allows", async () => {
+    await seed();
+    await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    mocks.transport.mockResolvedValue({ status: 500 });
+    const memory = store as MemoryStore;
+    const puts = vi.spyOn(memory, "put"),
+      gets = vi.spyOn(memory, "get");
+    const other = [vi.spyOn(memory, "list"), vi.spyOn(memory, "atomicPut"), vi.spyOn(memory, "delete")];
+    await handler(event);
+    expect(mocks.transport).toHaveBeenCalledTimes(1);
+    for (const spy of other) expect(spy).not.toHaveBeenCalled();
+    const keys = [...puts.mock.calls.map(([row]) => row.pk), ...gets.mock.calls.map(([key]) => key)];
+    expect(new Set(keys)).toEqual(new Set([pk]));
+    expect(decideAppRoleAccess("dynamodb:PutItem", [pk], "coordinator")).toBe("allow");
+    expect(decideAppRoleAccess("dynamodb:GetItem", [pk], "coordinator")).toBe("allow");
+  });
+
+  it("skips delivery when the Lambda is close to its timeout, and still records", async () => {
+    await seed();
+    await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    expect(await handler(event, { getRemainingTimeInMillis: () => 10_000 })).toMatchObject({ done: false });
+    expect(mocks.transport).not.toHaveBeenCalled();
+    expect((await events()).map((e) => e.type)).toEqual(["withdrawal.searching"]);
+  });
 });

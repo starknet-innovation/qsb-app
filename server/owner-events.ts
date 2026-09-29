@@ -93,9 +93,11 @@ function derive(row: Row, previous: string | null | undefined, at: string): Cand
 }
 
 let lastStamp = 0;
-/** Strictly increasing within this process, so one process's events keep their order. */
+/** Increasing within this process, so events written in the same millisecond keep their order. */
 function stamp() {
-  lastStamp = Math.max(Date.now(), lastStamp + 1);
+  const now = Date.now();
+  // Follow the clock if it steps back by more than a second, rather than run ahead of it.
+  lastStamp = now > lastStamp || lastStamp - now > 1000 ? now : lastStamp + 1;
   return new Date(lastStamp).toISOString();
 }
 function eventRow({ owner, event }: Candidate): Row {

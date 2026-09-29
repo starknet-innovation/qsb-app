@@ -7,6 +7,7 @@ import { Esplora } from "../server/chain";
 import { buildStoredSpendRecord } from "../server/job-spend-record";
 import type { Job } from "../src/lib/model";
 import { reconcileWithdrawal } from "../server/withdrawal-reconciliation";
+import { recordOwnerEvents } from "../server/owner-events";
 import { observeWithdrawal } from "../server/withdrawal-status";
 import { withdrawalReconciliationEnvironmentError } from "../scripts/reconcile-withdrawal";
 vi.mock("../server/withdrawal-status", () => ({ observeWithdrawal: vi.fn() }));
@@ -140,6 +141,25 @@ it("records confirmed alternate txid while preserving original bytes/id", async 
   expect((await f.store.get(f.pk, "JOB#" + f.job.id))?.job).toMatchObject({
     txid: f.job.txid,
     status: "confirmed",
+  });
+});
+it("records the operator-confirmed withdrawal as an owner event in the same transaction", async () => {
+  const f = await fixture();
+  vi.mocked(observeWithdrawal).mockResolvedValue({
+    status: "confirmed",
+    chain: { confirmed: true, confirmations: 1, outpointMatched: true, outputMatched: true },
+    miner: null,
+    alert: undefined,
+    includedTxid: f.job.txid,
+  });
+  const store = recordOwnerEvents(f.store);
+  await reconcileWithdrawal({ ...f.input, store });
+  await store.settle();
+  const [writes] = f.writes.mock.calls.at(-1)!;
+  expect(writes.map((w) => w.row.sk.split("#")[0])).toEqual(["TX", "JOB", "EVENT"]);
+  expect(writes.find((w) => w.row.sk.startsWith("EVENT#"))!.row).toMatchObject({
+    pk: f.pk,
+    event: { type: "withdrawal.confirmed", subjectId: f.job.id, status: "confirmed" },
   });
 });
 it("records foreign-spend alert rather than submitting replacement", async () => {

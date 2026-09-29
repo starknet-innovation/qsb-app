@@ -8,6 +8,15 @@ const mocks = vi.hoisted(() => ({
   status: vi.fn(),
   cancel: vi.fn(),
   cpu: vi.fn(),
+  // Webhook HTTP and DNS: synthetic, never the network.
+  transport: vi.fn(async (): Promise<{ status: number }> => {
+    throw Error("Unexpected webhook request");
+  }),
+  resolve: vi.fn(async () => [{ address: "93.184.215.14", family: 4 }]),
+}));
+vi.mock("../server/webhook-transport", () => ({
+  httpsTransport: mocks.transport,
+  systemResolver: mocks.resolve,
 }));
 vi.mock("../src/lib/releases/registry.generated", async () => {
   const { servedFixture, otherFixture } = await import("./solver-fixture");
@@ -61,6 +70,8 @@ import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job, type SearchSlot } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
+import { EVENT_SETTLE_MS, SETTLE_CAP_MS, listOwnerEvents } from "../server/owner-events";
+import { registerWebhook } from "../server/webhooks";
 
 const event = { owner: "test", jobId: "test-job", revision: 0 };
 const pk = "OWNER#test",
@@ -416,3 +427,28 @@ it("pauses as exhausted only after the last chunk of a stage has finished", asyn
   await handler(event);
   expect(await saved()).toMatchObject({ status: "paused", error: expect.stringContaining("range exhausted") });
 });
+
+it.each(["throws", "hangs"])("a webhook receiver that %s changes nothing in a parallel tick", async (mode) => {
+  mocks.transport.mockImplementation(
+    mode === "hangs" ? () => new Promise(() => {}) : async () => { throw Error("ECONNRESET"); },
+  );
+  const tick = async (hooked: boolean) => {
+    (store as MemoryStore).rows.clear();
+    mocks.run.mockClear();
+    submitted = 0;
+    await seed();
+    if (hooked) await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    const result = await handler(event);
+    const { updatedAt, parallelSlots, ...job } = await saved();
+    return { result, job, slots: parallelSlots!.map(({ submissionStartedAt, ...slot }) => slot), runs: mocks.run.mock.calls.length };
+  };
+  const plain = await tick(false);
+  const started = Date.now();
+  const hooked = await tick(true);
+  expect(Date.now() - started).toBeLessThan(SETTLE_CAP_MS + 500);
+  expect(hooked).toEqual(plain);
+  expect(plain.runs).toBe(4);
+  expect(mocks.transport).toHaveBeenCalledTimes(1);
+  const { events } = await listOwnerEvents(store, event.owner, { limit: 10 }, Date.now() + EVENT_SETTLE_MS + 1000);
+  expect(events.map((e) => e.type)).toEqual(["withdrawal.searching"]);
+}, 15_000);

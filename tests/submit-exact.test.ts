@@ -15,6 +15,7 @@ import {
 } from "../server/job-spend-record";
 import type { Job, PublicVault, Withdrawal } from "../src/lib/model";
 import { outputScript } from "../src/lib/transactions";
+import { recordOwnerEvents } from "../server/owner-events";
 /** A real, opaque credential for tests; the placeholder is not a real key. */
 const credentialFor = (authorization?: string) =>
   new Slipstream("https://slipstream.mara.com", async () => authorization).credential();
@@ -316,6 +317,25 @@ describe("submitExact durable one-shot submission", () => {
       expect(f.miner.submit).not.toHaveBeenCalled();
     },
   );
+  it("records withdrawal.submitted in the intent's transaction, before the POST, once", async () => {
+    const f = await fixture();
+    const store = recordOwnerEvents(f.store);
+    const deps = { ...f.deps, store };
+    const events = () =>
+      [...f.store.rows.values()].filter((row) => row.sk.startsWith("EVENT#")).map((row) => row.event);
+    f.miner.submit.mockImplementation(async () => {
+      expect(events()).toMatchObject([
+        { type: "withdrawal.submitted", subjectId: f.stored.id, status: "submitted" },
+      ]);
+      return { accepted: true };
+    });
+    expect(await submitExact(f.stored.owner, f.stored.id, f.raw, deps)).toEqual({ txid: f.id, status: "submitted" });
+    // A retry with the same bytes returns the existing intent and records nothing new.
+    await submitExact(f.stored.owner, f.stored.id, f.raw, deps);
+    await store.settle();
+    expect(f.miner.submit).toHaveBeenCalledOnce();
+    expect(events()).toHaveLength(1);
+  });
 });
 
 describe("authenticated exact submit route", () => {
