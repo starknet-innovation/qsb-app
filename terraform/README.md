@@ -13,7 +13,7 @@ Recorded local evidence: [single-pipeline mock plan inventory](../docs/SINGLE-PI
 | Web | Private versioned/encrypted S3 bucket, public-access block, CloudFront OAC, HTTPS distribution and security headers |
 | API | HTTP API Gateway, throttled default stage, Node.js 22 ARM64 Lambda |
 | Persistence | On-demand DynamoDB table with `pk`/`sk`, `expiresAt` TTL, point-in-time recovery and deletion protection |
-| Search control | Node.js 22 coordinator, Standard Step Functions loop and continuation; no generic retry around paid work |
+| Search control | Node.js 22 coordinator, Standard Step Functions loop and continuation; no generic retry around paid work (only a throttled coordinator invoke is retried) |
 | CPU checks | Python 3.13 ARM64 reference Lambda; public inputs only |
 | Operations | Separate service roles, resource-scoped data/compute grants, 30-day log retention and failure alarms |
 | External | Existing AWS Batch endpoint and an optional administrator-created `qsb/slipstream` secret (the API's MARA Slipstream credential); no secret values in Terraform |
@@ -71,6 +71,7 @@ State is kept in the bootstrap state bucket under `qsb/main/terraform.tfstate`, 
 | `operator_principal_arns` | the `qsb-operator` role ARN | reconcile runs as `qsb-operator`; the reconcile role stays dormant |
 | `solver_release_id`, `batch_job_queue`, `batch_job_definition`, `batch_job_bucket` | the enrolled release and the `terraform/gpu` outputs | the served solver and the GPU backend |
 | `mainnet_enabled`, `exact_submit_enabled` | `false` | turned on only under #22 with explicit approval |
+| `api_keys_enabled` | `false` | scoped API keys ([docs/API.md](../docs/API.md)); turned on only with the maintainer's explicit approval of third-party access |
 | `slipstream_secret_arn` | empty, or the `qsb/slipstream` secret's ARN | the API's optional MARA Slipstream credential; see [MARA Slipstream credential](#mara-slipstream-credential) |
 
 Getting the role path wrong on the first apply means replacing the roles later, which needs an administrator again. `check-single-pipeline.py --deploy` refuses a plan that breaks the name, path, boundary or reconcile-principal rule.
@@ -142,7 +143,7 @@ terraform -chdir=terraform test -json -verbose > /tmp/qsb-terraform-tests.jsonl
 python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-tests.jsonl
 ```
 
-The tests use a mocked AWS provider and plan only. `check-single-pipeline.py` checks the expanded mocked plans (unconfigured preview, configured AWS Batch, and configured miner credential) or a saved real plan: exactly three application Lambdas, four service roles, one MFA-required reconciliation role, one table, one state machine and one frontend bucket, with no supervised infrastructure or secret-value resources. Counts exclude frontend objects and the separately bootstrapped GitHub OIDC/state infrastructure. They check disabled activation, persistence protection, that the only secret grant is the API's read of the `qsb/slipstream` miner credential, no generic paid-work retry, and rejection of network/commit/partial-provider mismatches. They do not call AWS or AWS Batch and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
+The tests use a mocked AWS provider and plan only. `check-single-pipeline.py` checks the expanded mocked plans (unconfigured preview, configured AWS Batch, and configured miner credential) or a saved real plan: exactly three application Lambdas, four service roles, one MFA-required reconciliation role, one table, one state machine and one frontend bucket, with no supervised infrastructure or secret-value resources. Counts exclude frontend objects and the separately bootstrapped GitHub OIDC/state infrastructure. They check disabled activation, persistence protection, that the only secret grant is the API's read of the `qsb/slipstream` miner credential, no generic paid-work retry (the coordinator task retries only `Lambda.TooManyRequestsException`, and every other catchable error ends in `NeedsOperatorAttention`), and rejection of network/commit/partial-provider mismatches. They do not call AWS or AWS Batch and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
 
 References: [Lambda + HTTP API](https://developer.hashicorp.com/terraform/tutorials/aws/lambda-api-gateway), [fileset build-time semantics](https://developer.hashicorp.com/terraform/language/functions/fileset), [provider resource documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs).
 

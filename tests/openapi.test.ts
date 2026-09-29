@@ -5,9 +5,12 @@ import { createApp } from "../server/app";
 import { deployedApiApp } from "../server/lambda";
 import { API_ERROR_CODES, apiErrorCodes } from "../server/api-errors";
 import { MemoryStore } from "../server/store";
+import { routeScopes } from "../server/scoped-keys";
 import type { Esplora } from "../server/chain";
 import type { Slipstream } from "../server/providers";
+import { idempotentPosts } from "../server/idempotency";
 import {
+  acceptsIdempotencyKey,
   apiRoutes,
   errorSources,
   flaglessPattern,
@@ -73,13 +76,55 @@ describe("OpenAPI document", () => {
     // Hono's own test for middleware: a handler that takes `next`. An app.all
     // route stays in as ALL, which no documented operation matches.
     const served = inspectRoutes(deployedApiApp("mainnet", new MemoryStore()))
-      .filter((r) => !r.isMiddleware && r.method !== "OPTIONS")
-      .map((r) => `${r.method} ${openApiPath(r.path)}`);
+      .filter((r) => !r.isMiddleware && r.method !== "OPTIONS");
+    // Every route is registered once, under /api; /v1 is a rewrite and adds none.
+    for (const r of served) expect(r.path).toMatch(/^\/api\//);
+    const servedPaths = served.map(
+      (r) => `${r.method} ${openApiPath(r.path)}`,
+    );
     const documented = operations.map(
       ({ method, path }) => `${method.toUpperCase()} ${path}`,
     );
     expect(new Set(documented).size).toBe(documented.length);
-    expect(documented.sort()).toEqual([...new Set(served)].sort());
+    expect(documented.sort()).toEqual([...new Set(servedPaths)].sort());
+  });
+
+  it("serves every documented operation under each server", async () => {
+    const app = deployedApiApp("mainnet", new MemoryStore());
+    expect(document.servers.map((s: Json) => s.url)).toEqual(["/v1", "/api"]);
+    for (const { path, method } of operations)
+      for (const { url } of document.servers as Json[]) {
+        const response = await app.request(
+          `${url}${path.replace(/\{\w+\}/g, "ab".repeat(32))}`,
+          {
+            method: method.toUpperCase(),
+            headers: { "content-type": "application/json" },
+            body: method === "post" ? "{}" : undefined,
+          },
+        );
+        // Hono's plain-text 404 means no route; every documented one answers JSON.
+        expect(
+          { at: `${method} ${url}${path}`, type: response.headers.get("content-type") },
+        ).toEqual({ at: `${method} ${url}${path}`, type: expect.stringMatching(/^application\/json/) });
+      }
+  });
+
+  it("documents the Idempotency-Key header on exactly the routes that accept it", () => {
+    expect(apiRoutes.filter(acceptsIdempotencyKey).map((r) => r.path).sort()).toEqual(
+      idempotentPosts.map((path) => `/api${path}`).sort(),
+    );
+    for (const route of apiRoutes) {
+      const operation = document.paths[openApiPath(route.path)][route.method];
+      const header = ((operation.parameters ?? []) as Json[]).filter((p) => p.in === "header");
+      expect({ route: route.operationId, header: header.map((p) => p.name) }).toEqual({
+        route: route.operationId,
+        header: acceptsIdempotencyKey(route) ? ["Idempotency-Key"] : [],
+      });
+      if (acceptsIdempotencyKey(route))
+        expect(routeErrors(route)[409]).toEqual(
+          expect.arrayContaining(["idempotency_conflict", "idempotency_in_progress"]),
+        );
+    }
   });
 
   it("lists only codes from apiErrorCodes", () => {
@@ -115,19 +160,32 @@ describe("OpenAPI document", () => {
       title: expect.any(String),
       version: expect.any(String),
     });
-    expect(document.servers).toEqual([{ url: "/" }]);
+    expect(document.servers).toEqual([
+      { url: "/v1" },
+      { url: "/api", description: "webapp alias" },
+    ]);
     const schemes = Object.keys(document.components.securitySchemes);
     const ids = operations.map(({ operation }) => operation.operationId);
     expect(new Set(ids).size).toBe(ids.length);
     for (const { path, method, operation } of operations) {
-      expect(path).toMatch(/^\/api\//);
+      // Relative to the servers: no /api or /v1 prefix.
+      expect(path).toMatch(/^\/(?!api\/|v1\/)/);
       expect(["get", "post"]).toContain(method);
       expect(operation.summary).toEqual(expect.any(String));
       const templated = [...path.matchAll(/\{(\w+)\}/g)].map(([, n]) => n);
       const params = (operation.parameters ?? []) as Json[];
-      expect(params.map((p) => p.name)).toEqual(templated);
-      for (const p of params)
-        expect(p).toMatchObject({ in: "path", required: true, schema: {} });
+      const inPath = params.filter((p) => p.in === "path");
+      expect(inPath.map((p) => p.name)).toEqual(templated);
+      for (const p of inPath)
+        expect(p).toMatchObject({ required: true, schema: {} });
+      // The only other parameter is the optional Idempotency-Key header.
+      for (const p of params.filter((p) => p.in !== "path"))
+        expect(p).toMatchObject({
+          name: "Idempotency-Key",
+          in: "header",
+          required: false,
+          schema: { type: "string", pattern: expect.any(String) },
+        });
       for (const requirement of operation.security ?? [])
         for (const name of Object.keys(requirement))
           expect(schemes).toContain(name);
@@ -167,6 +225,26 @@ describe("OpenAPI document", () => {
         auth: body.code === "auth_required",
       }).toEqual({ route: route.operationId, auth: route.auth });
     }
+  });
+
+  it("gives each route the credentials and API key scope that routeScopes enforces", () => {
+    const secured: Record<string, string | null> = {};
+    for (const { path, method, operation } of operations) {
+      if (!operation.security) continue;
+      const [session, key, ...rest] = operation.security as Json[];
+      expect(session).toEqual({ session: [] });
+      expect(rest).toEqual([]);
+      if (key) expect(Object.keys(key)).toEqual(["apiKey"]);
+      if (key) expect(key.apiKey).toHaveLength(1);
+      secured[`${method.toUpperCase()} ${path}`] = key ? key.apiKey[0] : null;
+    }
+    const enforced = Object.fromEntries(
+      Object.entries(routeScopes).map(([route, scope]) => {
+        const [method, path] = route.split(" ");
+        return [`${method} ${openApiPath(path)}`, scope];
+      }),
+    );
+    expect(secured).toEqual(enforced);
   });
 
   it("lists every error site in tests/api-error-sites.json", () => {

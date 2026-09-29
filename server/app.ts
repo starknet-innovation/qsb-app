@@ -28,6 +28,7 @@ import {
   vaultConfiguration,
 } from "../src/lib/provenance";
 import { Hono } from "hono";
+import { getPath } from "hono/utils/url";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
@@ -44,6 +45,14 @@ import {
   outpoint,
 } from "../src/lib/model";
 import { Conflict, store as defaultStore, type Store } from "./store";
+import {
+  apiKeyOwner,
+  apiKeysEnabled,
+  authorizeApiKey,
+  bearerApiKey,
+  installApiKeyRoutes,
+} from "./scoped-keys";
+import { idempotency, idempotentPosts } from "./idempotency";
 import { slipstream, MinerAuthenticationError } from "./providers";
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { chain, ChainError, ChainNotFound, type Esplora } from "./chain";
@@ -104,6 +113,7 @@ export function createApp(
     miner?: typeof slipstream;
     enabled?: boolean;
     exactSubmit?: boolean;
+    apiKeys?: boolean;
     consensus?: ConsensusVerifier;
     mainnetUi?: MainnetUiOptions;
     // Trusted server wiring only; routes under /api/jobs inherit the auth middleware.
@@ -115,6 +125,8 @@ export function createApp(
     inProcessHandoff?: boolean;
     /** Injected chain reads for supervised admission. Never the process-wide client by default. */
     fundingLedger?: FundingLedger;
+    /** Also serve every route under /v1. Only the coordinator API opts in; parked supervised apps don't. */
+    versionedAlias?: boolean;
     /** Trusted test configuration; the deployment reads QSB_OWNER_* from the environment. */
     ownerLimits?: OwnerLimits;
   } = {},
@@ -122,6 +134,7 @@ export function createApp(
   const ledger = dependencies.chain || chain,
     miner = dependencies.miner || slipstream;
   const enabled = dependencies.enabled ?? transactionsEnabled;
+  const apiKeys = dependencies.apiKeys ?? apiKeysEnabled();
   const mainnetUiOptions = { ...dependencies.mainnetUi };
   const mainnetUiRoutes = { creation: false, admission: false };
   const limits = () => dependencies.ownerLimits ?? ownerLimits();
@@ -145,14 +158,19 @@ export function createApp(
       if ((e as Error).name !== "ExecutionAlreadyExists") throw e;
     }
   }
-  const app = new Hono<Env>();
+  // /v1 is the stable prefix: it routes to the same handlers and middleware as /api (docs/API.md).
+  const app = new Hono<Env>(
+    dependencies.versionedAlias === true
+      ? { getPath: (request) => getPath(request).replace(/^\/v1(?=\/|$)/, "/api") }
+      : {},
+  );
   const origin = process.env.APP_ORIGIN || "http://127.0.0.1:5173";
   app.use("*", secureHeaders());
   app.use(
     "*",
     cors({
       origin,
-      allowHeaders: ["Content-Type", "Authorization"],
+      allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
       allowMethods: ["GET", "POST", "OPTIONS"],
     }),
   );
@@ -213,7 +231,7 @@ export function createApp(
     );
   });
   app.get("/api/health", (c) => c.json({ ok: true, network: NETWORK_ID }));
-  /** The effective owner limits, never the allowlist itself. `allowlisted` is the signed-in caller's, else null.
+  /** The effective owner limits, never the allowlist itself. `allowlisted` is the caller's, by session or API key, else null.
    * Null when a limit is malformed: config stays readable while the gated routes refuse. */
   async function ownerLimitsConfig(authorization = "") {
     let current: OwnerLimits;
@@ -225,6 +243,11 @@ export function createApp(
     }
     const { allowlist, maxActiveJobs, maxGpuSeconds } = current;
     let listed: boolean | null = null;
+    const apiKey = bearerApiKey(authorization);
+    if (allowlist && apiKey) {
+      const owner = await apiKeyOwner(store, apiKey, apiKeys);
+      if (owner) listed = allowlist.has(owner);
+    }
     if (allowlist && /^Bearer [A-Za-z0-9_-]{43}$/.test(authorization)) {
       const session = await store.get(`SESSION#${hash(authorization.slice(7))}`, "AUTH");
       if (session?.network === NETWORK_ID) listed = allowlist.has(session.owner as string);
@@ -246,6 +269,7 @@ export function createApp(
       operationsEnabled: enabled,
       solverReleaseId: deployedSolverId(),
       exactSubmitEnabled: dependencies.exactSubmit ?? exactSubmitEnabled(),
+      apiKeysEnabled: apiKeys,
       billing: "not_configured",
       awsRegion: process.env.AWS_REGION || "local",
       maxBtc: null,
@@ -337,8 +361,15 @@ export function createApp(
   app.use("/api/jobs", auth);
   app.use("/api/payment-utxos", auth);
   app.use("/api/payment-input", auth);
+  app.use("/api/api-keys/*", auth);
+  app.use("/api/api-keys", auth);
+  for (const route of idempotentPosts)
+    app.post(`/api${route}`, idempotency(store, route));
   async function auth(c: any, next: () => Promise<void>) {
     const bearer = c.req.header("Authorization") || "";
+    const apiKey = bearerApiKey(bearer);
+    if (apiKey)
+      return (await authorizeApiKey(c, store, apiKey, apiKeys)) ?? next();
     if (!/^Bearer [A-Za-z0-9_-]{43}$/.test(bearer))
       return apiError(
         c,
@@ -357,6 +388,7 @@ export function createApp(
     c.set("owner", session.owner);
     await next();
   }
+  installApiKeyRoutes(app, store, apiKeys);
   app.get("/api/vaults", async (c) => {
     const rows = await store.list(`OWNER#${c.get("owner")}`, "VAULT#");
     return c.json({
@@ -1190,4 +1222,4 @@ export function createApp(
   }
   return app;
 }
-export const app = createApp();
+export const app = createApp(defaultStore, { versionedAlias: true });

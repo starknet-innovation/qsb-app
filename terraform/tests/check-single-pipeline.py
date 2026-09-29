@@ -51,7 +51,8 @@ API_ENV_REFERENCES = {
     'aws_cloudfront_distribution.web', 'aws_cloudfront_distribution.web.domain_name',
     'aws_dynamodb_table.records', 'aws_dynamodb_table.records.name',
     'local.owner_limit_env', 'local.solver_release_id', 'local.workflow_arn',
-    'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network', 'var.slipstream_secret_arn',
+    'var.api_keys_enabled', 'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network',
+    'var.slipstream_secret_arn',
 }
 # The mocked `terraform test` plans whose expanded inventory must pass validate().
 MOCK_RUNS = {'baseline', 'configured_single_pipeline', 'miner_credential_api_only'}
@@ -65,6 +66,28 @@ DATA_SOURCES = {'aws_partition', 'aws_cloudfront_cache_policy', 'aws_cloudfront_
 # override and the GPU spend constants.
 FILE_INPUTS = re.compile(r'(?:"\$\{path\.module\}/policies/[a-z0-9-]+\.json"|"\$\{local\.artifacts\}/'
                          r'|var\.build_manifest_path\)|"\$\{path\.module\}/\.\./server/gpu-spend\.json")')
+
+
+# The withdrawal workflow retries only a throttled coordinator invoke, which Lambda refused before the coordinator
+# ran. Every other catchable error, where the coordinator may have run, must end in NeedsOperatorAttention.
+COORDINATOR_RETRY_ERRORS = ['Lambda.TooManyRequestsException']
+COORDINATOR_CATCH = [{'ErrorEquals': ['States.ALL'], 'ResultPath': '$.failure', 'Next': 'NeedsOperatorAttention'}]
+
+
+def workflow_rules(rows):
+    machine = next(r for r in rows if r['type'] == 'aws_sfn_state_machine')
+    definition = machine.get('values', {}).get('definition')
+    require(isinstance(definition, str), 'the withdrawal state machine definition must be known at plan')
+    states = json.loads(definition).get('States', {})
+    task = states.get('CoordinateSearch', {})
+    retry = task.get('Retry')
+    require(isinstance(retry, list) and len(retry) == 1 and retry[0].get('ErrorEquals') == COORDINATOR_RETRY_ERRORS
+            and type(retry[0].get('MaxAttempts')) is int and 1 <= retry[0]['MaxAttempts'] <= 10,
+            'CoordinateSearch must retry only Lambda.TooManyRequestsException, a bounded number of times')
+    require(task.get('Catch') == COORDINATOR_CATCH, 'Every other CoordinateSearch error must end in NeedsOperatorAttention')
+    # A Pass or Succeed here would end an unreconciled outcome as a succeeded execution, with no failure alarm.
+    require(states.get('NeedsOperatorAttention', {}).get('Type') == 'Fail',
+            'NeedsOperatorAttention must stay a Fail state, so the execution fails and the alarm fires')
 
 
 def reads_secrets(action):
@@ -180,6 +203,7 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
     roles = [r for r in rows if r['type'] == 'aws_iam_role']
     require(len(roles) == (5 if expanded else 3) and {r['name'] for r in roles} == {'lambda', 'workflow', 'operator_reconcile'}, 'Expected only Lambda/workflow service roles and one reconciliation operator role')
     if expanded:
+        workflow_rules(rows)
         funcs = {r['name']: r for r in rows if r['type'] == 'aws_lambda_function'}
         envs = {name: dict((row.get('values', {}).get('environment') or [{}])[0].get('variables', {}) or {})
                 for name, row in funcs.items()}

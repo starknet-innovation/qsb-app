@@ -66,12 +66,39 @@ run "baseline" {
     error_message = "Workflow timeout must cover the coordinator preflight and paid submission budget."
   }
   assert {
-    condition     = !can(jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Retry)
-    error_message = "Do not add generic automatic retries around billable coordination."
+    # A throttled invoke never ran the coordinator, so it is the only error retried; the retrier is bounded.
+    condition = try(
+      length(jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Retry) == 1 &&
+      jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Retry[0].ErrorEquals == ["Lambda.TooManyRequestsException"] &&
+      jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Retry[0].MaxAttempts >= 1 &&
+      jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Retry[0].MaxAttempts <= 10,
+      false
+    )
+    error_message = "CoordinateSearch must retry only Lambda.TooManyRequestsException, a bounded number of times. Do not add generic automatic retries around billable coordination."
+  }
+  assert {
+    condition = jsonencode(jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Catch) == jsonencode([
+      { ErrorEquals = ["States.ALL"], ResultPath = "$.failure", Next = "NeedsOperatorAttention" }
+    ])
+    error_message = "Every other CoordinateSearch error, including an exhausted throttling retry, must end in NeedsOperatorAttention."
+  }
+  assert {
+    # A Pass or Succeed here would end an unreconciled outcome as a succeeded execution, with no failure alarm.
+    condition     = try(jsondecode(aws_sfn_state_machine.withdrawal.definition).States.NeedsOperatorAttention.Type == "Fail", false)
+    error_message = "NeedsOperatorAttention must stay a Fail state, so the execution fails and the workflow-failures alarm fires."
   }
   assert {
     condition     = aws_lambda_function.coordinator.environment[0].variables.GPU_WORKERS_MAX == tostring(local.gpu_spend.workersMax) && local.gpu_spend.workersMax >= 1 && local.gpu_spend.workersMax <= 16 && aws_lambda_function.coordinator.environment[0].variables.GPU_WORKERS_MIN == "0" && aws_lambda_function.coordinator.environment[0].variables.GPU_EXECUTION_TIMEOUT_MS == tostring(local.gpu_spend.executionTimeoutMs) && aws_lambda_function.coordinator.environment[0].variables.MAX_JOB_GPU_SECONDS == (tostring(local.gpu_spend.maxJobGpuSeconds)) && output.gpu_limits.workersMax == local.gpu_spend.workersMax && output.gpu_limits.workersMin == 0 && output.gpu_limits.executionTimeoutMs == local.gpu_spend.executionTimeoutMs
     error_message = "Deployed configuration must show the reviewed workersMax (1-16), workersMin=0, and the execution timeout."
+  }
+  assert {
+    condition = length(aws_cloudfront_distribution.web.ordered_cache_behavior) == 2 && alltrue([
+      for pattern in ["/api/*", "/v1/*"] : length([
+        for b in aws_cloudfront_distribution.web.ordered_cache_behavior : b
+        if b.path_pattern == pattern && b.target_origin_id == "api" && b.viewer_protocol_policy == "https-only" && toset(b.allowed_methods) == toset(["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]) && toset(b.cached_methods) == toset(["GET", "HEAD"]) && b.cache_policy_id == data.aws_cloudfront_cache_policy.caching_disabled.id && b.origin_request_policy_id == data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
+      ]) == 1
+    ])
+    error_message = "/api/* and /v1/* must both reach the API origin uncached, with the same policies."
   }
 }
 run "reject_network_mismatch" {
@@ -340,6 +367,25 @@ run "exact_submit_explicit_switch" {
   assert {
     condition     = !output.exact_submit_enabled && aws_lambda_function.api.environment[0].variables.QSB_EXACT_SUBMIT_ENABLED == "true" && !output.transactions_enabled
     error_message = "A submit request cannot enable the effective submit output while mainnet is disabled."
+  }
+}
+run "api_keys_default_off" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.QSB_API_KEYS_ENABLED == "false" && !contains(keys(aws_lambda_function.coordinator.environment[0].variables), "QSB_API_KEYS_ENABLED") && length(aws_lambda_function.reference.environment) == 0
+    error_message = "API keys must default off, on the API Lambda only."
+  }
+}
+run "api_keys_explicit_switch" {
+  command = plan
+  variables {
+    network          = "mainnet"
+    api_keys_enabled = true
+  }
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.QSB_API_KEYS_ENABLED == "true" && !contains(keys(aws_lambda_function.coordinator.environment[0].variables), "QSB_API_KEYS_ENABLED") && !output.transactions_enabled && !output.exact_submit_enabled && aws_lambda_function.api.environment[0].variables.QSB_MAINNET_ENABLED == "false" && aws_lambda_function.api.environment[0].variables.QSB_EXACT_SUBMIT_ENABLED == "false"
+    error_message = "The API key switch reaches only the API Lambda and changes no mainnet switch."
   }
 }
 run "exact_submit_reject_testnet" {

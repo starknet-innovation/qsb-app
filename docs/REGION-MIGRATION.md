@@ -148,6 +148,9 @@ Nothing live changes in this phase.
       then plan, check and apply. The switches alone don't stop writes: creating a vault and the status reads still
       write to the table. With no concurrency, every function is throttled, so nothing reads or writes the old
       table.
+    - No execution may be running before the freeze. The workflow retries a throttled coordinator call (up to 6
+      times, about 3 minutes in all), so an execution caught by the freeze would keep retrying, then stop in
+      `NeedsOperatorAttention`.
     - Concurrency 0 stops new invocations but not ones already running. So wait at least 3 minutes after the apply,
       longer than any application function's timeout (the API's 120 seconds is the longest). Then re-check that the
       state machine has no running executions and the GPU queue is empty.

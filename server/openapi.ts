@@ -27,6 +27,18 @@ import {
 import { NETWORK_ID } from "../src/lib/network";
 import { coordinatorSolvedResultSchema } from "../src/mainnet/coordinatorResult";
 import { slipstreamRatesSchema } from "./providers";
+import {
+  apiKeyIdParam,
+  apiKeyRequest,
+  apiKeyRevokeRequest,
+  apiKeyScopes,
+  defaultApiKeyDays,
+  maxActiveApiKeys,
+  routeScopes,
+  type ApiKeyMetadata,
+  type ApiKeyScope,
+} from "./scoped-keys";
+import { idempotencyKey, idempotentPosts } from "./idempotency";
 import type { Esplora } from "./chain";
 import type { mainnetUiConfig } from "./mainnetConfig";
 import type { EsploraInclusionReport } from "./runtime/miner-inclusion";
@@ -288,6 +300,29 @@ type _PaymentUtxos = Assert<
     z.infer<typeof paymentUtxosResponse>["utxos"]
   >
 >;
+const apiKeyScope = component(
+  "ApiKeyScope",
+  z.enum(apiKeyScopes),
+  "What an API key may do. `read`: every authenticated GET and the payment-input lookup. `vaults`: register and fund vaults. `withdrawals`: create, pause and resume withdrawal jobs. `submit`: submit a signed withdrawal.",
+);
+const apiKeyMetadata = component(
+  "ApiKeyMetadata",
+  z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+    scopes: z.array(apiKeyScope),
+    network: z.string(),
+    createdAt: z.string().datetime(),
+    expiresAt: z.string().datetime(),
+    revokedAt: z.string().datetime().optional(),
+    status: z.enum(["active", "expired", "revoked"]),
+  }),
+  "An API key's metadata. It never includes the key or its hash.",
+);
+type _ApiKeyMetadata = Assert<
+  Fits<ApiKeyMetadata, z.infer<typeof apiKeyMetadata>>
+>;
+const apiKeyResponse = z.object({ apiKey: apiKeyMetadata });
 const uiConfig = {
   supervisedSearch: z.object({ enabled: z.boolean(), releaseId: z.string() }),
   mainnetRecoveryEnabled: z.boolean(),
@@ -318,6 +353,10 @@ const configResponse = z.object({
     z.boolean(),
     "Whether submission to the miner is switched on.",
   ),
+  apiKeysEnabled: describe(
+    z.boolean(),
+    "Whether API keys are switched on for this deployment.",
+  ),
   billing: z.literal("not_configured"),
   awsRegion: z.string(),
   maxBtc: z.null(),
@@ -329,7 +368,7 @@ const configResponse = z.object({
         allowlist: describe(z.boolean(), "Whether an owner allowlist is set. The list itself is never returned."),
         allowlisted: describe(
           z.boolean().nullable(),
-          "Whether the signed-in caller is on the allowlist; null without a session or an allowlist.",
+          "Whether the caller, by its session or API key, is on the allowlist; null without either or without an allowlist.",
         ),
         maxActiveJobs: describe(
           z.number().int().nullable(),
@@ -394,6 +433,10 @@ export type ApiRoute = {
   operationId: string;
   summary: string;
   description?: string;
+  /**
+   * Whether it needs sign-in. Which credentials it takes, and the scope an API
+   * key needs, come from routeScopes: see `routeAuth`.
+   */
   auth: boolean;
   params?: Record<string, z.ZodType>;
   body?: z.ZodType;
@@ -591,6 +634,44 @@ const exactSubmit = source(
   }),
 );
 
+// The auth middleware's API key checks, for every authenticated route.
+const apiKeyAuth = source(
+  [
+    "scoped-keys.ts | authorizeApiKey",
+    "scoped-keys.ts | wrongNetwork",
+    "scoped-keys.ts | disabled",
+  ],
+  {
+    401: ["api_key_invalid", "api_key_revoked", "network_mismatch"],
+    403: ["api_key_not_allowed", "api_key_scope_denied"],
+    503: ["api_keys_disabled"],
+  },
+);
+const apiKeyIssue = source(["scoped-keys.ts | POST /api/api-keys"], {
+  409: ["api_key_limit_reached"],
+  503: ["api_keys_disabled"],
+});
+const apiKeyRevoke = source(
+  ["scoped-keys.ts | POST /api/api-keys/:id/revoke"],
+  { 404: ["api_key_not_found"] },
+);
+// The Idempotency-Key layer on idempotentPosts: a malformed key, a key bound to
+// another request, or one whose first request still holds its lease.
+const idempotent = source(
+  ["idempotency.ts | idempotency", "idempotency.ts | inProgress"],
+  {
+    400: ["invalid_request"],
+    409: ["idempotency_conflict", "idempotency_in_progress"],
+  },
+);
+/** Whether the route accepts an Idempotency-Key header (server/idempotency.ts). */
+export const acceptsIdempotencyKey = (route: ApiRoute) =>
+  route.method === "post" &&
+  idempotentPosts.some((path) => `/api${path}` === route.path);
+describe(
+  idempotencyKey,
+  "Optional. Names one attempt of this request for 24 hours. The same key with the same path and body replays the first settled 2xx (with `Idempotency-Replayed: true`) without running the handler; a different path or body is `idempotency_conflict`; a retry while the first still runs is `idempotency_in_progress`. Errors and `uncertain` outcomes aren't stored, so a retry runs the handler again. A new attempt needs a new key. See docs/API.md.",
+);
 // Reading the owner limits: a malformed QSB_OWNER_* value refuses the route.
 const ownerLimitsRead = source(
   ["owner-limits.ts | positive", "owner-limits.ts | gpuSeconds"],
@@ -1011,16 +1092,98 @@ export const apiRoutes: readonly ApiRoute[] = [
       409: ["job_unsupported", "intent_conflict"],
     }),
   },
+  {
+    method: "post",
+    path: "/api/api-keys",
+    operationId: "createApiKey",
+    summary: "Mint an API key for the signed-in owner",
+    description: `Wallet session only. The key is returned once; only its SHA-256 is stored. \`expiresInDays\` defaults to ${defaultApiKeyDays}. An owner can have ${maxActiveApiKeys} active keys. Refused with \`api_keys_disabled\` unless the deployment switches keys on (\`apiKeysEnabled\` in the configuration).`,
+    auth: true,
+    body: apiKeyRequest,
+    responses: {
+      201: {
+        description: "The new key and its metadata.",
+        schema: apiKeyResponse.extend({
+          key: describe(
+            z.string(),
+            "The API key, `qsb_<network>_<43 base64url characters>`, for `Authorization: Bearer <key>`. Shown only here.",
+          ),
+        }),
+      },
+    },
+    errors: merge(writes, apiKeyIssue),
+  },
+  {
+    method: "get",
+    path: "/api/api-keys",
+    operationId: "listApiKeys",
+    summary: "The owner's API keys",
+    description: "Wallet session only. Metadata only, never a key or its hash.",
+    auth: true,
+    responses: {
+      200: {
+        description: "The keys.",
+        schema: z.object({ apiKeys: z.array(apiKeyMetadata) }),
+      },
+    },
+    errors: {},
+  },
+  {
+    method: "post",
+    path: "/api/api-keys/:id/revoke",
+    operationId: "revokeApiKey",
+    summary: "Revoke an API key at once",
+    description:
+      "Wallet session only. Revoking a revoked key returns it again. Listing and revocation work while keys are switched off.",
+    auth: true,
+    params: { id: describe(apiKeyIdParam, "The API key id.") },
+    body: apiKeyRevokeRequest,
+    bodyOptional: true,
+    responses: {
+      200: { description: "The revoked key.", schema: apiKeyResponse },
+    },
+    errors: merge(writes, apiKeyRevoke),
+  },
 ];
+
+/**
+ * Who may call a route: nobody signed in, a wallet session only, or a session
+ * or an API key holding `scope`. From routeScopes, the table the auth
+ * middleware enforces.
+ */
+export function routeAuth(
+  route: ApiRoute,
+):
+  | { kind: "none" }
+  | { kind: "session" }
+  | { kind: "session-or-key"; scope: ApiKeyScope } {
+  if (!route.auth) return { kind: "none" };
+  const scope = routeScopes[`${route.method.toUpperCase()} ${route.path}`];
+  return scope ? { kind: "session-or-key", scope } : { kind: "session" };
+}
 
 /** A route's errors, including those every route of its kind can return. */
 export function routeErrors(route: ApiRoute): Errors {
+  const auth = routeAuth(route);
   return merge(
     route.errors,
     { 500: ["internal_error"] },
     route.auth ? { 401: ["auth_required", "session_expired"] } : {},
+    // Any authenticated route checks a presented API key.
+    route.auth
+      ? {
+          401: apiKeyAuth[401]!,
+          403: [
+            auth.kind === "session"
+              ? "api_key_not_allowed"
+              : "api_key_scope_denied",
+          ],
+          503: apiKeyAuth[503]!,
+        }
+      : {},
     route.method === "post" ? { 413: ["request_too_large"] } : {},
     route.body ? { 400: ["invalid_request"] } : {},
+    acceptsIdempotencyKey(route) ? idempotent : {},
   );
 }
 
@@ -1148,19 +1311,59 @@ const duration = (seconds: number) =>
     ? `${seconds / 3600} hour${seconds === 3600 ? "" : "s"}`
     : `${seconds / 60} minutes`;
 const pathOf = (operationId: string) =>
-  apiRoutes.find((route) => route.operationId === operationId)!.path;
-/** Hono's `/api/vaults/:id` is OpenAPI's `/api/vaults/{id}`. */
-export const openApiPath = (path: string) => path.replace(/:(\w+)/g, "{$1}");
+  openApiPath(apiRoutes.find((route) => route.operationId === operationId)!.path);
+/** Hono's `/api/vaults/:id` is OpenAPI's `/vaults/{id}`, under the `/v1` and `/api` servers. */
+export const openApiPath = (path: string) =>
+  path.replace(/^\/api(?=\/)/, "").replace(/:(\w+)/g, "{$1}");
+const parameter = (
+  name: string,
+  where: "path" | "header",
+  required: boolean,
+  schema: z.ZodType,
+) => {
+  const { description, ...json } = strip(
+    z.toJSONSchema(schema, { ...jsonSchemaParams, io: "input" }),
+  );
+  return { name, in: where, required, description, schema: json };
+};
+
+const securityOf = (auth: ReturnType<typeof routeAuth>) =>
+  auth.kind === "none"
+    ? {}
+    : {
+        security: [
+          { session: [] },
+          ...(auth.kind === "session-or-key" ? [{ apiKey: [auth.scope] }] : []),
+        ],
+      };
 
 function operation(route: ApiRoute) {
   const responses: Record<string, unknown> = {};
+  const keyed = acceptsIdempotencyKey(route);
   for (const [status, response] of Object.entries(route.responses))
     responses[status] = {
       description: response.description,
+      ...(keyed
+        ? {
+            headers: {
+              "Idempotency-Replayed": {
+                description:
+                  "`true` when this is a stored response replayed for an Idempotency-Key. It may be stale; read current state from the GET routes.",
+                schema: { type: "string", const: "true" },
+              },
+            },
+          }
+        : {}),
       content: {
         "application/json": { schema: ref(schemaIds.get(response.schema)!) },
       },
     };
+  const parameters = [
+    ...Object.entries(route.params ?? {}).map(([name, schema]) =>
+      parameter(name, "path", true, schema),
+    ),
+    ...(keyed ? [parameter("Idempotency-Key", "header", false, idempotencyKey)] : []),
+  ];
   const errors = routeErrors(route);
   const statuses = Object.keys(errors).map(Number) as ErrorStatus[];
   for (const status of statuses.sort((a, b) => a - b)) {
@@ -1185,23 +1388,8 @@ function operation(route: ApiRoute) {
     operationId: route.operationId,
     summary: route.summary,
     ...(route.description ? { description: route.description } : {}),
-    ...(route.auth ? { security: [{ session: [] }] } : {}),
-    ...(route.params
-      ? {
-          parameters: Object.entries(route.params).map(([name, schema]) => {
-            const { description, ...json } = strip(
-              z.toJSONSchema(schema, { ...jsonSchemaParams, io: "input" }),
-            );
-            return {
-              name,
-              in: "path",
-              required: true,
-              description,
-              schema: json,
-            };
-          }),
-        }
-      : {}),
+    ...securityOf(routeAuth(route)),
+    ...(parameters.length ? { parameters } : {}),
     ...(route.body
       ? {
           requestBody: {
@@ -1238,6 +1426,8 @@ export function openApiDocument() {
       description: [
         "The QSB Vault server's JSON API: `createApp` in `server/app.ts`, as `server/lambda.ts` serves it on Bitcoin mainnet.",
         "",
+        "Paths are relative to a server: `/v1` is the stable prefix; `/api` is the same API under the webapp's prefix.",
+        "",
         "The server coordinates; it holds no secret. QSB state generation, the recovery backup, deposit signing and withdrawal assembly run on the client.",
         "",
         "Every error is JSON with an `error` message and a stable `code` (`ApiErrorCode`). A route that doesn't exist returns a plain-text 404.",
@@ -1245,7 +1435,10 @@ export function openApiDocument() {
         "Generated by `npm run openapi` from `server/openapi.ts` and the zod schemas the handlers parse. Don't edit it by hand.",
       ].join("\n"),
     },
-    servers: [{ url: "/" }],
+    servers: [
+      { url: "/v1" },
+      { url: "/api", description: "webapp alias" },
+    ],
     paths,
     components: {
       schemas: componentSchemas(),
@@ -1261,6 +1454,17 @@ export function openApiDocument() {
             `3. \`POST ${pathOf("verifyChallenge")}\` with the \`id\` and the \`signature\`. The response has the \`token\`.`,
             "",
             `Send \`Authorization: Bearer <token>\`. A session lasts ${duration(SESSION_SECONDS)} and is bound to the signing address and this deployment's network. After that, requests return \`session_expired\`; sign in again.`,
+          ].join("\n"),
+        },
+        apiKey: {
+          type: "http",
+          scheme: "bearer",
+          description: [
+            `An API key minted with a session (\`POST ${pathOf("createApiKey")}\`). It acts for the same owner. Send \`Authorization: Bearer qsb_<network>_<43 base64url characters>\`.`,
+            "",
+            "An operation that accepts a key lists the one scope the key needs (`ApiKeyScope`). The key-management routes take a session only.",
+            "",
+            "A key works only on the network in its prefix, until it expires or is revoked. Keys are refused with `api_keys_disabled` unless the deployment switches them on (`apiKeysEnabled` in the configuration).",
           ].join("\n"),
         },
       },
