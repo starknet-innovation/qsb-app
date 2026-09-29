@@ -10,6 +10,7 @@ import { Slipstream } from "../server/providers";
 import { leaseSeconds } from "../server/idempotency";
 import { transactionId } from "../server/runtime/miner-inclusion";
 import { buildStoredSpendRecord } from "../server/job-spend-record";
+import { inventoryRows } from "../server/runtime/storage-authority";
 import { outputScript } from "../src/lib/transactions";
 import { BITCOIN_NETWORK } from "../src/lib/network";
 import type { Job, PublicVault, Withdrawal } from "../src/lib/model";
@@ -177,6 +178,8 @@ describe("Idempotency-Key", () => {
     const [row] = await f.keys();
     expect(row).toMatchObject({ pk: `OWNER#${owner}`, sk: `IDEMPOTENCY#/vaults/:id/fund/submit#${key}`, response: { status: 201, body } });
     expect(row.expiresAt).toBeGreaterThan(Date.now() / 1000 + 86400 - 60);
+    // An operational row with no credential-like fields.
+    expect(inventoryRows([row]).counts).toMatchObject({ operational: 1, unclassified: 0 });
   });
 
   it("replays a settled withdrawal submission without a second consensus check or POST", async () => {
@@ -223,6 +226,7 @@ describe("Idempotency-Key", () => {
 
   it("does not store a 5xx: the retry runs the handler", async () => {
     const f = await fixture();
+    vi.spyOn(console, "error").mockImplementation(() => {});
     f.credential.mockRejectedValueOnce(new Error("storage unavailable"));
     expect((await f.fund(deposit(), { key })).status).toBe(500);
     expect(f.submitFunding).not.toHaveBeenCalled();
@@ -257,7 +261,9 @@ describe("Idempotency-Key", () => {
       if (row.sk.startsWith("IDEMPOTENCY#") && row.response) throw new Error("storage unavailable");
       return put(row, expected);
     });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     expect((await json(await w.post({ key }))).body).toMatchObject({ status: "submitted" });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('"idempotency":"unrecorded"'));
     expect((await json(await w.post({ key }))).body.code).toBe("idempotency_in_progress");
     const now = Date.now();
     vi.spyOn(Date, "now").mockReturnValue(now + (leaseSeconds + 1) * 1000);
@@ -285,7 +291,7 @@ describe("Idempotency-Key", () => {
     const f = await fixture();
     for (const bad of ["", "short", "x".repeat(129), "has space-12345", "dots.1234567", "slash/1234567"]) {
       const vault = vaultFor(owner);
-      expect(await json(await f.call("/vaults", vault, { key: bad }))).toMatchObject({ status: 400, body: { code: "idempotency_key_invalid" } });
+      expect(await json(await f.call("/vaults", vault, { key: bad }))).toEqual({ status: 400, body: { error: "Invalid request", code: "invalid_request", issues: [{ path: ["Idempotency-Key"], message: "Use 8 to 128 letters, digits, '-' or '_'." }] } });
       expect(await f.store.get(`OWNER#${owner}`, `VAULT#${vault.id}`)).toBeUndefined();
     }
     expect(await f.keys()).toEqual([]);

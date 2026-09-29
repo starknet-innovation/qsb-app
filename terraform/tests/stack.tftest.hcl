@@ -72,6 +72,15 @@ run "baseline" {
     condition     = aws_lambda_function.coordinator.environment[0].variables.GPU_WORKERS_MAX == tostring(local.gpu_spend.workersMax) && local.gpu_spend.workersMax >= 1 && local.gpu_spend.workersMax <= 16 && aws_lambda_function.coordinator.environment[0].variables.GPU_WORKERS_MIN == "0" && aws_lambda_function.coordinator.environment[0].variables.GPU_EXECUTION_TIMEOUT_MS == tostring(local.gpu_spend.executionTimeoutMs) && aws_lambda_function.coordinator.environment[0].variables.MAX_JOB_GPU_SECONDS == (tostring(local.gpu_spend.maxJobGpuSeconds)) && output.gpu_limits.workersMax == local.gpu_spend.workersMax && output.gpu_limits.workersMin == 0 && output.gpu_limits.executionTimeoutMs == local.gpu_spend.executionTimeoutMs
     error_message = "Deployed configuration must show the reviewed workersMax (1-16), workersMin=0, and the execution timeout."
   }
+  assert {
+    condition = length(aws_cloudfront_distribution.web.ordered_cache_behavior) == 2 && alltrue([
+      for pattern in ["/api/*", "/v1/*"] : length([
+        for b in aws_cloudfront_distribution.web.ordered_cache_behavior : b
+        if b.path_pattern == pattern && b.target_origin_id == "api" && b.viewer_protocol_policy == "https-only" && toset(b.allowed_methods) == toset(["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]) && toset(b.cached_methods) == toset(["GET", "HEAD"]) && b.cache_policy_id == data.aws_cloudfront_cache_policy.caching_disabled.id && b.origin_request_policy_id == data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
+      ]) == 1
+    ])
+    error_message = "/api/* and /v1/* must both reach the API origin uncached, with the same policies."
+  }
 }
 run "reject_network_mismatch" {
   command = plan

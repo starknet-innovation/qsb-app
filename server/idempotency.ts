@@ -56,8 +56,9 @@ export function idempotency(
     if (!keyPattern.test(key))
       return c.json(
         {
-          error: "Idempotency-Key must be 8 to 128 letters, digits, '-' or '_'.",
-          code: "idempotency_key_invalid",
+          error: "Invalid request",
+          code: "invalid_request",
+          issues: [{ path: ["Idempotency-Key"], message: "Use 8 to 128 letters, digits, '-' or '_'." }],
         },
         400,
       );
@@ -120,9 +121,9 @@ export function idempotency(
     }
     if (!lease) return inProgress(leaseSeconds);
     await next();
-    const status = c.res.status,
-      body = await c.res.clone().text();
     try {
+      const status = c.res.status,
+        body = await c.res.clone().text();
       await store.put(
         {
           ...lease,
