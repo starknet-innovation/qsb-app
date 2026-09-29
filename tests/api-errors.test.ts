@@ -197,7 +197,7 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
   ["submit_disabled", 503, (f) => f.call("POST", `/vaults/${vaultId}/fund/submit`, {}, { app: { exactSubmit: false } })],
   ["vault_not_found", 404, (f) => f.call("GET", `/vaults/${other}/funding`)],
   ["network_mismatch", 409, async (f) => {
-    await f.putVault({ network: "testnet4" as never });
+    await f.putVault({ network: "testnet4" });
     return f.call("GET", `/vaults/${vaultId}/funding`);
   }],
   ["vault_not_funded", 409, async (f) => {
@@ -350,6 +350,13 @@ describe("API error codes", () => {
   it("drives every listed code, and the list has no duplicates", () => {
     expect(new Set(API_ERROR_CODES).size).toBe(API_ERROR_CODES.length);
     expect([...new Set(cases.map(([code]) => code))].sort()).toEqual([...API_ERROR_CODES].sort());
+  });
+  it("lists every code once in docs/API.md", () => {
+    const doc = readFileSync(new URL("../docs/API.md", import.meta.url), "utf8");
+    const listed = [...doc.matchAll(/^\|.*\|$/gm)].flatMap(([row]) =>
+      [...row.matchAll(/`([a-z_]+)`/g)].map(([, code]) => code),
+    );
+    expect(listed.sort()).toEqual([...API_ERROR_CODES].sort());
   });
   it("leaves no error body without a code in the default routes", () => {
     const source = readFileSync(new URL("../server/app.ts", import.meta.url), "utf8");
