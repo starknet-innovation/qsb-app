@@ -12,6 +12,7 @@ The checked-in capability limit is `providerGpuLimit: 1` in `server/mainnet-capa
 - `maxGpuWorkers`: 1 (supervised runtime; the coordinator uses `workersMax` below)
 - `minIdleWorkers`: 0
 - The coordinator path uses `server/gpu-spend.json`: `workersMax` (1–16; see [Parallel GPU search](#parallel-gpu-search)), `workersMin` 0, `executionTimeoutMs` 900000, and `maxJobGpuSeconds` 14745600 (4,096 GPU-hours per job, reserved across retries and all stages). A 64-hit output is not credited as a finished range. These checks do not start a worker, evaluate the USD ceiling, or authorize a spend.
+- Optional per-owner limits (allowlist, active withdrawals, GPU seconds) are off by default; see [Per-owner limits](#per-owner-limits).
 - `costUnit` is `operator-units`. `maxCostUnits` is a positive integer of those units. The operator cost field is not the experimental USD ceiling. A plan that labels the field as USD, or that supplies `vaultUsd`, `feeUsd`, or `gpuUsd` on the runbook, is refused with `CostFieldIsNotUsdCeiling`.
 - The experimental USD limits are vault 10000, fee 1000, and GPU 1000. They are encoded only in `assertExperimentalUsdLimits`. That check cannot run while `release.mainnetEnabled` and `broadcastAuthorized` are false: it throws `UsdLimitCheckClosed` and does not compare amounts. It does not read `maxCostUnits`, approve activation, or authorize a spend.
 - A missing or zero operator cost ceiling is refused. A plan above the concurrency cap is refused. `acceptOperationalRunbook` does not provision workers. `executed`, `provisioned`, and `usdLimitsEvaluated` stay false. `costFieldIsUsdCeiling` stays false.
@@ -249,6 +250,43 @@ not the configured cap.
 
 Startup, idle time, storage and provider retry/billing behavior are not an invoice
 cap. No paid run is authorized by changing this configuration.
+
+### Per-owner limits
+
+Three Terraform variables, all off by default, limit one owner (the signed-in
+address) for the partner phase. They reach the API and coordinator Lambdas only,
+need no IAM change, and only add refusals: the per-job cap above always applies.
+See [docs/API.md](API.md#per-owner-limits) for the routes and error codes.
+
+- **`owner_allowlist`** (`QSB_OWNER_ALLOWLIST`): only listed addresses may register
+  vaults, deposit, or create or resume withdrawals. Match the address exactly as the
+  wallet signs in. Removing an owner pauses their withdrawals at the next coordinator
+  tick, as a disabled deployment does: running GPU jobs aren't cancelled, and resume
+  after re-adding polls them. Lambda environments hold 4 KB in all, so this suits a
+  short partner list.
+- **`owner_max_active_jobs`** (`QSB_OWNER_MAX_ACTIVE_JOBS`): a withdrawal holds a slot
+  while queued, searching or paused, and releases it on its own status write to
+  failed, awaiting_authorization, submitted or confirmed, which never go back. A
+  paused withdrawal keeps its slot, so one waiting for operator review holds it until
+  it's resolved. Creation claims the slot in the same transaction as the job and its
+  reservations, through the owner's `LIMIT#ACTIVE_JOBS` row; of two creations racing
+  for the last slot, one gets a 409 and writes nothing. Withdrawals created before the
+  limit was set count too.
+- **`owner_max_gpu_seconds`** (`QSB_OWNER_MAX_GPU_SECONDS`): before each paid POST, on
+  either the one-GPU or the parallel path, the coordinator charges the owner's
+  `LIMIT#GPU_SECONDS` row in the same conditional write as the job's reservation. The
+  charge is what the job has reserved beyond its `ownerGpuChargedSeconds`, so a job
+  that started before the limit was set is charged its earlier reservations too.
+  Charges are never refunded, whatever the outcome. At the budget the coordinator
+  behaves as at the per-job cap: it starts no new paid submission, lets running
+  chunks finish and pauses with "Owner GPU-time budget reached", and it never touches
+  or resubmits in-flight work. Job creation is refused once less than one
+  submission's reservation is left, so no inputs are reserved to a withdrawal that
+  can't search.
+
+To give an owner more GPU time, raise the variable and apply, then resume their
+paused withdrawals. Lowering a limit below current use refuses new work only. Record
+any change in the deployment record, as for the mainnet switches.
 
 Before a paid claim, endpoint-limit failures pause with `Compute provider limits unconfirmed;
 nothing was submitted` and leave the time reservation unchanged. Fix the endpoint
