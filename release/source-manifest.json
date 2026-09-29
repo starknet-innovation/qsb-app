@@ -51,7 +51,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "6b3d05ab7f8dd939b2ea2b878d257d009a9ce13359e843fff9eccd76d3c9e444",
+      "api": "5604a8e67ae6978bf5f72e02bd902ee1c382a7a60bcb54c87d1d598891cb2569",
       "build-metadata": "2c4804c98f40b16adda8fde8e13f053d59cc53e26f951906064834edd469b1c6",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "458e1ea333fbbf2d2ed5fe3f50185cd035be5ee5b20071f422020854849cdb67",
@@ -94,7 +94,7 @@
       "value": null
     },
     "sourceFiles": {
-      "AGENTS.md": "0001643b5eec18408f631ab6646c5f341a4972bb3c06ff031dde07588a73bb5d",
+      "AGENTS.md": "e86a204479f0a5f60ebb21cc1f6e4203669b2854f773eaa37f53a9b0890687c2",
       "README.md": "a0649108b1391eaaaa09cbbf8fc8f2e7bead0cb7af728055d740ebbb5e719cce",
       "contracts/ranked-v2.json": "1bf7fb177e684c7b9c520b2dcb3c6e840f346e6d9c2c37089b35ee6fae010076",
       "docs/source-build/20260924/solver-build-receipt.json": "1e243370561b16c7d2c1d9be68e756fe39fbea44167f0e70d8507d1a14dfc160",
@@ -118,7 +118,7 @@
       "server/consensus.ts": "2684a00a3a53a942d3cc0815b8f9aa5fd659439f6811ceac465d38cbd08377a8",
       "server/coordinator.ts": "6e3e3cd97b4f9ff2e4753272aa7da98b9a33c410896759fa7f12cf6a87d706f2",
       "server/exact-submit-permit.ts": "1c98f8a75da77cfbe501c86bcee1c6d1b44adf3d84bd2ab446562a2a6e1509cf",
-      "server/gpu-spend.json": "61cc20e599610346779638d0957b1054d6cee175890f4a0d4000f6a8fd7a15a8",
+      "server/gpu-spend.json": "71f457740abc7a8699671faf5f1a9209506e5d11ea3efa89320580edcd3b13f6",
       "server/gpu-spend.ts": "34d431a9c0a04ddf807a6a13e65ac1bc9fa13aeb3cd860351e380f982f72c033",
       "server/job-spend-record.ts": "2d671feb6a54d02d1fc7130243ac05b5f5d9ec76ba2f7c901af7bb8342bed2a5",
       "server/lambda.ts": "abe72c18c555f2d699ec5cdb3c0a8edb0d6b4df77500f76b14ade0d388096c0c",

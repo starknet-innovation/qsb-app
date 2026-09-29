@@ -1,5 +1,5 @@
 {
-  "workersMax": 8,
+  "workersMax": 16,
   "workersMin": 0,
   "executionTimeoutMs": 900000,
   "maxJobGpuSeconds": 14745600
