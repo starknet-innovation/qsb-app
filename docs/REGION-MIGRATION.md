@@ -132,7 +132,9 @@ Nothing live changes in this phase.
 ## Cutover
 
 10. **Freeze** (operator, old account).
-    - Confirm the GPU queue is empty and no withdrawal or deposit is in flight.
+    - Confirm the GPU queue is empty, no withdrawal or deposit is in flight, and the withdrawal state machine has no
+      running executions (`aws stepfunctions list-executions --state-machine-arn <arn> --status-filter RUNNING`
+      lists none).
     - Freeze the old app: set `mainnet_enabled` and `exact_submit_enabled` to false **and `lambda_concurrency` to 0**,
       then plan, check and apply. The switches alone don't stop writes: creating a vault and the status reads still
       write to the table. With no concurrency, every function is throttled, so nothing reads or writes the old
@@ -168,7 +170,8 @@ Nothing live changes in this phase.
 
 ## Rollback
 
-- **Before step 13:** restore the old app's `lambda_concurrency` (2) and its switches, then plan and apply. Its table
+- **Before step 13:** restore the old app's `lambda_concurrency` and its switches to their values before the freeze,
+  then plan and apply. Its table
   hasn't changed since the freeze, and nothing in the new stack has taken a deposit.
 - **After step 13:** new deposits live only in the new account, so don't roll back. Fix forward. Step 14 removes
   the old services, so the old stack can't be switched on by mistake.
@@ -189,8 +192,7 @@ after the new stack has run a full deposit and withdrawal.
 3. **Cleanup** (old account's administrator). Delete these permanently, checking each against this list first:
    - the old records table (disable deletion protection first) and its on-demand backup;
    - note that deleting a table with point-in-time recovery makes DynamoDB keep a system backup of it for 35 days.
-     It can't be deleted early (`DeleteBackup` removes only on-demand backups), so the old account holds QSB data
-     until then. After 35 days, confirm it has expired: `aws dynamodb list-backups --region eu-west-1 --backup-type SYSTEM`
+     Treat it as retained until it expires, so the old account holds QSB data until then. After 35 days, confirm it has expired: `aws dynamodb list-backups --region eu-west-1 --backup-type SYSTEM`
      should list nothing for the old table;
    - the `qsb-solver` repository;
    - the job and frontend buckets;
