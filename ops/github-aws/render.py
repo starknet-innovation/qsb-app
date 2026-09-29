@@ -63,7 +63,8 @@ def render(c):
     allow('RuntimeLogs',['logs:CreateLogStream','logs:PutLogEvents'],log_arns,target=runtime)
     allow('BatchRead',['batch:DescribeJobs','batch:DescribeJobDefinitions','batch:DescribeJobQueues','batch:DescribeComputeEnvironments','batch:ListJobs'],['*'],{'StringEquals':{'aws:RequestedRegion':region}},runtime)
     allow('BatchSubmit',['batch:SubmitJob'],[arn('batch','job-queue/qsb-gpu'),arn('batch','job-definition/qsb-gpu-solver:*')],target=runtime)
-    allow('BatchTag',['batch:TagResource'],[arn('batch','job/*')],{'StringEquals':{'aws:RequestTag/Project':'qsb-gpu'},'ForAllValues:StringEquals':{'aws:TagKeys':['Project','QsbRequest','InputSha256']}},runtime)
+    # SubmitJob with tags is authorized for TagResource on the queue and job definition as well as the job.
+    allow('BatchTag',['batch:TagResource'],[arn('batch','job/*'),arn('batch','job-queue/qsb-gpu'),arn('batch','job-definition/qsb-gpu-solver:*')],{'StringEquals':{'aws:RequestTag/Project':'qsb-gpu'},'ForAllValues:StringEquals':{'aws:TagKeys':['Project','QsbRequest','InputSha256']}},runtime)
     allow('BatchCancel',['batch:CancelJob','batch:TerminateJob'],[arn('batch','job/*')],{'StringEquals':{'aws:ResourceTag/Project':'qsb-gpu'}},runtime)
     allow('GpuInputs',['s3:PutObject'],[f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/inputs/*'],target=runtime)
     allow('GpuOutputs',['s3:GetObject'],[f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/outputs/*'],target=runtime)
