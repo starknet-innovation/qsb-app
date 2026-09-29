@@ -155,6 +155,7 @@ async function setup() {
     enabled: true,
     exactSubmit: true,
     webhooks,
+    apiKeys: false,
     ownerLimits: undefined as OwnerLimits | undefined,
   };
   const calls: { method: string; path: string }[] = [];
@@ -201,6 +202,25 @@ const readyToSubmit = async (f: Fixture, overrides: Partial<Job> = {}) => {
   return { rawTxHex: signedWithdrawal(buildStoredSpendRecord(stored)) };
 };
 const other = "33333333-3333-4333-8333-333333333333";
+const keysOn = { app: { apiKeys: true } };
+/** Seed an API key's lookup row directly and return the key. */
+const seedKey = async (f: Fixture, fields: Record<string, unknown> = {}) => {
+  const key = `qsb_mainnet_${"K".repeat(43)}`;
+  await f.store.put({
+    pk: `APIKEY#${createHash("sha256").update(key).digest("hex")}`,
+    sk: "AUTH",
+    version: 0,
+    owner,
+    id: other,
+    scopes: ["read"],
+    network: "mainnet",
+    createdAt: "2026-09-24T00:00:00.000Z",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    revoked: false,
+    ...fields,
+  });
+  return { ...keysOn, auth: key };
+};
 const ownerOff: OwnerLimits = { allowlist: null, maxActiveJobs: null, maxGpuSeconds: null };
 /** A confirmed-looking previous transaction with one 70000 sat output to the owner, served by the chain. */
 const previousTx = (f: Fixture) => {
@@ -249,6 +269,17 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
   }],
   ["auth_required", 401, (f) => f.call("GET", "/vaults", undefined, { auth: null })],
   ["session_expired", 401, (f) => f.call("GET", "/vaults", undefined, { auth: "B".repeat(43) })],
+  ["api_key_invalid", 401, (f) => f.call("GET", "/vaults", undefined, { ...keysOn, auth: `qsb_mainnet_${"U".repeat(43)}` })],
+  ["api_key_revoked", 401, async (f) => f.call("GET", "/vaults", undefined, await seedKey(f, { revoked: true }))],
+  ["api_key_not_allowed", 403, async (f) => f.call("GET", "/api-keys", undefined, await seedKey(f))],
+  ["api_key_scope_denied", 403, async (f) => f.call("POST", "/vaults", {}, await seedKey(f))],
+  ["api_key_limit_reached", 409, async (f) => {
+    for (let i = 0; i < 10; i++)
+      await f.store.put({ pk, sk: `APIKEY#${i}`, version: 0, revoked: false, expiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    return f.call("POST", "/api-keys", { name: "ci", scopes: ["read"] }, keysOn);
+  }],
+  ["api_key_not_found", 404, (f) => f.call("POST", `/api-keys/${other}/revoke`, {}, keysOn)],
+  ["api_keys_disabled", 503, (f) => f.call("POST", "/api-keys", { name: "ci", scopes: ["read"] })],
   ["miner_rate_unavailable", 503, (f) => {
     f.miner.rates.mockRejectedValue(new Error("down"));
     return f.call("GET", "/rates");

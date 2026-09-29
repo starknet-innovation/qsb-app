@@ -5,6 +5,7 @@ import { createApp } from "../server/app";
 import { deployedApiApp } from "../server/lambda";
 import { API_ERROR_CODES, apiErrorCodes } from "../server/api-errors";
 import { MemoryStore } from "../server/store";
+import { routeScopes } from "../server/scoped-keys";
 import type { Esplora } from "../server/chain";
 import type { Slipstream } from "../server/providers";
 import { idempotentPosts } from "../server/idempotency";
@@ -240,6 +241,26 @@ describe("OpenAPI document", () => {
         auth: body.code === "auth_required",
       }).toEqual({ route: route.operationId, auth: route.auth });
     }
+  });
+
+  it("gives each route the credentials and API key scope that routeScopes enforces", () => {
+    const secured: Record<string, string | null> = {};
+    for (const { path, method, operation } of operations) {
+      if (!operation.security) continue;
+      const [session, key, ...rest] = operation.security as Json[];
+      expect(session).toEqual({ session: [] });
+      expect(rest).toEqual([]);
+      if (key) expect(Object.keys(key)).toEqual(["apiKey"]);
+      if (key) expect(key.apiKey).toHaveLength(1);
+      secured[`${method.toUpperCase()} ${path}`] = key ? key.apiKey[0] : null;
+    }
+    const enforced = Object.fromEntries(
+      Object.entries(routeScopes).map(([route, scope]) => {
+        const [method, path] = route.split(" ");
+        return [`${method} ${openApiPath(path)}`, scope];
+      }),
+    );
+    expect(secured).toEqual(enforced);
   });
 
   it("lists every error site in tests/api-error-sites.json", () => {

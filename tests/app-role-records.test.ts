@@ -9,6 +9,7 @@ describe("app role record access", () => {
     expect(coordinatorPathWrites.api.map((entry) => entry.prefix)).toEqual([
       "CHALLENGE#",
       "SESSION#",
+      "APIKEY#",
       "OWNER#",
       "OUTPOINT#",
     ]);

@@ -70,6 +70,7 @@ State is kept in the bootstrap state bucket under `qsb/main/terraform.tfstate`, 
 | `operator_principal_arns` | the `qsb-operator` role ARN | reconcile runs as `qsb-operator`; the reconcile role stays dormant |
 | `solver_release_id`, `batch_job_queue`, `batch_job_definition`, `batch_job_bucket` | the enrolled release and the `terraform/gpu` outputs | the served solver and the GPU backend |
 | `mainnet_enabled`, `exact_submit_enabled` | `false` | turned on only under #22 with explicit approval |
+| `api_keys_enabled` | `false` | scoped API keys ([docs/API.md](../docs/API.md)); turned on only with the maintainer's explicit approval of third-party access |
 | `slipstream_secret_arn` | empty, or the `qsb/slipstream` secret's ARN | the API's optional MARA Slipstream credential; see [MARA Slipstream credential](#mara-slipstream-credential) |
 
 Getting the role path wrong on the first apply means replacing the roles later, which needs an administrator again. `check-single-pipeline.py --deploy` refuses a plan that breaks the name, path, boundary or reconcile-principal rule.
