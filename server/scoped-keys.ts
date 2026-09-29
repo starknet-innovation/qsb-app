@@ -135,6 +135,21 @@ export async function authorizeApiKey(
   c.set("owner", row.owner as string);
 }
 
+/**
+ * The owner a live API key acts for, or undefined. For a public route that
+ * reports the caller's standing; it checks no scope and authorizes nothing.
+ */
+export async function apiKeyOwner(
+  store: Store,
+  key: string,
+  enabled: boolean,
+): Promise<string | undefined> {
+  if (!enabled || !key.startsWith(`qsb_${NETWORK_ID}_`)) return;
+  const row = await store.get(`APIKEY#${hash(key)}`, "AUTH");
+  if (row?.network === NETWORK_ID && row.revoked !== true)
+    return row.owner as string;
+}
+
 export type ApiKeyMetadata = ReturnType<typeof metadata>;
 function metadata(row: Row, now: number) {
   const status: "active" | "expired" | "revoked" =

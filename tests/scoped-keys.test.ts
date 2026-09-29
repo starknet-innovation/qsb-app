@@ -467,6 +467,40 @@ describe("API key authorization", () => {
   });
 });
 
+describe("API key owner limits", () => {
+  it("reports an API-key caller's allowlist standing in /api/config", async () => {
+    const store = new MemoryStore();
+    const ownerLimits = {
+      allowlist: new Set([owner]),
+      maxActiveJobs: null,
+      maxGpuSeconds: null,
+    };
+    const on = await setup(store, { ownerLimits });
+    const listedKey = (await on.mint(await on.session())).body;
+    const unlistedKey = (await on.mint(await on.session(other))).body.key;
+    const standing = async (app: typeof on.app, key?: string) =>
+      (
+        await (
+          await app.request("/api/config", {
+            headers: key ? { Authorization: `Bearer ${key}` } : {},
+          })
+        ).json()
+      ).ownerLimits.allowlisted;
+    expect(await standing(on.app, listedKey.key)).toBe(true);
+    expect(await standing(on.app, unlistedKey)).toBe(false);
+    expect(await standing(on.app)).toBe(null);
+    const unknown = `qsb_mainnet_${randomBytes(32).toString("base64url")}`;
+    expect(await standing(on.app, unknown)).toBe(null);
+    const off = await setup(store, { ownerLimits, apiKeys: false });
+    expect(await standing(off.app, listedKey.key)).toBe(null);
+    const open = await setup(store);
+    expect(await standing(open.app, listedKey.key)).toBe(null);
+    const token = await on.session();
+    await on.call("POST", `/api/api-keys/${listedKey.apiKey.id}/revoke`, token);
+    expect(await standing(on.app, listedKey.key)).toBe(null);
+  });
+});
+
 describe("API key switch", () => {
   it("is off unless QSB_API_KEYS_ENABLED is exactly true", async () => {
     const enabled = async (value?: string) => {

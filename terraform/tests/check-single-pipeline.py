@@ -50,7 +50,7 @@ def require(condition, message):
 API_ENV_REFERENCES = {
     'aws_cloudfront_distribution.web', 'aws_cloudfront_distribution.web.domain_name',
     'aws_dynamodb_table.records', 'aws_dynamodb_table.records.name',
-    'local.solver_release_id', 'local.workflow_arn',
+    'local.owner_limit_env', 'local.solver_release_id', 'local.workflow_arn',
     'var.api_keys_enabled', 'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network',
     'var.slipstream_secret_arn',
 }
