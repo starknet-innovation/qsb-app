@@ -29,6 +29,8 @@ import {
 import { BITCOIN_NETWORK, NETWORK_CONFIG } from "../src/lib/network";
 import { outputScript } from "../src/lib/transactions";
 import type { Job, PublicVault, Withdrawal } from "../src/lib/model";
+import { GPU_SECONDS_SK, type OwnerLimits } from "../server/owner-limits";
+import servedRelease from "../src/lib/releases/qsb-solver-aws-v0-1-0.json";
 
 // Hermetic: the chain is a real Esplora over an in-memory fetch, the miner and
 // consensus are fakes, and a seeded session stands in for sign-in.
@@ -147,6 +149,7 @@ async function setup() {
     consensus,
     enabled: true,
     exactSubmit: true,
+    ownerLimits: undefined as OwnerLimits | undefined,
   };
   const calls: { method: string; path: string }[] = [];
   const call = (
@@ -192,6 +195,7 @@ const readyToSubmit = async (f: Fixture, overrides: Partial<Job> = {}) => {
   return { rawTxHex: signedWithdrawal(buildStoredSpendRecord(stored)) };
 };
 const other = "33333333-3333-4333-8333-333333333333";
+const ownerOff: OwnerLimits = { allowlist: null, maxActiveJobs: null, maxGpuSeconds: null };
 /** A confirmed-looking previous transaction with one 70000 sat output to the owner, served by the chain. */
 const previousTx = (f: Fixture) => {
   const previous = new btc.Transaction(opts);
@@ -331,6 +335,24 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
     await first;
     return busy;
   }],
+  ["owner_not_allowlisted", 403, (f) =>
+    f.call("POST", "/jobs", manifest, { app: { ownerLimits: { ...ownerOff, allowlist: new Set([other]) } } })],
+  ["owner_active_withdrawal_limit", 429, async (f) => {
+    await f.putJob({ status: "paused", stage: "pinning" });
+    await f.store.put({ pk, sk: `JOB#${other}`, version: 0, job: job({ id: other, status: "searching" }) });
+    return f.call("POST", `/jobs/${jobId}/resume`, {}, { app: { ownerLimits: { ...ownerOff, maxActiveJobs: 1 } } });
+  }],
+  ["owner_gpu_budget_reached", 429, async (f) => {
+    vi.stubEnv("SOLVER_RELEASE_ID", servedRelease.id);
+    await f.putVault(confirmedVault);
+    vi.spyOn(f.chain, "unspent").mockResolvedValue({ previousTxHex: "00", confirmations: 1 });
+    await f.store.put({ pk, sk: GPU_SECONDS_SK, version: 0, reservedSeconds: 3600 });
+    return f.call("POST", "/jobs", manifest, { app: { ownerLimits: { ...ownerOff, maxGpuSeconds: 3600 } } });
+  }],
+  ["owner_limits_invalid", 503, (f) => {
+    vi.stubEnv("QSB_OWNER_MAX_ACTIVE_JOBS", "two");
+    return f.call("POST", "/jobs", manifest);
+  }],
   ["job_not_found", 404, (f) => f.call("GET", `/jobs/${jobId}/status`)],
   ["job_not_found", 409, (f) => f.call("POST", `/jobs/${jobId}/submit`, { rawTxHex: "00" })],
   ["job_unsupported", 409, async (f) => {
@@ -469,6 +491,7 @@ function errorSites(): string[] {
     ConsensusError: () => "consensus_rejected",
     SubmitDisabled: () => "submit_disabled",
     MinerAuthenticationError: () => "miner_unavailable",
+    OwnerLimitsInvalid: () => "owner_limits_invalid",
     MinerInclusionError: (message) => (message === "ExactSpendMismatch" ? "exact_spend_mismatch" : "inclusion_check_failed"),
   };
   const files = appModules();
