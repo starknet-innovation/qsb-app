@@ -12,7 +12,7 @@ It's generated; don't edit it by hand. After changing a route, a request schema 
 npm run openapi
 ```
 
-[`server/openapi.ts`](../server/openapi.ts) holds the route registry. Request schemas are the zod objects the handlers parse ([`server/api-schemas.ts`](../server/api-schemas.ts) and [`src/lib/model.ts`](../src/lib/model.ts)). [`tests/openapi.test.ts`](../tests/openapi.test.ts) fails when the committed file is stale, when `createApp` serves a route the document lacks (or the reverse), or when a route's sign-in requirement differs from the server's. It also fails when an error site in [`tests/api-error-sites.json`](../tests/api-error-sites.json) isn't listed: a route's own site for that route and status, and a helper's site by an error source in the registry that covers it, unless the registry records why it never reaches a response. [`tests/api-errors.test.ts`](../tests/api-errors.test.ts) also checks that the document lists each status and code it drives.
+[`server/openapi.ts`](../server/openapi.ts) holds the route registry. Request schemas are the zod objects the handlers parse ([`server/api-schemas.ts`](../server/api-schemas.ts) and [`src/lib/model.ts`](../src/lib/model.ts)). [`tests/openapi.test.ts`](../tests/openapi.test.ts) fails when the committed file is stale, when the mainnet Lambda's app (`deployedApiApp` in [`server/lambda.ts`](../server/lambda.ts)) serves a route the document lacks (or the reverse), or when a route's sign-in requirement differs from the server's. It also fails when an error site in [`tests/api-error-sites.json`](../tests/api-error-sites.json) isn't listed: a route's own site for that route and status, and any other site by an error source in the registry that covers it, unless the registry records why it never reaches a response. The snapshot covers `server/app.ts` and every server module it imports, `server/runtime/` included, and each error class `app.onError` answers for. Which sources a route merges, that is which helpers it calls, is declared by hand. [`tests/api-errors.test.ts`](../tests/api-errors.test.ts) also checks that the document lists each status and code it drives.
 
 ## Errors
 
@@ -29,7 +29,7 @@ Every error that `createApp` returns has a JSON body with a message and a code:
 
 Errors produced in front of the app have no `code`. That includes errors from the API gateway, for example on throttling or when the function fails or times out (these can be JSON with only a `message` field), other non-JSON proxy errors, and Hono's plain-text 404 for a route that doesn't exist.
 
-[`server/api-errors.ts`](../server/api-errors.ts) is the source of truth. It exports `apiErrorCodes` (each code and its meaning), the `ApiErrorCode` type and the `API_ERROR_CODES` list. [`tests/api-errors.test.ts`](../tests/api-errors.test.ts) drives every code through `createApp`, checks that this table lists each one, and pins each error site's status, code and message in [`tests/api-error-sites.json`](../tests/api-error-sites.json).
+[`server/api-errors.ts`](../server/api-errors.ts) is the source of truth. It exports `apiErrorCodes` (each code and its meaning), the `ApiErrorCode` type and the `API_ERROR_CODES` list. [`tests/api-errors.test.ts`](../tests/api-errors.test.ts) drives every code through `createApp`, checks that this table lists each one, and pins each error site's status, code and message in [`tests/api-error-sites.json`](../tests/api-error-sites.json), across `server/app.ts` and the server modules it imports.
 
 | Area | Codes |
 |---|---|

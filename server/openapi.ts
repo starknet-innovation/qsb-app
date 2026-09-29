@@ -396,26 +396,47 @@ const merge = (...sets: Errors[]): Errors => {
       (out[Number(status) as ErrorStatus] ??= []).push(...codes);
   return out;
 };
-const writes: Errors = { 409: ["state_conflict"] };
-
-// Errors raised inside helpers, each with the sites it covers in
+// Errors raised outside a route's own code, each with the sites it covers in
 // tests/api-error-sites.json (`file | function`). tests/openapi.test.ts checks
-// every helper site's code is listed by a source that covers it, or that the
-// site is in unreachedErrorSites. Routes merge the sources of the helpers they call.
+// that every such site's code is listed by a source that covers it, or that the
+// site is in unreachedErrorSites. Routes merge the sources of what they call.
 const sources = new Map<Errors, readonly string[]>();
 const source = (sites: readonly string[], errors: Errors) => {
   sources.set(errors, sites);
   return errors;
 };
-/** The helper error sources, with the snapshot sites each covers. */
+/** The error sources, with the snapshot sites each covers. */
 export const errorSources = () =>
   [...sources].map(([errors, sites]) => ({ sites, errors }));
-/** Helper sites whose error never reaches a response, and why. */
+// Activation, external-miner and broadcast-permit checks: no route calls them.
+const offRoute = [
+  "agreeExternalMinerChain",
+  "assertCandidateNotRegtest",
+  "assertLocalMinerTransport",
+  "assertReleaseClosed",
+  "assertReusableFixture",
+  "assertSpendMatchesTransaction",
+  "assessWalletFundingRequest",
+  "callMinerSubmit",
+  "describeExternalInclusion",
+  "grantExactSpendPermit",
+  "inputOutpoints",
+  "localTransportInvocations",
+  "parseExactSpend",
+  "parseParties",
+  "parseSpentRefs",
+];
+const unsentPermit =
+  "Only miner.submit's non-exact path calls it. submitExact passes an exact permit and catches every miner.submit error.";
+/**
+ * Sites (`file | function`, or `file | function | class`) whose error never
+ * reaches a response, and why.
+ */
 export const unreachedErrorSites: Record<string, string> = {
   "chain.ts | withdrawalInclusion":
     "observeWithdrawal settles it; a conflicting spender becomes the response's `alert`.",
-  "transaction-checks.ts | assertWithdrawalSpendAgainstJob":
-    "It rethrows its own errors as exact_spend_mismatch.",
+  "transaction-checks.ts | assertWithdrawalSpendAgainstJob | ChainError":
+    "It rethrows these as exact_spend_mismatch.",
   "transaction-checks.ts | helperSighashAll":
     "Only assertWithdrawalSpendAgainstJob calls it, which rethrows as exact_spend_mismatch.",
   "transaction-checks.ts | assertOutput":
@@ -423,8 +444,32 @@ export const unreachedErrorSites: Record<string, string> = {
   "transaction-checks.ts | parse":
     "assertWithdrawalSpendAgainstJob rethrows it as exact_spend_mismatch; checkWithdrawal parses the same bytes only after that passed; checkFunding isn't called by a route.",
   "transaction-checks.ts | checkFunding": "No route calls it.",
+  "providers.ts | submit": unsentPermit,
+  "runtime/miner-inclusion.ts | assertBroadcastPermit": unsentPermit,
+  "runtime/miner-inclusion.ts | assertPermitMinerEndpoint": unsentPermit,
+  "runtime/miner-inclusion.ts | assertMainnetTransportClosed": unsentPermit,
+  ...Object.fromEntries(
+    offRoute.map((name) => [
+      `runtime/miner-inclusion.ts | ${name}`,
+      "An activation or external-miner check. No route calls it.",
+    ]),
+  ),
 };
 
+// A store write that loses a version race.
+const writes = source(
+  [
+    "store.ts | put",
+    "store.ts | atomicPut",
+    "store.ts | delete",
+    "store.ts | rejectGuarded",
+  ],
+  { 409: ["state_conflict"] },
+);
+const reservations = source(
+  ["runtime/storage-authority.ts | canonicalReservationWrites"],
+  { 409: ["state_conflict"] },
+);
 // Any chain read checks the provider's network first. An error status is a
 // 409 chain_unavailable, a request that fails before any response a 500 one.
 // A malformed answer is chain_error: a 400 when it fails its zod parse,
@@ -450,18 +495,32 @@ const inputCheck = source(
   }),
 );
 // A failed secret read is a 500; a refused credential a 503.
-const minerCredential = source(["providers.ts | credential"], {
-  500: ["miner_unavailable"],
-  503: ["miner_unavailable"],
-});
+const minerCredential = source(
+  ["providers.ts | credential", "providers.ts | minerSecret"],
+  { 500: ["miner_unavailable"], 503: ["miner_unavailable"] },
+);
 // A miner status lookup: a malformed answer that fails its zod parse is a
 // 400, any other failure a 500, and a 401 or 403 from the miner a 503.
 const minerLookup = source(
-  ["providers.ts | request", "providers.ts | status"],
+  [
+    "providers.ts | request",
+    "providers.ts | status",
+    "providers.ts | secretFor",
+  ],
   {
     400: ["miner_request_failed"],
     500: ["miner_request_failed"],
     503: ["miner_unavailable"],
+  },
+);
+const inclusionJudgment = source(
+  ["runtime/miner-inclusion.ts | judgeInclusionEvidence"],
+  { 409: ["inclusion_check_failed"] },
+);
+const consensusCheck = source(
+  ["consensus.ts | verify", "consensus.ts | reject"],
+  {
+    409: ["consensus_rejected"],
   },
 );
 const fundingMatch = source(["transaction-checks.ts | invalid"], {
@@ -487,10 +546,17 @@ const deposit = source(
     503: ["submit_disabled"],
   }),
 );
-// submitExact, with checkWithdrawal's chain checks and the consensus check.
+// submitExact: the stored spend and transaction checks, checkWithdrawal's
+// chain checks, and the consensus check.
 const exactSubmit = source(
-  ["submit-exact.ts | submitExact", "transaction-checks.ts | checkWithdrawal"],
-  merge(inputCheck, writes, minerCredential, {
+  [
+    "submit-exact.ts | submitExact",
+    "job-spend-record.ts | mismatch",
+    "transaction-checks.ts | assertWithdrawalSpendAgainstJob",
+    "transaction-checks.ts | checkWithdrawal",
+    "runtime/miner-inclusion.ts | readTransaction",
+  ],
+  merge(inputCheck, writes, minerCredential, consensusCheck, {
     409: [
       "job_not_found",
       "job_unsupported",
@@ -498,7 +564,6 @@ const exactSubmit = source(
       "exact_spend_mismatch",
       "intent_conflict",
       "vault_not_found",
-      "consensus_rejected",
     ],
     503: ["submit_disabled"],
   }),
@@ -510,6 +575,10 @@ const jobId = describe(
   "The job id: the withdrawal's `idempotencyKey`.",
 );
 describe(transactionIdParam, "The submitted transaction's id, lowercase hex.");
+describe(
+  fundSubmitRequest.shape.rawTxHex,
+  "The signed deposit, hex. A deposit over 150,000 characters (75,000 bytes) passes this schema but is refused with a 409 `funding_transaction_invalid`, before anything is stored or sent.",
+);
 
 export const apiRoutes: readonly ApiRoute[] = [
   {
@@ -776,10 +845,9 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: transactionStatusResponse,
       },
     },
-    errors: merge(writes, {
+    errors: merge(writes, inclusionJudgment, {
       400: ["invalid_request"],
       404: ["intent_not_found"],
-      409: ["inclusion_check_failed"],
     }),
   },
   {
@@ -809,7 +877,7 @@ export const apiRoutes: readonly ApiRoute[] = [
       200: { description: "The existing job.", schema: jobResponse },
       201: { description: "The job was created.", schema: jobResponse },
     },
-    errors: merge(inputCheck, writes, {
+    errors: merge(inputCheck, writes, reservations, {
       400: ["withdrawal_invalid"],
       404: ["vault_not_found"],
       409: [
@@ -949,11 +1017,20 @@ for (const route of apiRoutes) {
 }
 
 // JSON Schema `pattern` has no flags. Translate a case-insensitive character
-// class, and refuse any other flagged pattern rather than drop its flags.
-function flaglessPattern(regex: RegExp): string {
+// class, and refuse any other flagged pattern rather than drop its flags: a
+// letter outside a class, or an escape that can stand for a letter or its case
+// (`\x61`, `\u0041`, `\p{Lu}`, `\k<name>`, a backreference, an escaped letter).
+// Only punctuation escapes and the case-neutral `\d \s \w \b \n \r \t \f \v`
+// (and their negations) pass.
+export function flaglessPattern(regex: RegExp): string {
   if (!regex.flags) return regex.source;
   const outside = regex.source.replace(/\\./g, "").replace(/\[[^\]]*\]/g, "");
-  if (regex.flags !== "i" || /[a-z]/i.test(outside))
+  const escapes = [...regex.source.matchAll(/\\(.)/g)].map(([, c]) => c);
+  if (
+    regex.flags !== "i" ||
+    /[a-z]/i.test(outside) ||
+    escapes.some((c) => !/^(?:[^0-9A-Za-z]|[dDsSwWbBnrtfv])$/.test(c))
+  )
     throw new Error(`No flagless form for the pattern ${regex}`);
   return regex.source.replace(/\[((?:\\.|[^\]\\])*)\]/g, (_, body: string) => {
     const other = (

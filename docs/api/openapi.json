@@ -4196,7 +4196,8 @@
           "rawTxHex": {
             "type": "string",
             "maxLength": 200000,
-            "pattern": "^(?:[0-9a-fA-F]{2})+$"
+            "pattern": "^(?:[0-9a-fA-F]{2})+$",
+            "description": "The signed deposit, hex. A deposit over 150,000 characters (75,000 bytes) passes this schema but is refused with a 409 `funding_transaction_invalid`, before anything is stored or sent."
           },
           "amount": {
             "$ref": "#/components/schemas/Sats"

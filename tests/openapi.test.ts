@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { inspectRoutes } from "hono/dev";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../server/app";
+import { deployedApiApp } from "../server/lambda";
 import { API_ERROR_CODES, apiErrorCodes } from "../server/api-errors";
 import { MemoryStore } from "../server/store";
 import type { Esplora } from "../server/chain";
@@ -8,12 +10,34 @@ import type { Slipstream } from "../server/providers";
 import {
   apiRoutes,
   errorSources,
+  flaglessPattern,
   openApiDocument,
   openApiPath,
   routeErrors,
   unreachedErrorSites,
   serializeOpenApi,
 } from "../server/openapi";
+
+// The deployed app uses the process-wide chain and miner. Neither can reach a
+// provider from this file.
+vi.mock("../server/chain", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../server/chain")>();
+  return {
+    ...actual,
+    chain: new actual.Esplora("https://chain.test", async (url) => {
+      throw Error(`Unexpected chain lookup ${url}`);
+    }),
+  };
+});
+vi.mock("../server/providers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../server/providers")>();
+  return {
+    ...actual,
+    slipstream: new actual.Slipstream("https://miner.test", async () => {
+      throw Error("Unexpected miner credential read");
+    }),
+  };
+});
 
 type Json = Record<string, any>;
 const document = openApiDocument() as Json;
@@ -45,9 +69,11 @@ describe("OpenAPI document", () => {
     expect(committed).toBe(serializeOpenApi(openApiDocument()));
   });
 
-  it("documents exactly the routes createApp serves", () => {
-    const served = createApp(new MemoryStore())
-      .routes.filter((r) => r.method !== "ALL" && r.method !== "OPTIONS")
+  it("documents exactly the routes the mainnet Lambda serves", () => {
+    // Hono's own test for middleware: a handler that takes `next`. An app.all
+    // route stays in as ALL, which no documented operation matches.
+    const served = inspectRoutes(deployedApiApp("mainnet", new MemoryStore()))
+      .filter((r) => !r.isMiddleware && r.method !== "OPTIONS")
       .map((r) => `${r.method} ${openApiPath(r.path)}`);
     const documented = operations.map(
       ({ method, path }) => `${method.toUpperCase()} ${path}`,
@@ -144,17 +170,23 @@ describe("OpenAPI document", () => {
   });
 
   it("lists every error site in tests/api-error-sites.json", () => {
+    const classStatus: Record<string, number> = {
+      ChainError: 409,
+      ChainNotFound: 409,
+      WithdrawalConflict: 409,
+      MinerInclusionError: 409,
+      Conflict: 409,
+      ConsensusError: 409,
+      SubmitDisabled: 503,
+      MinerAuthenticationError: 503,
+    };
     const lines = JSON.parse(
       readFileSync(new URL("./api-error-sites.json", import.meta.url), "utf8"),
     ) as string[];
     const sites = lines.map((line) => {
       const [file, where, kind, code] = line.split(" | ");
-      // An HTTP status, or the class app.onError answers with a 409.
-      const status = /^\d{3}$/.test(kind)
-        ? Number(kind)
-        : ["ChainError", "ChainNotFound", "WithdrawalConflict"].includes(kind)
-          ? 409
-          : undefined;
+      // An HTTP status, or the status app.onError gives the thrown class.
+      const status = /^\d{3}$/.test(kind) ? Number(kind) : classStatus[kind];
       return {
         line,
         key: `${file} | ${where}`,
@@ -193,7 +225,11 @@ describe("OpenAPI document", () => {
           );
         continue;
       }
-      if (site.key in unreachedErrorSites) continue;
+      if (
+        site.key in unreachedErrorSites ||
+        `${site.key} | ${site.kind}` in unreachedErrorSites
+      )
+        continue;
       // A helper's site: a code attached to any error class can have any status.
       if (site.kind !== "attached")
         expect(site.status, site.line).toBeDefined();
@@ -204,12 +240,51 @@ describe("OpenAPI document", () => {
         site.line,
       ).toBe(true);
     }
-    const keys = sites.map((site) => site.key);
+    const keys = sites.flatMap((site) => [
+      site.key,
+      `${site.key} | ${site.kind}`,
+    ]);
     for (const key of [
       ...errorSources().flatMap((s) => s.sites),
       ...Object.keys(unreachedErrorSites),
     ])
       expect(keys).toContain(key);
+  });
+
+  it("emits a case-insensitive pattern without its flag, or refuses it", () => {
+    for (const [regex, emitted] of [
+      [/^[a-f0-9]{64}$/, "^[a-f0-9]{64}$"],
+      [/^[a-f0-9]{64}$/i, "^[a-f0-9A-F]{64}$"],
+      [/^(?:[a-f0-9]{2})+$/i, "^(?:[a-f0-9A-F]{2})+$"],
+      [/^\d[\-a-c]\.$/i, "^\\d[\\-a-cA-C]\\.$"],
+    ] as const) {
+      expect(flaglessPattern(regex)).toBe(emitted);
+      // The emitted pattern accepts exactly what the flagged regex does.
+      for (const sample of [
+        "ab".repeat(32),
+        "AB".repeat(32),
+        "aB09",
+        "1B.",
+        "1-.",
+        "x",
+      ])
+        expect(new RegExp(emitted).test(sample)).toBe(regex.test(sample));
+    }
+    for (const regex of [
+      /^abc$/i,
+      /^[\x61-\x66]$/i,
+      /^[\u0041]$/i,
+      new RegExp("^\\p{Lu}$", "i"),
+      /^\p{Lu}$/iu,
+      /^(?<n>[a-f])\k<n>$/i,
+      /^([a-f])\1$/i,
+      /^[\A]$/i,
+      /^\cA$/i,
+      /^[a-f]$/g,
+    ])
+      expect(() => flaglessPattern(regex), String(regex)).toThrow(
+        "No flagless form",
+      );
   });
 
   it("describes every field /api/health and /api/config return", async () => {

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
@@ -405,19 +406,49 @@ function where(node: ts.Node): string {
       (ts.isArrowFunction(at.initializer) || ts.isFunctionExpression(at.initializer))
     )
       return at.name.text;
-    if (ts.isCallExpression(at) && ts.isIdentifier(at.expression) && at.expression.text !== "apiError") return at.expression.text;
+    // withApiErrorCode only wraps: a site inside it belongs to the function around it.
+    if (ts.isCallExpression(at) && ts.isIdentifier(at.expression) && !["apiError", "withApiErrorCode"].includes(at.expression.text))
+      return at.expression.text;
   }
   return "module";
 }
+/** server/app.ts and the server modules it imports, directly or not, relative to server/. */
+function appModules(): string[] {
+  const seen = new Set<string>();
+  const pending = ["server/app.ts"];
+  while (pending.length) {
+    const file = pending.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    parse(file).forEachChild((node) => {
+      if (!ts.isImportDeclaration(node) || node.importClause?.isTypeOnly) return;
+      const specifier = (node.moduleSpecifier as ts.StringLiteral).text;
+      const resolved = path.posix.join(path.posix.dirname(file), `${specifier}.ts`);
+      if (specifier.startsWith(".") && resolved.startsWith("server/") && existsSync(new URL(`../${resolved}`, import.meta.url)))
+        pending.push(resolved);
+    });
+  }
+  return [...seen].map((file) => file.slice("server/".length)).sort();
+}
 /**
  * Every error site on the default routes, as "file | where | status | code | message":
- * each apiError call in app.ts, each thrown ChainError (and subclass), and each code
- * attached with withApiErrorCode in server/.
+ * each apiError call in app.ts, each code attached with withApiErrorCode, and each
+ * thrown class app.onError answers for (ChainError and its subclasses, Conflict,
+ * ConsensusError, SubmitDisabled, MinerAuthenticationError, MinerInclusionError), in
+ * app.ts and the server modules it imports.
  */
 function errorSites(): string[] {
   const sites: string[] = [];
   const chainErrors: Record<string, string> = { ChainError: "chain_error", ChainNotFound: "chain_transaction_not_found", WithdrawalConflict: "chain_error" };
-  const files = readdirSync(new URL("../server/", import.meta.url)).filter((name) => name.endsWith(".ts")).sort();
+  // The code app.onError gives each class; a MinerInclusionError's depends on its message.
+  const classCodes: Record<string, (message: string) => ApiErrorCode> = {
+    Conflict: () => "state_conflict",
+    ConsensusError: () => "consensus_rejected",
+    SubmitDisabled: () => "submit_disabled",
+    MinerAuthenticationError: () => "miner_unavailable",
+    MinerInclusionError: (message) => (message === "ExactSpendMismatch" ? "exact_spend_mismatch" : "inclusion_check_failed"),
+  };
+  const files = appModules();
   for (const name of files) {
     const file = `server/${name}`;
     const visit = (node: ts.Node) => {
@@ -432,6 +463,11 @@ function errorSites(): string[] {
         const [message, code] = node.arguments ?? [];
         const className = node.expression.getText();
         sites.push([name, where(node), className, code ? text(code) : chainErrors[className], text(message)].join(" | "));
+      }
+      if (ts.isNewExpression(node) && node.expression.getText() in classCodes) {
+        const [message] = node.arguments ?? [];
+        const className = node.expression.getText();
+        sites.push([name, where(node), className, classCodes[className](text(message)), text(message)].join(" | "));
       }
       ts.forEachChild(node, visit);
     };
