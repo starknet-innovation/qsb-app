@@ -1587,7 +1587,7 @@ export function openApiDocument() {
     },
     servers: [
       { url: "/v1" },
-      { url: "/api", description: "webapp alias" },
+      { url: "/api", description: "compatibility alias; the webapp uses /v1" },
     ],
     paths,
     webhooks: {

@@ -166,7 +166,7 @@ describe("client boundaries", () => {
     }) as never;
     const wallet = { ...signer, loopbackOnly: undefined };
     await new QsbClient({ baseUrl: "https://qsb.example/app", signer: wallet, fetch: recording }).config();
-    // The webapp's /api alias still works, e.g. behind the Vite dev proxy.
+    // The /api compatibility alias still works.
     await new QsbClient({ baseUrl: "https://qsb.example/app", basePath: "/api", signer: wallet, fetch: recording }).config();
     expect(seen.map(([url]) => url)).toEqual(["https://qsb.example/app/v1/config", "https://qsb.example/app/api/config"]);
     expect(seen.every(([, init]) => init?.redirect === "error")).toBe(true);

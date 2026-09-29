@@ -67,10 +67,12 @@ const confirmingLedger = {
   unspent: async () => ({ previousTxHex: "00", confirmations: 1 }),
 };
 
+// With the /v1 alias, like the local and mainnet apps: the mainnet webapp's readers call /v1.
 function handoffApp(store: MemoryStore) {
   return createApp(store, {
     inProcessHandoff: true,
     fundingLedger: confirmingLedger,
+    versionedAlias: true,
   });
 }
 

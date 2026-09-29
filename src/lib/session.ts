@@ -1,3 +1,5 @@
+import { API_BASE_PATH, type ApiBasePath } from "./network";
+
 /**
  * A non-OK API response, for the webapp and the SDK. `code` is the API's machine-readable
  * error code, when it sent one.
@@ -9,7 +11,8 @@ export class ApiRequestError extends Error {
   }
 }
 const sessionToken = /^[A-Za-z0-9_-]{43}$/;
-export function createSessionClient(fetcher: typeof fetch = fetch) {
+/** `basePath` prefixes every route: the webapp's own (`API_BASE_PATH`), or the SDK's choice. */
+export function createSessionClient(fetcher: typeof fetch = fetch, basePath: ApiBasePath = API_BASE_PATH) {
 let token: string | undefined;
 let epoch = 0;
 function clearSession() {
@@ -23,7 +26,7 @@ function restoreSession(value: string) {
   token = value;
 }
 async function api<T>(path: string, body?: unknown): Promise<T> {
-  const r = await fetcher(`/api${path}`, {
+  const r = await fetcher(`${basePath}${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
       "Content-Type": "application/json",

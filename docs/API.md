@@ -4,14 +4,14 @@ The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts
 
 ## Prefixes
 
-- `/v1` is the stable prefix for integrators.
-- `/api` serves the same routes. The webapp still calls it; moving the webapp onto `/v1` (#85) is a follow-up after the phase-2 API PRs land.
+- `/v1` is the stable prefix, for integrators and the mainnet webapp. The webapp builds every API URL from `API_BASE_PATH` in [`src/lib/network.ts`](../src/lib/network.ts) (#85).
+- `/api` serves the same routes and stays for compatibility: a browser may still run a bundle cached from before the move. A testnet4 build of the webapp still calls `/api`, because the testnet4 deployment is a parked supervised app, which serves `/api` only.
 
-Both prefixes reach the same handlers and middleware: secure headers, CORS, the body limit, sign-in and error mapping. With `versionedAlias`, `createApp` rewrites a leading `/v1` segment to `/api` before routing, so a route is defined once. Only the coordinator API opts in: the mainnet Lambda (`server/lambda.ts`) and the local server (`server/local.ts`). The parked supervised apps have no `/v1`. CloudFront forwards `/v1/*` and `/api/*` to the API with the same uncached behaviour (`terraform/web.tf`).
+Both prefixes reach the same handlers and middleware: secure headers, CORS, the body limit, sign-in and error mapping. With `versionedAlias`, `createApp` rewrites a leading `/v1` segment to `/api` before routing, so a route is defined once. Only the coordinator API opts in: the mainnet Lambda (`server/lambda.ts`) and the local server (`server/local.ts`). The parked supervised apps have no `/v1`. CloudFront forwards `/v1/*` and `/api/*` to the API with the same uncached behaviour (`terraform/web.tf`), and `npm run dev`'s Vite proxy forwards both to the local server.
 
 ## OpenAPI
 
-[`docs/api/openapi.json`](api/openapi.json) is the OpenAPI 3.1 document for the mainnet API: every route, its sign-in requirement, request and response schemas, and the error codes each route can return, by status. Its paths are relative to its two servers, `/v1` and the `/api` webapp alias.
+[`docs/api/openapi.json`](api/openapi.json) is the OpenAPI 3.1 document for the mainnet API: every route, its sign-in requirement, request and response schemas, and the error codes each route can return, by status. Its paths are relative to its two servers, `/v1` and the `/api` compatibility alias.
 
 It's generated; don't edit it by hand. After changing a route, a request schema or a code, regenerate it and commit the result:
 

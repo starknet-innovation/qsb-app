@@ -207,7 +207,7 @@ describe("Codex review of #91", () => {
       expect(code).toBe(0);
       expect(JSON.parse(out)).toMatchObject(command === "config" ? { network: "mainnet" } : { submit_fee_rate: 1 });
     }
-    // /v1 by default; --base-path /api reaches the webapp alias.
+    // /v1 by default; --base-path /api reaches the compatibility alias.
     const code = await runCli(["--base-path", "/api", "config"], {
       env: { QSB_API_URL: API }, stdin: Readable.from([]), stdout: new PassThrough(), stderr: new PassThrough(), interactive: false, cwd: tmpdir(), fetch: w.fetch,
     });

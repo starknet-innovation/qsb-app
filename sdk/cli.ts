@@ -53,7 +53,7 @@ Withdrawals
 
 Options
   --api <url>            API origin (or QSB_API_URL)
-  --base-path <path>     /v1 (default), or /api, the webapp alias, e.g. behind the Vite dev proxy
+  --base-path <path>     /v1 (default), or /api, the compatibility alias
   --app-origin <url>     Origin the server's sign-in challenge must name (or QSB_APP_ORIGIN;
                          default: the --api origin). Nothing else is ever signed.
   --address <address>    Payment address (or QSB_ADDRESS)

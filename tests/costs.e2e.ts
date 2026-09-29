@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 test("costs distinguish illustrations, unavailable charges and stale rates", async ({ page }) => {
   let unavailable = false;
-  await page.route("**/api/rates", route => route.fulfill({status: unavailable ? 503 : 200, contentType: "application/json", body: JSON.stringify(unavailable ? {error: "Unavailable"} : {effective_rate: 4, submit_fee_rate: 1})}));
+  await page.route("**/v1/rates", route => route.fulfill({status: unavailable ? 503 : 200, contentType: "application/json", body: JSON.stringify(unavailable ? {error: "Unavailable"} : {effective_rate: 4, submit_fee_rate: 1})}));
   await page.goto("/");
   await page.getByRole("button", {name: "Costs & billing"}).click();
   await expect(page.getByRole("heading", {name: "Every cost, explained."})).toBeVisible();
