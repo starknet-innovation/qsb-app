@@ -1,12 +1,3 @@
-## Current goal and plan
-
-The goal is a working mainnet withdrawal without production-grade hardening. Tracking issue #8 is the plan. Its steps are separate issues, done in order.
-
-- **Pick work only from #8.** Open one PR per plan step and put `Closes #N` in the PR body.
-- **Check the step's dependencies first.** Don't start a step while any of them is still open.
-- **Meet the issue exactly.** Satisfy every Scope and Acceptance item, including any added in the issue's comments.
-- **Don't open off-plan PRs.** #26 and #29 were closed for being off-plan. If a change seems necessary but isn't in the plan, say so in a comment on #8 instead of opening a PR.
-
 ## Decisions already made
 
 Don't reopen these in code or PRs.
