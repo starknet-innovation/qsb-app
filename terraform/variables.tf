@@ -42,24 +42,31 @@ variable "batch_job_queue" {
   type    = string
   default = ""
   validation {
-    condition     = var.batch_job_queue == "" || can(regex("^arn:aws:batch:[a-z0-9-]+:[0-9]{12}:job-queue/qsb-[a-z0-9-]+$", var.batch_job_queue))
-    error_message = "Use an exact QSB AWS Batch binding."
+    condition = var.batch_job_queue == "" || (
+      can(regex("^arn:aws:batch:[a-z0-9-]+:[0-9]{12}:job-queue/qsb-[a-z0-9-]+$", var.batch_job_queue)) &&
+      try(split(":", var.batch_job_queue)[3] == var.region && split(":", var.batch_job_queue)[4] == var.aws_account_id, false)
+    )
+    error_message = "Use an exact QSB AWS Batch binding in this stack's account and region."
   }
 }
 variable "batch_job_definition" {
   type    = string
   default = ""
   validation {
-    condition     = var.batch_job_definition == "" || can(regex("^arn:aws:batch:[a-z0-9-]+:[0-9]{12}:job-definition/qsb-[a-z0-9-]+:[0-9]+$", var.batch_job_definition))
-    error_message = "Use an exact QSB AWS Batch binding."
+    condition = var.batch_job_definition == "" || (
+      can(regex("^arn:aws:batch:[a-z0-9-]+:[0-9]{12}:job-definition/qsb-[a-z0-9-]+:[0-9]+$", var.batch_job_definition)) &&
+      try(split(":", var.batch_job_definition)[3] == var.region && split(":", var.batch_job_definition)[4] == var.aws_account_id, false)
+    )
+    error_message = "Use an exact QSB AWS Batch binding in this stack's account and region."
   }
 }
 variable "batch_job_bucket" {
   type    = string
   default = ""
   validation {
-    condition     = var.batch_job_bucket == "" || can(regex("^qsb-[a-z0-9-]+$", var.batch_job_bucket))
-    error_message = "Use an exact QSB AWS Batch binding."
+    # The runtime boundary grants job input/output access to this bucket name only.
+    condition     = var.batch_job_bucket == "" || var.batch_job_bucket == "qsb-gpu-${var.aws_account_id}-${var.region}-jobs"
+    error_message = "Use this stack's account and region job bucket, qsb-gpu-<account>-<region>-jobs."
   }
 }
 variable "lambda_concurrency" {

@@ -54,6 +54,11 @@ Nothing live changes in this phase.
      `aws ec2 describe-instance-type-offerings --region eu-west-2 --location-type availability-zone --filters Name=instance-type,Values=g5.xlarge`.
      Then request the Service Quotas "Running On-Demand G and VT instances" quota, at least the compute
      environment's 4 vCPUs.
+   - **GPU AMI.** Find the Ireland AMI's name with `aws ec2 describe-images --region eu-west-1 --image-ids ami-05db4db06e751ab89 --query 'Images[0].Name'`.
+     Then find the image with the same name in eu-west-2:
+     `aws ec2 describe-images --region eu-west-2 --owners amazon --filters Name=name,Values=<that name> --query 'Images[0].ImageId'`.
+     The same name means the same NVIDIA driver build. The operator's roles can't do these lookups or the quota
+     request: they're limited to their own account and region.
    - **Network.** Choose the VPC and subnets for the GPU stack.
 3. **Private inventory** (AWS admin). Write it for the new account with:
    - `account` (the new one), `region` `eu-west-2`, `subject` (the same GitHub main-branch subject) and a new
@@ -71,12 +76,8 @@ Nothing live changes in this phase.
      permission set as its inline policy. It allows assuming those two roles and nothing else.
    - Then check with `verify_access.py --profile qsb-view --inventory INVENTORY --live`.
 5. **GPU stack** (operator, new account).
-   - **AMI.** Find the Ireland AMI's name with `aws ec2 describe-images --region eu-west-1 --image-ids ami-05db4db06e751ab89 --query 'Images[0].Name'`.
-     Then find the image with the same name in eu-west-2:
-     `aws ec2 describe-images --region eu-west-2 --owners amazon --filters Name=name,Values=<that name> --query 'Images[0].ImageId'`.
-     The same name means the same NVIDIA driver build.
    - **Init** with the new state bucket: `-backend-config=region=eu-west-2 -backend-config=key=qsb/gpu/terraform.tfstate`.
-   - **Tfvars:** the new `aws_account_id`, `region = "eu-west-2"`, `gpu_ami`, `vpc_id`, `subnets`, the GPU
+   - **Tfvars:** the new `aws_account_id`, `region = "eu-west-2"`, the `gpu_ami` from step 2, `vpc_id`, `subnets`, the GPU
      boundary ARN, and the image `<new account>.dkr.ecr.eu-west-2.amazonaws.com/qsb-solver@sha256:<the enrolled digest>`.
    - Then plan and apply.
    - **Solver image.** Copy it into the new repository by digest, from

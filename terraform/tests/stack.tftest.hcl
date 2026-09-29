@@ -114,7 +114,7 @@ run "configured_single_pipeline" {
     network              = "mainnet"
     batch_job_queue      = "arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu"
     batch_job_definition = "arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-gpu-solver:1"
-    batch_job_bucket     = "qsb-gpu-jobs"
+    batch_job_bucket     = "qsb-gpu-123456789012-eu-west-2-jobs"
   }
   assert {
     condition     = output.compute_configured && !output.transactions_enabled && length(aws_iam_role_policy.batch) == 1 && aws_lambda_function.coordinator.environment[0].variables.AWS_BATCH_JOB_QUEUE == var.batch_job_queue && !contains(keys(aws_lambda_function.api.environment[0].variables), "AWS_BATCH_JOB_QUEUE") && length(aws_lambda_function.reference.environment) == 0
@@ -147,7 +147,7 @@ run "operator_reconcile_scope" {
     network                      = "mainnet"
     batch_job_queue              = "arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu"
     batch_job_definition         = "arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-gpu-solver:1"
-    batch_job_bucket             = "qsb-gpu-jobs"
+    batch_job_bucket             = "qsb-gpu-123456789012-eu-west-2-jobs"
     operator_principal_arns      = ["arn:aws:iam::123456789012:user/alice", "arn:aws:iam::123456789012:role/operators"]
     iam_role_path                = "/qsb/runtime/"
     iam_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary"
@@ -267,6 +267,26 @@ run "reject_miner_credential_legacy_region" {
     slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/slipstream-AbC123"
   }
   expect_failures = [var.slipstream_secret_arn]
+}
+run "reject_batch_binding_other_region" {
+  command = plan
+  variables {
+    network              = "mainnet"
+    batch_job_queue      = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu"
+    batch_job_definition = "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:1"
+    batch_job_bucket     = "qsb-gpu-123456789012-eu-west-1-jobs"
+  }
+  expect_failures = [var.batch_job_queue, var.batch_job_definition, var.batch_job_bucket]
+}
+run "reject_batch_binding_other_account" {
+  command = plan
+  variables {
+    network              = "mainnet"
+    batch_job_queue      = "arn:aws:batch:eu-west-2:210987654321:job-queue/qsb-gpu"
+    batch_job_definition = "arn:aws:batch:eu-west-2:210987654321:job-definition/qsb-gpu-solver:1"
+    batch_job_bucket     = "qsb-gpu-210987654321-eu-west-2-jobs"
+  }
+  expect_failures = [var.batch_job_queue, var.batch_job_definition, var.batch_job_bucket]
 }
 run "region_is_pinned" {
   command = plan

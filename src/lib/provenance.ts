@@ -23,8 +23,7 @@ export const externalSolverDescriptorSchema = z
     image: z
       .string()
       .regex(
-        // eu-west-2 is QSB's region; eu-west-1 only for descriptors enrolled before the move.
-        /^(?:ghcr\.io\/starknet-innovation\/qsb-solver|\d{12}\.dkr\.ecr\.eu-west-[12]\.amazonaws\.com\/qsb-solver)@sha256:[a-f0-9]{64}$/,
+        /^(?:ghcr\.io\/starknet-innovation\/qsb-solver|\d{12}\.dkr\.ecr\.eu-west-1\.amazonaws\.com\/qsb-solver)@sha256:[a-f0-9]{64}$/,
       ),
   })
   .strict();

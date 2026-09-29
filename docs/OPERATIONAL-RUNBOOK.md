@@ -276,11 +276,12 @@ exported credentials out of the parent shell; never print or share credentials:
   # Verify the assumed-role ARN before proceeding; this prints no credentials.
   aws sts get-caller-identity
   export TABLE_NAME='your-records-table'
-  export AWS_REGION='eu-west-2'
-  export AWS_BATCH_JOB_QUEUE='arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu'
-  export AWS_BATCH_JOB_DEFINITION='arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-gpu-solver:1'
-  export AWS_BATCH_JOB_BUCKET='qsb-gpu-123456789012-eu-west-2-jobs'
-  export WORKFLOW_ARN='arn:aws:states:eu-west-2:123456789012:stateMachine:qsb-app-withdrawal'
+  # The live stack's region: eu-west-1 until the eu-west-2 cutover (docs/REGION-MIGRATION.md).
+  export AWS_REGION='your-stack-region'
+  export AWS_BATCH_JOB_QUEUE='arn:aws:batch:your-stack-region:123456789012:job-queue/qsb-gpu'
+  export AWS_BATCH_JOB_DEFINITION='arn:aws:batch:your-stack-region:123456789012:job-definition/qsb-gpu-solver:1'
+  export AWS_BATCH_JOB_BUCKET='qsb-gpu-123456789012-your-stack-region-jobs'
+  export WORKFLOW_ARN='arn:aws:states:your-stack-region:123456789012:stateMachine:qsb-app-withdrawal'
   export QSB_NETWORK='mainnet'
   # Set explicitly to the verified deployed switch; false refuses mainnet polling.
   export QSB_MAINNET_ENABLED='false'

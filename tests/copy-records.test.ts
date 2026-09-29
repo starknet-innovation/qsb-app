@@ -112,6 +112,22 @@ describe("copyRecords", () => {
   });
 });
 
+describe("TTL rows", () => {
+  it("skips sessions and challenges, which DynamoDB may delete on its own at any time", async () => {
+    const { source, dest } = tables(10);
+    source.items.push({ pk: { S: "SESSION#s" }, sk: { S: "x" }, expiresAt: { N: "1" } });
+    dest.items.push({ pk: { S: "CHALLENGE#c" }, sk: { S: "y" }, expiresAt: { N: "2" } });
+    let scans = 0;
+    // A TTL delete in the source between scans must not fail the copy.
+    source.onScan = () => {
+      if (++scans === 3) source.items = source.items.filter((item) => !item.expiresAt);
+    };
+    const result = await copyRecords(source, "old", dest, "new", true, noPause);
+    expect(result).toMatchObject({ items: 10, skippedEphemeral: 1, copied: true });
+    expect(dest.items.filter((item) => item.pk?.S?.startsWith("SESSION#"))).toHaveLength(0);
+  });
+});
+
 describe("canonical encoding", () => {
   it("ignores key and set order, and encodes binary values", () => {
     const a: Item = { sk: { S: "1" }, pk: { S: "p" }, s: { SS: ["x", "y"] }, b: { B: Uint8Array.of(1, 2) } };

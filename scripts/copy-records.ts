@@ -22,6 +22,10 @@ import {
  *
  * Without --apply it only counts. With --apply it copies and verifies. A re-run after a partial copy is
  * safe: the destination may only hold items identical to source items.
+ *
+ * Rows with a TTL (`expiresAt`: sign-in challenges and sessions) are neither copied nor compared. DynamoDB
+ * deletes them asynchronously on its own, which would make any comparison unstable, and everyone signs
+ * in again at the new stack anyway. Durable rows never carry a TTL.
  */
 export type Item = Record<string, AttributeValue>;
 type Command = ScanCommand | BatchWriteItemCommand;
@@ -29,6 +33,9 @@ export interface TableClient {
   send(command: Command): Promise<unknown>;
 }
 type Put = { PutRequest: { Item: Item } };
+
+/** Whether DynamoDB's TTL may delete this row on its own; such rows are ephemeral. */
+export const ephemeral = (item: Item) => "expiresAt" in item;
 
 export async function scanAll(client: TableClient, table: string): Promise<Item[]> {
   const items: Item[] = [];
@@ -84,12 +91,18 @@ export async function copyRecords(
   apply: boolean,
   pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
 ) {
-  const items = await scanAll(source, sourceTable);
-  const summary = { items: items.length, prefixes: prefixCounts(items), digest: digest(items) };
+  const all = await scanAll(source, sourceTable);
+  const items = all.filter((item) => !ephemeral(item));
+  const summary = {
+    items: items.length,
+    skippedEphemeral: all.length - items.length,
+    prefixes: prefixCounts(items),
+    digest: digest(items),
+  };
   if (!apply) return { ...summary, copied: false };
   // Only a partial earlier copy may be present: every destination item must match a source item.
   const known = new Set(items.map(canonical));
-  const present = await scanAll(dest, destTable);
+  const present = (await scanAll(dest, destTable)).filter((item) => !ephemeral(item));
   if (present.some((item) => !known.has(canonical(item))))
     throw new Error("The destination holds items that aren't in the source. Nothing was copied.");
   for (let i = 0; i < items.length; i += 25) {
@@ -104,10 +117,10 @@ export async function copyRecords(
       pending = out.UnprocessedItems?.[destTable] ?? [];
     }
   }
-  const after = digest(await scanAll(source, sourceTable));
+  const after = digest((await scanAll(source, sourceTable)).filter((item) => !ephemeral(item)));
   if (after !== summary.digest)
     throw new Error("The source changed during the copy. Is the old stack still switched on? Re-run once it's frozen.");
-  const copied = await scanAll(dest, destTable);
+  const copied = (await scanAll(dest, destTable)).filter((item) => !ephemeral(item));
   if (copied.length !== items.length || digest(copied) !== summary.digest)
     throw new Error(
       `Verification failed: the destination has ${copied.length} items, the source ${items.length}. Don't switch the new stack on.`,
