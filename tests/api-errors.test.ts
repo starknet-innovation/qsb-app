@@ -158,7 +158,7 @@ async function setup() {
     path: string,
     body?: unknown,
     // `raw` sends a body as is; `stream` sends it without a length, so bodyLimit counts it.
-    options: { auth?: string | null; app?: Partial<typeof deps>; raw?: string; stream?: string } = {},
+    options: { auth?: string | null; app?: Partial<typeof deps>; raw?: string; stream?: string; headers?: Record<string, string> } = {},
   ) => {
     calls.push({ method: method.toLowerCase(), path: "/api" + path });
     const auth = options.auth === undefined ? token : options.auth;
@@ -168,6 +168,7 @@ async function setup() {
         headers: {
           "content-type": "application/json",
           ...(auth ? { authorization: "Bearer " + auth } : {}),
+          ...options.headers,
         },
         body:
           options.stream !== undefined
@@ -342,6 +343,28 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
   ["idempotency_conflict", 409, async (f) => {
     await f.putJob();
     return f.call("POST", "/jobs", manifest);
+  }],
+  ["invalid_request", 400, (f) => f.call("POST", `/jobs/${jobId}/pause`, {}, { headers: { "idempotency-key": "short" } })],
+  ["idempotency_conflict", 409, async (f) => {
+    await f.putVault();
+    const headers = { "idempotency-key": "deposit-attempt-1" };
+    await f.call("POST", `/vaults/${vaultId}/fund/submit`, { rawTxHex: deposit(), amount: "50000", costAccepted: true }, { headers });
+    return f.call("POST", `/vaults/${vaultId}/fund/submit`, { rawTxHex: deposit(49_999n), amount: "49999", costAccepted: true }, { headers });
+  }],
+  ["idempotency_in_progress", 409, async (f) => {
+    await f.putVault();
+    let release!: () => void;
+    f.miner.submitFunding.mockImplementationOnce(
+      () => new Promise((resolve) => (release = () => resolve({ status: "success" }))),
+    );
+    const request = () =>
+      f.call("POST", `/vaults/${vaultId}/fund/submit`, { rawTxHex: deposit(), amount: "50000", costAccepted: true }, { headers: { "idempotency-key": "deposit-attempt-1" } });
+    const first = request();
+    await vi.waitFor(() => expect(f.miner.submitFunding).toHaveBeenCalled());
+    const busy = await request();
+    release();
+    await first;
+    return busy;
   }],
   ["owner_not_allowlisted", 403, (f) =>
     f.call("POST", "/jobs", manifest, { app: { ownerLimits: { ...ownerOff, allowlist: new Set([other]) } } })],

@@ -467,6 +467,57 @@ describe("API key authorization", () => {
   });
 });
 
+describe("API keys under /v1 and Idempotency-Key", () => {
+  it("never records a minted key for replay, on either prefix", async () => {
+    const store = new MemoryStore();
+    const { session } = await setup(store);
+    const app = createApp(store, {
+      chain,
+      miner,
+      apiKeys: true,
+      versionedAlias: true,
+    });
+    const token = await session();
+    const mint = async (prefix: string) => {
+      const r = await app.request(`${prefix}/api-keys`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": "mint-once-please",
+        },
+        body: JSON.stringify({ name: "ci", scopes: ["read"] }),
+      });
+      expect(r.status).toBe(201);
+      expect(r.headers.get("Idempotency-Replayed")).toBeNull();
+      return (await r.json()).key as string;
+    };
+    const keys = [await mint("/api"), await mint("/api"), await mint("/v1")];
+    expect(new Set(keys).size).toBe(3);
+    const rows = [...store.rows.values()];
+    expect(rows.filter((r) => r.sk.startsWith("IDEMPOTENCY#"))).toEqual([]);
+    const everything = JSON.stringify(rows);
+    for (const key of keys) expect(everything).not.toContain(key.slice(12));
+    const v1 = await app.request("/v1/vaults", {
+      headers: { Authorization: `Bearer ${keys[2]}` },
+    });
+    expect(v1.status).toBe(200);
+  });
+
+  it("checks the scope when an idempotency layer shares the route", async () => {
+    const { session, call, mint } = await setup();
+    const token = await session();
+    const read = (await mint(token, { scopes: ["read"] })).body.key;
+    const vaults = (await mint(token, { scopes: ["vaults"] })).body.key;
+    const post = async (key: string) => {
+      const r = await call("POST", "/api/vaults", key, {});
+      return [r.status, (await r.json()).code];
+    };
+    expect(await post(read)).toEqual([403, "api_key_scope_denied"]);
+    expect(await post(vaults)).toEqual([400, "invalid_request"]);
+  });
+});
+
 describe("API key owner limits", () => {
   it("reports an API-key caller's allowlist standing in /api/config", async () => {
     const store = new MemoryStore();
