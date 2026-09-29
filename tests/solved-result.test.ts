@@ -230,3 +230,52 @@ it("delivers the coordinator solved result and signs it locally without exportin
   expect(release.mainnetEnabled).toBe(false);
   expect(capability.broadcastAuthorized).toBe(false);
 });
+
+it("delivers the solved result when the stored manifest comes back with keys reordered", async () => {
+  const store = new MemoryStore();
+  const app = deployedApiApp("mainnet", store);
+  const token = await signIn(app);
+  const fixture = solvedJob();
+  // DynamoDB maps keep no key order; the hash was taken in schema order.
+  const reverse = (value: object) =>
+    Object.fromEntries(Object.entries(value).reverse());
+  const manifest = reverse({
+    ...fixture.job.manifest,
+    funding: reverse(fixture.job.manifest.funding),
+    helper: reverse(fixture.job.manifest.helper),
+  }) as Withdrawal;
+  expect(digest(JSON.stringify(manifest))).not.toBe(fixture.job.manifestHash);
+  const job = { ...fixture.job, manifest };
+  await store.put({
+    pk: `OWNER#${address}`,
+    sk: `JOB#${job.id}`,
+    version: 0,
+    job,
+  });
+  const response = await app.request(
+    request(`/api/jobs/${job.id}/solved-result`, token),
+  );
+  expect(response.status).toBe(200);
+  const solved = await response.json();
+  expect(solved.manifestHash).toBe(fixture.job.manifestHash);
+  expect(digest(JSON.stringify(solved.manifest))).toBe(solved.manifestHash);
+
+  const tampered = {
+    ...job,
+    id: crypto.randomUUID(),
+    manifest: { ...manifest, fee: "10001" },
+  };
+  await store.put({
+    pk: `OWNER#${address}`,
+    sk: `JOB#${tampered.id}`,
+    version: 0,
+    job: tampered,
+  });
+  expect(
+    (
+      await app.request(
+        request(`/api/jobs/${tampered.id}/solved-result`, token),
+      )
+    ).status,
+  ).toBe(404);
+});

@@ -99,6 +99,13 @@ export const withdrawalSchema = z
   })
   .strict();
 export type Withdrawal = z.infer<typeof withdrawalSchema>;
+/**
+ * manifestHash is taken over the schema-ordered JSON at creation. Stored
+ * copies can come back with keys reordered (DynamoDB maps keep no order),
+ * so re-parse before hashing a manifest that was read back.
+ */
+export const canonicalManifest = (manifest: unknown): Withdrawal =>
+  withdrawalSchema.parse(manifest);
 export type Job = {
   id: string;
   owner: string;
