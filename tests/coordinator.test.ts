@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   enabled: true,
   health: vi.fn(),
@@ -67,6 +67,12 @@ import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
+import {
+  ACTIVE_JOBS_SK,
+  GPU_SECONDS_SK,
+  OWNER_GPU_BUDGET_REACHED,
+  claimWithdrawalSlot,
+} from "../server/owner-limits";
 const event = { owner: "test", jobId: "test-job", revision: 0 };
 const pk = "OWNER#test",
   sk = "JOB#test-job";
@@ -749,4 +755,171 @@ it.each(["configuration", "prepare"])("retains pending request allowance during 
   await handler(event);
   expect(((await store.get(pk, sk))!.job as Job).batchReplacementFor).toBe("qsb-prior-request");
   expect(mocks.run).not.toHaveBeenCalled();
+});
+
+describe("owner limits", () => {
+  const budgetRow = () => store.get(pk, GPU_SECONDS_SK);
+  const job = async () => (await store.get(pk, sk))!.job as Job;
+  const withBudget = async (reservedSeconds: number) =>
+    store.put({ pk, sk: GPU_SECONDS_SK, version: 0, reservedSeconds });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("writes no owner row and changes nothing when the switches are unset", async () => {
+    await seed();
+    await handler(event);
+    expect(mocks.run).toHaveBeenCalledOnce();
+    expect([...(store as MemoryStore).rows.keys()].filter((k) => k.includes("LIMIT#"))).toEqual([]);
+    expect(await job()).not.toHaveProperty("ownerGpuChargedSeconds");
+  });
+
+  it("charges the owner in the same conditional write as the per-job reservation, before the POST", async () => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "36000");
+    await seed();
+    const atomicPut = vi.spyOn(store, "atomicPut");
+    mocks.run.mockImplementationOnce(async () => {
+      expect(await job()).toMatchObject({ status: "searching", gpuBudgetReservedSeconds: 900, ownerGpuChargedSeconds: 900 });
+      expect(await budgetRow()).toMatchObject({ version: 0, reservedSeconds: 900 });
+      return { id: "compute-1" };
+    });
+    await handler(event);
+    expect(mocks.run).toHaveBeenCalledOnce();
+    expect(atomicPut).toHaveBeenCalledOnce();
+    expect(atomicPut.mock.calls[0][0].map((w) => [w.row.sk, w.expected])).toEqual([
+      [sk, 0],
+      [GPU_SECONDS_SK, undefined],
+    ]);
+    expect(atomicPut.mock.invocationCallOrder[0]).toBeLessThan(mocks.run.mock.invocationCallOrder[0]);
+    expect(await job()).toMatchObject({ runpodId: "compute-1", gpuSubmissions: 1, ownerGpuChargedSeconds: 900 });
+  });
+
+  it("pauses before preparing when the owner budget is used, like the per-job cap", async () => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "36000");
+    await seed();
+    await withBudget(35101);
+    expect(await handler(event)).toMatchObject({ done: true });
+    expect(mocks.prepareRun).not.toHaveBeenCalled();
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(await job()).toMatchObject({ status: "paused", error: OWNER_GPU_BUDGET_REACHED, gpuBudgetReservedSeconds: 0 });
+    expect(await budgetRow()).toMatchObject({ version: 0, reservedSeconds: 35101 });
+  });
+
+  it("never loosens the per-job cap", async () => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "1000000000");
+    await seed({ gpuBudgetReservedSeconds: 35101 });
+    await handler(event);
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(await job()).toMatchObject({ status: "paused", error: expect.stringMatching(/^GPU-time budget reached/) });
+    expect(await budgetRow()).toBeUndefined();
+  });
+
+  it("charges a job started before the limit its earlier reservations", async () => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "36000");
+    await seed({ gpuSubmissions: 7, gpuBudgetReservedSeconds: 6300 });
+    await handler(event);
+    expect(await job()).toMatchObject({ gpuBudgetReservedSeconds: 7200, ownerGpuChargedSeconds: 7200 });
+    expect(await budgetRow()).toMatchObject({ reservedSeconds: 7200 });
+  });
+
+  it.each([
+    [1000, 1900, true],
+    [35500, 35500, false],
+  ])("re-reads the budget when another withdrawal of the owner reserves first (%s)", async (other, total, submits) => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "36000");
+    await seed();
+    const real = store.atomicPut.bind(store);
+    vi.spyOn(store, "atomicPut").mockImplementationOnce(async (writes) => {
+      await withBudget(other);
+      return real(writes);
+    });
+    await handler(event);
+    expect(mocks.run).toHaveBeenCalledTimes(submits ? 1 : 0);
+    expect(await budgetRow()).toMatchObject({ reservedSeconds: total });
+    expect(await job()).toMatchObject(
+      submits
+        ? { status: "searching", runpodId: "compute-1", ownerGpuChargedSeconds: 900 }
+        : { status: "paused", error: OWNER_GPU_BUDGET_REACHED, gpuBudgetReservedSeconds: 0 },
+    );
+  });
+
+  it("writes neither row when the transaction fails, and sends nothing", async () => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "36000");
+    await seed();
+    vi.spyOn(store, "atomicPut").mockRejectedValueOnce(new Error("AccessDenied"));
+    await expect(handler(event)).rejects.toThrow("AccessDenied");
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(await job()).toMatchObject({ status: "queued", gpuBudgetReservedSeconds: 0 });
+    expect(await budgetRow()).toBeUndefined();
+  });
+
+  it("still polls and credits in-flight work with the budget used, and never resubmits it", async () => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "900");
+    await seed({ status: "searching", runpodId: "compute-1", gpuBudgetReservedSeconds: 900, ownerGpuChargedSeconds: 900 });
+    await withBudget(900);
+    mocks.status.mockResolvedValue({ status: "IN_PROGRESS" });
+    expect(await handler(event)).toMatchObject({ done: false });
+    mocks.status.mockResolvedValue(completedOutput(0, []));
+    await handler(event);
+    expect(await job()).toMatchObject({ status: "queued", attempt: 1, computeSeconds: 1 });
+    await handler(event);
+    expect(mocks.cancel).not.toHaveBeenCalled();
+    expect(mocks.prepareRun).not.toHaveBeenCalled();
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(await job()).toMatchObject({ status: "paused", error: OWNER_GPU_BUDGET_REACHED });
+    expect(await budgetRow()).toMatchObject({ version: 0, reservedSeconds: 900 });
+  });
+
+  it("pauses before any paid request when the owner budget setting is malformed", async () => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "36000s");
+    await seed();
+    await handler(event);
+    expect(mocks.prepareRun).not.toHaveBeenCalled();
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(await job()).toMatchObject({ status: "paused", error: expect.stringContaining("QSB_OWNER_MAX_GPU_SECONDS") });
+  });
+
+  it.each([
+    ["listed", "someone-else,test", true],
+    ["not listed", "someone-else", false],
+  ])("submits for an owner %s on the allowlist only", async (_, list, submits) => {
+    vi.stubEnv("QSB_OWNER_ALLOWLIST", list);
+    await seed({ status: "searching", runpodId: "compute-1" });
+    mocks.status.mockResolvedValue(completedOutput(0, []));
+    await handler(event);
+    if (!submits) {
+      expect(mocks.status).not.toHaveBeenCalled();
+      expect(await job()).toMatchObject({ status: "paused", runpodId: "compute-1", error: "Wallet is not allowed by deployment configuration." });
+      return;
+    }
+    await handler(event);
+    expect(mocks.run).toHaveBeenCalledOnce();
+  });
+
+  it("releases the owner's withdrawal slot when the search fails", async () => {
+    await seed({ status: "searching", runpodId: "compute-1" });
+    expect(await claimWithdrawalSlot(store, "test", "next", 1)).toBeUndefined();
+    mocks.status.mockResolvedValue(completedOutput(0, ["sequence=2147483648\nlocktime=500000000\n".repeat(64)]));
+    await handler(event);
+    expect(await job()).toMatchObject({ status: "failed" });
+    expect(await claimWithdrawalSlot(store, "test", "next", 1)).toMatchObject({ row: { sk: ACTIVE_JOBS_SK } });
+  });
+
+  it("releases the owner's withdrawal slot when the search finishes", async () => {
+    const indices = [149, 148, 147, 146, 145, 144, 143, 142, 141];
+    await seed({
+      status: "searching",
+      runpodId: "compute-1",
+      stage: "round2",
+      solution: { sequence: 2147483648, locktime: 500000000, round1: indices, round2: [] },
+    });
+    expect(await claimWithdrawalSlot(store, "test", "next", 1)).toBeUndefined();
+    const done = completedOutput(0, ["public-hit"]);
+    mocks.status.mockResolvedValue({ ...done, output: { ...done.output, stage: "round2", workRange: workRange("round2", 0) } });
+    mocks.cpu.mockResolvedValue({ Payload: Buffer.from(JSON.stringify({ valid: true, indices })) });
+    await handler(event);
+    expect(await job()).toMatchObject({ status: "awaiting_authorization", stage: "verification" });
+    expect(await claimWithdrawalSlot(store, "test", "next", 1)).toMatchObject({ row: { sk: ACTIVE_JOBS_SK } });
+  });
 });
