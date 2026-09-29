@@ -964,7 +964,7 @@ const reasons: Record<ErrorStatus, string> = {
   500: "Internal error",
   503: "Unavailable",
 };
-const hours = (seconds: number) =>
+const duration = (seconds: number) =>
   seconds % 3600 === 0
     ? `${seconds / 3600} hour${seconds === 3600 ? "" : "s"}`
     : `${seconds / 60} minutes`;
@@ -1077,11 +1077,11 @@ export function openApiDocument() {
           description: [
             "A session token from BIP-322 sign-in:",
             "",
-            `1. \`POST ${pathOf("createChallenge")}\` with the wallet address. The response has a challenge \`id\` and a \`message\`. The challenge lasts ${hours(CHALLENGE_SECONDS)} and works once.`,
+            `1. \`POST ${pathOf("createChallenge")}\` with the wallet address. The response has a challenge \`id\` and a \`message\`. The challenge lasts ${duration(CHALLENGE_SECONDS)} and works once.`,
             "2. Sign `message` with the address's key, as a BIP-322 signature.",
             `3. \`POST ${pathOf("verifyChallenge")}\` with the \`id\` and the \`signature\`. The response has the \`token\`.`,
             "",
-            `Send \`Authorization: Bearer <token>\`. A session lasts ${hours(SESSION_SECONDS)} and is bound to the signing address and this deployment's network. After that, requests return \`session_expired\`; sign in again.`,
+            `Send \`Authorization: Bearer <token>\`. A session lasts ${duration(SESSION_SECONDS)} and is bound to the signing address and this deployment's network. After that, requests return \`session_expired\`; sign in again.`,
           ].join("\n"),
         },
       },
