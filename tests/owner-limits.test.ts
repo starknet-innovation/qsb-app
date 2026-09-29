@@ -256,7 +256,7 @@ describe("active withdrawals per owner", () => {
     expect(f.snapshot()).toEqual(before);
   });
 
-  it.each(["failed", "awaiting_authorization", "submitted", "confirmed"] as const)(
+  it.each(["paused", "failed", "awaiting_authorization", "submitted", "confirmed"] as const)(
     "releases the slot when a withdrawal is %s",
     async (status) => {
       const f = await fixture(limited(1));
@@ -267,11 +267,93 @@ describe("active withdrawals per owner", () => {
     },
   );
 
-  it.each(["queued", "searching", "paused"] as const)("keeps the slot while a withdrawal is %s", async (status) => {
+  it.each(["queued", "searching"] as const)("keeps the slot while a withdrawal is %s", async (status) => {
     const f = await fixture(limited(1));
     const created = await (await f.post("/api/jobs", await f.withdrawal())).json();
     await f.setStatus(created.job.id, status);
     expect((await f.post("/api/jobs", await f.withdrawal())).status).toBe(429);
+  });
+
+  it("frees the slot when the owner pauses, so a paused withdrawal doesn't block a new one", async () => {
+    const f = await fixture(limited(1));
+    const first = await (await f.post("/api/jobs", await f.withdrawal())).json();
+    expect((await f.post(`/api/jobs/${first.job.id}/pause`)).status).toBe(200);
+    expect((await f.post("/api/jobs", await f.withdrawal())).status).toBe(201);
+  });
+
+  it("refuses to resume into a full owner, writing and starting nothing", async () => {
+    const f = await fixture(limited(1));
+    const first = await (await f.post("/api/jobs", await f.withdrawal())).json();
+    expect((await f.post(`/api/jobs/${first.job.id}/pause`)).status).toBe(200);
+    expect((await f.post("/api/jobs", await f.withdrawal())).status).toBe(201);
+    f.workflow.mockClear();
+    const before = f.written();
+    const response = await f.post(`/api/jobs/${first.job.id}/resume`);
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({ code: "owner_active_withdrawal_limit" });
+    expect(f.written()).toEqual(before);
+    expect(f.workflow).not.toHaveBeenCalled();
+  });
+
+  it("re-claims the slot in the same write as the resume", async () => {
+    const f = await fixture(limited(1));
+    const first = await (await f.post("/api/jobs", await f.withdrawal())).json();
+    expect((await f.post(`/api/jobs/${first.job.id}/pause`)).status).toBe(200);
+    const atomicPut = vi.spyOn(f.store, "atomicPut");
+    expect((await f.post(`/api/jobs/${first.job.id}/resume`)).status).toBe(202);
+    expect(atomicPut).toHaveBeenCalledOnce();
+    expect(atomicPut.mock.calls[0][0].map((w) => [w.row.sk, w.expected])).toEqual([
+      [`JOB#${first.job.id}`, 1],
+      [ACTIVE_JOBS_SK, 0],
+    ]);
+    expect(await f.store.get(pk, ACTIVE_JOBS_SK)).toMatchObject({ version: 1, jobId: first.job.id });
+    expect((await f.post("/api/jobs", await f.withdrawal())).status).toBe(429);
+  });
+
+  it("resumes with a plain write when the limit is off", async () => {
+    const f = await fixture(off());
+    const first = await (await f.post("/api/jobs", await f.withdrawal())).json();
+    expect((await f.post(`/api/jobs/${first.job.id}/pause`)).status).toBe(200);
+    const atomicPut = vi.spyOn(f.store, "atomicPut");
+    expect((await f.post(`/api/jobs/${first.job.id}/resume`)).status).toBe(202);
+    expect(atomicPut).not.toHaveBeenCalled();
+    expect(await f.store.get(pk, ACTIVE_JOBS_SK)).toBeUndefined();
+  });
+
+  it("gives exactly one of a concurrent resume and creation the last slot", async () => {
+    const store = new MemoryStore();
+    const f = await fixture(limited(1), store);
+    const first = await (await f.post("/api/jobs", await f.withdrawal())).json();
+    expect((await f.post(`/api/jobs/${first.job.id}/pause`)).status).toBe(200);
+    const next = await f.withdrawal();
+    // Both requests read the fence and count before either commits. Without a claim on
+    // resume only one reaches the transaction, so a timer lets it go on alone.
+    const commit = store.atomicPut.bind(store);
+    let arrived = 0;
+    let both!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      both = resolve;
+      setTimeout(resolve, 200);
+    });
+    vi.spyOn(store, "atomicPut").mockImplementation(async (writes: AtomicWrite[]) => {
+      if (++arrived === 2) both();
+      await ready;
+      return commit(writes);
+    });
+    const [resumed, created] = await Promise.all([
+      f.post(`/api/jobs/${first.job.id}/resume`),
+      f.post("/api/jobs", next),
+    ]);
+    expect([resumed.status, created.status].filter((status) => status < 300)).toHaveLength(1);
+    expect([resumed.status, created.status].filter((status) => status === 409)).toHaveLength(1);
+    const active = f
+      .jobs()
+      .filter((row) => ["queued", "searching"].includes((row.job as Job).status));
+    expect(active).toHaveLength(1);
+    if (created.status === 409) {
+      expect(await store.get(pk, `JOB#${next.idempotencyKey}`)).toBeUndefined();
+      expect(await store.get(`OUTPOINT#${next.funding.txid}:0`, "RESERVATION")).toBeUndefined();
+    } else expect((await store.get(pk, `JOB#${first.job.id}`))!.job).toMatchObject({ status: "paused" });
   });
 
   it("counts withdrawals created before the limit was set", async () => {

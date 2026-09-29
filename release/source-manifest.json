@@ -51,7 +51,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "4e906709a9ef9bc77745d5e08c16848eca757540d3c84a847ec7c5caff2b2f16",
+      "api": "f99bb205df1f3286e21460c6db8d17feb8ad2c696dca4d381a2b52ca6388a595",
       "build-metadata": "2c4804c98f40b16adda8fde8e13f053d59cc53e26f951906064834edd469b1c6",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "937ed85c9f65566b212e105e397fb341b6ad7426a5278c23281b5ae649941c55",
@@ -109,7 +109,7 @@
       "scripts/generate-solver-registry.mjs": "e88dcd1462fb6a8fe4e66efffab9c96345f656b22cd11e40b3f865257a9a1b8c",
       "scripts/package-release.ts": "5b1d0d9e5169c8e83a1b9259033c710011a3d8cf46b02824a1c73708de4d2031",
       "scripts/storage-inventory.ts": "c8ecc1d3ed239f444efd50ab8bb704be13408f609aba1e80d16a5325d5e4603e",
-      "server/app.ts": "47596118ab230bad7849e5001ddc4b4dae4edc212af5e630462db477c3587c28",
+      "server/app.ts": "2941c9582a6ae451006455ae939f4e852a5d9cf2847f8825715dc5419d4869b3",
       "server/aws-batch-command.json": "5a4544d33c5744dbc438c0d515a84e3bb2c8e80d8662020c4a7c765ed5267881",
       "server/aws-batch.ts": "a0db53599bf9ae3cb2fb24355f4309631b86d0646472cd477f2eb9ca76817fa7",
       "server/candidate-output.ts": "d21c9cf57d3f0604c7a501a88b9a9925a035ec878ec568e56d3e7f99bc3d004a",
@@ -126,7 +126,7 @@
       "server/mainnet-capability.json": "c0fa06da307e9aea3e9023f4ac29a8d2fb31b51e75f27e26d4b781adf71e0e82",
       "server/mainnetConfig.ts": "e995c6a9385012217326c2490f188e8382eda40fb37858e9d4f0939d86181102",
       "server/network.ts": "195d8e3db91d09dcb4aab06358a69f9e466ea93927869951d9b6f7010f41fad3",
-      "server/owner-limits.ts": "10937606243aa9c6a497f502feb03f7c0012aebcf17f6a5f5f9edc967ffa7856",
+      "server/owner-limits.ts": "1c6476377e743f38b93a035ee5114a0a2891fd726e59fbd176be0fef8d76518c",
       "server/parallel-search.ts": "1d14f9bdfce20e0c4e31ca974e917cb1eafc058aa99afb97acd9e883df55d8f6",
       "server/providers.ts": "ea4a61120de685d7dd4bfc801dcce8170f1fb0dccf2672c6ff09299df07dd016",
       "server/runtime/activation.ts": "5d615a42fbb8dc3402aee7382c0edd72787f05277b2c000763229a51a947a011",

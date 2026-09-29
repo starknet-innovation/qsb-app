@@ -10,7 +10,7 @@ import { Conflict, type AtomicWrite, type Row, type Store } from "./store";
 export type OwnerLimits = {
   /** QSB_OWNER_ALLOWLIST: when set, only these owners may register vaults, deposit, or create or resume withdrawals. */
   allowlist: ReadonlySet<string> | null;
-  /** QSB_OWNER_MAX_ACTIVE_JOBS: withdrawals one owner may have queued, searching or paused at once. */
+  /** QSB_OWNER_MAX_ACTIVE_JOBS: withdrawals one owner may have queued or searching at once. */
   maxActiveJobs: number | null;
   /** QSB_OWNER_MAX_GPU_SECONDS: GPU seconds reserved across all of one owner's withdrawals. Never refunded. */
   maxGpuSeconds: number | null;
@@ -61,8 +61,13 @@ export function ownerLimits(env: Env = process.env): OwnerLimits {
   };
 }
 
-/** Statuses whose GPU search is over for good. A withdrawal holds its owner's slot until it reaches one. */
+/**
+ * Statuses that hold no slot. A withdrawal holds its owner's slot only while queued or searching.
+ * Pausing frees it; the only ways back, resume and an operator's provider-id reconciliation,
+ * claim a slot again. The other statuses are final for the GPU search.
+ */
 export const SLOT_RELEASED: readonly string[] = [
+  "paused",
   "failed",
   "awaiting_authorization",
   "submitted",
@@ -72,10 +77,10 @@ export const ACTIVE_JOBS_SK = "LIMIT#ACTIVE_JOBS";
 
 /**
  * A conditional write on the owner's fence row that claims a withdrawal slot, for the same
- * transaction as the new job and its reservations; undefined when the owner holds `max` slots.
- * The fence is read before the jobs are counted, so of two creations racing for the last slot
- * one fails its transaction. A slot is released by the job's own status write: released
- * statuses never return to queued, searching or paused.
+ * transaction as the write that makes `jobId` queued or searching (creation, resume or an
+ * operator's reconciliation); undefined when the owner holds `max` slots. The fence is read
+ * before the jobs are counted, so of two claims racing for the last slot one fails its
+ * transaction. A slot is released by the job's own status write.
  */
 export async function claimWithdrawalSlot(
   store: Store,
@@ -104,6 +109,14 @@ export async function claimWithdrawalSlot(
       updatedAt: new Date().toISOString(),
     },
     expected: fence?.version,
+  };
+}
+
+/** The refusal body for a creation or resume over the limit. */
+export function activeWithdrawalLimit(max: number) {
+  return {
+    error: `This wallet already has ${max} active withdrawal${max === 1 ? "" : "s"}, the most this deployment allows. Queued and searching withdrawals count; pausing one frees its slot.`,
+    code: "owner_active_withdrawal_limit",
   };
 }
 

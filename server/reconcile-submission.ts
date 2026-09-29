@@ -13,7 +13,8 @@ import { assertSolverPin, solverRelease } from "../src/lib/provenance";
 import { rehearsalAddressAllowed, transactionsEnabled } from "./network";
 import { configuredCompute } from "./compute-provider";
 import { searchVersion, workRange } from "./search-ranges";
-import { store as defaultStore, type Store } from "./store";
+import { store as defaultStore, type AtomicWrite, type Store } from "./store";
+import { OwnerLimitsInvalid, claimWithdrawalSlot, ownerLimits } from "./owner-limits";
 
 export class ReconciliationError extends Error {
   constructor(message: string) {
@@ -111,6 +112,8 @@ export async function reconcileUnknownSubmission(input: {
   resumePolling: (job: Job) => Promise<PollingStart>;
   pollingAllowed?: (owner: string) => boolean;
   now?: string;
+  /** QSB_OWNER_MAX_ACTIVE_JOBS, set to the deployment's value; read from the environment by default. */
+  maxActiveJobs?: number | null;
 }): Promise<ReconciliationResult> {
   const { store, owner, jobId, lookup, log } = input;
   const decision = reconciliationDecisionSchema.parse(input.decision);
@@ -274,6 +277,23 @@ export async function reconcileUnknownSubmission(input: {
     if (slots && target) slots.splice(slots.indexOf(target), 1);
     replacedRequest = request;
   }
+  // Attaching an ID to a paused job makes it searching again, so it re-claims the owner's
+  // withdrawal slot in the same transaction, as resume does. Nothing is written at the limit.
+  let slot: AtomicWrite | undefined;
+  if (decision.kind === "provider-id" && !recorded) {
+    let max = input.maxActiveJobs;
+    if (max === undefined)
+      try {
+        max = ownerLimits().maxActiveJobs;
+      } catch (error) {
+        if (error instanceof OwnerLimitsInvalid) throw new ReconciliationError("OwnerLimitsInvalid");
+        throw error;
+      }
+    if (max !== null) {
+      slot = await claimWithdrawalSlot(store, owner, jobId, max);
+      if (!slot) throw new ReconciliationError("OwnerActiveWithdrawalLimit");
+    }
+  }
   const priorRevision = job.revision;
   job.revision += 1;
   job.updatedAt = now;
@@ -302,6 +322,7 @@ export async function reconcileUnknownSubmission(input: {
         decision: job.submissionReconciliation,
       },
     },
+    ...(slot ? [slot] : []),
   ]);
   log({
     action: decision.kind,

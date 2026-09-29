@@ -46,6 +46,7 @@ import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
 import {
   OwnerGpuBudget,
   OwnerLimitsInvalid,
+  activeWithdrawalLimit,
   claimWithdrawalSlot,
   ownerLimits,
   type OwnerLimits,
@@ -758,13 +759,7 @@ export function createApp(
         ? undefined
         : await claimWithdrawalSlot(store, owner, id, maxActiveJobs);
     if (maxActiveJobs !== null && !slot)
-      return c.json(
-        {
-          error: `This wallet already has ${maxActiveJobs} active withdrawal${maxActiveJobs === 1 ? "" : "s"}, the most this deployment allows. Queued, searching and paused withdrawals count until they finish.`,
-          code: "owner_active_withdrawal_limit",
-        },
-        429,
-      );
+      return c.json(activeWithdrawalLimit(maxActiveJobs), 429);
     // Its first paid submission would pause at once, with its inputs already reserved to it.
     const budget = await OwnerGpuBudget.open(store, owner, maxGpuSeconds);
     if (budget?.exceeds(job, nextGpuReservation(job, gpuSpendLimits.executionTimeoutMs)))
@@ -841,8 +836,9 @@ export function createApp(
   app.post("/api/jobs/:id/resume", async (c) => {
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
       return c.json({ error: `${NETWORK_ID} withdrawals are disabled.` }, 503);
-    // No slot claim or budget check: a paused job keeps its slot, and resume may only poll paid work.
+    // No budget check: resume may only poll paid work. It does re-claim the slot pausing freed.
     if (!allowlisted(c.get("owner"))) return c.json(notAllowlisted, 403);
+    const { maxActiveJobs } = limits();
     const pk = `OWNER#${c.get("owner")}`,
       sk = `JOB#${c.req.param("id")}`,
       row = await store.get(pk, sk);
@@ -889,13 +885,22 @@ export function createApp(
       job.error?.includes("failed independent")
     )
       return c.json({ error: "This failure needs operator review." }, 409);
+    // In the same transaction as the resume write; a refusal writes and starts nothing.
+    const slot =
+      maxActiveJobs === null
+        ? undefined
+        : await claimWithdrawalSlot(store, c.get("owner"), job.id, maxActiveJobs);
+    if (maxActiveJobs !== null && !slot)
+      return c.json(activeWithdrawalLimit(maxActiveJobs), 429);
     job.status = "queued";
     job.retryRequested = true;
     job.revision++;
     job.updatedAt = new Date().toISOString();
     delete job.error;
     delete job.oneSubmissionAllowed;
-    await store.put({ ...row, job, version: row.version + 1 }, row.version);
+    const resumed = { ...row, job, version: row.version + 1 };
+    if (slot) await store.atomicPut([{ row: resumed, expected: row.version }, slot]);
+    else await store.put(resumed, row.version);
     await startWorkflow(job);
     return c.json({ job }, 202);
   });

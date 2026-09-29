@@ -1,6 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { release, type Job } from "../src/lib/model";
 import { MemoryStore } from "../server/store";
+import { ACTIVE_JOBS_SK } from "../server/owner-limits";
 import { workRange } from "../server/search-ranges";
 import {
   reconcileUnknownSubmission,
@@ -543,4 +544,29 @@ it("rejects concurrent identity mutation without spending an allowance", async (
   await expect(run(batchReplacement())).rejects.toThrow();
   expect(await store.list(pk, "RECONCILIATION_REQUEST#")).toHaveLength(0);
   expect((await job()).oneSubmissionAllowed).toBeUndefined();
+});
+
+it("re-claims the owner's withdrawal slot when attaching an ID makes a paused job searching", async () => {
+  const attach = (maxActiveJobs: number) =>
+    reconcileUnknownSubmission({
+      store, owner, jobId, decision, lookup, now, log: () => {}, resumePolling, pollingAllowed: () => true, maxActiveJobs,
+    });
+  await store.put({ pk, sk: "JOB#other", version: 0, job: { id: "other", status: "searching" } });
+  const before = structuredClone([...store.rows]);
+  await expect(attach(1)).rejects.toThrow("OwnerActiveWithdrawalLimit");
+  expect([...store.rows]).toEqual(before);
+  expect(resumePolling).not.toHaveBeenCalled();
+  const atomicPut = vi.spyOn(store, "atomicPut");
+  expect(await attach(2)).toMatchObject({ outcome: "provider-id" });
+  expect(atomicPut.mock.calls[0][0].map((w) => w.row.sk)).toContain(ACTIVE_JOBS_SK);
+  expect(await job()).toMatchObject({ status: "searching", runpodId: "provider-1" });
+  expect(await store.get(pk, ACTIVE_JOBS_SK)).toMatchObject({ version: 0, jobId });
+});
+it("claims no slot for a not-submitted decision, which leaves the job paused", async () => {
+  await store.put({ pk, sk: "JOB#other", version: 0, job: { id: "other", status: "searching" } });
+  await reconcileUnknownSubmission({
+    store, owner, jobId, decision: replacement(), lookup, now, log: () => {}, resumePolling, pollingAllowed: () => true, maxActiveJobs: 1,
+  });
+  expect(await job()).toMatchObject({ status: "paused", oneSubmissionAllowed: true });
+  expect(await store.get(pk, ACTIVE_JOBS_SK)).toBeUndefined();
 });

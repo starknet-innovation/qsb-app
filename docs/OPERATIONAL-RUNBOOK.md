@@ -290,14 +290,24 @@ shrinking it:
   retention).
 
 **`owner_max_active_jobs`** (`QSB_OWNER_MAX_ACTIVE_JOBS`): a withdrawal holds a slot
-while queued, searching or paused, and releases it on its own status write to failed,
-awaiting_authorization, submitted or confirmed, which never go back. A paused
-withdrawal keeps its slot, so one waiting for operator review holds it until it's
-resolved. Creation claims the slot in the same transaction as the job and its
-reservations, through the owner's `LIMIT#ACTIVE_JOBS` row, which also names the last
-claimant so a half-visible concurrent creation still counts. Of two creations racing
-for the last slot, one gets a 409 and writes nothing. Withdrawals created before the
-limit was set count too.
+only while queued or searching. Pausing it, or its reaching failed,
+awaiting_authorization, submitted or confirmed, frees the slot on that status write.
+The only ways back to queued or searching claim a slot again, in the same transaction
+as that write, through the owner's `LIMIT#ACTIVE_JOBS` row: creation, resume (429
+`owner_active_withdrawal_limit` at the limit, nothing written or started) and an
+operator's provider-id reconciliation of a paused job. The fence row also names the
+last claimant, so a half-visible concurrent claim still counts. Of two claims racing
+for the last slot, one gets a conflict and writes nothing. Withdrawals created before
+the limit was set count too. The coordinator never un-pauses a job, and pause stays
+unrestricted.
+- **Reconciliation.** When the deployment sets this limit, set `QSB_OWNER_MAX_ACTIVE_JOBS`
+  to the same value (check `ownerLimits.maxActiveJobs` in uncached `GET /api/config`)
+  before running the reconcile CLI. A `--provider-id` decision on a paused job then
+  claims a slot with the attachment, which needs Query on the owner's `JOB#` rows and
+  PutItem on its `LIMIT#` row (`qsb-operator` has both). At the limit it refuses with
+  `OwnerActiveWithdrawalLimit` and writes nothing: pause another of the owner's
+  withdrawals or raise the limit, then retry. A `--not-submitted` decision leaves the
+  job paused and claims nothing; its resume claims.
 
 **`owner_max_gpu_seconds`** (`QSB_OWNER_MAX_GPU_SECONDS`), at least one submission's
 reservation (`executionTimeoutMs` in `server/gpu-spend.json`, 900 seconds today);
