@@ -45,7 +45,9 @@ export const apiErrorCodes = {
     "The job isn't a coordinator withdrawal, so this route doesn't serve it.",
   job_state_invalid: "The job's current status doesn't allow this action.",
   idempotency_conflict:
-    "The idempotency key already belongs to a different withdrawal.",
+    "The idempotency key already belongs to a different request: the manifest's key to another withdrawal, or the Idempotency-Key header to another path or body.",
+  idempotency_in_progress:
+    "A request with this Idempotency-Key is still running. Retry after `Retry-After` seconds.",
   withdrawal_invalid:
     "The withdrawal doesn't match the vault's deposit, or its destination or amounts don't balance.",
   solver_not_served:

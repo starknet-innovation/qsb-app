@@ -118,6 +118,17 @@ resource "aws_cloudfront_distribution" "web" {
     origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
   }
+  # /v1 is the stable API prefix; the API serves it with the same handlers as /api. Keep it identical.
+  ordered_cache_behavior {
+    path_pattern               = "/v1/*"
+    target_origin_id           = "api"
+    viewer_protocol_policy     = "https-only"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
+  }
   restrictions {
     geo_restriction { restriction_type = "none" }
   }
