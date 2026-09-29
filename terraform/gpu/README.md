@@ -1,6 +1,6 @@
 # QSB GPU backend on AWS Batch
 
-This stack runs the external qsb-solver pinning and subset worker on one On-Demand g5.xlarge A10G in Ireland. It is separate from the application state, so provisioning GPU compute cannot recreate the parked CDK stacks or activate mainnet.
+This stack runs the external qsb-solver pinning and subset worker on one On-Demand g5.xlarge A10G in `var.region` (eu-west-2 after the move; see [REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md)). It is separate from the application state, so provisioning GPU compute cannot recreate the parked CDK stacks or activate mainnet.
 
 Capacity: EC2 BEST_FIT, min 0/max 4 vCPUs, g5.xlarge only. Verify that the operator account's G/VT quota supports 4 vCPUs. Job definitions require one GPU, 4 vCPUs, 12 GB RAM, one attempt and a 900-second running timeout. An independent five-minute EventBridge/Lambda watchdog terminates jobs older than 30 minutes, including startup/queue time. It never submits replacements. Capacity scales to zero after AWS Batch's idle cooldown; this is not an instantaneous stop or a hard dollar budget. Idle startup/termination and storage are chargeable.
 

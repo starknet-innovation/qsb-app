@@ -23,9 +23,9 @@ import {
  * Without --apply it only counts. With --apply it copies and verifies. A re-run after a partial copy is
  * safe: the destination may only hold items identical to source items.
  *
- * Rows with a TTL (`expiresAt`: sign-in challenges and sessions) are neither copied nor compared. DynamoDB
- * deletes them asynchronously on its own, which would make any comparison unstable, and everyone signs
- * in again at the new stack anyway. Durable rows never carry a TTL.
+ * Sign-in challenges and sessions (the rows with a TTL, `expiresAt`) are neither copied nor compared.
+ * DynamoDB deletes them asynchronously on its own, which would make any comparison unstable, and everyone
+ * signs in again at the new stack anyway. Any other row with a TTL stops the copy.
  */
 export type Item = Record<string, AttributeValue>;
 type Command = ScanCommand | BatchWriteItemCommand;
@@ -34,8 +34,14 @@ export interface TableClient {
 }
 type Put = { PutRequest: { Item: Item } };
 
-/** Whether DynamoDB's TTL may delete this row on its own; such rows are ephemeral. */
-export const ephemeral = (item: Item) => "expiresAt" in item;
+/** Sign-in challenges and sessions: the only rows with a TTL, which DynamoDB may delete at any time. */
+const EPHEMERAL = ["CHALLENGE#", "SESSION#"];
+export function ephemeral(item: Item) {
+  if (!("expiresAt" in item)) return false;
+  if (EPHEMERAL.some((prefix) => item.pk?.S?.startsWith(prefix))) return true;
+  // Any other row with a TTL is unexpected: stop rather than silently leave it behind.
+  throw new Error(`A ${(item.pk?.S ?? "?").split("#")[0]} row has a TTL, which only challenges and sessions should. Nothing was copied.`);
+}
 
 export async function scanAll(client: TableClient, table: string): Promise<Item[]> {
   const items: Item[] = [];

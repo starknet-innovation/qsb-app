@@ -112,11 +112,16 @@ def statement_diff(installed, rendered):
 
 
 def trusted(document):
-    """Who a trust policy lets in: each statement's principal, and any OIDC audience/subject it pins."""
+    """Who a trust policy lets in: each statement's principal, any OIDC audience/subject it pins, and
+    any principal-ARN condition (an Identity Center permission set's role is named that way)."""
     out = []
     for s in (document or {}).get('Statement', []):
-        pinned = {k: v for k, v in (s.get('Condition', {}).get('StringEquals', {})).items()
-                  if k.endswith((':sub', ':aud'))}
+        conditions = s.get('Condition', {})
+        pinned = {k: v for k, v in conditions.get('StringEquals', {}).items() if k.endswith((':sub', ':aud'))}
+        for operator, keys in conditions.items():
+            for key, value in keys.items():
+                if key.lower() == 'aws:principalarn':
+                    pinned[f'{operator}:{key}'] = value
         out.append(json.dumps({'Principal': s.get('Principal'), 'NotPrincipal': s.get('NotPrincipal'),
                                'pinned': pinned}, sort_keys=True))
     return sorted(out)

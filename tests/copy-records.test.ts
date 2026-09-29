@@ -128,6 +128,15 @@ describe("TTL rows", () => {
   });
 });
 
+describe("unexpected TTL rows", () => {
+  it("stops instead of skipping a durable row that carries a TTL", async () => {
+    const { source, dest } = tables(5);
+    source.items.push({ pk: { S: "OWNER#placeholder" }, sk: { S: "VAULT#x" }, expiresAt: { N: "9" } });
+    await expect(copyRecords(source, "old", dest, "new", false, noPause)).rejects.toThrow("OWNER row has a TTL");
+    expect(dest.writes).toBe(0);
+  });
+});
+
 describe("canonical encoding", () => {
   it("ignores key and set order, and encodes binary values", () => {
     const a: Item = { sk: { S: "1" }, pk: { S: "p" }, s: { SS: ["x", "y"] }, b: { B: Uint8Array.of(1, 2) } };

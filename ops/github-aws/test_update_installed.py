@@ -157,6 +157,17 @@ class UpdateInstalled(unittest.TestCase):
         self.assertFalse([item for item in self.plan if 'assume-qsb-roles' in item['target']])
         self.assertNotIn(('iam', 'get-user-policy'), self.calls)
 
+    def test_a_renamed_permission_set_counts_as_moving_the_trust(self):
+        self.inventory = SSO_INVENTORY
+        installed = self.installed()
+        self.inventory = {**SSO_INVENTORY, 'operator_sso_permission_set': 'SomeoneElse'}
+        with contextlib.suppress(SystemExit):
+            self.run_update(installed)
+        self.assertEqual(self.writes(), [])
+        with contextlib.suppress(SystemExit):
+            self.run_update(installed, apply=False)
+        self.assertEqual([op for s, op in self.calls if s == 'iam' and op in WRITES], [])
+
     def test_stale_deploy_role_and_runtime_boundary_are_updated_and_read_back(self):
         iam = self.installed()
         iam['deploy']['Statement'].append({'Sid': 'EcrQsb', 'Effect': 'Allow', 'Action': ['ecr:*'], 'Resource': ['*']})

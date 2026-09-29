@@ -242,7 +242,7 @@ class DeployChecks(unittest.TestCase):
                                                         policy_name='logs'), 'Only the miner_credential policy')
 
     def test_a_region_change_on_an_existing_stack_is_refused(self):
-        # Refreshing against the wrong region finds nothing, so Terraform reports the state as deleted.
+        # Resources in state that refresh no longer finds would be recreated silently.
         doc = plan()
         doc['resource_drift'] = [{'address': 'aws_dynamodb_table.records', 'mode': 'managed',
                                   'change': {'actions': ['delete']}}]

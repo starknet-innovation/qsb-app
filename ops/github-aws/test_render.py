@@ -27,12 +27,13 @@ class SinglePipelinePolicies(unittest.TestCase):
 
     def test_a_new_account_without_registered_edge_ids_renders_valid_policies(self):
         empty = render(dict(self.inventory, distributions=[], apis=[], origin_access_controls=[], response_headers_policies=[]))
-        sids = {s['Sid'] for s in empty['deploy']['Statement']}
-        self.assertNotIn('RegisteredQsbCloudFront', sids)
-        self.assertNotIn('RegisteredQsbApis', sids)
         self.assertTrue(all(s['Resource'] for s in empty['deploy']['Statement']))
-        # Registering the IDs later adds exactly those statements back.
-        self.assertIn('RegisteredQsbCloudFront', {s['Sid'] for s in self.policies['deploy']['Statement']})
+        cdn = next(s for s in empty['deploy']['Statement'] if s['Sid'] == 'RegisteredQsbCloudFront')
+        self.assertTrue(all(r.endswith('/UNREGISTERED') for r in cdn['Resource']))
+        apis = next(s for s in empty['deploy']['Statement'] if s['Sid'] == 'RegisteredQsbApis')
+        self.assertTrue(all('/apis/UNREGISTERED' in r for r in apis['Resource']))
+        # Registering the IDs later changes only those resources, so the policy shape is the same.
+        self.assertEqual([s['Sid'] for s in empty['deploy']['Statement']], [s['Sid'] for s in self.policies['deploy']['Statement']])
 
     def test_removed_services_have_no_deploy_or_runtime_actions(self):
         removed = {'ec2', 'backup', 'sqs', 'events', 'ecr'}

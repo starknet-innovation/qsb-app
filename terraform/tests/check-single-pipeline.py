@@ -243,17 +243,19 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
 
 
 def region_checks(plan):
-    """A region change on an existing stack would replan it elsewhere and orphan the original.
+    """Refuse a plan that would move an existing stack to another region, or recreate resources it lost.
 
-    Refreshing state against the wrong region (or account) finds none of its resources, so the plan
-    reports them as deleted outside Terraform and recreates them: refuse any such drift. Also refuse
-    existing resources whose ARN names a region other than var.region. See docs/REGION-MIGRATION.md."""
+    With AWS provider 6.x each resource keeps its region in state and is refreshed there, so a change of
+    var.region shows up as existing resources whose ARNs name another region: refuse those. Separately,
+    resources in state that refresh no longer finds (deleted outside Terraform) would be recreated
+    silently: refuse that drift too. The region_pin resource refuses the change at plan as well.
+    See docs/REGION-MIGRATION.md."""
     region = (plan.get('variables', {}).get('region') or {}).get('value')
     require(isinstance(region, str) and region, 'the plan must set var.region explicitly')
     gone = [r['address'] for r in plan.get('resource_drift', [])
             if r.get('mode') == 'managed' and 'delete' in r.get('change', {}).get('actions', [])]
-    require(not gone, f'{len(gone)} resources in state were not found (e.g. {", ".join(gone[:3])}): wrong '
-                      'region or account, or deleted outside Terraform. Investigate before applying')
+    require(not gone, f'{len(gone)} resources in state were not found (e.g. {", ".join(gone[:3])}): deleted '
+                      'outside Terraform, or planned with the wrong credentials. Investigate before applying')
     for row in module_resources((plan.get('prior_state') or {}).get('values', {}).get('root_module', {})):
         parts = str(row.get('values', {}).get('arn') or '').split(':')
         if len(parts) > 3 and parts[3]:  # global services (IAM, CloudFront, S3 buckets) carry no region

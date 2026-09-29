@@ -43,12 +43,19 @@ Nothing live changes in this phase.
    region is no longer in `versions.tf`.
    - Add `"region": "eu-west-1"` to the old GPU tfvars. The app tfvars already has it.
    - The GPU AMI is now required too, so add `"gpu_ami": "ami-05db4db06e751ab89"`. That's the pinned Ireland AMI.
-   - Re-initialise both working copies with `-reconfigure -backend-config=bucket=<current state bucket>
-     -backend-config=region=eu-west-1`. The GPU stack also needs `-backend-config=key=qsb/gpu/terraform.tfstate`.
-   - Then plan and apply both stacks once. The only change should be the new `terraform_data.region_pin`.
+   - Re-initialise the app working copy with `-reconfigure -backend-config=bucket=<current state bucket>
+     -backend-config=region=eu-west-1`. Until then its plan stops with "Backend initialization required". The GPU
+     stack's backend block didn't change, so its working copy needs no re-init.
+   - Then plan and apply both stacks once. Expect the new `terraform_data.region_pin`, the `SourceCommit` tag
+     updates, and a replaced release record (`terraform_data.release` in the app, `terraform_data.release_identity`
+     in the GPU stack), as with any new commit. Nothing else should be replaced or destroyed.
 2. **Identity Center and account basics** (AWS admin, new account).
-   - Create a permission set for the QSB operator (for example `QsbOperator`) and require MFA for its sign-in.
-     Assign it to the QSB owner in the new account. It gets its inline policy in step 4.
+   - Create a permission set for the QSB operator (for example `QsbOperator`). Assign it to the QSB owner in the new
+     account. It gets its inline policy in step 4. Keep its session duration at one hour; `qsb-operator` sessions
+     are an hour at most anyway.
+   - **MFA.** The two access roles no longer check MFA themselves, because Identity Center enforces it for the
+     whole instance, not per permission set. Confirm that Identity Center prompts for MFA at every sign-in
+     ("always-on") and requires users to register an MFA device.
    - Create the GitHub OIDC provider (`token.actions.githubusercontent.com`), which the deploy role trusts.
    - **GPU capacity.** Check that `g5.xlarge` is offered in the subnets you'll use:
      `aws ec2 describe-instance-type-offerings --region eu-west-2 --location-type availability-zone --filters Name=instance-type,Values=g5.xlarge`.
@@ -60,13 +67,19 @@ Nothing live changes in this phase.
      The same name means the same NVIDIA driver build. The operator's roles can't do these lookups or the quota
      request: they're limited to their own account and region.
    - **Network.** Choose the VPC and subnets for the GPU stack.
+   - **New-account limits.**
+     - Lambda reserved concurrency: the app reserves 2 for each of its 3 functions, and a new account's quota may be
+       lower.
+     - CloudFront: new accounts sometimes need AWS to verify them before they can create a distribution.
+     - If the app's `alarm_actions` is used, create its SNS topic in the new account.
 3. **Private inventory** (AWS admin). Write it for the new account with:
    - `account` (the new one), `region` `eu-west-2`, `subject` (the same GitHub main-branch subject) and a new
      `state_bucket` name;
    - `operator_sso_permission_set` (for example `QsbOperator`) instead of `operator_user`;
    - `gpu_vpc`;
-   - empty `distributions`, `apis`, `origin_access_controls` and `response_headers_policies`. None exist yet, and
-     the deploy policy leaves those statements out until they're registered in step 7.
+   - empty `distributions`, `apis`, `origin_access_controls` and `response_headers_policies`. None exist yet. The
+     deploy policy names an `UNREGISTERED` placeholder until the real IDs are registered in step 7, so the policies
+     keep the same shape.
 4. **Bootstrap** (AWS admin). Run `ops/github-aws/bootstrap.py`, then `ops/github-aws/bootstrap_access.py`: plan
    first, then `--apply`.
    - They create the deploy role, the runtime and GPU boundaries, the state bucket in eu-west-2, `qsb-viewonly` and
@@ -74,7 +87,9 @@ Nothing live changes in this phase.
    - The two access roles trust only the permission set's role. There's no IAM user.
    - Render `permission-set.json` with `python3 ops/github-aws/access.py INVENTORY OUTPUT_DIR` and attach it to the
      permission set as its inline policy. It allows assuming those two roles and nothing else.
-   - Then check with `verify_access.py --profile qsb-view --inventory INVENTORY --live`.
+   - Then check with `verify_access.py --profile qsb-view --inventory INVENTORY --live`. That exercises the trust.
+     The permission set's inline policy lives in Identity Center, and no tool here reads it, so the AWS admin
+     confirms by hand that it equals `permission-set.json`.
 5. **GPU stack** (operator, new account).
    - **Init** with the new state bucket: `-backend-config=region=eu-west-2 -backend-config=key=qsb/gpu/terraform.tfstate`.
    - **Tfvars:** the new `aws_account_id`, `region = "eu-west-2"`, the `gpu_ami` from step 2, `vpc_id`, `subnets`, the GPU
@@ -95,17 +110,18 @@ Nothing live changes in this phase.
 7. **Register the edge IDs** (temp admin).
    - Add the new CloudFront distribution, API, origin access control and response-headers IDs to the inventory.
    - Run `update_installed.py` as a plan, then with `--apply`. From then on `qsb-operator` manages the whole stack.
+     If it refuses because the number of operator policies changed, the AWS admin runs
+     `bootstrap_access.py --resume`, which adds only the missing policy, then re-runs the update.
    - Then the AWS admin removes the temp admin role.
-8. **Client code** (AWS admin or temp admin, with the key holder).
+8. **Client code** (AWS admin, with the key holder).
    - Create `qsb/slipstream` in the new account in eu-west-2 with `{"client_code": "…"}`, as in `terraform/README.md`
      ("MARA Slipstream credential").
    - Then the operator sets its ARN as `slipstream_secret_arn`, plans and applies.
    - `GET /api/rates` through the new URL must return 200.
-9. **Check without writing** (operator).
+9. **Check** (operator).
    - `/api/config` shows mainnet, the enrolled solver and the switches off.
    - Run a bounded GPU preflight (driver visible, image pulled by digest), as for the eu-west-1 image preflight.
-   - **Don't sign in to the new stack yet.** A sign-in writes a session row, and the copy in step 11 refuses a
-     destination holding rows the source lacks.
+   - Signing in is fine. It writes only a challenge and a session, which the copy in step 11 ignores.
 
 ## Cutover
 
@@ -117,14 +133,24 @@ Nothing live changes in this phase.
     - Then take an on-demand backup of the old records table
       (`aws dynamodb create-backup --region eu-west-1 --table-name <name>-records --backup-name qsb-pre-move`).
 11. **Copy the data** (operator, both accounts). Use one profile per account:
-    `npx tsx scripts/copy-records.ts --from eu-west-1:<old>-records --from-profile <old operator profile> --to eu-west-2:<new>-records --to-profile <new operator profile>`.
+    `npx tsx scripts/copy-records.ts --from eu-west-1:<old>-records --from-profile qsb-copy-from --to eu-west-2:<new>-records --to-profile qsb-copy-to`.
+    - **Profiles.** The script can't answer an MFA prompt, so give it profiles that reuse credentials the CLI has
+      already obtained:
+      - In `~/.aws/config`, add `[profile qsb-copy-from]` with
+        `credential_process = aws configure export-credentials --profile qsb-operator --format process`. That's the
+        old account's operator profile. Run `aws sts get-caller-identity --profile qsb-operator` first, which
+        prompts for MFA once and caches the session.
+      - Add `[profile qsb-copy-to]` the same way for the new account's operator profile, after `aws sso login`.
     - It counts first. Add `--apply` to copy.
     - It copies every item unchanged, refuses a destination holding anything the source lacks, fails if the source
       changes during the copy, and verifies both tables item by item. It resumes safely.
     - It prints only counts and a digest. The data passes through the operator's machine, not any AI tool.
 12. **Verify** (operator). Sign in at the new URL. The vault, its deposit and its status must show as before.
 13. **Switch on** (operator, with the owner's OK). Set both switches on in the new stack, plan and apply.
-14. **Point the tooling at the new account.**
+14. **Retire the old stack's services straight away** (operator, old account). Steps 1 and 2 of "Decommission the
+    old stack" below destroy everything that could take a deposit, and keep the data. Afterwards nothing is left to
+    switch back on by mistake. Deleting the kept data still waits for the cleanup.
+15. **Point the tooling at the new account.**
     - Set the GitHub repository variables `QSB_AWS_ACCOUNT_ID`, `QSB_AWS_REGION` (eu-west-2) and
       `QSB_AWS_ROLE_ARN` (the new `qsb-github-deploy`).
     - Point the local `qsb-view` and `qsb-operator` profiles at the new account's roles through Identity Center,
@@ -134,11 +160,13 @@ Nothing live changes in this phase.
 
 - **Before step 13:** switch the old app back on. Its table hasn't changed since the freeze, and nothing in the new
   stack has taken a deposit.
-- **After step 13:** new deposits live only in the new account, so don't roll back. Fix forward.
+- **After step 13:** new deposits live only in the new account, so don't roll back. Fix forward. Step 14 removes
+  the old services, so the old stack can't be switched on by mistake.
 
 ## Decommission the old stack
 
-Do this after the new stack has run a full deposit and withdrawal.
+Steps 1 and 2 run at cutover step 14. They destroy the old services but keep the data. Step 3 deletes the kept data,
+after the new stack has run a full deposit and withdrawal.
 
 1. **GPU stack** (operator, old account).
    - Run `terraform state rm terraform_data.region_pin aws_ecr_repository.solver`, plus the job bucket and its
@@ -150,6 +178,9 @@ Do this after the new stack has run a full deposit and withdrawal.
    - Then run `terraform destroy`. It removes CloudFront, the Lambdas and the roles; the old URL stops working.
 3. **Cleanup** (old account's administrator). Delete these permanently, checking each against this list first:
    - the old records table (disable deletion protection first) and its on-demand backup;
+   - the system backup DynamoDB creates automatically when a table with point-in-time recovery is deleted. It's
+     kept for 35 days in eu-west-1: find it with `aws dynamodb list-backups --region eu-west-1 --backup-type SYSTEM`
+     and delete it too;
    - the `qsb-solver` repository;
    - the job and frontend buckets;
    - the old `qsb/slipstream` secret;

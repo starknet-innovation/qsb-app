@@ -99,7 +99,8 @@ def access(c):
     else:
         # Identity Center roles sit under the reserved /aws-reserved/sso.amazonaws.com/ path, which no
         # one can create roles in, so only that permission set's role matches. The `*` covers the
-        # optional region segment of the path. MFA is enforced by Identity Center's sign-in.
+        # optional region segment of the path. MFA isn't checked here: Identity Center enforces it for the
+        # whole instance, so the administrator must keep it always-on (docs/REGION-MIGRATION.md, step 2).
         trust = {'Version': '2012-10-17', 'Statement': [{
             'Effect': 'Allow', 'Principal': {'AWS': iam('root')}, 'Action': 'sts:AssumeRole',
             'Condition': {'ArnLike': {'aws:PrincipalArn': iam(

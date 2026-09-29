@@ -120,6 +120,32 @@ name) and `gpu_vpc` (the VPC of the `terraform/gpu` security group).
 
 Exactly one of the two must be set. See [REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md).
 
+With Identity Center, the local profiles chain from the permission set's session:
+
+```ini
+[profile qsb-sso]
+sso_session = qsb
+sso_account_id = NEW_ACCOUNT_ID
+sso_role_name = QsbOperator
+region = eu-west-2
+
+[profile qsb-operator]
+source_profile = qsb-sso
+role_arn = arn:aws:iam::NEW_ACCOUNT_ID:role/qsb/bootstrap/qsb-operator
+region = eu-west-2
+
+[profile qsb-view]
+source_profile = qsb-sso
+role_arn = arn:aws:iam::NEW_ACCOUNT_ID:role/qsb/bootstrap/qsb-viewonly
+region = eu-west-2
+
+[sso-session qsb]
+sso_start_url = https://YOUR-PORTAL.awsapps.com/start
+sso_region = eu-west-2
+```
+
+Sign in with `aws sso login --sso-session qsb`.
+
 | Identity | Path | Can | Cannot |
 | --- | --- | --- | --- |
 | IAM user `operator_user` | `/qsb/operators/` | sign in (console or `aws login`), change its password, assume the two roles | assume any other role, even one whose trust names it; any other action, even one a resource policy grants it; it has no access keys |
