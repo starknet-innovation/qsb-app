@@ -422,18 +422,38 @@ function releaseIdentities(row: Row): string[] {
   return ids;
 }
 
+/** Provider IDs of a job's paid submissions: the single field, or each parallel slot's. */
+function providerIds(job: Record<string, unknown> | undefined): string[] {
+  const ids: string[] = [];
+  if (typeof job?.runpodId === "string" && job.runpodId.length > 0) ids.push(job.runpodId);
+  if (Array.isArray(job?.parallelSlots))
+    for (const slot of job.parallelSlots)
+      if (typeof record(slot)?.runpodId === "string" && record(slot)!.runpodId)
+        ids.push(record(slot)!.runpodId as string);
+  return ids;
+}
+
 function hasProviderId(job: Record<string, unknown> | undefined): boolean {
-  return typeof job?.runpodId === "string" && job.runpodId.length > 0;
+  return providerIds(job).length > 0;
+}
+
+/** A parallel slot saved before its paid submit returned, with no provider id. */
+function slotWithoutProvider(job: Record<string, unknown> | undefined): boolean {
+  return (
+    Array.isArray(job?.parallelSlots) &&
+    job.parallelSlots.some((slot) => typeof record(slot)?.runpodId !== "string")
+  );
 }
 
 /** Coordinator saves `searching` with no provider id before the paid submit returns. */
 function searchingWithoutProvider(job: Record<string, unknown> | undefined): boolean {
-  return job?.status === "searching" && !hasProviderId(job);
+  if (job?.status !== "searching") return false;
+  return Array.isArray(job.parallelSlots) ? slotWithoutProvider(job) : !hasProviderId(job);
 }
 
 function pausedUnknownSubmission(job: Record<string, unknown> | undefined): boolean {
   return (
-    !hasProviderId(job) &&
+    (Array.isArray(job?.parallelSlots) ? slotWithoutProvider(job) : !hasProviderId(job)) &&
     job?.status === "paused" &&
     typeof job.error === "string" &&
     job.error.includes("Submission outcome unknown")
@@ -787,7 +807,8 @@ export function preservationFailures(before: Row[], after: Row[]): string[] {
         failures.push("OriginalRequestChanged");
       if (job.coverage !== undefined && job.coverage !== nextJob.coverage)
         failures.push("CompletedCoverageDropped");
-      if (typeof job.runpodId === "string" && nextJob.runpodId !== job.runpodId)
+      const nextIds = new Set(providerIds(nextJob));
+      if (providerIds(job).some((id) => !nextIds.has(id)))
         failures.push("RollbackWouldDuplicatePaidWork");
       if (
         pausedUnknownSubmission(job) &&

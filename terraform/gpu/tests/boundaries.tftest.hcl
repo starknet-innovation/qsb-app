@@ -21,8 +21,8 @@ run "every_gpu_role_is_bounded" {
     error_message = "All four GPU roles must carry the required GPU boundary on the operator-managed path."
   }
   assert {
-    condition     = aws_batch_compute_environment.gpu.compute_resources[0].min_vcpus == 0 && aws_batch_compute_environment.gpu.compute_resources[0].max_vcpus == 4
-    error_message = "Boundary enrollment must not change the zero-idle-capacity and one-instance configuration."
+    condition     = aws_batch_compute_environment.gpu.compute_resources[0].min_vcpus == 0 && aws_batch_compute_environment.gpu.compute_resources[0].max_vcpus == 4 * jsondecode(file("../../server/gpu-spend.json")).workersMax
+    error_message = "Boundary enrollment must not change zero idle capacity or the one instance per GPU worker configuration."
   }
 }
 run "reject_empty_boundary" {

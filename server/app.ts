@@ -633,7 +633,10 @@ export function createApp(
         );
       const storedJob = existing.job as Job;
       if (storedJob.status === "queued") {
-        let runnable = Boolean(storedJob.runpodId); // Existing paid IDs still need polling.
+        // Existing paid IDs, single or per parallel chunk, still need polling.
+        let runnable =
+          Boolean(storedJob.runpodId) ||
+          Boolean(storedJob.parallelSlots?.some((s) => s.runpodId));
         if (!runnable && storedJob.solver) {
           try { deployedSolver(storedJob.solver.descriptor.id); runnable = true; } catch {}
         }
@@ -745,7 +748,10 @@ export function createApp(
       );
     if (!["searching", "queued"].includes(job.status))
       return c.json({ error: "This job cannot be paused." }, 409);
-    if (job.status === "searching" && !job.runpodId)
+    const unknownPost = job.parallelSlots
+      ? job.parallelSlots.some((s) => !s.runpodId)
+      : !job.runpodId;
+    if (job.status === "searching" && unknownPost)
       job.error =
         "Submission outcome unknown. Reconcile compute provider before resuming.";
     job.status = "paused";
