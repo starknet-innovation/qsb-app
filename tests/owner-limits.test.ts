@@ -107,6 +107,11 @@ describe("configuration", () => {
       }),
     ).toEqual({ allowlist: new Set([owner, outsider]), maxActiveJobs: 2, maxGpuSeconds: 3600 });
   });
+  it("refuses an owner GPU budget smaller than one submission's reservation", () => {
+    expect(() => ownerLimits({ QSB_OWNER_MAX_GPU_SECONDS: "899" })).toThrow(/at least 900/);
+    expect(ownerLimits({ QSB_OWNER_MAX_GPU_SECONDS: "900" }).maxGpuSeconds).toBe(900);
+    expect(ownerLimits({ QSB_OWNER_MAX_ACTIVE_JOBS: "1" }).maxActiveJobs).toBe(1);
+  });
   it.each(["0", "-1", "1.5", "1e3", "abc", "9007199254740993"])("refuses a malformed limit %s", (value) => {
     expect(() => ownerLimits({ QSB_OWNER_MAX_ACTIVE_JOBS: value })).toThrow(OwnerLimitsInvalid);
     expect(() => ownerLimits({ QSB_OWNER_MAX_GPU_SECONDS: value })).toThrow(OwnerLimitsInvalid);
@@ -293,6 +298,30 @@ describe("active withdrawals per owner", () => {
     expect(await store.get(pk, "JOB#mine")).toBeUndefined();
   });
 
+  it("counts the fence's last claimant when the job query misses its half-visible transaction", async () => {
+    const store = new MemoryStore();
+    const f = await fixture(limited(1), store);
+    const first = await f.withdrawal();
+    expect((await f.post("/api/jobs", first)).status).toBe(201);
+    // DynamoDB: the committing transaction's fence is visible, its job not yet.
+    const list = store.list.bind(store);
+    vi.spyOn(store, "list").mockImplementation(async (rowPk, prefix) =>
+      (await list(rowPk, prefix)).filter((row) => row.sk !== `JOB#${first.idempotencyKey}`),
+    );
+    const before = f.written();
+    const response = await f.post("/api/jobs", await f.withdrawal());
+    expect(response.status).toBe(429);
+    expect(f.written()).toEqual(before);
+    // With room for two, the claimant is still counted once, not twice.
+    const unit = new MemoryStore();
+    await unit.put({ pk, sk: ACTIVE_JOBS_SK, version: 3, jobId: "b" });
+    expect(await claimWithdrawalSlot(unit, owner, "c", 1)).toBeUndefined();
+    expect(await claimWithdrawalSlot(unit, owner, "c", 2)).toMatchObject({ expected: 3, row: { version: 4, jobId: "c" } });
+    await unit.put({ pk, sk: "JOB#b", version: 0, job: { status: "queued" } });
+    expect(await claimWithdrawalSlot(unit, owner, "c", 2)).toMatchObject({ expected: 3 });
+    expect(await claimWithdrawalSlot(unit, owner, "c", 1)).toBeUndefined();
+  });
+
   it.each([0, 1])("gives exactly one of two concurrent creations the last slot (%s already active)", async (active) => {
     const store = new MemoryStore();
     const f = await fixture(limited(active + 1), store);
@@ -341,6 +370,38 @@ describe("owner GPU budget at creation", () => {
     // Creation reserves nothing: the coordinator charges the budget before each paid POST.
     expect(await f.store.get(pk, GPU_SECONDS_SK)).toMatchObject({ version: 0, reservedSeconds });
   });
+
+  it("creates the owner's budget row at zero with the first withdrawal", async () => {
+    const f = await fixture({ ...off(), maxGpuSeconds: 1800 });
+    expect((await f.post("/api/jobs", await f.withdrawal())).status).toBe(201);
+    expect(await f.store.get(pk, GPU_SECONDS_SK)).toMatchObject({ version: 0, reservedSeconds: 0 });
+  });
+
+  it.each([false, true])(
+    "fails the creation when another withdrawal charges the budget after the check (row existed: %s)",
+    async (existed) => {
+      const store = new MemoryStore();
+      const f = await fixture({ ...off(), maxGpuSeconds: 1800 }, store);
+      if (existed) await store.put({ pk, sk: GPU_SECONDS_SK, version: 0, reservedSeconds: 0 });
+      const manifest = await f.withdrawal();
+      const commit = store.atomicPut.bind(store);
+      vi.spyOn(store, "atomicPut").mockImplementationOnce(async (writes: AtomicWrite[]) => {
+        // The coordinator charges the last 900 seconds for another withdrawal.
+        const row = await store.get(pk, GPU_SECONDS_SK);
+        await store.put(
+          { pk, sk: GPU_SECONDS_SK, version: (row?.version ?? -1) + 1, reservedSeconds: 1800 },
+          row?.version,
+        );
+        return commit(writes);
+      });
+      expect((await f.post("/api/jobs", manifest)).status).toBe(409);
+      expect(f.jobs()).toHaveLength(0);
+      expect([...store.rows.keys()].filter((k) => k.startsWith("OUTPOINT#"))).toEqual([]);
+      expect(f.workflow).not.toHaveBeenCalled();
+      // A retry sees the spent budget and refuses.
+      expect((await f.post("/api/jobs", manifest)).status).toBe(429);
+    },
+  );
 
   it("reports the effective limits", async () => {
     const f = await fixture({ ...off(), maxActiveJobs: 2, maxGpuSeconds: 3600 });

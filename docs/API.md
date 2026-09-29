@@ -12,7 +12,7 @@ Three deployment switches limit what one owner, the signed-in wallet address, ca
 | `QSB_OWNER_MAX_ACTIVE_JOBS` (`owner_max_active_jobs`) | Most withdrawals one owner may have queued, searching or paused. | 429 `owner_active_withdrawal_limit` from `POST /api/jobs` |
 | `QSB_OWNER_MAX_GPU_SECONDS` (`owner_max_gpu_seconds`) | GPU seconds reserved across all of one owner's withdrawals. | 429 `owner_gpu_budget_reached` from `POST /api/jobs`; the coordinator pauses the withdrawal |
 
-A malformed value refuses these routes with 503 `owner_limits_invalid`, and `GET /api/config` then reports `ownerLimits: null`.
+A malformed value, including a GPU budget smaller than one submission's reservation, refuses these routes with 503 `owner_limits_invalid`, and `GET /api/config` then reports `ownerLimits: null`. A creation that races another withdrawal for the last slot or the last of the GPU budget gets the usual 409 and writes nothing.
 
 Sign-in, reads and pause stay open, and so does `POST /api/jobs/:id/submit`: it sends the owner's own solved withdrawal and uses no GPU. Replaying an `idempotencyKey` returns the existing job and takes no slot.
 

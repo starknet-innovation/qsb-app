@@ -882,13 +882,19 @@ describe("owner limits", () => {
     expect(await budgetRow()).toMatchObject({ version: 0, reservedSeconds: 900 });
   });
 
-  it("pauses before any paid request when the owner budget setting is malformed", async () => {
-    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "36000s");
+  it.each([
+    ["36000s", "positive integer"],
+    ["899", "at least 900"],
+  ])("pauses before any paid request when the owner budget setting is %s", async (value, reason) => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", value);
     await seed();
     await handler(event);
     expect(mocks.prepareRun).not.toHaveBeenCalled();
     expect(mocks.run).not.toHaveBeenCalled();
-    expect(await job()).toMatchObject({ status: "paused", error: expect.stringContaining("QSB_OWNER_MAX_GPU_SECONDS") });
+    expect(await job()).toMatchObject({
+      status: "paused",
+      error: expect.stringMatching(new RegExp(`QSB_OWNER_MAX_GPU_SECONDS must be .*${reason}.* Nothing was submitted\\.`)),
+    });
   });
 
   it.each([

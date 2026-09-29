@@ -251,43 +251,6 @@ not the configured cap.
 Startup, idle time, storage and provider retry/billing behavior are not an invoice
 cap. No paid run is authorized by changing this configuration.
 
-### Per-owner limits
-
-Three Terraform variables, all off by default, limit one owner (the signed-in
-address) for the partner phase. They reach the API and coordinator Lambdas only,
-need no IAM change, and only add refusals: the per-job cap above always applies.
-See [docs/API.md](API.md#per-owner-limits) for the routes and error codes.
-
-- **`owner_allowlist`** (`QSB_OWNER_ALLOWLIST`): only listed addresses may register
-  vaults, deposit, or create or resume withdrawals. Match the address exactly as the
-  wallet signs in. Removing an owner pauses their withdrawals at the next coordinator
-  tick, as a disabled deployment does: running GPU jobs aren't cancelled, and resume
-  after re-adding polls them. Lambda environments hold 4 KB in all, so this suits a
-  short partner list.
-- **`owner_max_active_jobs`** (`QSB_OWNER_MAX_ACTIVE_JOBS`): a withdrawal holds a slot
-  while queued, searching or paused, and releases it on its own status write to
-  failed, awaiting_authorization, submitted or confirmed, which never go back. A
-  paused withdrawal keeps its slot, so one waiting for operator review holds it until
-  it's resolved. Creation claims the slot in the same transaction as the job and its
-  reservations, through the owner's `LIMIT#ACTIVE_JOBS` row; of two creations racing
-  for the last slot, one gets a 409 and writes nothing. Withdrawals created before the
-  limit was set count too.
-- **`owner_max_gpu_seconds`** (`QSB_OWNER_MAX_GPU_SECONDS`): before each paid POST, on
-  either the one-GPU or the parallel path, the coordinator charges the owner's
-  `LIMIT#GPU_SECONDS` row in the same conditional write as the job's reservation. The
-  charge is what the job has reserved beyond its `ownerGpuChargedSeconds`, so a job
-  that started before the limit was set is charged its earlier reservations too.
-  Charges are never refunded, whatever the outcome. At the budget the coordinator
-  behaves as at the per-job cap: it starts no new paid submission, lets running
-  chunks finish and pauses with "Owner GPU-time budget reached", and it never touches
-  or resubmits in-flight work. Job creation is refused once less than one
-  submission's reservation is left, so no inputs are reserved to a withdrawal that
-  can't search.
-
-To give an owner more GPU time, raise the variable and apply, then resume their
-paused withdrawals. Lowering a limit below current use refuses new work only. Record
-any change in the deployment record, as for the mainnet switches.
-
 Before a paid claim, endpoint-limit failures pause with `Compute provider limits unconfirmed;
 nothing was submitted` and leave the time reservation unchanged. Fix the endpoint
 permission/configuration, then resume normally. A failure after the paid POST
@@ -295,6 +258,75 @@ boundary remains an unknown submission and must be reconciled, never retried
 blindly. The 90-second coordinator timeout budgets the CPU export (25 seconds),
 endpoint check (20 seconds), paid POST (20 seconds), and persistence overhead;
 it reduces timeout exposure but does not make a POST and database write atomic.
+
+### Per-owner limits
+
+Three Terraform variables, all off by default, limit one owner for the partner
+phase. They reach the API and coordinator Lambdas only and only add refusals: the
+per-job cap above always applies. See [docs/API.md](API.md#per-owner-limits) for the
+routes and error codes.
+
+**Every limit is per address.** An owner is the address string exactly as the wallet
+signed in, with no normalisation: a differently spelled form of the same wallet
+address is another owner, with its own `OWNER#` partition, slots and GPU budget.
+Without an allowlist, a fresh address gets fresh limits; with one, a partner with N
+listed addresses gets N of each.
+
+**`owner_allowlist`** (`QSB_OWNER_ALLOWLIST`): only listed addresses may register
+vaults, deposit, or create or resume withdrawals. Terraform refuses a list over 2500
+characters (joined with commas), so both Lambdas keep room under their 4 KB
+environment limit and an apply can't update one and fail the other. Before setting or
+shrinking it:
+- **Inventory owners with a confirmed vault or a live withdrawal.** An unlisted owner
+  with a funded vault can't create a withdrawal at all (403), and only that owner's
+  withdrawal can spend the vault, so the funds wait until the owner is listed.
+  Leaving `POST /api/jobs/:id/submit` open only helps an owner whose withdrawal is
+  already solved.
+- **Unlisted owners' live withdrawals pause at their next coordinator tick**, and their
+  executions end. Their running AWS Batch jobs aren't cancelled: that time is already
+  reserved, and they run to completion with nothing polling them. Resume stays
+  refused (403) until the owner is listed again; then resume polls the saved provider
+  IDs. Re-list promptly, while AWS Batch still holds the results (verify its
+  retention).
+
+**`owner_max_active_jobs`** (`QSB_OWNER_MAX_ACTIVE_JOBS`): a withdrawal holds a slot
+while queued, searching or paused, and releases it on its own status write to failed,
+awaiting_authorization, submitted or confirmed, which never go back. A paused
+withdrawal keeps its slot, so one waiting for operator review holds it until it's
+resolved. Creation claims the slot in the same transaction as the job and its
+reservations, through the owner's `LIMIT#ACTIVE_JOBS` row, which also names the last
+claimant so a half-visible concurrent creation still counts. Of two creations racing
+for the last slot, one gets a 409 and writes nothing. Withdrawals created before the
+limit was set count too.
+
+**`owner_max_gpu_seconds`** (`QSB_OWNER_MAX_GPU_SECONDS`), at least one submission's
+reservation (`executionTimeoutMs` in `server/gpu-spend.json`, 900 seconds today);
+Terraform refuses less, and the Lambdas treat less as invalid:
+- **IAM sandbox check first.** With this set, the coordinator writes the job row and
+  the owner's `LIMIT#GPU_SECONDS` row in one `TransactWriteItems` of two conditional
+  `OWNER#` Puts. Its `PutItem` grant requires `dynamodb:LeadingKeys`, and whether AWS
+  sets that key for each item of a transaction is unverified; the live sandbox
+  ([APP-ROLE-SANDBOX.md](APP-ROLE-SANDBOX.md)) has only run the API role. Before this
+  variable is ever set, run that transaction as the coordinator role in the sandbox.
+  If it's denied, every paid submission would fail with AccessDenied: nothing is
+  written or sent, but all GPU work stops. Don't set the variable then. The fix is an
+  IAM change, which goes to the AWS administrator first.
+- **Charging.** Before each paid POST, on the one-GPU and the parallel path, the
+  coordinator charges the owner in the same conditional write as the job's
+  reservation: what the job has reserved beyond its `ownerGpuChargedSeconds`. A job
+  that started before the limit was set is charged its earlier reservations at its
+  next submission; withdrawals that finished earlier are never charged. Charges are
+  never refunded, whatever the outcome.
+- **At the budget** the coordinator behaves as at the per-job cap: it starts no new
+  paid submission, lets running chunks finish, and pauses with "Owner GPU-time budget
+  reached". It never touches or resubmits in-flight work. Job creation is refused
+  once less than one submission's reservation is left, and fails with a 409 if
+  another withdrawal charges the budget in between, so no inputs are reserved to a
+  withdrawal that can't search.
+
+To give an owner more GPU time, raise the variable and apply, then resume their
+paused withdrawals. Lowering a limit below current use refuses new work only. Record
+any change in the deployment record, as for the mainnet switches.
 
 ### App-role IAM merge gate
 

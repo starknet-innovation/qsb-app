@@ -778,6 +778,8 @@ export function createApp(
     await store.atomicPut([
       { row: { pk, sk, version: 0, job } },
       ...(slot ? [slot] : []),
+      // A charge by another withdrawal after the check above fails this creation instead.
+      ...(budget ? [budget.creationFence()] : []),
       ...(await canonicalReservationWrites(
         store,
         [manifest.funding, manifest.helper].map((point) => ({

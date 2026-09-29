@@ -1,4 +1,5 @@
 import type { Job } from "../src/lib/model";
+import { gpuSpendLimits } from "./gpu-spend";
 import { Conflict, type AtomicWrite, type Row, type Store } from "./store";
 
 /**
@@ -26,6 +27,18 @@ function positive(env: Env, name: string): number | null {
   return Number(value);
 }
 
+/** One paid submission's reservation. A smaller owner budget could never admit a withdrawal. */
+export const MIN_OWNER_GPU_SECONDS = Math.ceil(gpuSpendLimits.executionTimeoutMs / 1000);
+
+function gpuSeconds(env: Env): number | null {
+  const max = positive(env, "QSB_OWNER_MAX_GPU_SECONDS");
+  if (max !== null && max < MIN_OWNER_GPU_SECONDS)
+    throw new OwnerLimitsInvalid(
+      `QSB_OWNER_MAX_GPU_SECONDS must be at least ${MIN_OWNER_GPU_SECONDS}, one submission's reservation.`,
+    );
+  return max;
+}
+
 export function ownerAllowlist(env: Env = process.env): ReadonlySet<string> | null {
   const owners = (env.QSB_OWNER_ALLOWLIST ?? "")
     .split(",")
@@ -44,7 +57,7 @@ export function ownerLimits(env: Env = process.env): OwnerLimits {
   return {
     allowlist: ownerAllowlist(env),
     maxActiveJobs: positive(env, "QSB_OWNER_MAX_ACTIVE_JOBS"),
-    maxGpuSeconds: positive(env, "QSB_OWNER_MAX_GPU_SECONDS"),
+    maxGpuSeconds: gpuSeconds(env),
   };
 }
 
@@ -72,9 +85,15 @@ export async function claimWithdrawalSlot(
 ): Promise<AtomicWrite | undefined> {
   const pk = `OWNER#${owner}`;
   const fence = await store.get(pk, ACTIVE_JOBS_SK);
-  const active = (await store.list(pk, "JOB#")).filter(
+  const rows = await store.list(pk, "JOB#");
+  let active = rows.filter(
     (row) => !SLOT_RELEASED.includes((row.job as Job | undefined)?.status as string),
   ).length;
+  // A DynamoDB Query can miss the job of a transaction whose fence write is already visible.
+  // Only the last claimant can be caught like that: earlier ones held the fence until they
+  // finished. So count it as active unless the query returned it.
+  if (typeof fence?.jobId === "string" && !rows.some((row) => row.sk === `JOB#${fence.jobId}`))
+    active++;
   if (active >= max) return undefined;
   return {
     row: {
@@ -119,7 +138,7 @@ export class OwnerGpuBudget {
     const pk = `OWNER#${owner}`;
     if (max === undefined)
       try {
-        max = positive(process.env, "QSB_OWNER_MAX_GPU_SECONDS");
+        max = gpuSeconds(process.env);
       } catch (error) {
         // Refuse every reservation, like invalid per-job accounting.
         return new OwnerGpuBudget(store, pk, 0, `${(error as Error).message} Nothing was submitted.`);
@@ -142,6 +161,14 @@ export class OwnerGpuBudget {
   /** Whether reserving `reservedSeconds` for this job would take its owner past the budget. */
   exceeds(job: Job, reservedSeconds: number): boolean {
     return this.total(job, reservedSeconds) > this.max;
+  }
+
+  /** For job creation: fails the transaction if the owner's budget changes after this read. */
+  creationFence(): AtomicWrite {
+    if (this.row) return { row: this.row, expected: this.row.version, conditionOnly: true };
+    return {
+      row: { pk: this.pk, sk: GPU_SECONDS_SK, version: 0, reservedSeconds: 0, updatedAt: new Date().toISOString() },
+    };
   }
 
   /** Throws like the per-job check, for the same pause. */
