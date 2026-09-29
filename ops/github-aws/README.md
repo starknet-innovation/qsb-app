@@ -153,13 +153,15 @@ Sign in with `aws sso login --sso-session qsb`.
 | `qsb-viewonly` | `/qsb/bootstrap/` | AWS `ViewOnlyAccess`, plus Batch/Scheduler/IAM describe, IAM simulation and Cost Explorer reads | read data: S3 objects, DynamoDB items, secrets, parameters, KMS decrypt, log events, Lambda code, execution input/output |
 | `qsb-operator` | `/qsb/bootstrap/` | everything `qsb-github-deploy` can, plus the `terraform/gpu` stack and its smoke jobs | ingress rules, `RunInstances`, VPC/gateway creation, users, access keys or MFA devices, editing any `/qsb/bootstrap/` identity or policy, removing a boundary |
 
-Both roles trust only that user, only with MFA (`aws:MultiFactorAuthPresent`),
+**With an IAM user (`operator_user`).** Both roles trust only that user, only with MFA (`aws:MultiFactorAuthPresent`),
 and only when that MFA is under an hour old (`aws:MultiFactorAuthAge`). An older
 sign-in session can't mint role sessions without a fresh code. Neither role can
 assume other roles, so editing a runtime role's trust doesn't let the operator
 become that role. Both roles' sessions last at most 1 hour. AWS counts a role
 session assumed from an `aws login` session as role chaining, which caps it at
-1 hour whatever the role's maximum.
+1 hour whatever the role's maximum. With an Identity Center permission set there is no user row in the table
+above: see the Identity Center paragraph above for the trust, MFA and permission-set policy.
+
 GPU runtime roles (`/qsb/runtime/qsb-gpu-*`) can be created or changed only with
 the new `qsb-gpu-boundary`. It allows the ECS instance agent, pulling the
 `qsb-solver` image, the GPU log streams, reading job inputs, writing job outputs,
@@ -181,7 +183,12 @@ an AWS Budgets alert on the account.
 
 ### Create them once, as root
 
-1. Add `operator_user` and `gpu_vpc` to the private inventory (outside Git).
+Steps 1 and 5 and "Use them" below are for an IAM user (`operator_user`). For an account reached through IAM
+Identity Center, put `operator_sso_permission_set` in the inventory instead, skip step 5, attach the rendered
+`permission-set.json` to the permission set, and use the Identity Center profiles shown above. The whole sequence
+for a new account is in [REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md).
+
+1. Add `operator_user` (or `operator_sso_permission_set`) and `gpu_vpc` to the private inventory (outside Git).
 2. Check offline: `python3 ops/github-aws/test_access.py`, then
    `python3 ops/github-aws/verify_access.py --profile ADMIN --inventory INVENTORY`.
 3. Commit and push; the checkout must be clean and match its remote branch.
@@ -198,7 +205,7 @@ an AWS Budgets alert on the account.
 
 ### Use them
 
-`aws login --profile qsb-user` signs in as the user. Then define the role
+With an IAM user: `aws login --profile qsb-user` signs in as the user. Then define the role
 profiles in `~/.aws/config` (account number and MFA device ARN are yours to fill in):
 
 ```ini

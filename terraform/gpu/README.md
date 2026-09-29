@@ -14,7 +14,7 @@ Use an operator-configured AWS profile and explicitly supply the expected `aws_a
 terraform init -backend-config="bucket=${QSB_STATE_BUCKET:?Set the operator state bucket}" -backend-config=key=qsb/gpu/terraform.tfstate -backend-config=region=eu-west-2 -backend-config=encrypt=true -backend-config=use_lockfile=true
 ```
 
-Supply `release_manifest_path` (the generated app `terraform/.build/manifest.json` built with `--solver-release=RELEASE_ID`), `source_commit` (that clean pushed app commit), `image` (verified ECR digest), `vpc_id` and public `subnets` with an Internet gateway. Also supply the required `gpu_permissions_boundary_arn`:
+Supply `release_manifest_path` (the generated app `terraform/.build/manifest.json` built with `--solver-release=RELEASE_ID`), `source_commit` (that clean pushed app commit), `region`, `gpu_ami` (the ECS GPU-optimised AL2023 AMI pinned for that region; AMI IDs differ per region, see [REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md)), `image` (verified ECR digest in that region), `vpc_id` and public `subnets` with an Internet gateway. Also supply the required `gpu_permissions_boundary_arn`:
 
 ```hcl
 gpu_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-gpu-boundary"
