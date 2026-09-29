@@ -1,0 +1,755 @@
+import { randomUUID } from "node:crypto";
+import * as btc from "@scure/btc-signer";
+import { base64, hex } from "@scure/base";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { z } from "zod";
+import { ApiError, createSessionClient } from "../src/lib/session";
+import { NETWORK_ID } from "../src/lib/network";
+import { operationsAllowed } from "../src/lib/readiness";
+import { assertVaultConfiguration, vaultConfiguration } from "../src/lib/provenance";
+import {
+  canonicalManifest,
+  publicVaultSchema,
+  sats,
+  txid,
+  validatePublicState,
+  withdrawalSchema,
+  type Job,
+  type PublicVault,
+  type Recovery,
+  type Withdrawal,
+} from "../src/lib/model";
+import {
+  assertRecoveryAssembly,
+  assertRecoveryAuthorization,
+  bindRecoveryAssembly,
+  decryptRecovery,
+  encryptRecovery,
+} from "../src/lib/backup";
+import {
+  belowMinerFloor,
+  fundingFeeForRate,
+  fundingPsbt,
+  minerMinimumRate,
+  nestedPaymentAddress,
+  outputScript,
+  parseFeeRate,
+  transactionVsize,
+  verifySignedPsbt,
+  verifyWithdrawalCommitment,
+  withdrawalFeeForRate,
+  withdrawalVsize,
+  type FundingInput,
+} from "../src/lib/transactions";
+import {
+  rebuildWithdrawalFromSolvedResult,
+  signedCoordinatorResult,
+} from "../src/mainnet/localSignature";
+import {
+  coordinatorSignedResultSchema,
+  type CoordinatorSignedResult,
+} from "../src/mainnet/coordinatorResult";
+import type { Wallet } from "../src/lib/wallet";
+import { nodeQsb, type LocalQsb } from "./runtime";
+import { apiBase, isLoopback, signerWallet, type Signer } from "./signer";
+
+export { ApiError };
+export type { CoordinatorSignedResult as SignedWithdrawal };
+
+type Point = { txid: string; vout: number; value: string };
+export type ApiConfig = {
+  network?: string;
+  operationsEnabled?: boolean;
+  exactSubmitEnabled?: boolean;
+  solverReleaseId?: string | null;
+  [field: string]: unknown;
+};
+export type Rates = { submit_fee_rate: number; market_rate?: number; effective_rate?: number };
+/** Persists an encrypted recovery backup. It must resolve only once the text is safely stored. */
+export type SaveBackup = (encryptedBackup: string) => Promise<void>;
+/** A signed deposit kept before it's sent, so a retry can only resend these bytes. Public data. */
+export type PendingDeposit = { txid: string; amount: string; rawTxHex: string };
+export interface PendingDeposits {
+  get(vaultId: string): Promise<PendingDeposit | undefined>;
+  set(vaultId: string, deposit: PendingDeposit): Promise<void>;
+  delete(vaultId: string): Promise<void>;
+}
+export type DepositSubmission = {
+  vault: PublicVault;
+  submission: "submitted" | "uncertain" | "rejected";
+  reason?: string;
+  txid: string;
+};
+/** What withdrawals.submit's approval callback sees. Every value is bound to `txid`. */
+export type WithdrawalReview = Readonly<{
+  network: string;
+  jobId: string;
+  vaultId: string;
+  txid: string;
+  destination: string;
+  /** Sats paid to `destination`. */
+  outputValue: string;
+  /** Sats paid to the miner. */
+  fee: string;
+  vsize: number;
+  /** sat/vB of the signed transaction. */
+  feeRate: number;
+  /** MARA's current minimum sat/vB. */
+  minerMinimumFeeRate: number;
+}>;
+/** Return `review.txid` to approve that exact transaction; anything else refuses. */
+export type ApproveWithdrawal = (
+  review: WithdrawalReview,
+) => string | false | undefined | Promise<string | false | undefined>;
+
+export type QsbClientOptions = {
+  /** The app origin, e.g. https://app.example or http://127.0.0.1:8787. */
+  baseUrl: string;
+  signer: Signer;
+  /** Transport; defaults to the global fetch. */
+  fetch?: typeof fetch;
+  /** Local QSB generator and assembler; defaults to Pyodide in this process. */
+  qsb?: LocalQsb;
+  /** Where signed deposits wait until the miner has them; defaults to memory. */
+  pendingDeposits?: PendingDeposits;
+  /** A session token from an earlier login by the same address. */
+  token?: string;
+  timeoutMs?: number;
+};
+
+const uuid = z.string().uuid();
+const opts = { allowUnknownInputs: true, allowUnknownOutputs: true };
+const digest = (text: string) => hex.encode(sha256(new TextEncoder().encode(text)));
+export const preparedDepositSchema = z
+  .object({
+    format: z.literal("qsb-sdk-prepared-deposit-v1"),
+    network: z.string(),
+    vaultId: z.string().uuid(),
+    owner: z.string().min(14).max(100),
+    scriptHash: txid,
+    psbt: z.string().max(3000000),
+    signInputs: z.array(z.number().int().min(0).max(7)).min(1).max(8),
+    amount: sats,
+    fee: sats,
+    change: sats,
+    vsize: z.number().int().positive(),
+  })
+  .strict();
+/** An unsigned deposit PSBT and its quote. Public data: nothing in it is secret. */
+export type PreparedDeposit = z.infer<typeof preparedDepositSchema>;
+
+function memoryPending(): PendingDeposits {
+  const rows = new Map<string, PendingDeposit>();
+  return {
+    get: async (id) => rows.get(id),
+    set: async (id, deposit) => void rows.set(id, deposit),
+    delete: async (id) => void rows.delete(id),
+  };
+}
+function decodePsbt(psbt: string | Uint8Array): Uint8Array {
+  return typeof psbt === "string" ? base64.decode(psbt.trim()) : psbt;
+}
+function signInMessage(address: string) {
+  const escaped = address.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `^QSB Vault sign-in\\nOrigin: [^\\n]{1,200}\\nAddress: ${escaped}\\nNetwork: bitcoin-${NETWORK_ID}\\nNonce: [0-9a-f-]{36}\\nExpires: [^\\n]{1,40}\\nThis signature authorizes this session only\\. It does not authorize a Bitcoin transaction\\.$`,
+  );
+}
+
+/**
+ * A non-custodial client for the QSB API. Recovery state, passphrases and
+ * keys stay on this machine: state is generated, encrypted, validated and
+ * assembled locally, and only public vault data, unsigned requests and signed
+ * transactions are sent.
+ */
+export class QsbClient {
+  private readonly session: ReturnType<typeof createSessionClient>;
+  private readonly signer: Signer;
+  private readonly wallet: Wallet;
+  private readonly qsb: LocalQsb;
+  private readonly pending: PendingDeposits;
+
+  constructor(options: QsbClientOptions) {
+    const base = apiBase(options.baseUrl);
+    if (options.signer.loopbackOnly && !isLoopback(base))
+      throw new Error("This signer holds a raw key and only works with a loopback API URL.");
+    this.signer = options.signer;
+    this.wallet = signerWallet(options.signer);
+    this.qsb = options.qsb ?? nodeQsb();
+    this.pending = options.pendingDeposits ?? memoryPending();
+    const origin = base.href.replace(/\/$/, "");
+    const send = options.fetch ?? fetch;
+    const timeout = options.timeoutMs ?? 60000;
+    this.session = createSessionClient(((path: string, init?: RequestInit) =>
+      send(`${origin}${path}`, {
+        ...init,
+        redirect: "error",
+        signal: AbortSignal.timeout(timeout),
+      })) as typeof fetch);
+    if (options.token) this.session.restoreSession(options.token);
+  }
+
+  /** The current bearer token, for a caller that caches it (owner-only file permissions). */
+  get token(): string | undefined {
+    return this.session.currentToken();
+  }
+  get address(): string {
+    return this.wallet.address;
+  }
+
+  /** BIP-322 sign-in. The challenge must be the app's session-only message for this address. */
+  async login(): Promise<void> {
+    const expected = signInMessage(this.wallet.address);
+    await this.session.authenticate(this.wallet.address, (message) => {
+      if (!expected.test(message))
+        throw new Error("The sign-in challenge is not the app's session-only message. Nothing was signed.");
+      return this.signer.signMessage(this.wallet.address, message);
+    });
+  }
+  logout(): void {
+    this.session.clearSession();
+  }
+  config(): Promise<ApiConfig> {
+    return this.session.api<ApiConfig>("/config");
+  }
+  rates(): Promise<Rates> {
+    return this.session.api<Rates>("/rates");
+  }
+  /** Confirmed payment outputs of the signed-in address. */
+  async utxos(): Promise<Point[]> {
+    return (await this.session.api<{ utxos: Point[] }>("/payment-utxos")).utxos;
+  }
+
+  readonly vaults = {
+    /**
+     * Generate QSB state locally, encrypt the recovery backup locally, hand it
+     * to `saveBackup`, check it unlocks, then register only the public vault.
+     */
+    create: (input: { name: string; passphrase: string; saveBackup: SaveBackup }) =>
+      this.createVault(input),
+    list: () => this.session.api<{ vaults: PublicVault[]; resendable?: string[] }>("/vaults"),
+  };
+  readonly deposits = {
+    /** An unsigned deposit PSBT paying the vault, after checking the backup matches its script. */
+    prepare: (
+      vaultId: string,
+      input: {
+        backup: string;
+        passphrase: string;
+        amount: bigint | string;
+        feeRate: string;
+        utxos: { txid: string; vout: number }[];
+      },
+    ) => this.prepareDeposit(vaultId, input),
+    /** Check the signed PSBT against the prepared one, keep it as pending, then have the server relay it. */
+    submit: (
+      prepared: PreparedDeposit,
+      signedPsbt: string | Uint8Array,
+      input: { costAccepted: true },
+    ) => this.submitDeposit(prepared, signedPsbt, input),
+    status: (vaultId: string) => this.depositStatus(vaultId),
+    /** Resend the same signed deposit: the locally pending bytes, else the server's stored bytes. */
+    resubmit: (vaultId: string) => this.resubmitDeposit(vaultId),
+  };
+  readonly withdrawals = {
+    /**
+     * Fix the payout and fee, bind them into a new encrypted backup
+     * (`saveBackup` runs before any billable work), then create the search.
+     * A backup that already holds an intent resumes that intent unchanged.
+     */
+    create: (input: {
+      vaultId: string;
+      backup: string;
+      passphrase: string;
+      helper?: { txid: string; vout: number };
+      destination?: string;
+      feeRate?: string;
+      solverReleaseId?: string;
+      costAccepted: true;
+      saveBackup: SaveBackup;
+    }) => this.createWithdrawal(input),
+    list: async () => (await this.session.api<{ jobs: Job[] }>("/jobs")).jobs,
+    status: (jobId: string) =>
+      this.session.api<{ job: Job; [field: string]: unknown }>(`/jobs/${uuid.parse(jobId)}/status`),
+    pause: (jobId: string) =>
+      this.session.api<{ job: Job }>(`/jobs/${uuid.parse(jobId)}/pause`, {}),
+    resume: (jobId: string) =>
+      this.session.api<{ job: Job }>(`/jobs/${uuid.parse(jobId)}/resume`, {}),
+    /**
+     * Rebuild the withdrawal locally from the backup and the coordinator's
+     * public solved result, seal the signing backup (`saveBackup`) if the
+     * backup doesn't bind this assembly yet, then have the signer sign the
+     * helper input. Works hours later, in a new process, from the job id.
+     */
+    assemble: (jobId: string, input: { backup: string; passphrase: string; saveBackup?: SaveBackup }) =>
+      this.assembleWithdrawal(jobId, input),
+    /** Submit only after `approve` returns this exact transaction's txid. */
+    submit: (signed: CoordinatorSignedResult, input: { approve: ApproveWithdrawal }) =>
+      this.submitWithdrawal(signed, input),
+  };
+
+  private async vault(id: string): Promise<PublicVault> {
+    uuid.parse(id);
+    const vault = (await this.vaults.list()).vaults.find((v) => v.id === id);
+    if (!vault) throw new Error("Vault not found for this address.");
+    return vault;
+  }
+  private async assertServerNetwork(): Promise<ApiConfig> {
+    const config = await this.config();
+    if (config.network !== NETWORK_ID)
+      throw new Error(`The API serves ${String(config.network)}, not ${NETWORK_ID}. Nothing was changed.`);
+    return config;
+  }
+  private async assertOperations(): Promise<ApiConfig> {
+    const config = await this.config();
+    if (!operationsAllowed(config))
+      throw new Error("Transactions are disabled or the server network differs. Nothing was changed.");
+    return config;
+  }
+  private async minerFloor(): Promise<number> {
+    try {
+      return minerMinimumRate(await this.rates());
+    } catch {
+      throw new Error(
+        "MARA's fee quote is unavailable, so the rate can't be checked against its minimum. Nothing was submitted; try again shortly.",
+      );
+    }
+  }
+  private async assertMinerFloor(milliSatPerVb: bigint) {
+    const floor = await this.minerFloor();
+    if (belowMinerFloor(milliSatPerVb, floor))
+      throw new Error(`The fee rate is below MARA's current minimum of ${floor} sat/vB. Nothing was submitted.`);
+  }
+  /** Decrypt locally and check the state against the vault's script, as the webapp does. */
+  private async unlock(backup: string, passphrase: string, vault: PublicVault): Promise<Recovery> {
+    const recovery = await decryptRecovery(backup, passphrase);
+    assertVaultConfiguration(vault);
+    if (
+      recovery.vault.id !== vault.id ||
+      recovery.vault.scriptHash !== vault.scriptHash ||
+      recovery.vault.scriptHex !== vault.scriptHex ||
+      (await this.qsb.validateRecovery(recovery.stateJson)) !== vault.scriptHash
+    )
+      throw new Error("This backup belongs to a different vault.");
+    return recovery;
+  }
+  private async fundingInput(point: Point): Promise<FundingInput> {
+    const { previousTxHex } = await this.session.api<{ previousTxHex: string }>("/payment-input", {
+      txid: point.txid,
+      vout: point.vout,
+      value: point.value,
+    });
+    return {
+      txid: point.txid,
+      vout: point.vout,
+      value: BigInt(point.value),
+      previousTxHex,
+      publicKey: this.wallet.publicKey,
+      address: this.wallet.address,
+    };
+  }
+  private async selectUtxos(selection: { txid: string; vout: number }[]): Promise<Point[]> {
+    const available = await this.utxos();
+    return selection.map((wanted) => {
+      const found = available.find(
+        (p) => p.txid === wanted.txid.toLowerCase() && p.vout === wanted.vout,
+      );
+      if (!found) throw new Error(`${wanted.txid}:${wanted.vout} is not a confirmed payment output of this address.`);
+      return found;
+    });
+  }
+
+  private async createVault(input: { name: string; passphrase: string; saveBackup: SaveBackup }) {
+    const name = input.name.trim();
+    if (!name || name.length > 60) throw new Error("Give the vault a name of 1 to 60 characters.");
+    if (input.passphrase.length < 14)
+      throw new Error("Use a recovery passphrase of at least 14 characters.");
+    await this.assertServerNetwork();
+    try {
+      const data = await this.qsb.generateQsb();
+      validatePublicState(data.publicStateJson);
+      const vault: PublicVault = {
+        id: randomUUID(),
+        name,
+        createdAt: new Date().toISOString(),
+        network: NETWORK_ID,
+        config: "A",
+        scriptHex: data.scriptHex,
+        scriptHash: data.scriptHash,
+        publicStateJson: data.publicStateJson,
+        paymentAddress: this.wallet.address,
+        status: "unfunded",
+      };
+      vault.configuration = vaultConfiguration(vault);
+      const backup = await encryptRecovery(
+        { format: "qsb-recovery-v1", vault, stateJson: data.stateJson },
+        input.passphrase,
+      );
+      await input.saveBackup(backup);
+      await this.unlock(backup, input.passphrase, vault);
+      const registered = await this.session.api<{ vault: PublicVault }>(
+        "/vaults",
+        publicVaultSchema.parse(vault),
+      );
+      return { vault: registered.vault, backup };
+    } finally {
+      this.qsb.lockQsb();
+    }
+  }
+
+  private async prepareDeposit(
+    vaultId: string,
+    input: {
+      backup: string;
+      passphrase: string;
+      amount: bigint | string;
+      feeRate: string;
+      utxos: { txid: string; vout: number }[];
+    },
+  ): Promise<PreparedDeposit> {
+    const config = await this.assertOperations();
+    if (config.exactSubmitEnabled !== true)
+      throw new Error("Deposits are submitted to MARA Slipstream, which is switched off right now. Nothing was prepared.");
+    if (await this.pending.get(vaultId))
+      throw new Error("A signed deposit for this vault is waiting for MARA. Resubmit it; do not deposit again.");
+    const vault = await this.vault(vaultId);
+    if (vault.status !== "unfunded" || vault.funding)
+      throw new Error("This vault already has a deposit. A vault takes one deposit; do not deposit again.");
+    try {
+      await this.unlock(input.backup, input.passphrase, vault);
+    } finally {
+      this.qsb.lockQsb();
+    }
+    const amount = BigInt(sats.parse(String(input.amount)));
+    if (amount === 0n) throw new Error("Amount must be greater than zero.");
+    const rate = parseFeeRate(input.feeRate);
+    if (!input.utxos.length || input.utxos.length > 8)
+      throw new Error("Select between one and eight payment outputs.");
+    const inputs = await Promise.all((await this.selectUtxos(input.utxos)).map((p) => this.fundingInput(p)));
+    await this.assertMinerFloor(rate);
+    const quote = fundingFeeForRate(
+      inputs.map((i) => i.value),
+      nestedPaymentAddress(this.wallet.address),
+      vault.scriptHex.length / 2,
+      amount,
+      rate,
+    );
+    const tx = fundingPsbt(inputs, vault.scriptHex, amount, quote.fee, this.wallet.address);
+    if (tx.outputsLength !== (quote.change ? 2 : 1))
+      throw new Error("The deposit fee estimate doesn't match the transaction. Nothing was prepared.");
+    const total = inputs.reduce((sum, i) => sum + i.value, 0n);
+    return preparedDepositSchema.parse({
+      format: "qsb-sdk-prepared-deposit-v1",
+      network: NETWORK_ID,
+      vaultId,
+      owner: this.wallet.address,
+      scriptHash: vault.scriptHash,
+      psbt: base64.encode(tx.toPSBT()),
+      signInputs: inputs.map((_, index) => index),
+      amount: amount.toString(),
+      fee: quote.fee.toString(),
+      change: (total - amount - quote.fee).toString(),
+      vsize: quote.vsize,
+    });
+  }
+  /** Rebuild the prepared PSBT from its own inputs and the vault, so an edited file can't pass. */
+  private expectedDeposit(prepared: PreparedDeposit, vault: PublicVault): btc.Transaction {
+    const unsigned = btc.Transaction.fromPSBT(base64.decode(prepared.psbt), opts);
+    const inputs: FundingInput[] = [];
+    for (let i = 0; i < unsigned.inputsLength; i++) {
+      const input = unsigned.getInput(i);
+      if (!input.txid || input.index === undefined || !input.nonWitnessUtxo)
+        throw new Error("The prepared deposit is incomplete.");
+      const previousTxHex = hex.encode(btc.RawTx.encode(input.nonWitnessUtxo));
+      const previous = btc.Transaction.fromRaw(hex.decode(previousTxHex), opts);
+      inputs.push({
+        txid: hex.encode(input.txid),
+        vout: input.index,
+        value: previous.getOutput(input.index).amount ?? 0n,
+        previousTxHex,
+        publicKey: this.wallet.publicKey,
+        address: this.wallet.address,
+      });
+    }
+    const expected = fundingPsbt(
+      inputs,
+      vault.scriptHex,
+      BigInt(prepared.amount),
+      BigInt(prepared.fee),
+      this.wallet.address,
+    );
+    if (
+      hex.encode(expected.unsignedTx) !== hex.encode(unsigned.unsignedTx) ||
+      prepared.signInputs.join(",") !== inputs.map((_, i) => i).join(",")
+    )
+      throw new Error("The prepared deposit does not match this vault and address.");
+    return expected;
+  }
+  private async submitDeposit(
+    input: PreparedDeposit,
+    signedPsbt: string | Uint8Array,
+    options: { costAccepted: true },
+  ): Promise<DepositSubmission> {
+    if (options?.costAccepted !== true)
+      throw new Error("Accept the costs first: deposits.submit needs { costAccepted: true }.");
+    const prepared = preparedDepositSchema.parse(input);
+    if (prepared.network !== NETWORK_ID || prepared.owner !== this.wallet.address)
+      throw new Error("This deposit was prepared for another network or address.");
+    const config = await this.assertOperations();
+    if (config.exactSubmitEnabled !== true)
+      throw new Error("Deposits are submitted to MARA Slipstream, which is switched off right now. Nothing was sent.");
+    const vault = await this.vault(prepared.vaultId);
+    assertVaultConfiguration(vault);
+    if (vault.scriptHash !== prepared.scriptHash)
+      throw new Error("The prepared deposit belongs to a different vault script.");
+    const signed = verifySignedPsbt(this.expectedDeposit(prepared, vault), decodePsbt(signedPsbt));
+    for (let i = 0; i < signed.inputsLength; i++) {
+      const signedInput = signed.getInput(i);
+      if (!signedInput.finalScriptWitness?.length && !signedInput.finalScriptSig?.length) signed.finalizeIdx(i);
+    }
+    const deposit = { txid: signed.id, amount: prepared.amount, rawTxHex: signed.hex };
+    const waiting = await this.pending.get(prepared.vaultId);
+    if (waiting && waiting.txid !== deposit.txid)
+      throw new Error("Another signed deposit for this vault is waiting for MARA. Resubmit it; do not deposit again.");
+    if (vault.funding ? vault.funding.txid !== deposit.txid : vault.status !== "unfunded")
+      throw new Error("This vault already has a deposit. A vault takes one deposit; do not deposit again.");
+    // Keep the signed bytes before they leave, so an unknown outcome can only resend this deposit.
+    await this.pending.set(prepared.vaultId, deposit);
+    return this.sendDeposit(prepared.vaultId, deposit);
+  }
+  private async sendDeposit(vaultId: string, deposit: PendingDeposit): Promise<DepositSubmission> {
+    let result: Omit<DepositSubmission, "txid">;
+    try {
+      result = await this.session.api<Omit<DepositSubmission, "txid">>(`/vaults/${vaultId}/fund/submit`, {
+        rawTxHex: deposit.rawTxHex,
+        amount: deposit.amount,
+        costAccepted: true,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? ` ${error.message}` : "";
+      throw new Error(
+        `The deposit ${deposit.txid} is signed, but its submission to MARA isn't confirmed. Don't deposit again; use deposits.resubmit.${detail}`,
+      );
+    }
+    if (result.submission !== "uncertain") await this.pending.delete(vaultId);
+    return { ...result, txid: deposit.txid };
+  }
+  private async resubmitDeposit(vaultId: string) {
+    uuid.parse(vaultId);
+    const waiting = await this.pending.get(vaultId);
+    if (waiting) return this.sendDeposit(vaultId, waiting);
+    return this.session.api<Omit<DepositSubmission, "txid">>(`/vaults/${vaultId}/fund/resubmit`, {});
+  }
+  private async depositStatus(vaultId: string) {
+    const status = await this.session.api<{
+      vault: PublicVault;
+      status: { confirmed: boolean; confirmations?: number };
+      submission?: string;
+      previousTxHex: string;
+    }>(`/vaults/${uuid.parse(vaultId)}/funding`);
+    const waiting = await this.pending.get(vaultId);
+    if (waiting && status.vault.funding?.txid === waiting.txid && status.status.confirmed)
+      await this.pending.delete(vaultId);
+    return status;
+  }
+
+  private async createWithdrawal(input: {
+    vaultId: string;
+    backup: string;
+    passphrase: string;
+    helper?: { txid: string; vout: number };
+    destination?: string;
+    feeRate?: string;
+    solverReleaseId?: string;
+    costAccepted: true;
+    saveBackup: SaveBackup;
+  }): Promise<{ job: Job; backup?: string }> {
+    if (input.costAccepted !== true)
+      throw new Error("Accept the costs first: withdrawals.create needs { costAccepted: true }.");
+    const config = await this.assertOperations();
+    const vault = await this.vault(input.vaultId);
+    let recovery: Recovery;
+    try {
+      recovery = await this.unlock(input.backup, input.passphrase, vault);
+    } finally {
+      this.qsb.lockQsb();
+    }
+    const saved = recovery.authorization
+      ? withdrawalSchema.parse(JSON.parse(recovery.authorization.manifestJson))
+      : undefined;
+    const other = (await this.withdrawals.list()).find(
+      (job) => job.vaultId === vault.id && job.id !== saved?.idempotencyKey,
+    );
+    if (other) throw new Error(`This vault already has a withdrawal request (${other.id}). Resume that one.`);
+    const funded = await this.depositStatus(vault.id);
+    if (!funded.status.confirmed || !funded.vault.funding) throw new Error("Wait for the deposit to confirm.");
+    const funding = funded.vault.funding;
+    if (!config.solverReleaseId)
+      throw new Error("The deployment serves no solver right now. Nothing was created.");
+    if (input.solverReleaseId !== undefined && input.solverReleaseId !== config.solverReleaseId)
+      throw new Error("The deployment solver differs from the requested one. Nothing was created.");
+    const nested = nestedPaymentAddress(this.wallet.address);
+    let manifest: Withdrawal;
+    let backup: string | undefined;
+    if (saved) {
+      // Resume the saved intent exactly: its payout and one-time keys are already bound.
+      if (
+        (input.destination !== undefined && input.destination !== saved.destination) ||
+        (input.helper !== undefined &&
+          (input.helper.txid.toLowerCase() !== saved.helper.txid || input.helper.vout !== saved.helper.vout)) ||
+        input.feeRate !== undefined
+      )
+        throw new Error("This backup already authorizes a withdrawal. Resume it unchanged; do not reuse its one-time keys.");
+      if (saved.solverReleaseId !== config.solverReleaseId)
+        throw new Error("The saved intent uses a different solver. Keep its backup and contact the operator; do not create a new intent.");
+      if ((["txid", "vout", "value"] as const).some((field) => saved.funding[field] !== funding[field]))
+        throw new Error("The saved intent spends a different deposit.");
+      const vsize = withdrawalVsize(nested, saved.outputScript.length / 2);
+      await this.assertMinerFloor((BigInt(saved.fee) * 1000n) / BigInt(vsize));
+      manifest = saved;
+    } else {
+      if (!input.helper || !input.destination || !input.feeRate)
+        throw new Error("Choose a helper output, a destination and a fee rate.");
+      const [helper] = await this.selectUtxos([input.helper]);
+      const script = outputScript(input.destination);
+      const rate = parseFeeRate(input.feeRate);
+      await this.assertMinerFloor(rate);
+      const fee = withdrawalFeeForRate(nested, script.length, rate).fee;
+      const outputValue = BigInt(funding.value) + BigInt(helper.value) - fee;
+      if (outputValue <= 0n) throw new Error("The miner fee exceeds the available amount.");
+      manifest = withdrawalSchema.parse({
+        vaultId: vault.id,
+        funding,
+        helper,
+        destination: input.destination,
+        outputScript: hex.encode(script),
+        outputValue: outputValue.toString(),
+        fee: fee.toString(),
+        idempotencyKey: randomUUID(),
+        costAccepted: true,
+        solverReleaseId: config.solverReleaseId,
+      });
+      const manifestJson = JSON.stringify(manifest);
+      const manifestHash = digest(manifestJson);
+      await assertRecoveryAuthorization(recovery, manifestHash);
+      backup = await encryptRecovery(
+        { ...recovery, authorization: { manifestJson, manifestHash } },
+        input.passphrase,
+      );
+      // Keep the recovery before starting billable work: it binds the payout to the one-time keys.
+      await input.saveBackup(backup);
+    }
+    const manifestHash = digest(JSON.stringify(manifest));
+    const { job } = await this.session.api<{ job: Job }>("/jobs", manifest);
+    if (job.id !== manifest.idempotencyKey || job.manifestHash !== manifestHash)
+      throw new Error("The server returned a different withdrawal. Keep the backup and check withdrawals.list.");
+    return { job, ...(backup ? { backup } : {}) };
+  }
+
+  private async assembleWithdrawal(
+    jobId: string,
+    input: { backup: string; passphrase: string; saveBackup?: SaveBackup },
+  ): Promise<CoordinatorSignedResult> {
+    const { job } = await this.withdrawals.status(jobId);
+    if (job.status !== "awaiting_authorization" || !job.solution)
+      throw new Error(`The search has no solved result to authorize (status ${job.status}).`);
+    const funding = await this.depositStatus(job.vaultId);
+    let local: Awaited<ReturnType<typeof rebuildWithdrawalFromSolvedResult>>;
+    try {
+      const recovery = await this.unlock(input.backup, input.passphrase, funding.vault);
+      const intent = recovery.authorization;
+      if (!intent) throw new Error("Use the withdrawal backup saved when this withdrawal was created.");
+      if (
+        digest(intent.manifestJson) !== intent.manifestHash ||
+        digest(JSON.stringify(canonicalManifest(job.manifest))) !== intent.manifestHash ||
+        job.manifestHash !== intent.manifestHash
+      )
+        throw new Error("The job differs from the withdrawal intent in your backup.");
+      const solved = await this.session.api<unknown>(`/jobs/${job.id}/solved-result`);
+      local = await rebuildWithdrawalFromSolvedResult({
+        solved,
+        job,
+        stateJson: recovery.stateJson,
+        helper: await this.fundingInput(job.manifest.helper),
+        fundingPreviousTxHex: funding.previousTxHex,
+        assemble: this.qsb.assembleQsb,
+      });
+      const bound = await bindRecoveryAssembly(recovery, local.solved.solution, local.raw);
+      if (!intent.assembly) {
+        // Seal the exact solution and transaction into the backup before the helper is signed.
+        if (!input.saveBackup)
+          throw new Error("This backup doesn't bind the assembled transaction yet. Pass saveBackup to keep the signing backup first.");
+        await input.saveBackup(await encryptRecovery(bound, input.passphrase));
+      }
+      await assertRecoveryAssembly(bound, local.solved.solution, local.raw);
+    } finally {
+      this.qsb.lockQsb();
+    }
+    const returned = await this.signer.signPsbt(
+      this.wallet.address,
+      base64.encode(local.transaction.toPSBT()),
+      [0],
+    );
+    return signedCoordinatorResult(local.solved, local.transaction, decodePsbt(returned), this.wallet);
+  }
+
+  private async submitWithdrawal(
+    input: CoordinatorSignedResult,
+    options: { approve: ApproveWithdrawal },
+  ): Promise<{ txid: string; status: string }> {
+    if (typeof options?.approve !== "function")
+      throw new Error("withdrawals.submit needs an approve callback. Nothing was submitted.");
+    const signed = coordinatorSignedResultSchema.parse(input);
+    const config = await this.assertServerNetwork();
+    if (config.exactSubmitEnabled !== true)
+      throw new Error("Submission is disabled. Keep the signed result; nothing was broadcast.");
+    const { job } = await this.withdrawals.status(signed.jobId);
+    if (job.txid) throw new Error(`This withdrawal was already submitted as ${job.txid}. Check its status; do not submit again.`);
+    if (
+      job.status !== "awaiting_authorization" ||
+      !job.solution ||
+      job.vaultId !== signed.vaultId ||
+      job.manifestHash !== signed.manifestHash
+    )
+      throw new Error("The signed result doesn't match this withdrawal's solved state. Nothing was submitted.");
+    const manifest = canonicalManifest(job.manifest);
+    verifyWithdrawalCommitment(signed.rawTxHex, manifest, job.solution);
+    if (btc.Transaction.fromRaw(hex.decode(signed.rawTxHex), opts).id !== signed.txid)
+      throw new Error("The signed result's txid differs from its transaction. Nothing was submitted.");
+    const vsize = transactionVsize(signed.rawTxHex);
+    const milliSatPerVb = (BigInt(manifest.fee) * 1000n) / BigInt(vsize);
+    const floor = await this.minerFloor();
+    if (belowMinerFloor(milliSatPerVb, floor))
+      throw new Error(`The signed fee rate is below MARA's current minimum of ${floor} sat/vB. Nothing was submitted.`);
+    const review: WithdrawalReview = Object.freeze({
+      network: NETWORK_ID,
+      jobId: job.id,
+      vaultId: job.vaultId,
+      txid: signed.txid,
+      destination: manifest.destination,
+      outputValue: manifest.outputValue,
+      fee: manifest.fee,
+      vsize,
+      feeRate: Number(milliSatPerVb) / 1000,
+      minerMinimumFeeRate: floor,
+    });
+    if ((await options.approve(review)) !== review.txid)
+      throw new Error("The withdrawal was not approved. Nothing was submitted.");
+    let response: { txid: string; status: string };
+    try {
+      response = await this.session.api<{ txid: string; status: string }>(`/jobs/${job.id}/submit`, {
+        rawTxHex: signed.rawTxHex,
+      });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 503)
+        throw new Error("Submission is disabled. Keep the signed result; no submission was accepted.");
+      const detail = error instanceof Error ? ` ${error.message}` : "";
+      throw new Error(
+        `The submission outcome is uncertain. Keep the signed result and check withdrawals.status; do not submit again.${detail}`,
+      );
+    }
+    if (response.txid !== signed.txid || !["submitted", "uncertain", "confirmed"].includes(response.status))
+      throw new Error("Unexpected submission response. Check withdrawals.status; do not submit again.");
+    return response;
+  }
+}
