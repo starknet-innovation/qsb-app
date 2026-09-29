@@ -11,7 +11,7 @@ import { Signer as Bip322 } from "bip322-js";
 import awsRelease from "../src/lib/releases/qsb-solver-aws-v0-1-0.json";
 import { decryptRecovery } from "../src/lib/backup";
 import { transactionVsize } from "../src/lib/transactions";
-import { ApiError, QsbClient, loopbackTestSigner, type WithdrawalReview } from "../sdk";
+import { ApiRequestError, QsbClient, loopbackTestSigner, type WithdrawalReview } from "../sdk";
 import { runCli } from "../sdk/cli";
 import type { CliIo } from "../sdk/cli-io";
 import { API, localQsb, solvedWithdrawal as solved, world } from "./sdk-fixture";
@@ -152,10 +152,10 @@ describe("client boundaries", () => {
   });
   it("carries a machine-readable code when the server sends one", async () => {
     const coded = new QsbClient({ baseUrl: API, signer, fetch: respond({ error: "Vault not found", code: "vault_not_found" }, 404) as never });
-    await expect(coded.vaults.list()).rejects.toMatchObject({ name: "ApiError", status: 404, code: "vault_not_found", message: "Vault not found" });
+    await expect(coded.vaults.list()).rejects.toMatchObject({ name: "ApiRequestError", status: 404, code: "vault_not_found", message: "Vault not found" });
     const plain = new QsbClient({ baseUrl: API, signer, fetch: respond({ error: "Session expired. Please reconnect." }, 401) as never });
     const error = await plain.vaults.list().catch((e) => e);
-    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toBeInstanceOf(ApiRequestError);
     expect(error).toMatchObject({ status: 401, code: undefined });
   });
   it("sends every request to the configured origin without following redirects", async () => {

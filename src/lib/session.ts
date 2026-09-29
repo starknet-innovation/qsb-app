@@ -1,12 +1,11 @@
-/** A refused or failed API call. `code` is the server's machine-readable code when it sends one. */
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly code?: string,
-  ) {
+/**
+ * A non-OK API response, for the webapp and the SDK. `code` is the API's machine-readable
+ * error code, when it sent one.
+ */
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
     super(message);
-    this.name = "ApiError";
+    this.name = "ApiRequestError";
   }
 }
 const sessionToken = /^[A-Za-z0-9_-]{43}$/;
@@ -37,16 +36,21 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
   try {
     data = JSON.parse(text);
   } catch {
-    const message = r.ok
-      ? "The API returned an invalid response. Please try again."
-      : "The app API is unavailable. Please check that the local API server is running and try again.";
-    throw r.ok ? new Error(message) : new ApiError(message, r.status);
+    if (r.ok)
+      throw new Error("The API returned an invalid response. Please try again.");
   }
-  if (!r.ok)
-    throw new ApiError(
-      data?.error || "The request could not be completed.",
+  // A failure whose body isn't a JSON object (a gateway 502, a plain-text 404, `null`)
+  // still reports its status.
+  if (!r.ok && (typeof data !== "object" || data === null))
+    throw new ApiRequestError(
+      "The app API is unavailable. Please check that the local API server is running and try again.",
       r.status,
-      typeof data?.code === "string" ? data.code : undefined,
+    );
+  if (!r.ok)
+    throw new ApiRequestError(
+      data.error || "The request could not be completed.",
+      r.status,
+      typeof data.code === "string" ? data.code : undefined,
     );
   return data as T;
 }

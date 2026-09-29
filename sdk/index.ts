@@ -1,5 +1,5 @@
 export {
-  ApiError,
+  ApiRequestError,
   QsbClient,
   preparedDepositSchema,
   type ApiConfig,

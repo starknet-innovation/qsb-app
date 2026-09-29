@@ -69,7 +69,7 @@ await qsb.withdrawals.submit(tx, { approve: async (review) => (await askUser(rev
 | `withdrawals.assemble` | `…/solved-result`, `…/funding`, `/payment-input` | assemble from the backup, seal the signing backup, sign the helper input |
 | `withdrawals.submit` | `POST /api/jobs/:id/submit` | re-check the bytes against the job, then `approve(review)` |
 
-`publicApi({ baseUrl })` reads `config()` and `rates()` without a signer. Errors from the server are `ApiError`s with `status` and, when the server sends one, a machine-readable `code`.
+`publicApi({ baseUrl })` reads `config()` and `rates()` without a signer. Errors from the server are `ApiRequestError`s with `status` and, when the server sends one, a machine-readable `code`.
 
 Rules that carry over from the webapp:
 

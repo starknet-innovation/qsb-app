@@ -3,7 +3,7 @@ import * as btc from "@scure/btc-signer";
 import { base64, hex } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { z } from "zod";
-import { ApiError, createSessionClient } from "../src/lib/session";
+import { ApiRequestError, createSessionClient } from "../src/lib/session";
 import { NETWORK_ID } from "../src/lib/network";
 import { operationsAllowed } from "../src/lib/readiness";
 import { assertVaultConfiguration, vaultConfiguration } from "../src/lib/provenance";
@@ -54,7 +54,7 @@ import type { Wallet } from "../src/lib/wallet";
 import { nodeQsb, type LocalQsb } from "./runtime";
 import { apiBase, isLoopback, signerWallet, type Signer } from "./signer";
 
-export { ApiError };
+export { ApiRequestError };
 export type { CoordinatorSignedResult as SignedWithdrawal };
 
 type Point = { txid: string; vout: number; value: string };
@@ -164,11 +164,12 @@ function memoryStorage(): Pick<Storage, "getItem" | "setItem"> {
   const rows = new Map<string, string>();
   return { getItem: (key) => rows.get(key) ?? null, setItem: (key, value) => void rows.set(key, value) };
 }
-/** The server's own refusal of a disabled submission: `code` when it sends one, else its exact message. */
+/**
+ * The server's own refusal of a disabled submission: a 503 with code `submit_disabled`. Any
+ * other failure, including an uncoded 503 from a gateway or an older server, is uncertain.
+ */
 function submitDisabled(error: unknown): boolean {
-  if (!(error instanceof ApiError) || error.status !== 503) return false;
-  if (error.code !== undefined) return error.code === "submit_disabled";
-  return error.message === `${NETWORK_ID} withdrawals are disabled.` || error.message === "Exact submission is disabled.";
+  return error instanceof ApiRequestError && error.status === 503 && error.code === "submit_disabled";
 }
 const mainnetOnly = () => {
   if (NETWORK_ID !== "mainnet")
@@ -718,7 +719,18 @@ export class QsbClient {
       this.guard.claim(intentKey, manifestHash);
     }
     const manifestHash = digest(JSON.stringify(manifest));
-    const { job } = await this.session.api<{ job: Job }>("/jobs", manifest);
+    let job: Job;
+    try {
+      ({ job } = await this.session.api<{ job: Job }>("/jobs", manifest));
+    } catch (error) {
+      // Refused (an input_* code, say) or unanswered: either way the intent is only in the backup.
+      // Creating it again from that backup is idempotent, so a retry can never make a second search.
+      if (!backup) throw error;
+      throw new Error(
+        `The withdrawal search isn't confirmed: ${error instanceof Error ? error.message : String(error)} The new backup holds this intent; retry withdrawals.create with it, not with the original backup.`,
+        { cause: error },
+      );
+    }
     if (job.id !== manifest.idempotencyKey || job.manifestHash !== manifestHash)
       throw new Error("The server returned a different withdrawal. Keep the backup and check withdrawals.list.");
     return { job, ...(backup ? { backup } : {}) };

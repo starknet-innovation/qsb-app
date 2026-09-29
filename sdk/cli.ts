@@ -3,7 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { formatBtc, parseBtc } from "../src/lib/model";
-import { ApiError, QsbClient, preparedDepositSchema, publicApi, type WithdrawalReview } from "./client";
+import { ApiRequestError, QsbClient, preparedDepositSchema, publicApi, type WithdrawalReview } from "./client";
 import {
   Prompter,
   SignatureNeeded,
@@ -190,7 +190,7 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
           await client.vaults.list();
           return;
         } catch (error) {
-          if (!(error instanceof ApiError && error.status === 401)) throw error;
+          if (!(error instanceof ApiRequestError && error.status === 401)) throw error;
         }
       }
       await client.login();

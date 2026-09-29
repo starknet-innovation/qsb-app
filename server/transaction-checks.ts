@@ -48,14 +48,15 @@ export function matchVaultFunding(
   scriptHex: string,
   amount: bigint,
 ): { vout: 0; value: string } {
+  const invalid = (message: string) =>
+    new ChainError(message, "funding_transaction_invalid");
   if (amount <= 0n || tx.outputsLength < 1)
-    throw new ChainError("Invalid funding transaction.");
+    throw invalid("Invalid funding transaction.");
   const output = tx.getOutput(0);
   const script = output.script ? hex.encode(output.script) : "";
   if (script !== scriptHex.toLowerCase())
-    throw new ChainError("Funding transaction does not pay this vault.");
-  if (output.amount !== amount)
-    throw new ChainError("Funding amount does not match.");
+    throw invalid("Funding transaction does not pay this vault.");
+  if (output.amount !== amount) throw invalid("Funding amount does not match.");
   return { vout: 0, value: amount.toString() };
 }
 
@@ -180,7 +181,10 @@ export async function checkWithdrawal(
   chain: Esplora,
 ) {
   if (!job.solution || job.status !== "awaiting_authorization")
-    throw new ChainError("Withdrawal is not ready for authorization.");
+    throw new ChainError(
+      "Withdrawal is not ready for authorization.",
+      "job_state_invalid",
+    );
   assertWithdrawalSpendAgainstJob(job, raw);
   const m = withdrawalSchema.parse(job.manifest);
   await Promise.all([

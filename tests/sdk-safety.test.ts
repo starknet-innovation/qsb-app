@@ -117,11 +117,14 @@ describe("withdrawals.submit", () => {
     for (const [body, outcome] of [
       [{ message: "Service Unavailable" }, "uncertain"],
       [{ error: "Service Unavailable" }, "uncertain"],
-      [{ error: "Miner API credential is unavailable. Contact the service operator." }, "uncertain"],
-      [{ error: "Exact submission is disabled.", code: "miner_unavailable" }, "uncertain"],
-      [{ error: "mainnet withdrawals are disabled." }, "disabled"],
-      [{ error: "Exact submission is disabled." }, "disabled"],
-      [{ error: "Submission is off.", code: "submit_disabled" }, "disabled"],
+      [{ error: "Miner API credential is unavailable. Contact the service operator.", code: "miner_unavailable" }, "uncertain"],
+      [{ error: "Miner request failed (502)", code: "miner_request_failed" }, "uncertain"],
+      [{ error: "Unable to complete the request. Please retry.", code: "internal_error" }, "uncertain"],
+      // Without the code, even the server's exact message could come from a gateway or an older server.
+      [{ error: "mainnet withdrawals are disabled." }, "uncertain"],
+      [{ error: "Exact submission is disabled." }, "uncertain"],
+      [{ error: "mainnet withdrawals are disabled.", code: "submit_disabled" }, "disabled"],
+      [{ error: "Exact submission is disabled.", code: "submit_disabled" }, "disabled"],
     ] as const) {
       answer = body;
       await expect(
@@ -275,7 +278,10 @@ describe("one intent and one assembly per vault on this device", () => {
         destination: f.destination, feeRate: "3", costAccepted: true, saveBackup: f.keep,
       });
     dropJobs = true;
-    await expect(create(f.backups[0])).rejects.toThrow("fetch failed");
+    const lost = (await create(f.backups[0]).then(() => new Error("created"), (error: Error) => error)) as Error;
+    expect(lost.message).toContain("fetch failed");
+    expect(lost.message).toContain("retry withdrawals.create with it");
+    expect(lost.cause).toBeInstanceOf(TypeError);
     expect(f.backups).toHaveLength(2);
     dropJobs = false;
     // No job exists, but the original backup would bind the same one-time keys to a second payout.
