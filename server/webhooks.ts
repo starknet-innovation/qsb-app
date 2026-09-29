@@ -397,10 +397,10 @@ export async function deliverDue(
     const failing = new Set(row.hooks.filter((h) => h.status !== "active").map((h) => h.id));
     row.pending = row.pending.flatMap((p) => {
       if (failing.has(p.hook)) return [];
-      if (p.claim !== claim) return [p];
+      // At most one entry per (hook, event), so an applied outcome is for this round's claim.
       const outcome = applied.find((o) => o.hook === p.hook && o.eventId === p.event.id);
-      const { claim: _released, ...rest } = p;
       if (!outcome) return [p];
+      const { claim: _released, ...rest } = p;
       if (outcome.result === "ok") return [];
       const attempts = rest.attempts + (outcome.result === "failed" && !expired ? 1 : 0);
       return attempts >= MAX_ATTEMPTS ? [] : [{ ...rest, attempts, nextAt: 0 }];

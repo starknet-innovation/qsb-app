@@ -296,6 +296,23 @@ describe("owner event log", () => {
     expect(logged.mock.calls.flat().join(" ")).not.toContain("throttled");
   });
 
+  it("still queues and delivers for one owner when another owner's webhook row fails", async () => {
+    const inner = new MemoryStore();
+    const hooks = receiver();
+    for (const owner of ["a", "b"]) await registerWebhook(inner, owner, { url: "https://hooks.example.com/" }, hooks.resolve);
+    const get = MemoryStore.prototype.get.bind(inner);
+    vi.spyOn(inner, "get").mockImplementation((pk, sk) =>
+      pk === "OWNER#a" && sk === "WEBHOOKS" ? Promise.reject(Error("ThrottlingException")) : get(pk, sk),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const store = recordOwnerEvents(inner);
+    for (const owner of ["a", "b"])
+      await store.put({ pk: `OWNER#${owner}`, sk: "JOB#j", version: 0, job: { id: "j", status: "queued", stage: "pinning" } });
+    await store.settle({ delivery: hooks, owners: ["a", "b"] });
+    expect(hooks.transport).toHaveBeenCalledOnce();
+    expect(JSON.parse(hooks.calls[0].body)).toMatchObject({ type: "withdrawal.queued" });
+  });
+
   it("keeps one request's events and webhook work out of another owner's request", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     // This route takes longer than the request budget, so its settle() does no webhook work.
@@ -420,7 +437,14 @@ describe("operator notes", () => {
     }
     await store.atomicPut([{ row: { pk: "OWNER#owner-a", sk: "JOB#j", version: 0, job: { id: "j", status: "confirmed", stage: "verification" } } }]);
     await store.settle();
-    for (const kind of [...touched].filter((k) => k !== "JOB")) expect(runbook).toContain(kind === "EVENT" ? "`EVENT#`" : `\`${kind}\``);
+    // Both places that list what the reconcile CLIs need.
+    const passages = [
+      runbook.slice(runbook.indexOf("The CLI needs GetItem"), runbook.indexOf("Batch DescribeJobs")),
+      runbook.slice(runbook.indexOf("This command records a conditional observation"), runbook.indexOf("It takes no transaction bytes")),
+    ];
+    for (const passage of passages)
+      for (const kind of [...touched].filter((k) => k !== "JOB" && k !== "TX"))
+        expect(passage).toContain(kind === "EVENT" ? "`EVENT#`" : `\`${kind}\``);
     const section = runbook.slice(runbook.indexOf("### Webhook signing secrets"));
     expect(section).toContain("coordinator role");
     expect(readFileSync(path.join(process.cwd(), "terraform/data.tf"), "utf8")).toMatch(/point_in_time_recovery \{ enabled = true \}/);
@@ -659,6 +683,19 @@ describe("webhook retries", () => {
     answers[1](200);
     await fresh;
     expect((await f.store.get("OWNER#owner-a", "WEBHOOKS"))!.pending).toEqual([]);
+  });
+
+  it("a round that outlived its lease counts no failure, and releases its delivery", async () => {
+    const f = await queued();
+    let answer!: (status: number) => void;
+    f.hooks.transport.mockImplementation(() => new Promise((resolve) => (answer = (status) => resolve({ status }))));
+    const stale = f.flush();
+    await vi.waitFor(() => expect(f.hooks.transport).toHaveBeenCalledOnce());
+    vi.setSystemTime(Date.now() + LEASE_MS + 1);
+    answer(500);
+    await stale;
+    expect(await f.hook()).toMatchObject({ failures: 0 });
+    expect((await f.store.get("OWNER#owner-a", "WEBHOOKS"))!.pending).toMatchObject([{ attempts: 0, nextAt: 0 }]);
   });
 
   it("does not send a delivery that another flush has claimed", async () => {
