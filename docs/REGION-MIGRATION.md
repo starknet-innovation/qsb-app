@@ -10,11 +10,16 @@ The move is a new stack, never a change of `region` or account on an existing on
 - Terraform refuses any account other than `aws_account_id`.
 
 **Built alongside, not replaced.** The new account is empty, so there are no IAM name clashes and the new stack is
-built beside the live one. Downtime is only the data copy and the switch-over. The old stack stays intact, with its
-switches off, until the new one has run a deposit and a withdrawal. Rollback is switching the old one back on.
+built beside the live one. Downtime is only the data copy and the switch-over.
+- **Until the switch-on (step 13):** the old stack stays intact but frozen, so rollback is just unfreezing it.
+- **At the switch-on:** the old stack's services are retired straight away (step 14), so nothing can take a deposit
+  over the same vault rows. By then new deposits live only in the new account, so there's nothing to roll back to.
+- **Its data is kept:** the records table, the solver image and the buckets stay until the new stack has run a full
+  deposit and withdrawal (cleanup).
 
-**When to cut over:** only when nothing is in flight. That means no held or unconfirmed deposit, no withdrawal
-intent that isn't confirmed, and an empty GPU queue. Everything before the cutover can happen earlier.
+**When to cut over:** only after the first mainnet withdrawal (#22) is complete, and only when nothing is in
+flight. That means no held or unconfirmed deposit, no withdrawal intent that isn't confirmed, and an empty GPU queue.
+Everything before the cutover can happen earlier.
 
 **Who:** the steps below are marked by who runs them.
 
