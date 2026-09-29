@@ -7,7 +7,7 @@ The server is a JSON HTTP API (`server/app.ts`). It is non-custodial: keys, pass
 - `/v1` is the stable prefix for integrators.
 - `/api` serves the same routes. The webapp still calls it; moving the webapp onto `/v1` (#85) is a follow-up after the phase-2 API PRs land.
 
-Both prefixes reach the same handlers and middleware: secure headers, CORS, the body limit, sign-in and error mapping. `createApp` rewrites a leading `/v1` segment to `/api` before routing, so a route is defined once. CloudFront forwards `/v1/*` and `/api/*` to the API with the same uncached behaviour (`terraform/web.tf`).
+Both prefixes reach the same handlers and middleware: secure headers, CORS, the body limit, sign-in and error mapping. With `versionedAlias`, `createApp` rewrites a leading `/v1` segment to `/api` before routing, so a route is defined once. Only the coordinator API opts in: the mainnet Lambda (`server/lambda.ts`) and the local server (`server/local.ts`). The parked supervised apps have no `/v1`. CloudFront forwards `/v1/*` and `/api/*` to the API with the same uncached behaviour (`terraform/web.tf`).
 
 ## Idempotency-Key
 

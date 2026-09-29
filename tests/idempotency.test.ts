@@ -114,7 +114,7 @@ async function fixture() {
   const seen = vi.spyOn(miner, "seen").mockResolvedValue(false);
   const credential = vi.spyOn(miner, "credential");
   const consensus = { verify: vi.fn(async () => {}) };
-  const app = createApp(store, { chain, miner, consensus, enabled: true, exactSubmit: true });
+  const app = createApp(store, { chain, miner, consensus, enabled: true, exactSubmit: true, versionedAlias: true });
   const call = (
     path: string,
     body: unknown,

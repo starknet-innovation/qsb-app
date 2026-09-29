@@ -51,7 +51,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "9d330f006c2adbb9543c74f85dd1b2629e6567517034d364011ed0e897bb6f4b",
+      "api": "f67a541557c545babeb92a535ba87e36da0cb8be9be727070acf676921a68441",
       "build-metadata": "2c4804c98f40b16adda8fde8e13f053d59cc53e26f951906064834edd469b1c6",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "b095b87f4a501b1caa9c71550a647d59fbcd187ec30eea4da16cde140c602aac",
@@ -109,7 +109,7 @@
       "scripts/generate-solver-registry.mjs": "e88dcd1462fb6a8fe4e66efffab9c96345f656b22cd11e40b3f865257a9a1b8c",
       "scripts/package-release.ts": "5b1d0d9e5169c8e83a1b9259033c710011a3d8cf46b02824a1c73708de4d2031",
       "scripts/storage-inventory.ts": "c8ecc1d3ed239f444efd50ab8bb704be13408f609aba1e80d16a5325d5e4603e",
-      "server/app.ts": "92034e11984f16bbd0aa5c24bb8339a3aaf39a440822e1343d99e1c0e3f3856b",
+      "server/app.ts": "05af217738483d727d944430914bd2ca0ba5d4c2fc036fd97466fb90ee5010d6",
       "server/aws-batch-command.json": "5a4544d33c5744dbc438c0d515a84e3bb2c8e80d8662020c4a7c765ed5267881",
       "server/aws-batch.ts": "a0db53599bf9ae3cb2fb24355f4309631b86d0646472cd477f2eb9ca76817fa7",
       "server/candidate-output.ts": "d21c9cf57d3f0604c7a501a88b9a9925a035ec878ec568e56d3e7f99bc3d004a",
@@ -122,7 +122,7 @@
       "server/gpu-spend.ts": "34d431a9c0a04ddf807a6a13e65ac1bc9fa13aeb3cd860351e380f982f72c033",
       "server/idempotency.ts": "53378c89a0b727f14a363c89f1cfc74ef4b3869096262e0cb7aa5a518a9d9020",
       "server/job-spend-record.ts": "2d671feb6a54d02d1fc7130243ac05b5f5d9ec76ba2f7c901af7bb8342bed2a5",
-      "server/lambda.ts": "abe72c18c555f2d699ec5cdb3c0a8edb0d6b4df77500f76b14ade0d388096c0c",
+      "server/lambda.ts": "e8ef86e797459b01c756ae6c58bb4118253c6b2132e2fbba298ae2d62b557908",
       "server/local.ts": "7a3c1f8a57928f77e51418b92c025622bbe71a3b291cc2094e24e37eadc378bd",
       "server/mainnet-capability.json": "c0fa06da307e9aea3e9023f4ac29a8d2fb31b51e75f27e26d4b781adf71e0e82",
       "server/mainnetConfig.ts": "e995c6a9385012217326c2490f188e8382eda40fb37858e9d4f0939d86181102",

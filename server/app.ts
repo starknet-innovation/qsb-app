@@ -86,6 +86,8 @@ export function createApp(
     inProcessHandoff?: boolean;
     /** Injected chain reads for supervised admission. Never the process-wide client by default. */
     fundingLedger?: FundingLedger;
+    /** Also serve every route under /v1. Only the coordinator API opts in; parked supervised apps don't. */
+    versionedAlias?: boolean;
   } = {},
 ) {
   const ledger = dependencies.chain || chain,
@@ -112,9 +114,11 @@ export function createApp(
     }
   }
   // /v1 is the stable prefix: it routes to the same handlers and middleware as /api (docs/API.md).
-  const app = new Hono<Env>({
-    getPath: (request) => getPath(request).replace(/^\/v1(?=\/|$)/, "/api"),
-  });
+  const app = new Hono<Env>(
+    dependencies.versionedAlias === true
+      ? { getPath: (request) => getPath(request).replace(/^\/v1(?=\/|$)/, "/api") }
+      : {},
+  );
   const origin = process.env.APP_ORIGIN || "http://127.0.0.1:5173";
   app.use("*", secureHeaders());
   app.use(
@@ -939,4 +943,4 @@ export function createApp(
   }
   return app;
 }
-export const app = createApp();
+export const app = createApp(defaultStore, { versionedAlias: true });
