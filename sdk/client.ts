@@ -66,6 +66,13 @@ export type ApiConfig = {
   operationsEnabled?: boolean;
   exactSubmitEnabled?: boolean;
   solverReleaseId?: string | null;
+  /** The deployment's per-owner limits; `null` when they're misconfigured. `allowlisted` is the signed-in caller's. */
+  ownerLimits?: {
+    allowlist: boolean;
+    allowlisted: boolean | null;
+    maxActiveJobs: number | null;
+    maxGpuSeconds: number | null;
+  } | null;
   [field: string]: unknown;
 };
 export type Rates = { submit_fee_rate: number; market_rate?: number; effective_rate?: number };
@@ -173,6 +180,33 @@ function memoryStorage(): Pick<Storage, "getItem" | "setItem"> {
  */
 function submitDisabled(error: unknown): boolean {
   return error instanceof ApiRequestError && error.status === 503 && error.code === "submit_disabled";
+}
+/** Per-owner limit refusals, each with its status. The server returns them before writing or sending anything. */
+const ownerRefusals: Record<string, number> = {
+  owner_not_allowlisted: 403,
+  owner_active_withdrawal_limit: 429,
+  owner_gpu_budget_reached: 429,
+  owner_limits_invalid: 503,
+};
+function ownerRefusal(error: unknown): error is ApiRequestError {
+  return error instanceof ApiRequestError && error.code !== undefined && ownerRefusals[error.code] === error.status;
+}
+/** A final refusal of this request: nothing was written, reserved or sent by it. */
+function refused(error: ApiRequestError, what: string, next = ""): Error {
+  const reason =
+    error.code === "owner_limits_invalid"
+      ? "the deployment's per-owner limits are misconfigured; contact the operator"
+      : error.message.replace(/\.$/, "");
+  return new Error(`The deployment refused ${what} (${error.code}): ${reason}. Nothing was written or sent by this request.${next}`, {
+    cause: error,
+  });
+}
+/** Refuse early when the deployment says this owner can't act, or its limits are misconfigured. */
+function assertOwnerAllowed(config: ApiConfig) {
+  if (config.ownerLimits === null)
+    throw new Error("The deployment's per-owner limits are misconfigured (owner_limits_invalid). Nothing was changed; contact the operator.");
+  if (config.ownerLimits?.allowlisted === false)
+    throw new Error("This wallet isn't on this deployment's allowlist (owner_not_allowlisted). Nothing was changed.");
 }
 const mainnetOnly = () => {
   if (NETWORK_ID !== "mainnet")
@@ -331,8 +365,14 @@ export class QsbClient {
       this.session.api<{ job: Job; [field: string]: unknown }>(`/jobs/${id(jobId, "job")}/status`),
     pause: (jobId: string) =>
       this.session.api<{ job: Job }>(`/jobs/${id(jobId, "job")}/pause`, {}),
-    resume: (jobId: string) =>
-      this.session.api<{ job: Job }>(`/jobs/${id(jobId, "job")}/resume`, {}),
+    resume: async (jobId: string) => {
+      assertOwnerAllowed(await this.config());
+      try {
+        return await this.session.api<{ job: Job }>(`/jobs/${id(jobId, "job")}/resume`, {});
+      } catch (error) {
+        throw ownerRefusal(error) ? refused(error, "to resume the search") : error;
+      }
+    },
     /**
      * Rebuild the withdrawal locally from the backup and the coordinator's
      * public solved result, seal the signing backup (`saveBackup`) if the
@@ -421,7 +461,7 @@ export class QsbClient {
     if (!name || name.length > 60) throw new Error("Give the vault a name of 1 to 60 characters.");
     if (input.passphrase.length < 14)
       throw new Error("Use a recovery passphrase of at least 14 characters.");
-    await this.assertServerNetwork();
+    assertOwnerAllowed(await this.assertServerNetwork());
     try {
       const data = await this.qsb.generateQsb();
       validatePublicState(data.publicStateJson);
@@ -444,10 +484,13 @@ export class QsbClient {
       );
       await input.saveBackup(backup);
       await this.unlock(backup, input.passphrase, vault);
-      const registered = await this.session.api<{ vault: PublicVault }>(
-        "/vaults",
-        publicVaultSchema.parse(vault),
-      );
+      const registered = await this.session
+        .api<{ vault: PublicVault }>("/vaults", publicVaultSchema.parse(vault))
+        .catch((error) => {
+          throw ownerRefusal(error)
+            ? refused(error, "to register the vault", " The saved backup is for an unregistered vault: never pay into its script.")
+            : error;
+        });
       return { vault: registered.vault, backup };
     } finally {
       this.qsb.lockQsb();
@@ -465,6 +508,7 @@ export class QsbClient {
     },
   ): Promise<PreparedDeposit> {
     const config = await this.assertOperations();
+    assertOwnerAllowed(config);
     if (config.exactSubmitEnabled !== true)
       throw new Error("Deposits are submitted to MARA Slipstream, which is switched off right now. Nothing was prepared.");
     if (await this.pending.get(vaultId))
@@ -553,6 +597,7 @@ export class QsbClient {
     if (prepared.network !== NETWORK_ID || prepared.owner !== this.wallet.address)
       throw new Error("This deposit was prepared for another network or address.");
     const config = await this.assertOperations();
+    assertOwnerAllowed(config);
     if (config.exactSubmitEnabled !== true)
       throw new Error("Deposits are submitted to MARA Slipstream, which is switched off right now. Nothing was sent.");
     const vault = await this.vault(prepared.vaultId);
@@ -594,6 +639,10 @@ export class QsbClient {
         fundSubmitRequest.parse({ rawTxHex: deposit.rawTxHex, amount: deposit.amount, costAccepted: true }),
       );
     } catch (error) {
+      // A per-owner refusal comes before any write or miner call: final for this request. Earlier
+      // attempts may still have been sent, so the signed bytes stay pending either way.
+      if (ownerRefusal(error))
+        throw refused(error, "the deposit", " The signed deposit stays pending: resend it with deposits.resubmit once allowed; don't sign another.");
       throw unconfirmed(error instanceof Error ? ` ${error.message}` : "");
     }
     // Only an answer about this vault and these bytes ends the pending deposit.
@@ -610,7 +659,11 @@ export class QsbClient {
     id(vaultId, "vault");
     const waiting = await this.pending.get(vaultId);
     if (waiting) return this.sendDeposit(vaultId, waiting);
-    return this.session.api<Omit<DepositSubmission, "txid">>(`/vaults/${vaultId}/fund/resubmit`, fundResubmitRequest.parse({}));
+    try {
+      return await this.session.api<Omit<DepositSubmission, "txid">>(`/vaults/${vaultId}/fund/resubmit`, fundResubmitRequest.parse({}));
+    } catch (error) {
+      throw ownerRefusal(error) ? refused(error, "to resend the deposit", " Resend it once allowed; don't sign another.") : error;
+    }
   }
   private async depositStatus(vaultId: string) {
     const status = await this.session.api<{
@@ -639,6 +692,7 @@ export class QsbClient {
     if (input.costAccepted !== true)
       throw new Error("Accept the costs first: withdrawals.create needs { costAccepted: true }.");
     const config = await this.assertOperations();
+    assertOwnerAllowed(config);
     const vault = await this.vault(input.vaultId);
     let recovery: Recovery;
     try {
@@ -724,6 +778,8 @@ export class QsbClient {
     try {
       ({ job } = await this.session.api<{ job: Job }>("/jobs", manifest));
     } catch (error) {
+      const retry = backup ? " The new backup holds this intent; create the withdrawal again from it once allowed." : "";
+      if (ownerRefusal(error)) throw refused(error, "to create the search", ` Nothing was reserved.${retry}`);
       // Refused (an input_* code, say) or unanswered: either way the intent is only in the backup.
       // Creating it again from that backup is idempotent, so a retry can never make a second search.
       if (!backup) throw error;

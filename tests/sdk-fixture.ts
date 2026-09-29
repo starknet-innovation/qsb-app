@@ -8,6 +8,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { createApp } from "../server/app";
 import { MemoryStore } from "../server/store";
 import { Esplora } from "../server/chain";
+import type { OwnerLimits } from "../server/owner-limits";
 import { MinerHttpError, Slipstream } from "../server/providers";
 import { outputScript } from "../src/lib/transactions";
 import type { Job, Withdrawal } from "../src/lib/model";
@@ -81,7 +82,7 @@ export class FakeChain {
 
 export type Recorded = { method: string; url: string; headers: Record<string, string>; body: string };
 
-export function world() {
+export function world(server: { ownerLimits?: OwnerLimits } = {}) {
   const store = new MemoryStore();
   const chain = new FakeChain();
   const minerSubmissions: string[] = [];
@@ -115,6 +116,7 @@ export function world() {
     enabled: true,
     exactSubmit: true,
     consensus,
+    ...server,
   });
   if (previousOrigin === undefined) delete process.env.APP_ORIGIN;
   else process.env.APP_ORIGIN = previousOrigin;
@@ -192,10 +194,14 @@ export function localQsb() {
   return { qsb, assembled };
 }
 
-type Staging = { wrap?: (next: typeof fetch) => typeof fetch; options?: Partial<QsbClientOptions> };
+type Staging = {
+  wrap?: (next: typeof fetch) => typeof fetch;
+  options?: Partial<QsbClientOptions>;
+  server?: Parameters<typeof world>[0];
+};
 /** A signed-in SDK client with one registered vault. `backups[0]` is its encrypted backup. */
 export async function createdVault(passphrase: string, staging: Staging = {}) {
-  const w = world();
+  const w = world(staging.server);
   const owner = wallet(w.chain);
   const signer = loopbackTestSigner(owner.wif, API);
   const { qsb } = localQsb();

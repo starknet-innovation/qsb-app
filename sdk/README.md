@@ -69,7 +69,9 @@ await qsb.withdrawals.submit(tx, { approve: async (review) => (await askUser(rev
 | `withdrawals.assemble` | `…/solved-result`, `…/funding`, `/payment-input` | assemble from the backup, seal the signing backup, sign the helper input |
 | `withdrawals.submit` | `POST /api/jobs/:id/submit` | re-check the bytes against the job, then `approve(review)` |
 
-`publicApi({ baseUrl })` reads `config()` and `rates()` without a signer. Errors from the server are `ApiRequestError`s with `status` and, when the server sends one, a machine-readable `code`.
+`publicApi({ baseUrl })` reads `config()` and `rates()` without a signer. Errors from the server are `ApiRequestError`s with `status` and, when the server sends one, a machine-readable `code` ([docs/API.md](../docs/API.md)); the CLI prints the code after the message.
+
+Per-owner limits ([docs/API.md](../docs/API.md#per-owner-limits)): the SDK reads `ownerLimits` from `/api/config` first, and refuses before generating, saving or signing anything when the signed-in wallet isn't allowlisted or the limits are misconfigured (`ownerLimits: null`). A refusal the server returns anyway (`owner_not_allowlisted`, `owner_active_withdrawal_limit`, `owner_gpu_budget_reached`, `owner_limits_invalid`) is final for that request: nothing was written or sent by it. A signed deposit stays pending for `deposits.resubmit`, and a new withdrawal's intent stays in its new backup for a later `withdrawals.create`. `qsb config` shows `ownerLimits`.
 
 Rules that carry over from the webapp:
 

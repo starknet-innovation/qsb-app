@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Parallel search with four GPUs. Unsigned fixtures and synthetic provider IDs only.
 const mocks = vi.hoisted(() => ({
   enabled: true,
@@ -61,6 +61,7 @@ import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job, type SearchSlot } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
+import { GPU_SECONDS_SK, OWNER_GPU_BUDGET_REACHED } from "../server/owner-limits";
 
 const event = { owner: "test", jobId: "test-job", revision: 0 };
 const pk = "OWNER#test",
@@ -415,4 +416,83 @@ it("pauses as exhausted only after the last chunk of a stage has finished", asyn
   states["compute-1"] = output("pinning", last);
   await handler(event);
   expect(await saved()).toMatchObject({ status: "paused", error: expect.stringContaining("range exhausted") });
+});
+
+describe("owner GPU budget", () => {
+  const budgetRow = () => store.get(pk, GPU_SECONDS_SK);
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("charges each chunk to the owner in its own conditional write before its POST", async () => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "36000");
+    await seed();
+    mocks.run.mockImplementation(async (input) => {
+      const job = await saved();
+      expect(job.parallelSlots!.find((s) => s.attempt === input.attempt)!.runpodId).toBeUndefined();
+      expect(job.ownerGpuChargedSeconds).toBe(900 * (input.attempt + 1));
+      expect(await budgetRow()).toMatchObject({ version: input.attempt, reservedSeconds: 900 * (input.attempt + 1) });
+      return { id: `compute-${input.attempt}` };
+    });
+    await handler(event);
+    expect(mocks.run).toHaveBeenCalledTimes(4);
+    expect(await saved()).toMatchObject({ gpuBudgetReservedSeconds: 3600, ownerGpuChargedSeconds: 3600 });
+    expect(await budgetRow()).toMatchObject({ reservedSeconds: 3600 });
+  });
+
+  it("stops adding chunks at the owner budget and pauses only once nothing is running", async () => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "1800");
+    await seed();
+    await handler(event);
+    expect(mocks.run).toHaveBeenCalledTimes(2);
+    expect(await saved()).toMatchObject({ status: "searching", gpuBudgetReservedSeconds: 1800 });
+    // Running chunks are polled, never cancelled or resubmitted.
+    await handler(event);
+    expect(mocks.run).toHaveBeenCalledTimes(2);
+    expect(mocks.cancel).not.toHaveBeenCalled();
+    expect(await saved()).toMatchObject({ status: "searching" });
+    states["compute-1"] = output("pinning", 0);
+    states["compute-2"] = output("pinning", 1);
+    await handler(event);
+    expect(await saved()).toMatchObject({ status: "paused", error: OWNER_GPU_BUDGET_REACHED, attempt: 2, parallelSlots: [] });
+    expect(mocks.run).toHaveBeenCalledTimes(2);
+    expect(await budgetRow()).toMatchObject({ reservedSeconds: 1800 });
+  });
+
+  it("is shared by the owner's withdrawals", async () => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "2700");
+    await seed();
+    const other = { ...event, jobId: "other-job" };
+    await store.put({ pk, sk: "JOB#other-job", version: 0, job: { ...(await saved()), id: "other-job" } });
+    await handler(event);
+    await handler(other);
+    expect(mocks.run).toHaveBeenCalledTimes(3);
+    expect(await saved()).toMatchObject({ ownerGpuChargedSeconds: 2700 });
+    expect((await store.get(pk, "JOB#other-job"))!.job).toMatchObject({
+      status: "paused",
+      error: OWNER_GPU_BUDGET_REACHED,
+      gpuBudgetReservedSeconds: 0,
+    });
+    expect(await budgetRow()).toMatchObject({ reservedSeconds: 2700 });
+  });
+
+  it("re-reads the budget when another withdrawal reserves between chunks", async () => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "2700");
+    await seed();
+    const real = store.atomicPut.bind(store);
+    let calls = 0;
+    vi.spyOn(store, "atomicPut").mockImplementation(async (writes) => {
+      // After this job's first chunk, another withdrawal of the owner takes 900 seconds.
+      if (++calls === 2) {
+        const row = (await budgetRow())!;
+        await store.put({ ...row, version: row.version + 1, reservedSeconds: (row.reservedSeconds as number) + 900 }, row.version);
+      }
+      return real(writes);
+    });
+    await handler(event);
+    expect(mocks.run).toHaveBeenCalledTimes(2);
+    expect(await saved()).toMatchObject({ status: "searching", gpuBudgetReservedSeconds: 1800, ownerGpuChargedSeconds: 1800 });
+    expect(await budgetRow()).toMatchObject({ reservedSeconds: 2700 });
+  });
 });

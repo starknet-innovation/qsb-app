@@ -12,6 +12,7 @@ import { formatBtc, withdrawalSchema, type Job } from "../src/lib/model";
 import { loopbackTestSigner, type PendingDeposit } from "../sdk";
 import { runCli } from "../sdk/cli";
 import { API, createdVault, fundedVault, localQsb, solvedWithdrawal, wallet, world } from "./sdk-fixture";
+import { QsbClient } from "../sdk";
 
 beforeEach(() => vi.stubEnv("SOLVER_RELEASE_ID", awsRelease.id));
 afterEach(() => vi.unstubAllEnvs());
@@ -395,5 +396,105 @@ describe("CLI outcomes", () => {
     expect(resumed.code).toBe(0);
     expect(resumed.err).toContain("Resumed the intent saved in withdrawal.json; no new backup was written.");
     expect(existsSync(c.file("unused.json"))).toBe(false);
+  }, 120000);
+});
+
+describe("per-owner limits (#89)", () => {
+  /** Answer POSTs to `route` with one refusal while `answer` is set; everything else reaches the app. */
+  const intercept = (route: RegExp, holder: { answer?: { status: number; body: unknown } }) => (next: typeof fetch) =>
+    (async (input: RequestInfo | URL, init?: RequestInit) =>
+      holder.answer && init?.method === "POST" && route.test(new URL(String(input)).pathname)
+        ? new Response(JSON.stringify(holder.answer.body), { status: holder.answer.status })
+        : next(input, init)) as typeof fetch;
+
+  it("refuses before generating anything when the wallet isn't allowlisted", async () => {
+    const w = world({ ownerLimits: { allowlist: new Set(["bc1qsomeoneelse"]), maxActiveJobs: null, maxGpuSeconds: null } });
+    const owner = wallet(w.chain);
+    const client = new QsbClient({ baseUrl: API, signer: loopbackTestSigner(owner.wif, API), fetch: w.fetch, qsb: localQsb().qsb });
+    await client.login();
+    expect((await client.config()).ownerLimits).toEqual({ allowlist: true, allowlisted: false, maxActiveJobs: null, maxGpuSeconds: null });
+    const saveBackup = vi.fn(async () => {});
+    await expect(client.vaults.create({ name: "not allowed", passphrase, saveBackup })).rejects.toThrow(
+      "isn't on this deployment's allowlist (owner_not_allowlisted). Nothing was changed.",
+    );
+    expect(saveBackup).not.toHaveBeenCalled();
+    expect(posts(w, "/api/vaults")).toBe(0);
+  }, 120000);
+
+  it("reports a deposit refused by an owner limit as final for that request, and keeps its bytes pending", async () => {
+    const holder: { answer?: { status: number; body: unknown } } = {};
+    const pending = new Map<string, PendingDeposit>();
+    const v = await createdVault(passphrase, {
+      wrap: intercept(/\/fund\/(submit|resubmit)$/, holder),
+      options: {
+        pendingDeposits: {
+          get: async (id) => pending.get(id),
+          set: async (id, deposit) => void pending.set(id, deposit),
+          delete: async (id) => void pending.delete(id),
+        },
+      },
+    });
+    const prepared = await v.client.deposits.prepare(v.vault.id, {
+      backup: v.backups[0], passphrase, amount: 200000n, feeRate: "2", utxos: [{ txid: v.owner.fundingTxid, vout: 0 }],
+    });
+    const signed = await v.signer.signPsbt(v.signer.address, prepared.psbt, prepared.signInputs);
+    holder.answer = { status: 403, body: { error: "This wallet is not on this deployment's allowlist.", code: "owner_not_allowlisted" } };
+    const error = (await v.client.deposits.submit(prepared, signed, { costAccepted: true }).then(() => new Error("sent"), (e: Error) => e)) as Error;
+    expect(error.message).toContain("refused the deposit (owner_not_allowlisted)");
+    expect(error.message).toContain("Nothing was written or sent by this request");
+    expect(error.message).not.toContain("isn't confirmed");
+    expect(pending.get(v.vault.id)).toBeDefined();
+    holder.answer = { status: 503, body: { error: "This deployment's owner limits are misconfigured. Nothing was changed.", code: "owner_limits_invalid" } };
+    await expect(v.client.deposits.resubmit(v.vault.id)).rejects.toThrow("per-owner limits are misconfigured; contact the operator");
+    holder.answer = undefined;
+    expect((await v.client.deposits.resubmit(v.vault.id)).submission).toBe("submitted");
+  }, 120000);
+
+  it("reports a withdrawal refused by an owner limit as final, keeping the backup that holds its intent", async () => {
+    const holder: { answer?: { status: number; body: unknown } } = {};
+    const f = await fundedVault(passphrase, { wrap: intercept(/^\/api\/jobs(\/[0-9a-f-]{36}\/resume)?$/, holder) });
+    const create = (backup: string, fresh = true) =>
+      f.client.withdrawals.create({
+        vaultId: f.vault.id, backup, passphrase, costAccepted: true, saveBackup: f.keep,
+        ...(fresh ? { helper: { txid: f.owner.fundingTxid, vout: 1 }, destination: f.destination, feeRate: "3" } : {}),
+      });
+    holder.answer = { status: 429, body: { error: "This wallet already has 1 withdrawal queued or searching.", code: "owner_active_withdrawal_limit" } };
+    await expect(create(f.backups[0])).rejects.toThrow(
+      /refused to create the search \(owner_active_withdrawal_limit\).*Nothing was reserved\. The new backup holds this intent/,
+    );
+    holder.answer = { status: 503, body: { error: "This deployment's owner limits are misconfigured. Nothing was changed.", code: "owner_limits_invalid" } };
+    await expect(create(f.backups[1], false)).rejects.toThrow("per-owner limits are misconfigured; contact the operator");
+    holder.answer = undefined;
+    const { job } = await create(f.backups[1], false);
+    await f.client.withdrawals.pause(job.id);
+    holder.answer = { status: 429, body: { error: "GPU budget reached.", code: "owner_gpu_budget_reached" } };
+    await expect(f.client.withdrawals.resume(job.id)).rejects.toThrow("refused to resume the search (owner_gpu_budget_reached)");
+  }, 120000);
+
+  it("stops before any work when the deployment reports misconfigured owner limits", async () => {
+    let broken = false;
+    const v = await createdVault(passphrase, {
+      wrap: (next) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const response = await next(input, init);
+        if (!broken || !String(input).endsWith("/api/config")) return response;
+        return new Response(JSON.stringify({ ...(await response.json()), ownerLimits: null }));
+      }) as typeof fetch,
+    });
+    broken = true;
+    const before = v.w.requests.length;
+    await expect(
+      v.client.deposits.prepare(v.vault.id, {
+        backup: v.backups[0], passphrase, amount: 200000n, feeRate: "2", utxos: [{ txid: v.owner.fundingTxid, vout: 0 }],
+      }),
+    ).rejects.toThrow("per-owner limits are misconfigured (owner_limits_invalid)");
+    expect(v.w.requests.slice(before).map((r) => new URL(r.url).pathname)).toEqual(["/api/config"]);
+  }, 120000);
+
+  it("prints the server's code with a CLI error", async () => {
+    const w = world();
+    const owner = wallet(w.chain);
+    const result = await cli(w, owner.wif).run("withdraw", "status", crypto.randomUUID());
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("qsb: Job not found (job_not_found)");
   }, 120000);
 });

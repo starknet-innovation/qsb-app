@@ -430,7 +430,8 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
       say(error.message);
       return 3;
     }
-    say(`qsb: ${error instanceof Error ? error.message : String(error)}`);
+    const coded = error instanceof ApiRequestError && error.code ? ` (${error.code})` : "";
+    say(`qsb: ${error instanceof Error ? error.message : String(error)}${coded}`);
     return error instanceof UsageError || (error as { code?: string } | null)?.code?.startsWith("ERR_PARSE_ARGS") ? 2 : 1;
   } finally {
     prompts.close();
