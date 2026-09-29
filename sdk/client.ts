@@ -49,6 +49,7 @@ import {
   coordinatorSignedResultSchema,
   type CoordinatorSignedResult,
 } from "../src/mainnet/coordinatorResult";
+import { persistentGuard } from "../src/mainnet/guard";
 import type { Wallet } from "../src/lib/wallet";
 import { nodeQsb, type LocalQsb } from "./runtime";
 import { apiBase, isLoopback, signerWallet, type Signer } from "./signer";
@@ -112,6 +113,12 @@ export type QsbClientOptions = {
   qsb?: LocalQsb;
   /** Where signed deposits wait until the miner has them; defaults to memory. */
   pendingDeposits?: PendingDeposits;
+  /**
+   * This device's one-time authorizations, under the webapp's keys:
+   * `qsb-intent:<scriptHash>` (the withdrawal intent) and `qsb-assembly:<scriptHash>`
+   * (the assembled transaction). A different value for a vault is refused. Defaults to memory.
+   */
+  authorizations?: Pick<Storage, "getItem" | "setItem">;
   /** A session token from an earlier login by the same address. */
   token?: string;
   timeoutMs?: number;
@@ -142,6 +149,20 @@ export const preparedDepositSchema = z
 /** An unsigned deposit PSBT and its quote. Public data: nothing in it is secret. */
 export type PreparedDeposit = z.infer<typeof preparedDepositSchema>;
 
+function memoryStorage(): Pick<Storage, "getItem" | "setItem"> {
+  const rows = new Map<string, string>();
+  return { getItem: (key) => rows.get(key) ?? null, setItem: (key, value) => void rows.set(key, value) };
+}
+/** The server's own refusal of a disabled submission: `code` when it sends one, else its exact message. */
+function submitDisabled(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.status !== 503) return false;
+  if (error.code !== undefined) return error.code === "submit_disabled";
+  return error.message === `${NETWORK_ID} withdrawals are disabled.` || error.message === "Exact submission is disabled.";
+}
+const mainnetOnly = () => {
+  if (NETWORK_ID !== "mainnet")
+    throw new Error("Withdrawals are assembled from the coordinator's solved result, which is delivered on Bitcoin mainnet only.");
+};
 function memoryPending(): PendingDeposits {
   const rows = new Map<string, PendingDeposit>();
   return {
@@ -172,6 +193,7 @@ export class QsbClient {
   private readonly wallet: Wallet;
   private readonly qsb: LocalQsb;
   private readonly pending: PendingDeposits;
+  private readonly guard: ReturnType<typeof persistentGuard>;
 
   constructor(options: QsbClientOptions) {
     const base = apiBase(options.baseUrl);
@@ -181,6 +203,7 @@ export class QsbClient {
     this.wallet = signerWallet(options.signer);
     this.qsb = options.qsb ?? nodeQsb();
     this.pending = options.pendingDeposits ?? memoryPending();
+    this.guard = persistentGuard(options.authorizations ?? memoryStorage());
     const origin = base.href.replace(/\/$/, "");
     const send = options.fetch ?? fetch;
     const timeout = options.timeoutMs ?? 60000;
@@ -507,12 +530,20 @@ export class QsbClient {
     }
     const deposit = { txid: signed.id, amount: prepared.amount, rawTxHex: signed.hex };
     const waiting = await this.pending.get(prepared.vaultId);
-    if (waiting && waiting.txid !== deposit.txid)
-      throw new Error("Another signed deposit for this vault is waiting for MARA. Resubmit it; do not deposit again.");
-    if (vault.funding ? vault.funding.txid !== deposit.txid : vault.status !== "unfunded")
-      throw new Error("This vault already has a deposit. A vault takes one deposit; do not deposit again.");
-    // Keep the signed bytes before they leave, so an unknown outcome can only resend this deposit.
-    await this.pending.set(prepared.vaultId, deposit);
+    // Only these exact bytes may be sent again. A re-signed copy has the same txid but other
+    // witness bytes, which the server refuses once it holds the first.
+    if (waiting && waiting.rawTxHex !== deposit.rawTxHex)
+      throw new Error("A signed deposit for this vault is already waiting for MARA. Use deposits.resubmit; do not sign or deposit again.");
+    if (!waiting && (vault.funding || vault.status !== "unfunded"))
+      throw new Error("This vault already has a deposit. A vault takes one deposit; use deposits.resubmit to resend it.");
+    if (vault.funding && vault.funding.txid !== deposit.txid)
+      throw new Error("This vault already has a different deposit. A vault takes one deposit; do not deposit again.");
+    if (!waiting) {
+      // MARA's floor may have risen since prepare; a refused deposit would have to be redone.
+      await this.assertMinerFloor((BigInt(prepared.fee) * 1000n) / BigInt(transactionVsize(deposit.rawTxHex)));
+      // Keep the signed bytes before they leave, so an unknown outcome can only resend this deposit.
+      await this.pending.set(prepared.vaultId, deposit);
+    }
     return this.sendDeposit(prepared.vaultId, deposit);
   }
   private async sendDeposit(vaultId: string, deposit: PendingDeposit): Promise<DepositSubmission> {
@@ -605,6 +636,7 @@ export class QsbClient {
       const vsize = withdrawalVsize(nested, saved.outputScript.length / 2);
       await this.assertMinerFloor((BigInt(saved.fee) * 1000n) / BigInt(vsize));
       manifest = saved;
+      this.guard.claim(`qsb-intent:${vault.scriptHash}`, digest(JSON.stringify(saved)));
     } else {
       if (!input.helper || !input.destination || !input.feeRate)
         throw new Error("Choose a helper output, a destination and a fee rate.");
@@ -630,6 +662,8 @@ export class QsbClient {
       const manifestJson = JSON.stringify(manifest);
       const manifestHash = digest(manifestJson);
       await assertRecoveryAuthorization(recovery, manifestHash);
+      // This device keeps one intent per vault, as the webapp does, before anything is saved.
+      this.guard.claim(`qsb-intent:${vault.scriptHash}`, manifestHash);
       backup = await encryptRecovery(
         { ...recovery, authorization: { manifestJson, manifestHash } },
         input.passphrase,
@@ -648,6 +682,7 @@ export class QsbClient {
     jobId: string,
     input: { backup: string; passphrase: string; saveBackup?: SaveBackup },
   ): Promise<CoordinatorSignedResult> {
+    mainnetOnly();
     const { job } = await this.withdrawals.status(jobId);
     if (job.status !== "awaiting_authorization" || !job.solution)
       throw new Error(`The search has no solved result to authorize (status ${job.status}).`);
@@ -663,6 +698,7 @@ export class QsbClient {
         job.manifestHash !== intent.manifestHash
       )
         throw new Error("The job differs from the withdrawal intent in your backup.");
+      this.guard.claim(`qsb-intent:${funding.vault.scriptHash}`, intent.manifestHash);
       const solved = await this.session.api<unknown>(`/jobs/${job.id}/solved-result`);
       local = await rebuildWithdrawalFromSolvedResult({
         solved,
@@ -673,6 +709,8 @@ export class QsbClient {
         assemble: this.qsb.assembleQsb,
       });
       const bound = await bindRecoveryAssembly(recovery, local.solved.solution, local.raw);
+      // One assembly per vault on this device, even from an older backup that doesn't bind one yet.
+      this.guard.claim(`qsb-assembly:${funding.vault.scriptHash}`, bound.authorization!.assembly!.rawTxHash);
       if (!intent.assembly) {
         // Seal the exact solution and transaction into the backup before the helper is signed.
         if (!input.saveBackup)
@@ -697,6 +735,7 @@ export class QsbClient {
   ): Promise<{ txid: string; status: string }> {
     if (typeof options?.approve !== "function")
       throw new Error("withdrawals.submit needs an approve callback. Nothing was submitted.");
+    mainnetOnly();
     const signed = coordinatorSignedResultSchema.parse(input);
     const config = await this.assertServerNetwork();
     if (config.exactSubmitEnabled !== true)
@@ -710,7 +749,17 @@ export class QsbClient {
       job.manifestHash !== signed.manifestHash
     )
       throw new Error("The signed result doesn't match this withdrawal's solved state. Nothing was submitted.");
+    // The fee and the input values aren't in the QSB input's commitment, so the stored intent must
+    // be the one the backup bound at assembly before any value is shown.
     const manifest = canonicalManifest(job.manifest);
+    const manifestHash = digest(JSON.stringify(manifest));
+    if (
+      manifestHash !== signed.manifestHash ||
+      manifestHash !== job.manifestHash ||
+      job.id !== manifest.idempotencyKey ||
+      job.vaultId !== manifest.vaultId
+    )
+      throw new Error("The withdrawal's stored intent differs from the one bound at assembly. Nothing was submitted.");
     verifyWithdrawalCommitment(signed.rawTxHex, manifest, job.solution);
     if (btc.Transaction.fromRaw(hex.decode(signed.rawTxHex), opts).id !== signed.txid)
       throw new Error("The signed result's txid differs from its transaction. Nothing was submitted.");
@@ -739,7 +788,7 @@ export class QsbClient {
         rawTxHex: signed.rawTxHex,
       });
     } catch (error) {
-      if (error instanceof ApiError && error.status === 503)
+      if (submitDisabled(error))
         throw new Error("Submission is disabled. Keep the signed result; no submission was accepted.");
       const detail = error instanceof Error ? ` ${error.message}` : "";
       throw new Error(

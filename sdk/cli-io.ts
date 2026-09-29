@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { chmod, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
+import { open, rm } from "node:fs/promises";
 import path from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import { Writable } from "node:stream";
@@ -96,28 +96,62 @@ export async function readPassphrase(
 
 const resolveIn = (io: CliIo, file: string) => path.resolve(io.cwd, file);
 
-/** Refuse early, before any work, when a backup would land on an existing file. */
-export function assertNewFile(io: CliIo, file: string | undefined): void {
-  if (file !== undefined && existsSync(resolveIn(io, file)))
-    throw new UsageError(`${file} already exists. Backups are never overwritten; choose a new path.`);
+/**
+ * Refuse, before any work, an output that already exists, that is also one of the
+ * command's inputs, or that two outputs share. Nothing here is ever overwritten.
+ */
+export function assertOutputs(
+  io: CliIo,
+  outputs: (string | undefined)[],
+  inputs: (string | undefined)[],
+  maybeExisting: (string | undefined)[] = [],
+): void {
+  const seen = new Set(inputs.filter((f): f is string => f !== undefined).map((f) => resolveIn(io, f)));
+  for (const file of [...outputs, ...maybeExisting]) {
+    if (file === undefined) continue;
+    const target = resolveIn(io, file);
+    if (seen.has(target)) throw new UsageError(`${file} is used twice. Give every output its own new path.`);
+    seen.add(target);
+  }
+  for (const file of outputs)
+    if (file !== undefined && existsSync(resolveIn(io, file)))
+      throw new UsageError(`${file} already exists. Nothing is overwritten; choose a new path.`);
 }
-/** Write a private file (a backup) owner-only, never over an existing file, then read it back. */
-export async function writeNewPrivateFile(io: CliIo, file: string, text: string): Promise<void> {
+/** Create `target` exclusively, write it, and flush it and its directory to disk. */
+async function writeExclusive(target: string, text: string) {
+  const handle = await open(target, "wx", 0o600);
+  try {
+    await handle.writeFile(text);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  const directory = await open(path.dirname(target), "r");
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+}
+async function writeNew(io: CliIo, file: string, text: string, sameContentOk = false): Promise<string> {
   const target = resolveIn(io, file);
   try {
-    await writeFile(target, text, { mode: 0o600, flag: "wx" });
+    await writeExclusive(target, text);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST")
-      throw new UsageError(`${file} already exists. Backups are never overwritten; choose a new path.`);
-    throw error;
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if (!sameContentOk || (await readBounded(target, file)).toString("utf8") !== text)
+      throw new UsageError(`${file} already exists. Nothing is overwritten; choose a new path.`);
   }
-  if ((await readFile(target, "utf8")) !== text) throw new Error(`${file} did not save correctly.`);
-}
-/** Write a public file (an unsigned PSBT, a signed transaction), owner-only like everything else here. */
-export async function writePublicFile(io: CliIo, file: string, text: string): Promise<string> {
-  const target = resolveIn(io, file);
-  await writeFile(target, text, { mode: 0o600 });
   return target;
+}
+/** Write a backup owner-only, never over an existing file, durably, then read it back. */
+export async function writeNewPrivateFile(io: CliIo, file: string, text: string): Promise<void> {
+  const target = await writeNew(io, file, text);
+  if ((await readBounded(target, file)).toString("utf8") !== text) throw new Error(`${file} did not save correctly.`);
+}
+/** Write a public file (a PSBT, a signed transaction) owner-only, never over another file. */
+export function writePublicFile(io: CliIo, file: string, text: string, sameContentOk = false): Promise<string> {
+  return writeNew(io, file, text, sameContentOk);
 }
 /** Read a file through one handle, so its size is checked on the bytes that are read. */
 async function readBounded(target: string, file: string): Promise<Buffer> {
@@ -165,7 +199,7 @@ export function externalSigner(
       const name =
         files.psbtOut ??
         `qsb-unsigned-${createHash("sha256").update(psbt).digest("hex").slice(0, 12)}.psbt`;
-      const written = await writePublicFile(io, name, `${psbt}\n`);
+      const written = await writePublicFile(io, name, `${psbt}\n`, true);
       io.stderr.write(
         `Unsigned PSBT written to ${written}. Sign input ${inputs.join(", ")} with ${address}'s key. Do not finalize into a broadcast; nothing is sent until you approve it here.\n`,
       );
@@ -213,13 +247,25 @@ export async function loadSession(home: string, api: string, address: string): P
     return undefined;
   }
 }
-async function writePrivateAtomically(file: string, text: string) {
-  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+/** Replace CLI state (the session cache, a pending deposit) atomically and durably, owner-only. */
+function writePrivateAtomically(file: string, text: string) {
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${process.pid}.tmp`;
-  await rm(temporary, { force: true });
-  await writeFile(temporary, text, { mode: 0o600, flag: "wx" });
-  await chmod(temporary, 0o600);
-  await rename(temporary, file);
+  rmSync(temporary, { force: true });
+  const fd = openSync(temporary, "wx", 0o600);
+  try {
+    writeSync(fd, text);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(temporary, file);
+  const directory = openSync(path.dirname(file), "r");
+  try {
+    fsyncSync(directory);
+  } finally {
+    closeSync(directory);
+  }
 }
 /** Sessions last an hour on the server; the cache gives up five minutes early. */
 export async function saveSession(home: string, api: string, address: string, token: string) {
@@ -246,13 +292,36 @@ export function filePendingDeposits(home: string): PendingDeposits {
   return {
     async get(vaultId) {
       try {
-        return JSON.parse(await readFile(file(vaultId), "utf8")) as PendingDeposit;
+        return JSON.parse((await readBounded(file(vaultId), "The pending deposit")).toString("utf8")) as PendingDeposit;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
         throw error;
       }
     },
-    set: (vaultId, deposit) => writePrivateAtomically(file(vaultId), JSON.stringify(deposit)),
+    set: async (vaultId, deposit) => writePrivateAtomically(file(vaultId), JSON.stringify(deposit)),
     delete: (vaultId) => rm(file(vaultId), { force: true }),
+  };
+}
+
+/**
+ * This device's one-time withdrawal authorizations, one owner-only file per key, under the
+ * webapp's keys: qsb-intent:<scriptHash> and qsb-assembly:<scriptHash>.
+ */
+export function fileAuthorizations(home: string): Pick<Storage, "getItem" | "setItem"> {
+  const file = (key: string) => {
+    const match = /^(qsb-intent|qsb-assembly):([0-9a-f]{64})$/.exec(key);
+    if (!match) throw new Error("Unexpected authorization key.");
+    return path.join(home, "authorizations", `${match[1]}-${match[2]}`);
+  };
+  return {
+    getItem(key) {
+      try {
+        return readFileSync(file(key), "utf8");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      }
+    },
+    setItem: (key, value) => writePrivateAtomically(file(key), value),
   };
 }

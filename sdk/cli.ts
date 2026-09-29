@@ -8,9 +8,10 @@ import {
   Prompter,
   SignatureNeeded,
   UsageError,
-  assertNewFile,
+  assertOutputs,
   clearSession,
   externalSigner,
+  fileAuthorizations,
   filePendingDeposits,
   loadSession,
   readPassphrase,
@@ -162,6 +163,7 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
       fetch: io.fetch,
       qsb,
       pendingDeposits: filePendingDeposits(home),
+      authorizations: fileAuthorizations(home),
       token,
     });
     const signIn = async () => {
@@ -217,7 +219,7 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
       case "vault create": {
         arity(2);
         const file = need("backup"), name = need("name");
-        assertNewFile(io, file);
+        assertOutputs(io, [file], [], [values["message-out"]]);
         const secret = await passphrase(true);
         await signIn();
         say("Generating QSB keys locally…");
@@ -239,6 +241,8 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
         arity(3);
         const vaultId = id("vault");
         const out = need("out");
+        const psbtFile = values["psbt-out"] ?? `${out.replace(/\.json$/, "")}.psbt`;
+        assertOutputs(io, [out, psbtFile], [values.backup], [values["message-out"]]);
         const text = await backup();
         const secret = await passphrase();
         await signIn();
@@ -250,7 +254,6 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
           utxos: (values.utxo ?? []).map(outpoint),
         });
         await writePublicFile(io, out, `${JSON.stringify(prepared, null, 2)}\n`);
-        const psbtFile = values["psbt-out"] ?? `${out.replace(/\.json$/, "")}.psbt`;
         await writePublicFile(io, psbtFile, `${prepared.psbt}\n`);
         say(
           [
@@ -288,19 +291,28 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
         await signIn();
         print(await client.deposits.status(id("vault")));
         return 0;
-      case "deposit resubmit":
+      case "deposit resubmit": {
         arity(3);
         await signIn();
-        print(await client.deposits.resubmit(id("vault")));
-        return 0;
+        const result = await client.deposits.resubmit(id("vault"));
+        print(result);
+        if (result.submission === "submitted") return 0;
+        say(
+          result.submission === "rejected"
+            ? `MARA refused the deposit: ${result.reason ?? "no reason given"}.`
+            : "MARA's answer is still unclear. The same deposit can be resent again; don't make another deposit.",
+        );
+        return 1;
+      }
       case "withdraw create": {
         arity(3);
         const vaultId = id("vault");
-        assertNewFile(io, values["out-backup"]);
+        assertOutputs(io, [values["out-backup"]], [values.backup], [values["message-out"]]);
         const text = await backup();
         const costAccepted = accepted();
         const secret = await passphrase();
         await signIn();
+        let saved = false;
         const { job } = await client.withdrawals.create({
           vaultId,
           backup: text,
@@ -310,7 +322,10 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
           ...(values["fee-rate"] ? { feeRate: values["fee-rate"] } : {}),
           ...(values.solver ? { solverReleaseId: values.solver } : {}),
           costAccepted,
-          saveBackup: (encrypted) => writeNewPrivateFile(io, need("out-backup"), encrypted),
+          saveBackup: async (encrypted) => {
+            await writeNewPrivateFile(io, need("out-backup"), encrypted);
+            saved = true;
+          },
         });
         say(
           [
@@ -318,9 +333,9 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
             `  Destination: ${job.manifest.destination}`,
             `  Payout:      ${sats(job.manifest.outputValue)}`,
             `  Miner fee:   ${sats(job.manifest.fee)}`,
-            values["out-backup"]
+            saved
               ? `The withdrawal backup ${values["out-backup"]} binds this payout; use it to authorize the result.`
-              : "Resumed the intent saved in this backup.",
+              : `Resumed the intent saved in ${values.backup}; no new backup was written.`,
           ].join("\n"),
         );
         print({ job });
@@ -344,7 +359,12 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
         arity(3);
         const jobId = id("job");
         const out = need("out");
-        assertNewFile(io, values["out-backup"]);
+        assertOutputs(
+          io,
+          [values["out-backup"], out],
+          [values.backup, values["signed-psbt"]],
+          [values["psbt-out"], values["message-out"]],
+        );
         const text = await backup();
         const secret = await passphrase();
         await signIn();
@@ -388,7 +408,7 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
         });
         say(`${result.status}: ${result.txid}. Keep the signed file and check withdraw status; do not submit again.`);
         print(result);
-        return 0;
+        return result.status === "uncertain" ? 1 : 0;
       }
       default:
         throw new UsageError(`Unknown command "${positionals.join(" ")}". See --help.`);

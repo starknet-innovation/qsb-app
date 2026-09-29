@@ -14,7 +14,7 @@ import { transactionVsize } from "../src/lib/transactions";
 import { ApiError, QsbClient, loopbackTestSigner, type WithdrawalReview } from "../sdk";
 import { runCli } from "../sdk/cli";
 import type { CliIo } from "../sdk/cli-io";
-import { API, localQsb, solve, wallet, world } from "./sdk-fixture";
+import { API, localQsb, solvedWithdrawal as solved, world } from "./sdk-fixture";
 
 beforeEach(() => vi.stubEnv("SOLVER_RELEASE_ID", awsRelease.id));
 afterEach(() => vi.unstubAllEnvs());
@@ -22,44 +22,9 @@ const passphrase = "disposable sdk client passphrase";
 const opts = { allowUnknownInputs: true, allowUnknownOutputs: true };
 const newAddress = () => btc.p2wpkh(secp256k1.getPublicKey(randomBytes(32), true)).address!;
 
-/** A vault funded and withdrawn up to the solved result, driven through the SDK. */
-async function solvedWithdrawal() {
-  const w = world();
-  const owner = wallet(w.chain);
-  const signer = loopbackTestSigner(owner.wif, API);
-  const client = new QsbClient({ baseUrl: API, signer, fetch: w.fetch, qsb: localQsb().qsb });
-  const destination = newAddress();
-  await client.login();
-  const backups: string[] = [];
-  const keep = async (text: string) => void backups.push(text);
-  const { vault } = await client.vaults.create({ name: "sdk client", passphrase, saveBackup: keep });
-  const prepared = await client.deposits.prepare(vault.id, {
-    backup: backups[0],
-    passphrase,
-    amount: 200000n,
-    feeRate: "2",
-    utxos: [{ txid: owner.fundingTxid, vout: 0 }],
-  });
-  const signedDeposit = await signer.signPsbt(signer.address, prepared.psbt, prepared.signInputs);
-  const deposit = await client.deposits.submit(prepared, signedDeposit, { costAccepted: true });
-  w.chain.mine(deposit.txid);
-  const { job } = await client.withdrawals.create({
-    vaultId: vault.id,
-    backup: backups[0],
-    passphrase,
-    helper: { txid: owner.fundingTxid, vout: 1 },
-    destination,
-    feeRate: "3",
-    costAccepted: true,
-    saveBackup: keep,
-  });
-  await solve(w.store, owner.address, job.id);
-  return { w, owner, signer, client, vault, job, destination, backups, keep };
-}
-
 describe("withdrawals.submit approval", () => {
   it("shows the exact values bound to the txid and sends nothing without that approval", async () => {
-    const s = await solvedWithdrawal();
+    const s = await solved(passphrase);
     const signed = await s.client.withdrawals.assemble(s.job.id, {
       backup: s.backups[1],
       passphrase,
@@ -110,7 +75,7 @@ describe("withdrawals.submit approval", () => {
   }, 120000);
 
   it("refuses a signed result whose transaction was edited, before asking for approval", async () => {
-    const s = await solvedWithdrawal();
+    const s = await solved(passphrase);
     const signed = await s.client.withdrawals.assemble(s.job.id, { backup: s.backups[1], passphrase, saveBackup: s.keep });
     const payout = hex.encode(btc.OutScript.encode(btc.Address(btc.NETWORK).decode(s.destination)));
     const redirected = hex.encode(btc.OutScript.encode(btc.Address(btc.NETWORK).decode(newAddress())));
@@ -213,7 +178,7 @@ describe("CLI secrets and the external signer", () => {
     expect(existsSync(path.join(cwd, "b.json"))).toBe(false);
   });
   it("signs in and authorizes the helper through files and stdin, never holding the key", async () => {
-    const s = await solvedWithdrawal();
+    const s = await solved(passphrase);
     const cwd = mkdtempSync(path.join(tmpdir(), "qsb-cli-"));
     writeFileSync(path.join(cwd, "withdrawal.json"), s.backups[1]);
     const { qsb } = localQsb();

@@ -11,7 +11,7 @@ import { Esplora } from "../server/chain";
 import { MinerHttpError, Slipstream } from "../server/providers";
 import { outputScript } from "../src/lib/transactions";
 import type { Job, Withdrawal } from "../src/lib/model";
-import { nodeQsb, type LocalQsb } from "../sdk";
+import { nodeQsb, loopbackTestSigner, QsbClient, type LocalQsb, type QsbClientOptions } from "../sdk";
 
 const opts = { allowUnknownInputs: true, allowUnknownOutputs: true };
 const GENESIS = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f";
@@ -86,15 +86,19 @@ export function world() {
   const chain = new FakeChain();
   const minerSubmissions: string[] = [];
   const credential = new Slipstream("https://slipstream.mara.com", async () => undefined);
-  const relay = async (raw: string) => {
+  /** MARA's quote, and whether its POSTs lose their answer; tests change both. */
+  const rates = { submit_fee_rate: 1, market_rate: 2, effective_rate: 2.5 };
+  const lost = { deposit: false, withdrawal: false };
+  const relay = (kind: keyof typeof lost) => async (raw: string) => {
+    if (lost[kind]) throw new Error("socket hang up");
     minerSubmissions.push(raw);
     return { status: "success", message: chain.add(raw) };
   };
   const miner = {
-    rates: async () => ({ submit_fee_rate: 1, market_rate: 2, effective_rate: 2.5 }),
+    rates: async () => ({ ...rates }),
     credential: () => credential.credential(),
-    submitFunding: relay,
-    submit: relay,
+    submitFunding: relay("deposit"),
+    submit: relay("withdrawal"),
     seen: async (id: string) => chain.has(id),
     status: async (id: string) => {
       if (!chain.has(id)) throw new MinerHttpError(400, "Transaction not found");
@@ -121,7 +125,7 @@ export function world() {
     });
     return app.fetch(new Request(url, init));
   }) as typeof fetch;
-  return { store, chain, app, miner, consensus, minerSubmissions, requests, fetch: transport };
+  return { store, chain, app, miner, consensus, minerSubmissions, requests, rates, lost, fetch: transport };
 }
 
 /** A funded wallet: one confirmed transaction paying the key's P2WPKH address twice. */
@@ -178,4 +182,59 @@ export function localQsb() {
     },
   };
   return { qsb, assembled };
+}
+
+type Staging = { wrap?: (next: typeof fetch) => typeof fetch; options?: Partial<QsbClientOptions> };
+/** A signed-in SDK client with one registered vault. `backups[0]` is its encrypted backup. */
+export async function createdVault(passphrase: string, staging: Staging = {}) {
+  const w = world();
+  const owner = wallet(w.chain);
+  const signer = loopbackTestSigner(owner.wif, API);
+  const { qsb } = localQsb();
+  const remembered = new Map<string, string>();
+  const client = new QsbClient({
+    baseUrl: API,
+    signer,
+    fetch: (staging.wrap ?? ((next) => next))(w.fetch),
+    qsb,
+    authorizations: { getItem: (k) => remembered.get(k) ?? null, setItem: (k, v) => void remembered.set(k, v) },
+    ...staging.options,
+  });
+  await client.login();
+  const backups: string[] = [];
+  const keep = async (text: string) => void backups.push(text);
+  const { vault } = await client.vaults.create({ name: "sdk client", passphrase, saveBackup: keep });
+  return { w, owner, signer, client, vault, backups, keep, qsb };
+}
+/** The same, with its deposit relayed and confirmed. */
+export async function fundedVault(passphrase: string, staging: Staging = {}) {
+  const v = await createdVault(passphrase, staging);
+  const prepared = await v.client.deposits.prepare(v.vault.id, {
+    backup: v.backups[0],
+    passphrase,
+    amount: 200000n,
+    feeRate: "2",
+    utxos: [{ txid: v.owner.fundingTxid, vout: 0 }],
+  });
+  const signed = await v.signer.signPsbt(v.signer.address, prepared.psbt, prepared.signInputs);
+  const deposit = await v.client.deposits.submit(prepared, signed, { costAccepted: true });
+  v.w.chain.mine(deposit.txid);
+  const destination = btc.p2wpkh(secp256k1.getPublicKey(randomBytes(32), true)).address!;
+  return { ...v, destination };
+}
+/** The same, with a withdrawal the coordinator has solved. `backups[1]` binds its intent. */
+export async function solvedWithdrawal(passphrase: string, wrap?: Staging["wrap"]) {
+  const f = await fundedVault(passphrase, { wrap });
+  const { job } = await f.client.withdrawals.create({
+    vaultId: f.vault.id,
+    backup: f.backups[0],
+    passphrase,
+    helper: { txid: f.owner.fundingTxid, vout: 1 },
+    destination: f.destination,
+    feeRate: "3",
+    costAccepted: true,
+    saveBackup: f.keep,
+  });
+  await solve(f.w.store, f.owner.address, job.id);
+  return { ...f, job };
 }
