@@ -134,6 +134,14 @@ export async function copyRecords(
   return { ...summary, copied: true };
 }
 
+/**
+ * A client for one side of the copy. `profile` picks that side's credentials from the shared AWS config
+ * (including credential_process and Identity Center profiles), independently of the other side.
+ */
+export function clientFor(region: string, profile?: string) {
+  return new DynamoDBClient({ region, ...(profile ? { profile } : {}) });
+}
+
 export function parseTarget(value: string | undefined, flag: string) {
   const match = /^([a-z]{2}-[a-z]+-\d):([A-Za-z0-9_.-]{3,255})$/.exec(value ?? "");
   if (!match) throw new Error(`${flag} must be REGION:TABLE, for example eu-west-2:qsb-app-records.`);
@@ -147,15 +155,15 @@ export async function runCopyRecordsCli(args: string[]) {
     const to = parseTarget(args.includes("--to") ? flag("--to") : undefined, "--to");
     if (from.region === to.region && from.table === to.table) throw new Error("--from and --to are the same table.");
     const profile = (name: string) => {
-      if (!args.includes(name)) return {};
+      if (!args.includes(name)) return undefined;
       const value = flag(name);
       if (!value || !/^[\w+=,.@-]{1,128}$/.test(value)) throw new Error(`${name} must name an AWS profile.`);
-      return { profile: value };
+      return value;
     };
     const result = await copyRecords(
-      new DynamoDBClient({ region: from.region, ...profile("--from-profile") }),
+      clientFor(from.region, profile("--from-profile")),
       from.table,
-      new DynamoDBClient({ region: to.region, ...profile("--to-profile") }),
+      clientFor(to.region, profile("--to-profile")),
       to.table,
       args.includes("--apply"),
     );

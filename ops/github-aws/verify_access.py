@@ -2,7 +2,13 @@
 """Check the QSB human access policies with IAM's policy simulator.
 
 Without --live, simulates the rendered documents. With --live, simulates the
-installed qsb-operator and qsb-viewonly roles (which also covers ViewOnlyAccess).
+installed qsb-operator and qsb-viewonly roles (which also covers ViewOnlyAccess) and,
+with an IAM user, that user.
+
+In an Identity Center account the permission set's policy lives in Identity Center,
+which this account's roles can't read: the checks simulate the rendered
+permission-set.json. So --live then fails unless --permission-set-confirmed says the
+administrator has confirmed the installed inline policy equals it.
 Read-only; works from the qsb-viewonly role. Prints case names and decisions only.
 """
 import argparse
@@ -16,6 +22,9 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--profile', required=True)
 p.add_argument('--inventory', type=Path, required=True)
 p.add_argument('--live', action='store_true')
+p.add_argument('--permission-set-confirmed', action='store_true',
+               help="with --live in an Identity Center account: the administrator confirmed the permission set's "
+                    'installed inline policy equals the rendered permission-set.json')
 a = p.parse_args()
 c = json.loads(a.inventory.read_text())
 out = access(c)
@@ -108,10 +117,10 @@ gpu_cases = [
 ]
 
 
-def simulate(label, documents, role, cases):
+def simulate(label, documents, principal, cases):
     for name, action, resource, allowed, context in cases:
-        if a.live and role:
-            args = ['simulate-principal-policy', '--policy-source-arn', iam(f'role/qsb/bootstrap/{role}')]
+        if a.live and principal:
+            args = ['simulate-principal-policy', '--policy-source-arn', principal]
         else:
             args = ['simulate-custom-policy', '--policy-input-list', *[json.dumps(d) for d in documents]]
         args += ['--action-names', action, '--resource-arns', resource]
@@ -128,8 +137,8 @@ def simulate(label, documents, role, cases):
         print(f'{label}: {name}: {decision}', flush=True)
 
 
-simulate('operator', out['operator']['policies'], 'qsb-operator', operator_cases)
-simulate('viewonly', out['viewonly']['policies'], 'qsb-viewonly', viewonly_cases)
+simulate('operator', out['operator']['policies'], iam('role/qsb/bootstrap/qsb-operator'), operator_cases)
+simulate('viewonly', out['viewonly']['policies'], iam('role/qsb/bootstrap/qsb-viewonly'), viewonly_cases)
 simulate('gpu-boundary', [out['gpu_boundary']['document']], None, gpu_cases)
 # The IAM user's inline policy, or in an Identity Center account the permission-set policy: same limits.
 human = out['user'] or out['permission_set']
@@ -143,6 +152,13 @@ user_cases = [
     ('create access key', 'iam:CreateAccessKey',
      iam('user/qsb/operators/' + c['operator_user'] if out['user'] else 'user/anyone'), 'explicitDeny', []),
 ]
-simulate('user' if out['user'] else 'permission set', [human['inline']], None, user_cases)
+if out['user']:
+    simulate('user', [human['inline']], iam('user/qsb/operators/' + c['operator_user']), user_cases)
+else:
+    simulate('permission set (rendered)', [human['inline']], None, user_cases)
 total = len(operator_cases) + len(viewonly_cases) + len(gpu_cases) + len(user_cases)
 print(f'Passed {total} IAM simulations.', flush=True)
+if a.live and not out['user'] and not a.permission_set_confirmed:
+    raise SystemExit("Live check incomplete: the permission set's installed policy lives in Identity Center and "
+                     'was not read. Once the administrator confirms it equals permission-set.json, re-run with '
+                     '--permission-set-confirmed.')

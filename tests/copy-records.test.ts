@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BatchWriteItemCommand, ScanCommand } from "@aws-sdk/client-dynamodb";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   canonical,
+  clientFor,
   copyRecords,
   digest,
   parseTarget,
@@ -143,6 +147,26 @@ describe("canonical encoding", () => {
     const b: Item = { pk: { S: "p" }, b: { B: Uint8Array.of(1, 2) }, s: { SS: ["y", "x"] }, sk: { S: "1" } };
     expect(canonical(a)).toBe(canonical(b));
     expect(canonical(a)).not.toBe(canonical({ ...a, b: { B: Uint8Array.of(2, 1) } }));
+  });
+});
+
+describe("clientFor", () => {
+  const dir = mkdtempSync(join(tmpdir(), "copy-records-"));
+  afterEach(() => vi.unstubAllEnvs());
+  it("gives each side the credentials of its own profile", async () => {
+    // Two fake profiles whose credential_process prints different placeholder keys; nothing real is read.
+    const script = join(dir, "fake-credentials.sh");
+    writeFileSync(script, `#!/bin/sh\nprintf '{"Version":1,"AccessKeyId":"AKIAFAKE%s","SecretAccessKey":"placeholder"}' "$1"\n`);
+    chmodSync(script, 0o755);
+    const config = join(dir, "config");
+    writeFileSync(config, `[profile side-a]\ncredential_process = ${script} AAAA\n[profile side-b]\ncredential_process = ${script} BBBB\n`);
+    for (const name of ["AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]) vi.stubEnv(name, "");
+    vi.stubEnv("AWS_CONFIG_FILE", config);
+    vi.stubEnv("AWS_SHARED_CREDENTIALS_FILE", join(dir, "none"));
+    const a = await clientFor("eu-west-1", "side-a").config.credentials();
+    const b = await clientFor("eu-west-2", "side-b").config.credentials();
+    expect([a.accessKeyId, b.accessKeyId]).toEqual(["AKIAFAKEAAAA", "AKIAFAKEBBBB"]);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 
