@@ -146,7 +146,7 @@ variable "owner_allowlist" {
   }
 }
 variable "owner_max_active_jobs" {
-  description = "Most withdrawals one owner may have queued, searching or paused at once (QSB_OWNER_MAX_ACTIVE_JOBS). Null: no limit."
+  description = "Most withdrawals one owner may have queued or searching at once (QSB_OWNER_MAX_ACTIVE_JOBS); pausing frees a slot and resume claims one. Null: no limit. The reconcile CLI must be given the same value, or off."
   type        = number
   default     = null
   validation {

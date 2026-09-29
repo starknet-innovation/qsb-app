@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { release, type Job } from "../src/lib/model";
 import { MemoryStore } from "../server/store";
-import { ACTIVE_JOBS_SK } from "../server/owner-limits";
+import { ACTIVE_JOBS_SK, claimWithdrawalSlot } from "../server/owner-limits";
 import { workRange } from "../server/search-ranges";
 import {
   reconcileUnknownSubmission,
@@ -60,6 +60,7 @@ const run = (d: ReconciliationDecision = decision) =>
     log: () => {},
     resumePolling,
     pollingAllowed: () => true,
+    maxActiveJobs: null,
   });
 beforeEach(async () => {
   store = new MemoryStore();
@@ -569,4 +570,26 @@ it("claims no slot for a not-submitted decision, which leaves the job paused", a
   });
   expect(await job()).toMatchObject({ status: "paused", oneSubmissionAllowed: true });
   expect(await store.get(pk, ACTIVE_JOBS_SK)).toBeUndefined();
+});
+it("counts a reconciled job whose claim the query sees only half", async () => {
+  const paused = (await store.get(pk, sk))!;
+  await reconcileUnknownSubmission({
+    store, owner, jobId, decision, lookup, now, log: () => {}, resumePolling, pollingAllowed: () => true, maxActiveJobs: 1,
+  });
+  expect(await store.get(pk, ACTIVE_JOBS_SK)).toMatchObject({ jobId, jobVersion: paused.version + 1 });
+  // DynamoDB: the fence write is visible, the job still at its pre-claim, paused version.
+  const list = store.list.bind(store);
+  vi.spyOn(store, "list").mockImplementation(async (rowPk, prefix) =>
+    (await list(rowPk, prefix)).map((row) => (row.sk === sk ? paused : row)),
+  );
+  expect(await claimWithdrawalSlot(store, owner, "next", 1, 0)).toBeUndefined();
+});
+it.each([0, -1, 1.5])("refuses a malformed explicit limit %s before writing", async (maxActiveJobs) => {
+  const before = structuredClone([...store.rows]);
+  await expect(
+    reconcileUnknownSubmission({
+      store, owner, jobId, decision, lookup, now, log: () => {}, resumePolling, pollingAllowed: () => true, maxActiveJobs,
+    }),
+  ).rejects.toThrow("OwnerMaxActiveJobsInvalid");
+  expect([...store.rows]).toEqual(before);
 });

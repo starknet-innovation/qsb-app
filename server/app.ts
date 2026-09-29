@@ -757,7 +757,7 @@ export function createApp(
     const slot =
       maxActiveJobs === null
         ? undefined
-        : await claimWithdrawalSlot(store, owner, id, maxActiveJobs);
+        : await claimWithdrawalSlot(store, owner, id, maxActiveJobs, 0);
     if (maxActiveJobs !== null && !slot)
       return c.json(activeWithdrawalLimit(maxActiveJobs), 429);
     // Its first paid submission would pause at once, with its inputs already reserved to it.
@@ -889,7 +889,7 @@ export function createApp(
     const slot =
       maxActiveJobs === null
         ? undefined
-        : await claimWithdrawalSlot(store, c.get("owner"), job.id, maxActiveJobs);
+        : await claimWithdrawalSlot(store, c.get("owner"), job.id, maxActiveJobs, row.version + 1);
     if (maxActiveJobs !== null && !slot)
       return c.json(activeWithdrawalLimit(maxActiveJobs), 429);
     job.status = "queued";

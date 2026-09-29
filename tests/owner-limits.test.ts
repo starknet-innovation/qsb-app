@@ -310,6 +310,34 @@ describe("active withdrawals per owner", () => {
     expect((await f.post("/api/jobs", await f.withdrawal())).status).toBe(429);
   });
 
+  it("counts a resumed job whose claim the query sees only half", async () => {
+    const store = new MemoryStore();
+    const f = await fixture(limited(1), store);
+    const first = await (await f.post("/api/jobs", await f.withdrawal())).json();
+    expect((await f.post(`/api/jobs/${first.job.id}/pause`)).status).toBe(200);
+    const paused = (await store.get(pk, `JOB#${first.job.id}`))!;
+    expect((await f.post(`/api/jobs/${first.job.id}/resume`)).status).toBe(202);
+    expect(await store.get(pk, ACTIVE_JOBS_SK)).toMatchObject({ jobId: first.job.id, jobVersion: paused.version + 1 });
+    // DynamoDB: the resume's fence write is visible, its job write not yet.
+    const list = store.list.bind(store);
+    vi.spyOn(store, "list").mockImplementation(async (rowPk, prefix) =>
+      (await list(rowPk, prefix)).map((row) => (row.sk === paused.sk ? paused : row)),
+    );
+    const before = f.written();
+    expect((await f.post("/api/jobs", await f.withdrawal())).status).toBe(429);
+    expect(f.written()).toEqual(before);
+    // Once the query shows the claimed version, its real status counts: a later pause frees it.
+    const unit = new MemoryStore();
+    await unit.put({ pk, sk: ACTIVE_JOBS_SK, version: 5, jobId: "x", jobVersion: 4 });
+    await unit.put({ pk, sk: "JOB#x", version: 3, job: { status: "paused" } });
+    expect(await claimWithdrawalSlot(unit, owner, "y", 1, 0)).toBeUndefined();
+    await unit.put({ pk, sk: "JOB#x", version: 4, job: { status: "queued" } }, 3);
+    expect(await claimWithdrawalSlot(unit, owner, "y", 1, 0)).toBeUndefined();
+    expect(await claimWithdrawalSlot(unit, owner, "y", 2, 0)).toMatchObject({ expected: 5 });
+    await unit.put({ pk, sk: "JOB#x", version: 5, job: { status: "paused" } }, 4);
+    expect(await claimWithdrawalSlot(unit, owner, "y", 1, 0)).toMatchObject({ expected: 5, row: { jobId: "y", jobVersion: 0 } });
+  });
+
   it("resumes with a plain write when the limit is off", async () => {
     const f = await fixture(off());
     const first = await (await f.post("/api/jobs", await f.withdrawal())).json();
@@ -371,10 +399,10 @@ describe("active withdrawals per owner", () => {
     vi.spyOn(store, "list").mockImplementationOnce(async (rowPk, prefix) => {
       const stale = await list(rowPk, prefix);
       // Another creation takes the last slot between this count and the claim's write.
-      await store.atomicPut([queued("other"), (await claimWithdrawalSlot(store, owner, "other", 1))!]);
+      await store.atomicPut([queued("other"), (await claimWithdrawalSlot(store, owner, "other", 1, 0))!]);
       return stale;
     });
-    const claim = await claimWithdrawalSlot(store, owner, "mine", 1);
+    const claim = await claimWithdrawalSlot(store, owner, "mine", 1, 0);
     expect(claim).toBeDefined();
     await expect(store.atomicPut([queued("mine"), claim!])).rejects.toThrow(Conflict);
     expect(await store.get(pk, "JOB#mine")).toBeUndefined();
@@ -397,11 +425,11 @@ describe("active withdrawals per owner", () => {
     // With room for two, the claimant is still counted once, not twice.
     const unit = new MemoryStore();
     await unit.put({ pk, sk: ACTIVE_JOBS_SK, version: 3, jobId: "b" });
-    expect(await claimWithdrawalSlot(unit, owner, "c", 1)).toBeUndefined();
-    expect(await claimWithdrawalSlot(unit, owner, "c", 2)).toMatchObject({ expected: 3, row: { version: 4, jobId: "c" } });
+    expect(await claimWithdrawalSlot(unit, owner, "c", 1, 0)).toBeUndefined();
+    expect(await claimWithdrawalSlot(unit, owner, "c", 2, 0)).toMatchObject({ expected: 3, row: { version: 4, jobId: "c" } });
     await unit.put({ pk, sk: "JOB#b", version: 0, job: { status: "queued" } });
-    expect(await claimWithdrawalSlot(unit, owner, "c", 2)).toMatchObject({ expected: 3 });
-    expect(await claimWithdrawalSlot(unit, owner, "c", 1)).toBeUndefined();
+    expect(await claimWithdrawalSlot(unit, owner, "c", 2, 0)).toMatchObject({ expected: 3 });
+    expect(await claimWithdrawalSlot(unit, owner, "c", 1, 0)).toBeUndefined();
   });
 
   it.each([0, 1])("gives exactly one of two concurrent creations the last slot (%s already active)", async (active) => {

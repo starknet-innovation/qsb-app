@@ -14,7 +14,8 @@ import { rehearsalAddressAllowed, transactionsEnabled } from "./network";
 import { configuredCompute } from "./compute-provider";
 import { searchVersion, workRange } from "./search-ranges";
 import { store as defaultStore, type AtomicWrite, type Store } from "./store";
-import { OwnerLimitsInvalid, claimWithdrawalSlot, ownerLimits } from "./owner-limits";
+import { ACTIVE_JOBS_SK, claimWithdrawalSlot } from "./owner-limits";
+import { reconcileActiveJobLimit } from "./reconciliation-environment";
 
 export class ReconciliationError extends Error {
   constructor(message: string) {
@@ -112,8 +113,8 @@ export async function reconcileUnknownSubmission(input: {
   resumePolling: (job: Job) => Promise<PollingStart>;
   pollingAllowed?: (owner: string) => boolean;
   now?: string;
-  /** QSB_OWNER_MAX_ACTIVE_JOBS, set to the deployment's value; read from the environment by default. */
-  maxActiveJobs?: number | null;
+  /** The deployment's QSB_OWNER_MAX_ACTIVE_JOBS, given explicitly: null only when it is off. */
+  maxActiveJobs: number | null;
 }): Promise<ReconciliationResult> {
   const { store, owner, jobId, lookup, log } = input;
   const decision = reconciliationDecisionSchema.parse(input.decision);
@@ -281,16 +282,15 @@ export async function reconcileUnknownSubmission(input: {
   // withdrawal slot in the same transaction, as resume does. Nothing is written at the limit.
   let slot: AtomicWrite | undefined;
   if (decision.kind === "provider-id" && !recorded) {
-    let max = input.maxActiveJobs;
-    if (max === undefined)
-      try {
-        max = ownerLimits().maxActiveJobs;
-      } catch (error) {
-        if (error instanceof OwnerLimitsInvalid) throw new ReconciliationError("OwnerLimitsInvalid");
-        throw error;
-      }
-    if (max !== null) {
-      slot = await claimWithdrawalSlot(store, owner, jobId, max);
+    const max = input.maxActiveJobs;
+    if (max !== null && !(Number.isSafeInteger(max) && max >= 1))
+      throw new ReconciliationError("OwnerMaxActiveJobsInvalid");
+    if (max === null) {
+      // "off" from a shell that lost the setting must not skip a limit that has been in force.
+      if (await store.get(pk, ACTIVE_JOBS_SK))
+        throw new ReconciliationError("OwnerActiveJobLimitRecorded");
+    } else {
+      slot = await claimWithdrawalSlot(store, owner, jobId, max, row.version + 1);
       if (!slot) throw new ReconciliationError("OwnerActiveWithdrawalLimit");
     }
   }
@@ -429,12 +429,15 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
     });
     if (decision.kind === "provider-id" && !pollingStartAllowed(owner))
       throw new ReconciliationError("PollingNotAllowed");
+    const maxActiveJobs = reconcileActiveJobLimit(process.env);
+    if (maxActiveJobs === undefined) throw new ReconciliationError("OwnerMaxActiveJobsRequired");
     const endpoint = await configuredCompute();
     const result = await reconcileUnknownSubmission({
       store: defaultStore,
       owner,
       jobId,
       decision,
+      maxActiveJobs,
       lookup: {
         findRequest: (identity) => endpoint.findRequest(identity),
         status: (id, identity) => endpoint.status(id, identity),

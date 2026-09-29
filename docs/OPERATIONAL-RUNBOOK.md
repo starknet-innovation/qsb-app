@@ -81,10 +81,13 @@ Required environment: `TABLE_NAME` (the CLI refuses MemoryStore), `AWS_REGION`,
 (`mainnet` or `testnet4`). On mainnet, also set `QSB_MAINNET_ENABLED` explicitly to
 `"true"` or `"false"`. It must match the deployed value: verify
 `terraform output -raw transactions_enabled` or uncached `GET /api/config`
-(`operationsEnabled`, with `network` equal to `mainnet`). Missing or malformed
+(`operationsEnabled`, with `network` equal to `mainnet`). Always set
+`QSB_OWNER_MAX_ACTIVE_JOBS` to the deployment's `owner_max_active_jobs`: a positive
+integer, or the literal `off` when that variable is null (check `ownerLimits.maxActiveJobs`
+in uncached `GET /api/config`); see [Per-owner limits](#per-owner-limits). Missing or malformed
 values refuse before application imports. Both modes validate the required values before application imports,
 credentials, or database/provider reads and writes. The CLI needs GetItem on job/vault records, transactional PutItem
-on the job, `RECONCILIATION#` and `RECONCILIATION_REQUEST#` audit rows, Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. The CLI never submits or cancels Batch jobs and does not broadcast; the `qsb-operator` session itself has broader deployment and data permissions.
+on the job, `RECONCILIATION#` and `RECONCILIATION_REQUEST#` audit rows (and, when a `--provider-id` decision claims an owner's withdrawal slot, Query on the owner's `JOB#` rows and PutItem on its `LIMIT#ACTIVE_JOBS` row), Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. The CLI never submits or cancels Batch jobs and does not broadcast; the `qsb-operator` session itself has broader deployment and data permissions.
 
 To attach a known provider ID from AWS Batch's console and matching operator logs:
 
@@ -300,14 +303,27 @@ last claimant, so a half-visible concurrent claim still counts. Of two claims ra
 for the last slot, one gets a conflict and writes nothing. Withdrawals created before
 the limit was set count too. The coordinator never un-pauses a job, and pause stays
 unrestricted.
-- **Reconciliation.** When the deployment sets this limit, set `QSB_OWNER_MAX_ACTIVE_JOBS`
-  to the same value (check `ownerLimits.maxActiveJobs` in uncached `GET /api/config`)
-  before running the reconcile CLI. A `--provider-id` decision on a paused job then
-  claims a slot with the attachment, which needs Query on the owner's `JOB#` rows and
-  PutItem on its `LIMIT#` row (`qsb-operator` has both). At the limit it refuses with
-  `OwnerActiveWithdrawalLimit` and writes nothing: pause another of the owner's
-  withdrawals or raise the limit, then retry. A `--not-submitted` decision leaves the
-  job paused and claims nothing; its resume claims.
+- **Some pauses leave GPU work running.** The limit caps concurrent claims, not
+  instantaneous GPU use. A pause from a disabled deployment, allowlist removal, missing
+  compute configuration or, on the parallel path, a stopped chunk, a failed CPU check
+  or a failed preparation frees the slot but doesn't cancel the chunks already running;
+  they finish with nothing polling them, and the owner may create or resume another
+  withdrawal meanwhile. The overlap is bounded by the chunks in flight at the pause,
+  each at most one `executionTimeoutMs`, and each was charged to the owner's GPU
+  budget before its POST, so total spend stays capped. A user pause cancels them.
+- **Reconciliation.** The reconcile CLI refuses before any write unless
+  `QSB_OWNER_MAX_ACTIVE_JOBS` is the deployed value, a positive integer, or `off`, as
+  above. A `--provider-id` decision on a paused job claims a slot with the attachment;
+  at the limit it refuses with `OwnerActiveWithdrawalLimit` and writes nothing, so pause
+  another of the owner's withdrawals or raise the limit, then retry. With `off` it
+  refuses with `OwnerActiveJobLimitRecorded` if the owner has a `LIMIT#ACTIVE_JOBS`
+  row, since a limit has been in force: check the deployment's value again. If the limit
+  really is off now, delete that row (it only fences claims) and retry. A
+  `--not-submitted` decision leaves the job paused and claims nothing; its resume
+  claims. The claim needs Query, which `qsb-operator` has but the dormant scoped
+  reconcile role (`terraform/policies/operator-reconcile-records.json`) doesn't.
+  Activating that role for reconciliation would need an `OWNER#`-conditioned
+  `dynamodb:Query` added: an IAM change, so warn the AWS administrator first.
 
 **`owner_max_gpu_seconds`** (`QSB_OWNER_MAX_GPU_SECONDS`), at least one submission's
 reservation (`executionTimeoutMs` in `server/gpu-spend.json`, 900 seconds today);

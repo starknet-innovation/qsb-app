@@ -916,11 +916,11 @@ describe("owner limits", () => {
 
   it("releases the owner's withdrawal slot when the search fails", async () => {
     await seed({ status: "searching", runpodId: "compute-1" });
-    expect(await claimWithdrawalSlot(store, "test", "next", 1)).toBeUndefined();
+    expect(await claimWithdrawalSlot(store, "test", "next", 1, 0)).toBeUndefined();
     mocks.status.mockResolvedValue(completedOutput(0, ["sequence=2147483648\nlocktime=500000000\n".repeat(64)]));
     await handler(event);
     expect(await job()).toMatchObject({ status: "failed" });
-    expect(await claimWithdrawalSlot(store, "test", "next", 1)).toMatchObject({ row: { sk: ACTIVE_JOBS_SK } });
+    expect(await claimWithdrawalSlot(store, "test", "next", 1, 0)).toMatchObject({ row: { sk: ACTIVE_JOBS_SK } });
   });
 
   it("releases the owner's withdrawal slot when the search finishes", async () => {
@@ -931,12 +931,12 @@ describe("owner limits", () => {
       stage: "round2",
       solution: { sequence: 2147483648, locktime: 500000000, round1: indices, round2: [] },
     });
-    expect(await claimWithdrawalSlot(store, "test", "next", 1)).toBeUndefined();
+    expect(await claimWithdrawalSlot(store, "test", "next", 1, 0)).toBeUndefined();
     const done = completedOutput(0, ["public-hit"]);
     mocks.status.mockResolvedValue({ ...done, output: { ...done.output, stage: "round2", workRange: workRange("round2", 0) } });
     mocks.cpu.mockResolvedValue({ Payload: Buffer.from(JSON.stringify({ valid: true, indices })) });
     await handler(event);
     expect(await job()).toMatchObject({ status: "awaiting_authorization", stage: "verification" });
-    expect(await claimWithdrawalSlot(store, "test", "next", 1)).toMatchObject({ row: { sk: ACTIVE_JOBS_SK } });
+    expect(await claimWithdrawalSlot(store, "test", "next", 1, 0)).toMatchObject({ row: { sk: ACTIVE_JOBS_SK } });
   });
 });

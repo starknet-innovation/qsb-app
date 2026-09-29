@@ -78,27 +78,34 @@ export const ACTIVE_JOBS_SK = "LIMIT#ACTIVE_JOBS";
 /**
  * A conditional write on the owner's fence row that claims a withdrawal slot, for the same
  * transaction as the write that makes `jobId` queued or searching (creation, resume or an
- * operator's reconciliation); undefined when the owner holds `max` slots. The fence is read
- * before the jobs are counted, so of two claims racing for the last slot one fails its
- * transaction. A slot is released by the job's own status write.
+ * operator's reconciliation); undefined when the owner holds `max` slots. `jobVersion` is the
+ * version that job write commits. The fence is read before the jobs are counted, so of two
+ * claims racing for the last slot one fails its transaction. A slot is released by the job's
+ * own status write.
  */
 export async function claimWithdrawalSlot(
   store: Store,
   owner: string,
   jobId: string,
   max: number,
+  jobVersion: number,
 ): Promise<AtomicWrite | undefined> {
   const pk = `OWNER#${owner}`;
   const fence = await store.get(pk, ACTIVE_JOBS_SK);
   const rows = await store.list(pk, "JOB#");
-  let active = rows.filter(
-    (row) => !SLOT_RELEASED.includes((row.job as Job | undefined)?.status as string),
-  ).length;
-  // A DynamoDB Query can miss the job of a transaction whose fence write is already visible.
-  // Only the last claimant can be caught like that: earlier ones held the fence until they
-  // finished. So count it as active unless the query returned it.
-  if (typeof fence?.jobId === "string" && !rows.some((row) => row.sk === `JOB#${fence.jobId}`))
-    active++;
+  const held = (row: Row) =>
+    !SLOT_RELEASED.includes((row.job as Job | undefined)?.status as string);
+  let active = rows.filter(held).length;
+  // A DynamoDB Query can show a committing transaction's fence write but not its job write:
+  // the job missing, or still at its pre-claim version (paused, for a resume or a
+  // reconciliation). Only the last claimant can be caught like that; earlier ones held the
+  // fence until they finished. So it counts as active unless the query shows its job at the
+  // version its claim committed, or later.
+  if (typeof fence?.jobId === "string") {
+    const claimant = rows.find((row) => row.sk === `JOB#${fence.jobId}`);
+    const since = typeof fence.jobVersion === "number" ? fence.jobVersion : 0;
+    if (!(claimant && (claimant.version >= since || held(claimant)))) active++;
+  }
   if (active >= max) return undefined;
   return {
     row: {
@@ -106,6 +113,7 @@ export async function claimWithdrawalSlot(
       sk: ACTIVE_JOBS_SK,
       version: (fence?.version ?? -1) + 1,
       jobId,
+      jobVersion,
       updatedAt: new Date().toISOString(),
     },
     expected: fence?.version,
