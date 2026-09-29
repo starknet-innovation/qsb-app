@@ -65,7 +65,7 @@ it("documents one mainnet pipeline through createApp, startWorkflow, and the coo
   const workflow = readFileSync("terraform/workflow.tf", "utf8");
   const releaseGate = readFileSync("terraform/data.tf", "utf8");
   expect(lambda).toContain('network === "mainnet"');
-  expect(lambda).toContain("return createApp(records)");
+  expect(lambda).toContain("return createApp(records, { versionedAlias: true })");
   expect(lambda).not.toContain("installSupervisedCreation(");
   expect(app).toContain("await startWorkflow(job)");
   expect(workflow).toContain("function:${var.name}-coordinator");

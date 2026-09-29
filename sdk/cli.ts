@@ -52,6 +52,7 @@ Withdrawals
 
 Options
   --api <url>            API origin (or QSB_API_URL)
+  --base-path <path>     /v1 (default), or /api, the webapp alias, e.g. behind the Vite dev proxy
   --app-origin <url>     Origin the server's sign-in challenge must name (or QSB_APP_ORIGIN;
                          default: the --api origin). Nothing else is ever signed.
   --address <address>    Payment address (or QSB_ADDRESS)
@@ -68,6 +69,7 @@ Options
 
 const options = {
   api: { type: "string" },
+  "base-path": { type: "string" },
   "app-origin": { type: "string" },
   address: { type: "string" },
   "public-key": { type: "string" },
@@ -143,10 +145,12 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
     }
     const api = values.api ?? io.env.QSB_API_URL;
     if (!api) throw new UsageError("Set the API origin with --api or QSB_API_URL.");
+    const basePath = values["base-path"] ?? "/v1";
+    if (basePath !== "/v1" && basePath !== "/api") throw new UsageError("--base-path is /v1 or /api.");
     // Public routes: no wallet needed to look at a deployment first.
     if (group === "config" || group === "rates") {
       arity(1);
-      const open = publicApi({ baseUrl: api, fetch: io.fetch });
+      const open = publicApi({ baseUrl: api, basePath, fetch: io.fetch });
       print(await (group === "config" ? open.config() : open.rates()));
       return 0;
     }
@@ -176,6 +180,7 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
     const token = cache ? await loadSession(home, api, signer.address) : undefined;
     const client = new QsbClient({
       baseUrl: api,
+      basePath,
       appOrigin: values["app-origin"] ?? io.env.QSB_APP_ORIGIN,
       signer,
       fetch: io.fetch,

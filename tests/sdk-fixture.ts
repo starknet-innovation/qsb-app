@@ -116,6 +116,8 @@ export function world(server: { ownerLimits?: OwnerLimits } = {}) {
     enabled: true,
     exactSubmit: true,
     consensus,
+    // /v1 as the mainnet Lambda serves it; /api stays an alias.
+    versionedAlias: true,
     ...server,
   });
   if (previousOrigin === undefined) delete process.env.APP_ORIGIN;

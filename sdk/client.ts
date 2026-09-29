@@ -116,6 +116,8 @@ export type ApproveWithdrawal = (
 export type QsbClientOptions = {
   /** The app origin, e.g. https://app.example or http://127.0.0.1:8787. */
   baseUrl: string;
+  /** `/v1` (default), the stable prefix, or `/api`, the webapp's alias (e.g. behind the Vite dev proxy). */
+  basePath?: "/v1" | "/api";
   /**
    * The origin the server names in its sign-in challenge (its APP_ORIGIN); defaults to
    * `baseUrl`'s origin. A challenge naming any other origin is never signed, so an endpoint
@@ -231,19 +233,22 @@ function signInMessage(address: string, origin: string) {
 }
 
 /** The HTTP transport: one origin, no redirects, a timeout, and the webapp's session client. */
-function transport(options: Pick<QsbClientOptions, "baseUrl" | "fetch" | "timeoutMs">) {
+function transport(options: Pick<QsbClientOptions, "baseUrl" | "basePath" | "fetch" | "timeoutMs">) {
   const origin = apiBase(options.baseUrl).href.replace(/\/$/, "");
+  const base = options.basePath ?? "/v1";
+  if (base !== "/v1" && base !== "/api") throw new Error("The API base path is /v1 or /api.");
   const send = options.fetch ?? fetch;
   const timeout = options.timeoutMs ?? 60000;
+  // The session client addresses the webapp's /api alias; integrators use the stable /v1 prefix.
   return createSessionClient(((path: string, init?: RequestInit) =>
-    send(`${origin}${path}`, {
+    send(`${origin}${base}${path.replace(/^\/api(?=\/)/, "")}`, {
       ...init,
       redirect: "error",
       signal: AbortSignal.timeout(timeout),
     })) as typeof fetch);
 }
 /** The unauthenticated routes, for looking at a deployment before any wallet is set up. */
-export function publicApi(options: Pick<QsbClientOptions, "baseUrl" | "fetch" | "timeoutMs">) {
+export function publicApi(options: Pick<QsbClientOptions, "baseUrl" | "basePath" | "fetch" | "timeoutMs">) {
   const session = transport(options);
   return {
     config: () => session.api<ApiConfig>("/config"),

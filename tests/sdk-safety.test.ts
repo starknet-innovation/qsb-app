@@ -153,7 +153,7 @@ describe("Codex review of #91", () => {
     let operationsOff = false;
     const s = await solvedWithdrawal(passphrase, (next) => (async (input: RequestInfo | URL, init?: RequestInit) => {
       const response = await next(input, init);
-      if (!operationsOff || !String(input).endsWith("/api/config")) return response;
+      if (!operationsOff || !String(input).endsWith("/v1/config")) return response;
       return new Response(JSON.stringify({ ...(await response.json()), operationsEnabled: false, exactSubmitEnabled: true }));
     }) as typeof fetch);
     const signed = await s.client.withdrawals.assemble(s.job.id, { backup: s.backups[1], passphrase, saveBackup: s.keep });
@@ -207,6 +207,12 @@ describe("Codex review of #91", () => {
       expect(code).toBe(0);
       expect(JSON.parse(out)).toMatchObject(command === "config" ? { network: "mainnet" } : { submit_fee_rate: 1 });
     }
+    // /v1 by default; --base-path /api reaches the webapp alias.
+    const code = await runCli(["--base-path", "/api", "config"], {
+      env: { QSB_API_URL: API }, stdin: Readable.from([]), stdout: new PassThrough(), stderr: new PassThrough(), interactive: false, cwd: tmpdir(), fetch: w.fetch,
+    });
+    expect(code).toBe(0);
+    expect(w.requests.map((r) => new URL(r.url).pathname)).toEqual(["/v1/config", "/v1/rates", "/api/config"]);
   });
 });
 
@@ -235,7 +241,7 @@ describe("one intent and one assembly per vault on this device", () => {
         destination: f.destination, feeRate: "3", costAccepted: true, saveBackup,
       });
     await expect(create(async () => { throw new Error("disk full"); })).rejects.toThrow("disk full");
-    expect(posts(f.w, "/api/jobs")).toBe(0);
+    expect(posts(f.w, "/v1/jobs")).toBe(0);
     const { job } = await create(f.keep);
     expect(job.status).toBe("queued");
   }, 120000);
@@ -262,14 +268,14 @@ describe("one intent and one assembly per vault on this device", () => {
     expect(w.requests.length).toBe(before);
     expect(existsSync(c.file("home/authorizations"))).toBe(false);
     expect((await withdraw("--out-backup", "withdrawal.json")).code).toBe(0);
-    expect(posts(w, "/api/jobs")).toBe(1);
+    expect(posts(w, "/v1/jobs")).toBe(1);
   }, 120000);
 
   it("won't make a second intent from the original backup when the first one's job wasn't created", async () => {
     let dropJobs = false;
     const f = await fundedVault(passphrase, {
       wrap: (next) => (async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (dropJobs && String(input).endsWith("/api/jobs") && init?.method === "POST") throw new TypeError("fetch failed");
+        if (dropJobs && String(input).endsWith("/v1/jobs") && init?.method === "POST") throw new TypeError("fetch failed");
         return next(input, init);
       }) as typeof fetch,
     });
@@ -288,7 +294,7 @@ describe("one intent and one assembly per vault on this device", () => {
     // No job exists, but the original backup would bind the same one-time keys to a second payout.
     await expect(create(f.backups[0])).rejects.toThrow("already authorizes a different withdrawal or assembly");
     expect(f.backups).toHaveLength(2);
-    expect(posts(f.w, "/api/jobs")).toBe(0);
+    expect(posts(f.w, "/v1/jobs")).toBe(0);
     const saved = withdrawalSchema.parse(JSON.parse((await decryptRecovery(f.backups[1], passphrase)).authorization!.manifestJson));
     const { job } = await f.client.withdrawals.create({
       vaultId: f.vault.id, backup: f.backups[1], passphrase, costAccepted: true, saveBackup: f.keep,
@@ -418,7 +424,7 @@ describe("per-owner limits (#89)", () => {
       "isn't on this deployment's allowlist (owner_not_allowlisted). Nothing was changed.",
     );
     expect(saveBackup).not.toHaveBeenCalled();
-    expect(posts(w, "/api/vaults")).toBe(0);
+    expect(posts(w, "/v1/vaults")).toBe(0);
   }, 120000);
 
   it("reports a deposit refused by an owner limit as final for that request, and keeps its bytes pending", async () => {
@@ -452,7 +458,7 @@ describe("per-owner limits (#89)", () => {
 
   it("reports a withdrawal refused by an owner limit as final, keeping the backup that holds its intent", async () => {
     const holder: { answer?: { status: number; body: unknown } } = {};
-    const f = await fundedVault(passphrase, { wrap: intercept(/^\/api\/jobs(\/[0-9a-f-]{36}\/resume)?$/, holder) });
+    const f = await fundedVault(passphrase, { wrap: intercept(/^\/v1\/jobs(\/[0-9a-f-]{36}\/resume)?$/, holder) });
     const create = (backup: string, fresh = true) =>
       f.client.withdrawals.create({
         vaultId: f.vault.id, backup, passphrase, costAccepted: true, saveBackup: f.keep,
@@ -476,7 +482,7 @@ describe("per-owner limits (#89)", () => {
     const v = await createdVault(passphrase, {
       wrap: (next) => (async (input: RequestInfo | URL, init?: RequestInit) => {
         const response = await next(input, init);
-        if (!broken || !String(input).endsWith("/api/config")) return response;
+        if (!broken || !String(input).endsWith("/v1/config")) return response;
         return new Response(JSON.stringify({ ...(await response.json()), ownerLimits: null }));
       }) as typeof fetch,
     });
@@ -487,7 +493,7 @@ describe("per-owner limits (#89)", () => {
         backup: v.backups[0], passphrase, amount: 200000n, feeRate: "2", utxos: [{ txid: v.owner.fundingTxid, vout: 0 }],
       }),
     ).rejects.toThrow("per-owner limits are misconfigured (owner_limits_invalid)");
-    expect(v.w.requests.slice(before).map((r) => new URL(r.url).pathname)).toEqual(["/api/config"]);
+    expect(v.w.requests.slice(before).map((r) => new URL(r.url).pathname)).toEqual(["/v1/config"]);
   }, 120000);
 
   it("prints the server's code with a CLI error", async () => {

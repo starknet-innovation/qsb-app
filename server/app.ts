@@ -28,6 +28,7 @@ import {
   vaultConfiguration,
 } from "../src/lib/provenance";
 import { Hono } from "hono";
+import { getPath } from "hono/utils/url";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
@@ -44,6 +45,7 @@ import {
   outpoint,
 } from "../src/lib/model";
 import { Conflict, store as defaultStore, type Store } from "./store";
+import { idempotency, idempotentPosts } from "./idempotency";
 import { slipstream, MinerAuthenticationError } from "./providers";
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { chain, ChainError, ChainNotFound, type Esplora } from "./chain";
@@ -115,6 +117,8 @@ export function createApp(
     inProcessHandoff?: boolean;
     /** Injected chain reads for supervised admission. Never the process-wide client by default. */
     fundingLedger?: FundingLedger;
+    /** Also serve every route under /v1. Only the coordinator API opts in; parked supervised apps don't. */
+    versionedAlias?: boolean;
     /** Trusted test configuration; the deployment reads QSB_OWNER_* from the environment. */
     ownerLimits?: OwnerLimits;
   } = {},
@@ -145,14 +149,19 @@ export function createApp(
       if ((e as Error).name !== "ExecutionAlreadyExists") throw e;
     }
   }
-  const app = new Hono<Env>();
+  // /v1 is the stable prefix: it routes to the same handlers and middleware as /api (docs/API.md).
+  const app = new Hono<Env>(
+    dependencies.versionedAlias === true
+      ? { getPath: (request) => getPath(request).replace(/^\/v1(?=\/|$)/, "/api") }
+      : {},
+  );
   const origin = process.env.APP_ORIGIN || "http://127.0.0.1:5173";
   app.use("*", secureHeaders());
   app.use(
     "*",
     cors({
       origin,
-      allowHeaders: ["Content-Type", "Authorization"],
+      allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
       allowMethods: ["GET", "POST", "OPTIONS"],
     }),
   );
@@ -337,6 +346,8 @@ export function createApp(
   app.use("/api/jobs", auth);
   app.use("/api/payment-utxos", auth);
   app.use("/api/payment-input", auth);
+  for (const route of idempotentPosts)
+    app.post(`/api${route}`, idempotency(store, route));
   async function auth(c: any, next: () => Promise<void>) {
     const bearer = c.req.header("Authorization") || "";
     if (!/^Bearer [A-Za-z0-9_-]{43}$/.test(bearer))
@@ -1190,4 +1201,4 @@ export function createApp(
   }
   return app;
 }
-export const app = createApp();
+export const app = createApp(defaultStore, { versionedAlias: true });

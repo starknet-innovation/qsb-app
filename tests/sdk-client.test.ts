@@ -158,20 +158,20 @@ describe("client boundaries", () => {
     expect(error).toBeInstanceOf(ApiRequestError);
     expect(error).toMatchObject({ status: 401, code: undefined });
   });
-  it("sends every request to the configured origin without following redirects", async () => {
+  it("sends every request to the configured origin and base path, without following redirects", async () => {
     const seen: [string, RequestInit | undefined][] = [];
-    const client = new QsbClient({
-      baseUrl: "https://qsb.example/app",
-      signer: { ...signer, loopbackOnly: undefined },
-      fetch: (async (url: string, init?: RequestInit) => {
-        seen.push([url, init]);
-        return new Response(JSON.stringify({ network: "mainnet" }));
-      }) as never,
-    });
-    await client.config();
-    expect(seen[0][0]).toBe("https://qsb.example/app/api/config");
-    expect(seen[0][1]?.redirect).toBe("error");
-    expect(() => new QsbClient({ baseUrl: "http://qsb.example", signer: { ...signer, loopbackOnly: undefined } })).toThrow("https");
+    const recording = (async (url: string, init?: RequestInit) => {
+      seen.push([url, init]);
+      return new Response(JSON.stringify({ network: "mainnet" }));
+    }) as never;
+    const wallet = { ...signer, loopbackOnly: undefined };
+    await new QsbClient({ baseUrl: "https://qsb.example/app", signer: wallet, fetch: recording }).config();
+    // The webapp's /api alias still works, e.g. behind the Vite dev proxy.
+    await new QsbClient({ baseUrl: "https://qsb.example/app", basePath: "/api", signer: wallet, fetch: recording }).config();
+    expect(seen.map(([url]) => url)).toEqual(["https://qsb.example/app/v1/config", "https://qsb.example/app/api/config"]);
+    expect(seen.every(([, init]) => init?.redirect === "error")).toBe(true);
+    expect(() => new QsbClient({ baseUrl: API, basePath: "/v2" as never, signer })).toThrow("/v1 or /api");
+    expect(() => new QsbClient({ baseUrl: "http://qsb.example", signer: wallet })).toThrow("https");
   });
 });
 

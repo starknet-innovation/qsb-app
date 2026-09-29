@@ -87,7 +87,7 @@ function assertNothingLeaks(requests: Recorded[], values: { never: string[]; rev
   expect(requests.length).toBeGreaterThan(10);
   for (const request of requests) {
     const sent = `${request.method} ${request.url}\n${decodeURIComponent(request.url)}\n${JSON.stringify(request.headers)}\n${request.body}`;
-    const withdrawal = request.method === "POST" && /\/api\/jobs\/[0-9a-f-]{36}\/submit$/.test(new URL(request.url).pathname);
+    const withdrawal = request.method === "POST" && /\/v1\/jobs\/[0-9a-f-]{36}\/submit$/.test(new URL(request.url).pathname);
     for (const value of [...values.never, ...(withdrawal ? [] : values.revealed)])
       expect(sent.includes(value), `${request.method} ${request.url}`).toBe(false);
   }
@@ -217,7 +217,7 @@ it("drives vault creation, deposit, withdrawal, local assembly and approved subm
   for (const local of [readOwnerOnly(session), ...printed])
     for (const value of [...values.never, ...values.revealed]) expect(local.includes(value)).toBe(false);
   expect(stray).toEqual([]);
-  for (const route of ["POST /api/vaults", "POST /api/vaults/*/fund/submit", "POST /api/jobs", "POST /api/jobs/*/submit"])
+  for (const route of ["POST /v1/vaults", "POST /v1/vaults/*/fund/submit", "POST /v1/jobs", "POST /v1/jobs/*/submit"])
     expect(
       w.requests.some((r) => `${r.method} ${new URL(r.url).pathname.replace(/[0-9a-f-]{36}/g, "*")}` === route),
       route,

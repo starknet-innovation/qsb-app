@@ -27,6 +27,7 @@ import {
 import { NETWORK_ID } from "../src/lib/network";
 import { coordinatorSolvedResultSchema } from "../src/mainnet/coordinatorResult";
 import { slipstreamRatesSchema } from "./providers";
+import { idempotencyKey, idempotentPosts } from "./idempotency";
 import type { Esplora } from "./chain";
 import type { mainnetUiConfig } from "./mainnetConfig";
 import type { EsploraInclusionReport } from "./runtime/miner-inclusion";
@@ -591,6 +592,23 @@ const exactSubmit = source(
   }),
 );
 
+// The Idempotency-Key layer on idempotentPosts: a malformed key, a key bound to
+// another request, or one whose first request still holds its lease.
+const idempotent = source(
+  ["idempotency.ts | idempotency", "idempotency.ts | inProgress"],
+  {
+    400: ["invalid_request"],
+    409: ["idempotency_conflict", "idempotency_in_progress"],
+  },
+);
+/** Whether the route accepts an Idempotency-Key header (server/idempotency.ts). */
+export const acceptsIdempotencyKey = (route: ApiRoute) =>
+  route.method === "post" &&
+  idempotentPosts.some((path) => `/api${path}` === route.path);
+describe(
+  idempotencyKey,
+  "Optional. Names one attempt of this request for 24 hours. The same key with the same path and body replays the first settled 2xx (with `Idempotency-Replayed: true`) without running the handler; a different path or body is `idempotency_conflict`; a retry while the first still runs is `idempotency_in_progress`. Errors and `uncertain` outcomes aren't stored, so a retry runs the handler again. A new attempt needs a new key. See docs/API.md.",
+);
 // Reading the owner limits: a malformed QSB_OWNER_* value refuses the route.
 const ownerLimitsRead = source(
   ["owner-limits.ts | positive", "owner-limits.ts | gpuSeconds"],
@@ -1021,6 +1039,7 @@ export function routeErrors(route: ApiRoute): Errors {
     route.auth ? { 401: ["auth_required", "session_expired"] } : {},
     route.method === "post" ? { 413: ["request_too_large"] } : {},
     route.body ? { 400: ["invalid_request"] } : {},
+    acceptsIdempotencyKey(route) ? idempotent : {},
   );
 }
 
@@ -1148,19 +1167,49 @@ const duration = (seconds: number) =>
     ? `${seconds / 3600} hour${seconds === 3600 ? "" : "s"}`
     : `${seconds / 60} minutes`;
 const pathOf = (operationId: string) =>
-  apiRoutes.find((route) => route.operationId === operationId)!.path;
-/** Hono's `/api/vaults/:id` is OpenAPI's `/api/vaults/{id}`. */
-export const openApiPath = (path: string) => path.replace(/:(\w+)/g, "{$1}");
+  openApiPath(apiRoutes.find((route) => route.operationId === operationId)!.path);
+/** Hono's `/api/vaults/:id` is OpenAPI's `/vaults/{id}`, under the `/v1` and `/api` servers. */
+export const openApiPath = (path: string) =>
+  path.replace(/^\/api(?=\/)/, "").replace(/:(\w+)/g, "{$1}");
+const parameter = (
+  name: string,
+  where: "path" | "header",
+  required: boolean,
+  schema: z.ZodType,
+) => {
+  const { description, ...json } = strip(
+    z.toJSONSchema(schema, { ...jsonSchemaParams, io: "input" }),
+  );
+  return { name, in: where, required, description, schema: json };
+};
 
 function operation(route: ApiRoute) {
   const responses: Record<string, unknown> = {};
+  const keyed = acceptsIdempotencyKey(route);
   for (const [status, response] of Object.entries(route.responses))
     responses[status] = {
       description: response.description,
+      ...(keyed
+        ? {
+            headers: {
+              "Idempotency-Replayed": {
+                description:
+                  "`true` when this is a stored response replayed for an Idempotency-Key. It may be stale; read current state from the GET routes.",
+                schema: { type: "string", const: "true" },
+              },
+            },
+          }
+        : {}),
       content: {
         "application/json": { schema: ref(schemaIds.get(response.schema)!) },
       },
     };
+  const parameters = [
+    ...Object.entries(route.params ?? {}).map(([name, schema]) =>
+      parameter(name, "path", true, schema),
+    ),
+    ...(keyed ? [parameter("Idempotency-Key", "header", false, idempotencyKey)] : []),
+  ];
   const errors = routeErrors(route);
   const statuses = Object.keys(errors).map(Number) as ErrorStatus[];
   for (const status of statuses.sort((a, b) => a - b)) {
@@ -1186,22 +1235,7 @@ function operation(route: ApiRoute) {
     summary: route.summary,
     ...(route.description ? { description: route.description } : {}),
     ...(route.auth ? { security: [{ session: [] }] } : {}),
-    ...(route.params
-      ? {
-          parameters: Object.entries(route.params).map(([name, schema]) => {
-            const { description, ...json } = strip(
-              z.toJSONSchema(schema, { ...jsonSchemaParams, io: "input" }),
-            );
-            return {
-              name,
-              in: "path",
-              required: true,
-              description,
-              schema: json,
-            };
-          }),
-        }
-      : {}),
+    ...(parameters.length ? { parameters } : {}),
     ...(route.body
       ? {
           requestBody: {
@@ -1238,6 +1272,8 @@ export function openApiDocument() {
       description: [
         "The QSB Vault server's JSON API: `createApp` in `server/app.ts`, as `server/lambda.ts` serves it on Bitcoin mainnet.",
         "",
+        "Paths are relative to a server: `/v1` is the stable prefix; `/api` is the same API under the webapp's prefix.",
+        "",
         "The server coordinates; it holds no secret. QSB state generation, the recovery backup, deposit signing and withdrawal assembly run on the client.",
         "",
         "Every error is JSON with an `error` message and a stable `code` (`ApiErrorCode`). A route that doesn't exist returns a plain-text 404.",
@@ -1245,7 +1281,10 @@ export function openApiDocument() {
         "Generated by `npm run openapi` from `server/openapi.ts` and the zod schemas the handlers parse. Don't edit it by hand.",
       ].join("\n"),
     },
-    servers: [{ url: "/" }],
+    servers: [
+      { url: "/v1" },
+      { url: "/api", description: "webapp alias" },
+    ],
     paths,
     components: {
       schemas: componentSchemas(),
