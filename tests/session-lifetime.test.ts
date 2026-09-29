@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {createSessionClient} from '../src/lib/session';
+import {ApiRequestError,createSessionClient} from '../src/lib/session';
 import {test} from 'vitest';
 const token='T'.repeat(43), other='U'.repeat(43);
 function deferred<T>() { let resolve!:(x:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve}; }
@@ -36,6 +36,23 @@ async function main(){
  {
  const c=createSessionClient(async(input)=>String(input).endsWith('challenge')?response({id:'x',message:'x'}):response({token:[token]}));
  await assert.rejects(c.authenticate('wallet',async()=> 'signature'),/Invalid authentication/);assert.equal(c.currentToken(),undefined);passed++;
+ }
+ {
+ const c=createSessionClient(async()=>new Response(JSON.stringify({error:'Vault not found',code:'vault_not_found'}),{status:404}));
+ const error=await c.api('/vaults/x/funding').catch((e:unknown)=>e);assert.ok(error instanceof ApiRequestError);
+ assert.equal(error.message,'Vault not found');assert.equal(error.status,404);assert.equal(error.code,'vault_not_found');passed++;
+ }
+ {
+ const c=createSessionClient(async()=>new Response('404 Not Found',{status:404}));
+ const error=await c.api('/missing').catch((e:unknown)=>e);assert.ok(error instanceof ApiRequestError);
+ assert.equal(error.status,404);assert.equal(error.code,undefined);assert.match(error.message,/app API is unavailable/);
+ for(const body of ['null','5','"text"']){
+  const c=createSessionClient(async()=>new Response(body,{status:502}));
+  const error=await c.api('/read').catch((e:unknown)=>e);assert.ok(error instanceof ApiRequestError,body);
+  assert.equal(error.status,502);assert.equal(error.code,undefined);assert.match(error.message,/app API is unavailable/);
+ }
+ const ok=createSessionClient(async()=>new Response('not json'));
+ const invalid=await ok.api('/read').catch((e:unknown)=>e);assert.ok(invalid instanceof Error&&!(invalid instanceof ApiRequestError));passed++;
  }
  console.log(JSON.stringify({passed,network:'mocked fetch',wallet:'mocked signer',productionMounted:false}));
 }

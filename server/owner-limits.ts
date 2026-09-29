@@ -120,12 +120,9 @@ export async function claimWithdrawalSlot(
   };
 }
 
-/** The refusal body for a creation or resume over the limit. */
-export function activeWithdrawalLimit(max: number) {
-  return {
-    error: `This wallet already has ${max} active withdrawal${max === 1 ? "" : "s"}, the most this deployment allows. Queued and searching withdrawals count; pausing one frees its slot.`,
-    code: "owner_active_withdrawal_limit",
-  };
+/** The refusal message for a creation or resume over the limit. */
+export function activeWithdrawalLimitMessage(max: number): string {
+  return `This wallet already has ${max} active withdrawal${max === 1 ? "" : "s"}, the most this deployment allows. Queued and searching withdrawals count; pausing one frees its slot.`;
 }
 
 export const GPU_SECONDS_SK = "LIMIT#GPU_SECONDS";

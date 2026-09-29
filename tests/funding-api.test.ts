@@ -244,9 +244,32 @@ it("does not submit a withdrawal without an exact spend record", async () => {
   const response = await f.app.request(
     req("/jobs/" + jobId + "/submit", { rawTxHex: f.body.rawTxHex }, f.token),
   );
+  // No solution yet, so it's refused as not ready before the spend record is built.
   expect(response.status).toBe(409);
   expect(await response.json()).toMatchObject({
+    error: "Withdrawal is not ready for authorization.",
+    code: "job_state_invalid",
+  });
+  // With a solution, the missing spend record is still an exact-spend mismatch.
+  const row = await f.store.get("OWNER#" + address, "JOB#" + jobId);
+  await f.store.put(
+    {
+      ...row!,
+      version: 1,
+      job: {
+        ...(row!.job as object),
+        solution: { sequence: 0x80000000, locktime: 500000000, round1: [0, 1, 2, 3, 4, 5, 6, 7, 8], round2: [9, 10, 11, 12, 13, 14, 15, 16, 17] },
+      },
+    },
+    0,
+  );
+  const mismatch = await f.app.request(
+    req("/jobs/" + jobId + "/submit", { rawTxHex: f.body.rawTxHex }, f.token),
+  );
+  expect(mismatch.status).toBe(409);
+  expect(await mismatch.json()).toMatchObject({
     error: "ExactSpendMismatch",
+    code: "exact_spend_mismatch",
   });
   expect(f.submit).not.toHaveBeenCalled();
   expect(f.test).not.toHaveBeenCalled();
