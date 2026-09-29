@@ -43,8 +43,10 @@ async function cpu(payload: unknown) {
 const TICK_DELIVERY_BUDGET_MS = 2000;
 const TICK_REQUEST_TIMEOUT_MS = 1000;
 const TICK_DELIVERY_NEEDS_MS = 30_000;
-/** Queuing webhooks for this tick's events stops this long before the Lambda timeout. */
-const TIMEOUT_MARGIN_MS = 15_000;
+/** Writing this tick's event rows and queuing their webhooks: bounded, and done this long
+ * before the Lambda timeout, so it can't turn a tick into a timeout. */
+const TICK_SETTLE_LIMIT_MS = 3000;
+const TIMEOUT_MARGIN_MS = 5000;
 // Only identifiers enter workflow history. Recovery secrets never enter AWS.
 export async function handler(
   event: Event | { action: "providerHealth" },
@@ -63,8 +65,8 @@ export async function handler(
       health: await provider.health(),
     };
   }
-  // Status changes become owner events; webhook delivery follows the tick, bounded, and
-  // can't change its result or error.
+  // Status changes become owner events. Their rows and webhooks are written after the tick's
+  // work and POSTs, bounded, and can't change its result or error.
   const store = recordOwnerEvents(records);
   try {
     return await coordinate(event, store);
@@ -72,8 +74,9 @@ export async function handler(
     const remaining = context?.getRemainingTimeInMillis?.() ?? Infinity;
     await store.settle({
       delivery: { transport: httpsTransport, resolve: systemResolver },
-      owners: remaining >= TICK_DELIVERY_NEEDS_MS ? [event.owner] : [],
-      budgetMs: Math.min(TICK_DELIVERY_BUDGET_MS, remaining - TIMEOUT_MARGIN_MS),
+      owners: [event.owner],
+      limitMs: Math.min(TICK_SETTLE_LIMIT_MS, remaining - TIMEOUT_MARGIN_MS),
+      deliveryMs: remaining >= TICK_DELIVERY_NEEDS_MS ? TICK_DELIVERY_BUDGET_MS : 0,
       requestTimeoutMs: TICK_REQUEST_TIMEOUT_MS,
     });
   }

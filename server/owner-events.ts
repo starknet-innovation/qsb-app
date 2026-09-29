@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Job, PublicVault } from "../src/lib/model";
-import type { AtomicWrite, Row, Store } from "./store";
+import { Conflict, type AtomicWrite, type Row, type Store } from "./store";
 import { deliverDue, enqueueDeliveries, within, type Delivery } from "./webhooks";
 
 export const EVENT_TYPES = [
@@ -29,12 +29,16 @@ export type OwnerEvent = {
 
 export const EVENT_RETENTION_SECONDS = 30 * 86400;
 /**
- * Listed only once this old. An event write is cancelled after EVENT_WRITE_TIMEOUT_MS, so in
- * normal operation none lands behind a cursor.
+ * Listed only once this old. Event writes are cancelled within RECORD_ALLOWANCE_MS of being
+ * stamped, so in normal operation none lands behind a cursor.
  */
 export const EVENT_SETTLE_MS = 10_000;
-/** The event write after a status change outside a transaction: awaited, then cancelled. */
+/** One attempt at an event row outside a transaction; cancelled when it runs out. */
 export const EVENT_WRITE_TIMEOUT_MS = 1000;
+/** All attempts at a unit's event rows, one retry included. */
+const RECORD_ALLOWANCE_MS = 2000;
+/** Queuing one owner's webhook deliveries. */
+const QUEUE_TIMEOUT_MS = 1000;
 /** Bound on everything settle() does at the end of a request or tick. */
 export const SETTLE_CAP_MS = 4000;
 const SEEN_LIMIT = 2000;
@@ -113,15 +117,18 @@ function eventRow({ owner, event }: Candidate): Row {
 }
 
 export type SettleOptions = {
-  /** Deliver due webhooks of `owners` only. Omit to only queue deliveries. */
+  /** Deliver due webhooks of `owners` only. Omit to only record and queue. */
   delivery?: Delivery;
   owners?: string[];
-  budgetMs?: number;
+  /** Everything settle() does. Recording and queuing run even with no time to deliver. */
+  limitMs?: number;
+  /** Time for delivery, within limitMs. 0 queues deliveries for a later round to send. */
+  deliveryMs?: number;
   requestTimeoutMs?: number;
 };
 export type OwnerEventStore = Store & {
   /** A deposit the miner no longer has, found by the resend logic: not a status change. */
-  recordDropped(owner: string, vaultId: string): Promise<void>;
+  recordDropped(owner: string, vaultId: string): void;
   settle(options?: SettleOptions): Promise<void>;
 };
 /** What a row's status was at each version. Facts, so it can be shared across requests. */
@@ -129,24 +136,31 @@ export type StatusMemory = Map<string, string>;
 
 /**
  * A Store that records an owner event for each withdrawal (JOB#) or deposit (VAULT#) status
- * change written through it. Make one per request or tick. It never changes what the
- * caller's writes do:
+ * change written through it. Make one per request or tick, and settle() it at the end. It
+ * never changes what the caller's writes do:
  * - atomicPut adds the event rows to the caller's transaction. Their keys are new (a fresh
  *   timestamp and the subject's new version), so they can't be why a transaction is refused.
- * - put then writes the event, awaited and cancelled after EVENT_WRITE_TIMEOUT_MS. A write
- *   that fails or is cancelled is logged and dropped; nothing is left running.
- * - settle(), at the end, queues webhooks for this unit's events and delivers the given
- *   owners' due ones, within a budget.
+ * - put returns when the caller's write returns and only notes the event: no event I/O sits
+ *   between a paid intent and its POST.
+ * - settle(), after the unit's work, writes the noted event rows (cancelled when they run out
+ *   of time, retried once), queues webhooks for all the unit's events even when there's no
+ *   time to send them, then delivers the given owners' due ones within the delivery budget.
  * Errors from recording or delivery are logged and swallowed.
  */
 export function recordOwnerEvents(inner: Store, seen: StatusMemory = new Map()): OwnerEventStore {
+  /** Events to write at settle(). */
+  const noted: Candidate[] = [];
+  /** Events written, whose webhooks settle() queues. */
   const recorded: Candidate[] = [];
+  /** The last version of each subject row this unit read or wrote. */
+  const versions = new Map<string, number>();
   const remember = (row: Row) => {
     try {
       const status = subjectStatus(row);
       if (status === undefined) return;
       seen.set(key(row.pk, row.sk, row.version), status);
       if (seen.size > SEEN_LIMIT) seen.delete(seen.keys().next().value!);
+      versions.set(`${row.pk}|${row.sk}`, row.version);
     } catch {}
   };
   const previous = (row: Row, expected: number | undefined) =>
@@ -158,16 +172,36 @@ export function recordOwnerEvents(inner: Store, seen: StatusMemory = new Map()):
       logEventError("derive_failed", error);
     }
   };
-  async function write(item: Candidate) {
+  async function writeRow(row: Row, timeoutMs: number) {
     const cancel = new AbortController();
     try {
-      await within(inner.put(eventRow(item), undefined, { signal: cancel.signal }), EVENT_WRITE_TIMEOUT_MS);
-      recorded.push(item);
+      await within(
+        inner.put(row, undefined, { signal: cancel.signal }).catch((error) => {
+          // A retry finding the same row: the cancelled attempt was applied.
+          if (!(error instanceof Conflict)) throw error;
+        }),
+        timeoutMs,
+      );
+      return true;
     } catch (error) {
       logEventError("record_failed", error);
+      return false;
     } finally {
       cancel.abort();
     }
+  }
+  /** Write the noted rows, stamped now in order, within `allowanceMs`: one retry if time allows. */
+  async function writeNoted(items: Candidate[], allowanceMs: number) {
+    const end = Date.now() + allowanceMs;
+    let left = items.map((item) => ({ item, row: eventRow(item) }));
+    for (let attempt = 0; attempt < 2 && left.length; attempt++) {
+      const timeoutMs = Math.min(EVENT_WRITE_TIMEOUT_MS, end - Date.now());
+      if (timeoutMs <= 0) break;
+      const written = await Promise.all(left.map(({ row }) => writeRow(row, timeoutMs)));
+      left.forEach(({ item }, i) => written[i] && recorded.push(item));
+      left = left.filter((_, i) => !written[i]);
+    }
+    if (left.length) logEventError("record_dropped", new Error("EventNotRecorded"));
   }
   return {
     async get(pk, sk) {
@@ -186,7 +220,7 @@ export function recordOwnerEvents(inner: Store, seen: StatusMemory = new Map()):
       const item = candidate(row, expected, new Date().toISOString());
       await inner.put(row, expected, options);
       remember(row);
-      if (item) await write(item);
+      if (item) noted.push(item);
     },
     async atomicPut(writes: AtomicWrite[]) {
       const at = new Date().toISOString();
@@ -201,41 +235,50 @@ export function recordOwnerEvents(inner: Store, seen: StatusMemory = new Map()):
       for (const w of writes) if (!w.remove) remember(w.row);
       recorded.push(...items);
     },
-    async recordDropped(owner, vaultId) {
-      try {
-        const row = await within(inner.get(`OWNER#${owner}`, `VAULT#${vaultId}`), EVENT_WRITE_TIMEOUT_MS);
-        if (!row) return;
-        const id = `evt_${createHash("sha256").update(`${row.pk}\n${row.sk}\n${row.version}\ndropped`).digest("hex").slice(0, 32)}`;
-        const event: OwnerEvent = { id, type: "deposit.dropped", subjectId: vaultId, status: "dropped", at: new Date().toISOString() };
-        await write({ owner, event });
-      } catch (error) {
-        logEventError("record_failed", error);
-      }
+    recordDropped(owner, vaultId) {
+      const pk = `OWNER#${owner}`,
+        sk = `VAULT#${vaultId}`;
+      const version = versions.get(`${pk}|${sk}`);
+      // The resend logic wrote the vault through this store; without that there's no decision.
+      if (version === undefined) return;
+      const id = `evt_${createHash("sha256").update(`${pk}\n${sk}\n${version}\ndropped`).digest("hex").slice(0, 32)}`;
+      noted.push({
+        owner,
+        event: { id, type: "deposit.dropped", subjectId: vaultId, status: "dropped", at: new Date().toISOString() },
+      });
     },
     async settle(options: SettleOptions = {}) {
+      const writes = noted.splice(0);
       const owners = options.delivery ? [...new Set(options.owners ?? [])] : [];
-      const done = recorded.splice(0);
-      if (!done.length && !owners.length) return;
+      if (!writes.length && !recorded.length && !owners.length) return;
       const started = Date.now();
-      const budget = Math.min(options.budgetMs ?? SETTLE_CAP_MS, SETTLE_CAP_MS);
-      // The events are already written; only their webhooks wait for the next activity.
-      if (budget <= 0) return;
+      const until = started + Math.min(options.limitMs ?? SETTLE_CAP_MS, SETTLE_CAP_MS);
+      const left = () => until - Date.now();
+      if (left() <= 0) {
+        if (writes.length) logEventError("record_dropped", new Error("NoTimeLeft"));
+        recorded.splice(0);
+        return;
+      }
       const work = (async () => {
+        await writeNoted(writes, Math.min(RECORD_ALLOWANCE_MS, left()));
+        // Queue even when there's no time to send: the owner's next round sends them.
         const byOwner = new Map<string, OwnerEvent[]>();
-        for (const { owner, event } of done)
+        for (const { owner, event } of recorded.splice(0))
           byOwner.set(owner, [...(byOwner.get(owner) ?? []), event]);
         for (const [owner, events] of byOwner)
           try {
-            await enqueueDeliveries(inner, owner, events);
+            await within(enqueueDeliveries(inner, owner, events), Math.min(QUEUE_TIMEOUT_MS, left()));
           } catch (error) {
             logEventError("enqueue_failed", error);
           }
+        const window = Math.min(options.deliveryMs ?? left(), left());
+        if (!options.delivery || window <= 0) return;
         // Leave room for the delivery results to be written back.
-        const deadline = started + budget - Math.min(1000, budget / 2);
+        const deadline = Date.now() + window - Math.min(1000, window / 2);
         for (const owner of owners) {
           if (Date.now() >= deadline) break;
           try {
-            await deliverDue(inner, owner, options.delivery!, {
+            await deliverDue(inner, owner, options.delivery, {
               deadline,
               requestTimeoutMs: options.requestTimeoutMs,
             });
@@ -245,7 +288,7 @@ export function recordOwnerEvents(inner: Store, seen: StatusMemory = new Map()):
         }
       })();
       try {
-        await within(work, Math.max(0, started + budget - Date.now()));
+        await within(work, left());
       } catch (error) {
         logEventError("settle_incomplete", error);
       }

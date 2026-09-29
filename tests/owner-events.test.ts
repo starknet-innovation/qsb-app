@@ -187,6 +187,36 @@ describe("owner event log", () => {
     ]);
   });
 
+  it("writes no event row between a deposit intent and its miner POST", async () => {
+    const address = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20) });
+    const miner = new Slipstream("https://slipstream.test", async () => undefined);
+    const f = await setup({ miner, exactSubmit: true });
+    const a = await f.as(address);
+    const scriptHex = "51".repeat(100);
+    const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true, version: 2 });
+    tx.addInput({ txid: new Uint8Array(32).fill(4), index: 0, sequence: 0xfffffffe });
+    tx.addOutput({ amount: 50_000n, script: hex.decode(scriptHex) });
+    const raw = hex.encode(tx.toBytes(true, false));
+    const id = crypto.randomUUID();
+    await f.store.put({ pk: `OWNER#${address}`, sk: `VAULT#${id}`, version: 0, vault: {
+      id, scriptHex, config: "A", publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
+      scriptHash: createHash("sha256").update(Buffer.from(scriptHex, "hex")).digest("hex"), paymentAddress: address, network: "mainnet", status: "unfunded",
+    } });
+    const order: string[] = [];
+    const put = MemoryStore.prototype.put.bind(f.store);
+    vi.spyOn(f.store, "put").mockImplementation(async (row, expected, options) => {
+      await put(row, expected, options);
+      order.push(row.sk.split("#")[0]);
+    });
+    vi.spyOn(miner, "credential").mockResolvedValue({} as never);
+    vi.spyOn(miner, "submitFunding").mockImplementation(async (rawTx: string) => {
+      order.push("POST");
+      return { status: "success" as const, message: transactionId(rawTx) };
+    });
+    expect((await a.post(`/api/vaults/${id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true })).status).toBe(201);
+    expect(order).toEqual(["VAULT", "POST", "VAULT", "EVENT"]);
+  });
+
   it("pages oldest first with a stable cursor, and lists only settled events", async () => {
     // Ten seconds before a midnight, so the pages span two days of the log.
     vi.useFakeTimers({ toFake: ["Date"], now: Math.ceil(Date.now() / 86400_000 + 1) * 86400_000 - 10_000 });
@@ -248,35 +278,55 @@ describe("owner event log", () => {
   });
 
   const job = { pk: "OWNER#a", sk: "JOB#j", version: 0, job: { id: "j", status: "queued", stage: "pinning" } };
-  it("writes the event before put returns, so nothing is left running after a request or tick", async () => {
+  const eventPuts = (inner: MemoryStore, event: (options?: { signal?: AbortSignal }) => Promise<void>) => {
+    const put = MemoryStore.prototype.put.bind(inner);
+    return vi.spyOn(inner, "put").mockImplementation((row, expected, options) =>
+      row.sk.startsWith("EVENT#") ? event(options) : put(row, expected),
+    );
+  };
+  it("returns from put when the subject write returns, and writes the event row at settle", async () => {
     const inner = new MemoryStore();
     const store = recordOwnerEvents(inner);
-    const put = inner.put.bind(inner);
-    vi.spyOn(inner, "put").mockImplementation(async (row, expected) => {
-      if (row.sk.startsWith("EVENT#")) await new Promise((resolve) => setTimeout(resolve, 50));
-      return put(row, expected);
-    });
+    const puts = vi.spyOn(inner, "put");
     await store.put(job);
+    expect(puts.mock.calls.map(([row]) => row.sk)).toEqual(["JOB#j"]);
+    expect(eventRows(inner)).toHaveLength(0);
+    await store.settle();
     expect(eventRows(inner)).toHaveLength(1);
   });
 
-  it("cancels an event write that runs past its timeout, and keeps the caller's write", async () => {
+  it("retries a failed event write once at settle", async () => {
     const inner = new MemoryStore();
     const store = recordOwnerEvents(inner);
-    const put = inner.put.bind(inner);
+    const put = MemoryStore.prototype.put.bind(inner);
+    let failures = 1;
+    const puts = eventPuts(inner, async () => {
+      if (failures-- > 0) throw new Error("ThrottlingException");
+      return put(puts.mock.calls.at(-1)![0]);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await store.put(job);
+    await store.settle();
+    expect(eventRows(inner)).toHaveLength(1);
+  });
+
+  it("cancels event writes that run out of time at settle, and keeps the caller's write", async () => {
+    const inner = new MemoryStore();
+    const store = recordOwnerEvents(inner);
     const signals: AbortSignal[] = [];
-    vi.spyOn(inner, "put").mockImplementation((row, expected, options) => {
-      if (!row.sk.startsWith("EVENT#")) return put(row, expected);
+    eventPuts(inner, (options) => {
       signals.push(options!.signal!);
       return new Promise((_, reject) => options!.signal!.addEventListener("abort", () => reject(new Error("AbortError"))));
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const started = Date.now();
     await store.put(job);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(EVENT_WRITE_TIMEOUT_MS - 50);
-    expect(Date.now() - started).toBeLessThan(EVENT_WRITE_TIMEOUT_MS + 500);
-    expect(signals).toHaveLength(1);
-    expect(signals[0].aborted).toBe(true);
+    const started = Date.now();
+    await store.settle();
+    // One attempt and one retry, each cancelled at its timeout.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(2 * EVENT_WRITE_TIMEOUT_MS - 50);
+    expect(Date.now() - started).toBeLessThan(2 * EVENT_WRITE_TIMEOUT_MS + 500);
+    expect(signals.map((signal) => signal.aborted)).toEqual([true, true]);
+    expect(eventRows(inner)).toHaveLength(0);
     expect((await inner.get("OWNER#a", "JOB#j"))?.job).toMatchObject({ status: "queued" });
   });
 
@@ -290,6 +340,7 @@ describe("owner event log", () => {
     });
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     await store.put(job);
+    await store.settle();
     await store.settle();
     expect((await inner.get("OWNER#a", "JOB#j"))?.job).toMatchObject({ status: "queued" });
     expect(eventRows(inner)).toHaveLength(0);
@@ -313,9 +364,8 @@ describe("owner event log", () => {
     expect(JSON.parse(hooks.calls[0].body)).toMatchObject({ type: "withdrawal.queued" });
   });
 
-  it("keeps one request's events and webhook work out of another owner's request", async () => {
+  it("queues webhooks for events past the delivery budget, and a later request delivers them", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    // This route takes longer than the request budget, so its settle() does no webhook work.
     const chain = {
       status: vi.fn(async () => {
         vi.setSystemTime(Date.now() + 30_000);
@@ -331,18 +381,23 @@ describe("owner event log", () => {
     await f.store.put({ pk: "OWNER#owner-a", sk: `VAULT#${vault.id}`, version: 0, vault });
     await f.store.put({ pk: "OWNER#owner-a", sk: `TX#${job.txid}`, version: 0, txid: job.txid, jobId: job.id });
     expect((await a.get(`/api/jobs/${job.id}/status`)).status).toBe(200);
-    expect((await b.get("/api/webhooks")).status).toBe(200);
     expect(f.hooks.transport).not.toHaveBeenCalled();
-    expect((await recorded(f.store, "owner-a")).map((e) => e.type)).toEqual(["withdrawal.confirmed", "deposit.spent"]);
+    const row = await f.store.get("OWNER#owner-a", "WEBHOOKS");
+    expect((row!.pending as { event: OwnerEvent }[]).map((p) => p.event.type)).toEqual(["withdrawal.confirmed", "deposit.spent"]);
+    // Another owner's request doesn't send them; this owner's next one does.
+    await b.get("/api/webhooks");
+    expect(f.hooks.transport).not.toHaveBeenCalled();
+    await a.get("/api/webhooks");
+    expect(f.hooks.transport).toHaveBeenCalledTimes(2);
   });
 
-  it("returns the same result as before when a job-creation transaction with an event is refused", async () => {
+  it("returns the same result as an app that records nothing when a job-creation race is refused", async () => {
     vi.stubEnv("SOLVER_RELEASE_ID", servedFixture.id);
     vi.stubEnv("WORKFLOW_ARN", "arn:aws:states:eu-west-1:123456789012:stateMachine:test");
     const payment = btc.p2wpkh(hex.decode("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"));
     const owner = payment.address!;
     const funding = { txid: "11".repeat(32), vout: 0, value: "1000" };
-    const run = async (plain: boolean) => {
+    const run = async (recordEvents: boolean) => {
       vi.restoreAllMocks();
       const started = vi.spyOn(SFNClient.prototype, "send").mockResolvedValue({} as never);
       // Both requests pass their chain checks before either writes, so they race to commit.
@@ -354,32 +409,46 @@ describe("owner event log", () => {
         await barrier;
         return {};
       });
-      const f = await setup({ chain: { unspent } as never });
-      const records = plain ? f.store : undefined;
-      const a = await f.as(owner);
+      const f = await setup({ chain: { unspent } as never, ...(recordEvents ? {} : { recordEvents: false as const }) });
+      await f.as(owner);
       const vault = { ...fixtureVault, id: "00000000-0000-4000-8000-00000000000a", status: "confirmed", funding };
       await f.store.put({ pk: `OWNER#${owner}`, sk: `VAULT#${vault.id}`, version: 0, vault });
       const manifest = { vaultId: vault.id, funding, helper: { txid: "22".repeat(32), vout: 0, value: "500" }, destination: owner, outputScript: hex.encode(payment.script), outputValue: "1200", fee: "300", idempotencyKey: "00000000-0000-4000-8000-00000000000b", costAccepted: true };
-      const app = plain ? createApp(records!, { enabled: true, chain: { unspent } as never }) : f.app;
       const post = () =>
-        app.request("/api/jobs", { method: "POST", headers: { Authorization: `Bearer ${tokenFor(owner)}`, "Content-Type": "application/json" }, body: JSON.stringify(manifest) });
+        f.app.request("/api/jobs", { method: "POST", headers: { Authorization: `Bearer ${tokenFor(owner)}`, "Content-Type": "application/json" }, body: JSON.stringify(manifest) });
       const responses = await Promise.all([post(), post()]);
+      const bodies = await Promise.all(responses.map((r) => r.json()));
       const retry = await post();
       const strip = (body: any) => (body.job ? { ...body, job: { ...body.job, createdAt: 0, updatedAt: 0 } } : body);
       return {
-        statuses: responses.map((r) => r.status).sort(),
-        bodies: (await Promise.all(responses.map((r) => r.json()))).map(strip).sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))),
-        retry: [retry.status, strip(await retry.json())],
+        statuses: responses.map((r) => r.status),
+        committed: bodies[responses.findIndex((r) => r.status === 201)]?.job,
+        refused: bodies.find((body) => !body.job),
+        retry: [retry.status, await retry.json()] as const,
         workflows: started.mock.calls.length,
+        reservations: [...f.store.rows.values()].filter((row) => row.pk.startsWith("OUTPOINT#")).map((row) => row.pk).sort(),
         events: eventRows(f.store).length,
+        strip,
       };
     };
-    const main = await run(true);
-    const recording = await run(false);
-    expect(main.statuses).toEqual([201, 409]);
-    expect({ ...recording, events: 0 }).toEqual({ ...main, events: 0 });
-    // The plain store here stands for main: it records nothing. The recording app records one.
-    expect(recording.events).toBe(1);
+    for (const recordEvents of [false, true]) {
+      const r = await run(recordEvents);
+      expect([...r.statuses].sort()).toEqual([201, 409]);
+      expect(r.refused).toEqual({ error: "State changed. Refresh and try again." });
+      // The same-key retry returns the committed job and starts its workflow again.
+      expect(r.retry).toEqual([200, { job: r.committed }]);
+      expect(r.workflows).toBe(2);
+      expect(r.reservations).toEqual([`OUTPOINT#${"11".repeat(32)}:0`, `OUTPOINT#${"22".repeat(32)}:0`]);
+      expect(r.events).toBe(recordEvents ? 1 : 0);
+    }
+    const [plain, recording] = [await run(false), await run(true)];
+    const view = ({ strip, events, committed, retry, ...rest }: Awaited<ReturnType<typeof run>>) => ({
+      ...rest,
+      statuses: [...rest.statuses].sort(),
+      committed: strip({ job: committed }),
+      retry: [retry[0], strip(retry[1])],
+    });
+    expect(view(recording)).toEqual(view(plain));
   });
 });
 
@@ -455,7 +524,9 @@ describe("operator notes", () => {
   it("inventories event and webhook rows, leaving the signing secret out rather than refusing", async () => {
     const store = new MemoryStore();
     const { secret } = await registerWebhook(store, "owner-a", { url: "https://hooks.example.com/" }, receiver().resolve);
-    await recordOwnerEvents(store).put({ pk: "OWNER#owner-a", sk: "JOB#j", version: 0, job: { id: "j", status: "queued", stage: "pinning" } });
+    const recorder = recordOwnerEvents(store);
+    await recorder.put({ pk: "OWNER#owner-a", sk: "JOB#j", version: 0, job: { id: "j", status: "queued", stage: "pinning" } });
+    await recorder.settle();
     const rows = [...store.rows.values()];
     const report = inventoryRows(rows);
     expect(report.counts).toMatchObject({ operational: 2, job: 1, unclassified: 0 });

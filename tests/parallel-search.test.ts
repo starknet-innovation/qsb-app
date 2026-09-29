@@ -478,5 +478,26 @@ it.each(["throws", "hangs"])("a WEBHOOKS row that %s changes nothing in a parall
   const plain = await tick(false);
   const faulted = await tick(true);
   expect(faulted.outcome).toEqual(plain.outcome);
-  expect(faulted.elapsed).toBeLessThan(2500);
+  // A tick's webhook work, table faults included, stops within three seconds.
+  expect(faulted.elapsed).toBeLessThan(3500);
 }, 15_000);
+
+it("writes no event row before the tick's last paid POST", async () => {
+  await seed();
+  const order: string[] = [];
+  const memory = store as MemoryStore;
+  const put = MemoryStore.prototype.put.bind(memory);
+  const puts = vi.spyOn(memory, "put").mockImplementation(async (row, expected, options) => {
+    await put(row, expected, options);
+    if (row.sk.startsWith("EVENT#")) order.push("event");
+  });
+  mocks.run.mockImplementation(async () => {
+    order.push("POST");
+    return { id: `compute-${submitted}` };
+  });
+  await handler(event);
+  puts.mockRestore();
+  expect(order.filter((step) => step === "POST")).toHaveLength(4);
+  expect(order.slice(0, order.lastIndexOf("POST"))).not.toContain("event");
+  expect(order.at(-1)).toBe("event");
+});

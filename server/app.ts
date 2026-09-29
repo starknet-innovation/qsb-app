@@ -107,6 +107,8 @@ export function createApp(
     fundingLedger?: FundingLedger;
     /** Webhook HTTP and DNS. Defaults to the network; tests inject fakes. */
     webhooks?: Partial<Delivery>;
+    /** Tests only: false builds an app that records no owner events, to compare against. */
+    recordEvents?: false;
   } = {},
 ) {
   // Routes write through `store`, so withdrawal and deposit status changes become owner
@@ -114,7 +116,17 @@ export function createApp(
   // only the memory of row statuses by version, which are facts, is shared.
   const memory: StatusMemory = new Map();
   const requestEvents = new AsyncLocalStorage<OwnerEventStore>();
-  const current = () => requestEvents.getStore() ?? recordOwnerEvents(records, memory);
+  const unrecorded: OwnerEventStore = {
+    get: (pk, sk) => records.get(pk, sk),
+    put: (row, expected, options) => records.put(row, expected, options),
+    delete: (pk, sk, expected) => records.delete(pk, sk, expected),
+    list: (pk, prefix) => records.list(pk, prefix),
+    reservationRows: () => records.reservationRows(),
+    atomicPut: (writes) => records.atomicPut(writes),
+    recordDropped: () => {},
+    settle: async () => {},
+  };
+  const current = () => requestEvents.getStore() ?? unrecorded;
   const store: OwnerEventStore = {
     get: (pk, sk) => current().get(pk, sk),
     put: (row, expected, options) => current().put(row, expected, options),
@@ -170,9 +182,11 @@ export function createApp(
       onError: (c) => c.json({ error: "Request is too large" }, 413),
     }),
   );
-  // After the route has answered: record, enqueue and deliver this owner's webhooks, bounded.
-  // Nothing here can change the response.
+  // After the route has answered: write its event rows, queue their webhooks and deliver this
+  // owner's due ones, bounded. Delivery stops at the request budget; recording and queuing
+  // don't. Nothing here can change the response.
   app.use("*", async (c, next) => {
+    if (dependencies.recordEvents === false) return next();
     const started = Date.now();
     const events = recordOwnerEvents(records, memory);
     await requestEvents.run(events, next);
@@ -180,7 +194,7 @@ export function createApp(
     await events.settle({
       delivery,
       owners: owner ? [owner] : [],
-      budgetMs: Math.min(SETTLE_CAP_MS, REQUEST_BUDGET_MS - (Date.now() - started)),
+      deliveryMs: Math.min(SETTLE_CAP_MS, REQUEST_BUDGET_MS - (Date.now() - started)),
     });
   });
   app.onError((e, c) => {
@@ -382,7 +396,7 @@ export function createApp(
       enabled: dependencies.exactSubmit ?? exactSubmitEnabled(),
     });
     if (observed.unknown && !observed.accepted && result.vault.status === "submitted")
-      await store.recordDropped(owner, vaultId);
+      store.recordDropped(owner, vaultId);
     return result;
   }
   app.get("/api/vaults", async (c) => {

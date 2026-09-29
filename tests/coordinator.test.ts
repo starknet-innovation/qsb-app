@@ -871,6 +871,40 @@ describe("owner events and webhooks", () => {
     20_000,
   );
 
+  it("writes no event row between the paid intent and its POST", async () => {
+    await seed();
+    const order: string[] = [];
+    const memory = store as MemoryStore;
+    const put = MemoryStore.prototype.put.bind(memory);
+    const puts = vi.spyOn(memory, "put").mockImplementation(async (row, expected, options) => {
+      await put(row, expected, options);
+      order.push(row.sk.startsWith("EVENT#") ? "event" : `${row.sk.split("#")[0]}:${(row.job as Job | undefined)?.status}`);
+    });
+    mocks.run.mockImplementationOnce(async () => {
+      order.push("POST");
+      return { id: "compute-1" };
+    });
+    await handler(event);
+    puts.mockRestore();
+    const post = order.indexOf("POST");
+    expect(order[post - 1]).toBe("JOB:searching");
+    expect(order.slice(0, post)).not.toContain("event");
+    expect(order.slice(post)).toContain("event");
+  });
+
+  it("queues webhooks when there's no time to send them, and the next tick sends them", async () => {
+    await seed();
+    await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    mocks.transport.mockResolvedValue({ status: 204 });
+    expect(await handler(event, { getRemainingTimeInMillis: () => 20_000 })).toMatchObject({ done: false });
+    expect(mocks.transport).not.toHaveBeenCalled();
+    expect(((await store.get(pk, "WEBHOOKS"))!.pending as { event: { type: string } }[]).map((p) => p.event.type)).toEqual(["withdrawal.searching"]);
+    mocks.status.mockResolvedValue({ status: "IN_PROGRESS" });
+    await handler(event);
+    expect(mocks.transport).toHaveBeenCalledOnce();
+    expect((await store.get(pk, "WEBHOOKS"))!.pending).toEqual([]);
+  });
+
   it("skips delivery unless the Lambda has ample time left, and still records", async () => {
     await seed();
     await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
