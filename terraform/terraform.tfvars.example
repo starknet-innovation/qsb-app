@@ -28,3 +28,8 @@ exact_submit_enabled = false
 # Optional MARA Slipstream credential: the ARN of the administrator-created qsb/slipstream secret.
 # Set it only after the runtime boundary allows that secret (ops/github-aws/update_installed.py).
 # slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:qsb/slipstream-AbC123"
+
+# Optional partner-phase per-owner limits, all off by default (docs/OPERATIONAL-RUNBOOK.md#per-owner-limits).
+# owner_allowlist       = ["<partner address, exactly as it signs in>"]
+# owner_max_active_jobs = 2
+# owner_max_gpu_seconds = 1474560

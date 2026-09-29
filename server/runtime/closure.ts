@@ -92,6 +92,7 @@ export const unpackagedReleaseScripts = [
   "test:e2e",
   "typecheck",
   "vendor",
+  "openapi",
   "build:runtime",
   "build:optimized",
   "build:optimized:queue",

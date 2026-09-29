@@ -43,7 +43,7 @@ export async function submitExact(
   const { store, chain, consensus, miner } = deps;
   const pk = "OWNER#" + owner;
   const row = await store.get(pk, "JOB#" + jobId);
-  if (!row) throw new ChainError("Job not found.");
+  if (!row) throw new ChainError("Job not found.", "job_not_found");
   const job = row.job as Job;
   if (
     job.owner !== owner ||
@@ -51,7 +51,14 @@ export async function submitExact(
     (job as Job & { execution?: { kind?: string } }).execution?.kind ===
       "qsb-supervised-service-v1"
   )
-    throw new ChainError("Job is not a coordinator withdrawal.");
+    throw new ChainError("Job is not a coordinator withdrawal.", "job_unsupported");
+  // A job without a solution can't be submitted yet. assertStoredJobSpend would refuse it
+  // too, as a spend mismatch, before any other read; this only says why.
+  if (!job.solution)
+    throw new ChainError(
+      "Withdrawal is not ready for authorization.",
+      "job_state_invalid",
+    );
   assertStoredJobSpend(job, raw);
   const txid = transactionId(raw);
   const rawHash = createHash("sha256").update(raw.toLowerCase()).digest("hex");
@@ -64,15 +71,19 @@ export async function submitExact(
     )
       throw new ChainError(
         "Transaction intent differs. Reconcile the existing submission.",
+        "intent_conflict",
       );
     return summary(existing);
   }
   if (job.txid)
-    throw new ChainError("A withdrawal intent already exists. Reconcile it.");
+    throw new ChainError(
+      "A withdrawal intent already exists. Reconcile it.",
+      "intent_conflict",
+    );
   const vaultRow = await store.get(pk, "VAULT#" + job.vaultId);
   const vault = vaultRow?.vault as PublicVault | undefined;
   if (!vault || vault.network !== "mainnet" || vault.id !== job.vaultId)
-    throw new ChainError("Mainnet vault not found.");
+    throw new ChainError("Mainnet vault not found.", "vault_not_found");
   await checkWithdrawal(raw, vault, job, chain);
   // Every input is checked against real chain outputs by Core, before TX# exists.
   await consensus.verify(raw, chain);
@@ -130,7 +141,10 @@ export async function submitExact(
   for (let attempt = 0; attempt < 5; attempt++) {
     const current = await store.get(pk, intent.sk);
     if (!current || current.rawHash !== rawHash)
-      throw new ChainError("Original intent unavailable after submission.");
+      throw new ChainError(
+        "Original intent unavailable after submission.",
+        "intent_conflict",
+      );
     const nextStatus =
       current.status === "confirmed" || current.status === "conflict"
         ? current.status

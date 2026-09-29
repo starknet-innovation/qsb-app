@@ -184,6 +184,7 @@ it("resumes a paused job when only another coverage account is stopped", async (
   expect(blocked.status).toBe(409);
   expect(await blocked.json()).toEqual({
     error: "Stopped coverage cannot be resumed on this account.",
+    code: "coverage_stopped",
   });
 });
 
@@ -239,6 +240,7 @@ it("refuses to resume an unknown submission even when a list miss set an allowan
   expect(resumed.status).toBe(409);
   expect(await resumed.json()).toEqual({
     error: "Reconcile the unknown compute provider submission before retrying.",
+    code: "reconcile_required",
   });
   const kept = (await store.get(`OWNER#${address}`, `JOB#${jobId}`))
     ?.job as Job;

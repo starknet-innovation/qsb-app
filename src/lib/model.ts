@@ -99,6 +99,13 @@ export const withdrawalSchema = z
   })
   .strict();
 export type Withdrawal = z.infer<typeof withdrawalSchema>;
+/**
+ * manifestHash is taken over the schema-ordered JSON at creation. Stored
+ * copies can come back with keys reordered (DynamoDB maps keep no order),
+ * so re-parse before hashing a manifest that was read back.
+ */
+export const canonicalManifest = (manifest: unknown): Withdrawal =>
+  withdrawalSchema.parse(manifest);
 export type Job = {
   id: string;
   owner: string;
@@ -123,6 +130,8 @@ export type Job = {
   gpuSubmissions?: number;
   /** Durable worst-case GPU seconds reserved before paid POSTs; never refunded. */
   gpuBudgetReservedSeconds?: number;
+  /** How much of gpuBudgetReservedSeconds the owner's GPU budget has been charged (QSB_OWNER_MAX_GPU_SECONDS). */
+  ownerGpuChargedSeconds?: number;
   /** Legacy storage field: interpreted only with computeProvider for AWS jobs. */
   runpodId?: string;
   computeProvider?: "aws-batch" | "runpod";

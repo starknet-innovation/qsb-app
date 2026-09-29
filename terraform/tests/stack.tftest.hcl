@@ -417,6 +417,97 @@ run "mainnet_reject_testnet" {
   expect_failures = [var.mainnet_enabled, terraform_data.release]
 }
 
+run "owner_limits_default_off" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition     = length([for key in concat(keys(aws_lambda_function.api.environment[0].variables), keys(aws_lambda_function.coordinator.environment[0].variables)) : key if startswith(key, "QSB_OWNER_")]) == 0
+    error_message = "Unset owner limits must add nothing to either Lambda environment."
+  }
+}
+run "owner_limits_api_and_coordinator_only" {
+  command = plan
+  variables {
+    network               = "mainnet"
+    owner_allowlist       = ["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "bc1qexamplepartner0000000000"]
+    owner_max_active_jobs = 2
+    owner_max_gpu_seconds = 1474560
+  }
+  assert {
+    condition = alltrue([
+      for env in [aws_lambda_function.api.environment[0].variables, aws_lambda_function.coordinator.environment[0].variables] :
+      env.QSB_OWNER_ALLOWLIST == "bc1qexamplepartner0000000000,bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4" && env.QSB_OWNER_MAX_ACTIVE_JOBS == "2" && env.QSB_OWNER_MAX_GPU_SECONDS == "1474560"
+    ]) && length(aws_lambda_function.reference.environment) == 0 && !output.transactions_enabled && !output.exact_submit_enabled
+    error_message = "Owner limits reach the API and coordinator only, and setting them activates nothing."
+  }
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[0].Action == ["dynamodb:GetItem"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Action == ["dynamodb:PutItem"] && length(jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement) == 2
+    error_message = "Owner limits need no new coordinator grant: its budget row is an OWNER# PutItem."
+  }
+}
+run "reject_owner_allowlist_separator" {
+  command = plan
+  variables {
+    network         = "mainnet"
+    owner_allowlist = ["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4,bc1qexamplepartner0000000000"]
+  }
+  expect_failures = [var.owner_allowlist]
+}
+run "reject_owner_active_jobs_fraction" {
+  command = plan
+  variables {
+    network               = "mainnet"
+    owner_max_active_jobs = 1.5
+  }
+  expect_failures = [var.owner_max_active_jobs]
+}
+run "reject_owner_active_jobs_unsafe_integer" {
+  command = plan
+  variables {
+    network               = "mainnet"
+    owner_max_active_jobs = 9007199254740992
+  }
+  expect_failures = [var.owner_max_active_jobs]
+}
+run "reject_owner_gpu_seconds_below_one_submission" {
+  command = plan
+  variables {
+    network               = "mainnet"
+    owner_max_gpu_seconds = 899
+  }
+  expect_failures = [var.owner_max_gpu_seconds]
+}
+run "owner_gpu_seconds_one_submission" {
+  command = plan
+  variables {
+    network               = "mainnet"
+    owner_max_gpu_seconds = 900
+  }
+  assert {
+    condition     = aws_lambda_function.coordinator.environment[0].variables.QSB_OWNER_MAX_GPU_SECONDS == "900"
+    error_message = "One submission's reservation is the smallest owner budget."
+  }
+}
+run "reject_owner_allowlist_over_environment_room" {
+  command = plan
+  variables {
+    network         = "mainnet"
+    owner_allowlist = [for i in range(60) : format("bc1q%038d", i)]
+  }
+  expect_failures = [var.owner_allowlist]
+}
+run "owner_allowlist_within_environment_room" {
+  command = plan
+  variables {
+    network         = "mainnet"
+    owner_allowlist = [for i in range(58) : format("bc1q%038d", i)]
+  }
+  assert {
+    condition     = length(aws_lambda_function.coordinator.environment[0].variables.QSB_OWNER_ALLOWLIST) <= 2500 && length(split(",", aws_lambda_function.api.environment[0].variables.QSB_OWNER_ALLOWLIST)) == 58
+    error_message = "A list within the bound reaches both Lambdas whole."
+  }
+}
+
 run "reject_provider_queue_wildcard" {
   command = plan
   variables {

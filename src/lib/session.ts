@@ -1,3 +1,9 @@
+/** A non-OK API response. `code` is the API's machine-readable error code, when it sent one. */
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+  }
+}
 export function createSessionClient(fetcher: typeof fetch = fetch) {
 let token: string | undefined;
 let epoch = 0;
@@ -19,14 +25,22 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error(
-      r.ok
-        ? "The API returned an invalid response. Please try again."
-        : "The app API is unavailable. Please check that the local API server is running and try again.",
-    );
+    if (r.ok)
+      throw new Error("The API returned an invalid response. Please try again.");
   }
+  // A failure whose body isn't a JSON object (a gateway 502, a plain-text 404, `null`)
+  // still reports its status.
+  if (!r.ok && (typeof data !== "object" || data === null))
+    throw new ApiRequestError(
+      "The app API is unavailable. Please check that the local API server is running and try again.",
+      r.status,
+    );
   if (!r.ok)
-    throw new Error(data.error || "The request could not be completed.");
+    throw new ApiRequestError(
+      data.error || "The request could not be completed.",
+      r.status,
+      typeof data.code === "string" ? data.code : undefined,
+    );
   return data as T;
 }
 async function authenticate(
