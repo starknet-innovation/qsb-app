@@ -68,7 +68,7 @@ FILE_INPUTS = re.compile(r'(?:"\$\{path\.module\}/policies/[a-z0-9-]+\.json"|"\$
 
 
 # The withdrawal workflow retries only a throttled coordinator invoke, which Lambda refused before the coordinator
-# ran. Every other error, where the coordinator may have run, must end in NeedsOperatorAttention for reconciliation.
+# ran. Every other catchable error, where the coordinator may have run, must end in NeedsOperatorAttention.
 COORDINATOR_RETRY_ERRORS = ['Lambda.TooManyRequestsException']
 COORDINATOR_CATCH = [{'ErrorEquals': ['States.ALL'], 'ResultPath': '$.failure', 'Next': 'NeedsOperatorAttention'}]
 
@@ -83,8 +83,10 @@ def workflow_rules(rows):
     require(isinstance(retry, list) and len(retry) == 1 and retry[0].get('ErrorEquals') == COORDINATOR_RETRY_ERRORS
             and type(retry[0].get('MaxAttempts')) is int and 1 <= retry[0]['MaxAttempts'] <= 10,
             'CoordinateSearch must retry only Lambda.TooManyRequestsException, a bounded number of times')
-    require(task.get('Catch') == COORDINATOR_CATCH and states.get('NeedsOperatorAttention', {}).get('Type') == 'Fail',
-            'Every other CoordinateSearch error must end in NeedsOperatorAttention')
+    require(task.get('Catch') == COORDINATOR_CATCH, 'Every other CoordinateSearch error must end in NeedsOperatorAttention')
+    # A Pass or Succeed here would end an unreconciled outcome as a succeeded execution, with no failure alarm.
+    require(states.get('NeedsOperatorAttention', {}).get('Type') == 'Fail',
+            'NeedsOperatorAttention must stay a Fail state, so the execution fails and the alarm fires')
 
 
 def reads_secrets(action):

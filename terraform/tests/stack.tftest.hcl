@@ -78,8 +78,13 @@ run "baseline" {
   assert {
     condition = jsonencode(jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Catch) == jsonencode([
       { ErrorEquals = ["States.ALL"], ResultPath = "$.failure", Next = "NeedsOperatorAttention" }
-    ]) && jsondecode(aws_sfn_state_machine.withdrawal.definition).States.NeedsOperatorAttention.Type == "Fail"
+    ])
     error_message = "Every other CoordinateSearch error, including an exhausted throttling retry, must end in NeedsOperatorAttention."
+  }
+  assert {
+    # A Pass or Succeed here would end an unreconciled outcome as a succeeded execution, with no failure alarm.
+    condition     = try(jsondecode(aws_sfn_state_machine.withdrawal.definition).States.NeedsOperatorAttention.Type == "Fail", false)
+    error_message = "NeedsOperatorAttention must stay a Fail state, so the execution fails and the workflow-failures alarm fires."
   }
   assert {
     condition     = aws_lambda_function.coordinator.environment[0].variables.GPU_WORKERS_MAX == tostring(local.gpu_spend.workersMax) && local.gpu_spend.workersMax >= 1 && local.gpu_spend.workersMax <= 16 && aws_lambda_function.coordinator.environment[0].variables.GPU_WORKERS_MIN == "0" && aws_lambda_function.coordinator.environment[0].variables.GPU_EXECUTION_TIMEOUT_MS == tostring(local.gpu_spend.executionTimeoutMs) && aws_lambda_function.coordinator.environment[0].variables.MAX_JOB_GPU_SECONDS == (tostring(local.gpu_spend.maxJobGpuSeconds)) && output.gpu_limits.workersMax == local.gpu_spend.workersMax && output.gpu_limits.workersMin == 0 && output.gpu_limits.executionTimeoutMs == local.gpu_spend.executionTimeoutMs

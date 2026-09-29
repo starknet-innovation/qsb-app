@@ -28,8 +28,8 @@ resource "aws_sfn_state_machine" "withdrawal" {
   }
   definition = jsonencode({ StartAt = "CoordinateSearch", States = {
     # Retry only a throttled invoke (Lambda.TooManyRequestsException): Lambda refused it, so the coordinator
-    # never ran. Every other error, including timeouts and Lambda service errors where the coordinator may have
-    # run, goes straight to NeedsOperatorAttention for reconciliation. Never widen this retrier.
+    # never ran. Every other catchable error, including timeouts and Lambda service errors where the coordinator
+    # may have run, goes straight to NeedsOperatorAttention for reconciliation. Never widen this retrier.
     CoordinateSearch       = { Type = "Task", Resource = "arn:${data.aws_partition.current.partition}:lambda:${var.region}:${var.aws_account_id}:function:${var.name}-coordinator", TimeoutSeconds = aws_lambda_function.coordinator.timeout + 5, Retry = [{ ErrorEquals = ["Lambda.TooManyRequestsException"], IntervalSeconds = 3, BackoffRate = 2, MaxAttempts = 6, JitterStrategy = "FULL" }], Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.failure", Next = "NeedsOperatorAttention" }], Next = "SearchFinished" },
     SearchFinished         = { Type = "Choice", Choices = [{ Variable = "$.done", BooleanEquals = true, Next = "Finished" }, { Variable = "$.polls", NumericGreaterThanEquals = 1000, Next = "SaveContinuation" }], Default = "WaitForCompute" },
     WaitForCompute         = { Type = "Wait", SecondsPath = "$.waitSeconds", Next = "CoordinateSearch" },

@@ -18,7 +18,7 @@ def role(name, trust=OPERATOR):
         'assume_role_policy': json.dumps({'Statement': [{'Principal': {'AWS': [trust]}}]})}}
 
 
-def workflow(retry=None, catch=None):
+def workflow(retry=None, catch=None, fail=None):
     """The parts of terraform/workflow.tf's definition the checker reads."""
     task = {'Type': 'Task', 'Resource': 'arn:aws:lambda:eu-west-1:123456789012:function:qsb-app-coordinator',
             'Retry': [{'ErrorEquals': ['Lambda.TooManyRequestsException'], 'IntervalSeconds': 3, 'BackoffRate': 2,
@@ -30,9 +30,12 @@ def workflow(retry=None, catch=None):
             task.pop(key)
         elif value is not None:
             task[key] = value
-    return json.dumps({'StartAt': 'CoordinateSearch', 'States': {
-        'CoordinateSearch': task,
-        'NeedsOperatorAttention': {'Type': 'Fail', 'Error': 'WorkflowInterrupted'}}})
+    states = {'CoordinateSearch': task, 'NeedsOperatorAttention': {'Type': 'Fail', 'Error': 'WorkflowInterrupted'}}
+    if fail == 'absent':
+        states.pop('NeedsOperatorAttention')
+    elif fail is not None:
+        states['NeedsOperatorAttention'] = fail
+    return json.dumps({'StartAt': 'CoordinateSearch', 'States': states})
 
 
 def plan():
@@ -286,6 +289,12 @@ class DeployChecks(unittest.TestCase):
         next(r for r in doc['planned_values']['root_module']['resources']
              if r['type'] == 'aws_sfn_state_machine')['values'].pop('definition')
         self.refused(doc, 'definition must be known at plan')
+
+    def test_needs_operator_attention_stays_a_fail_state(self):
+        # Otherwise an unreconciled outcome would end as a succeeded execution and the failure alarm would stay silent.
+        for fail in ('absent', {'Type': 'Pass', 'End': True}, {'Type': 'Succeed'}):
+            with self.subTest(fail=fail):
+                self.refused(self.with_workflow(fail=fail), 'NeedsOperatorAttention must stay a Fail state')
 
     def test_flags_need_a_saved_plan(self):
         events = [{'type': 'test_run', '@testrun': 'baseline'}, {'type': 'test_summary', 'test_summary': {'status': 'pass'}}]
