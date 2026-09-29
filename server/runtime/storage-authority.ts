@@ -396,6 +396,7 @@ function primaryKind(row: Row): InventoryKind {
     row.sk === "AUTH" ||
     row.sk.startsWith("VAULT#") ||
     row.sk.startsWith("TX#") ||
+    row.sk.startsWith("LIMIT#") ||
     row.pk.startsWith("CHALLENGE#") ||
     row.pk.startsWith("SESSION#")
   )

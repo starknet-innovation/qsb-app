@@ -18,6 +18,12 @@ import {
 import { searchVersion, workRange } from "./search-ranges";
 import { gpuSpendLimits, nextGpuReservation } from "./gpu-spend";
 import {
+  OWNER_GPU_BUDGET_REACHED,
+  OwnerGpuBudget,
+  ownerAllowed,
+  saveGpuReservation,
+} from "./owner-limits";
+import {
   HOST_HIT_CAPACITY,
   publishedHitRecords,
 } from "./runtime/coverage-ledger";
@@ -115,7 +121,12 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   if (terminal && slots.length === 0) return { ...event, done: true };
 
   const unknown = () => slots.some((s) => !s.runpodId);
-  if (!terminal && (!transactionsEnabled || !rehearsalAddressAllowed(event.owner))) {
+  if (
+    !terminal &&
+    (!transactionsEnabled ||
+      !rehearsalAddressAllowed(event.owner) ||
+      !ownerAllowed(event.owner))
+  ) {
     // As on the single-GPU path: running chunks are not cancelled; resume polls them.
     if (job.status === "searching" && unknown()) {
       if (!job.error?.includes("Submission outcome unknown"))
@@ -310,6 +321,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     let attempt = job.attempt;
     let parameters: { parameterBase64: string; parameterSha256: string } | undefined;
     let sent = 0;
+    const ownerBudget = await OwnerGpuBudget.open(store, event.owner);
     while (slots.length < gpuSpendLimits.workersMax) {
       if (Date.now() - tickStarted > FILL_DEADLINE_MS) break;
       while (assigned.has(attempt) || completed.has(attempt)) attempt++;
@@ -329,6 +341,8 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
           throw new Error(
             "GPU-time budget reached. Further GPU work needs a reviewed budget change.",
           );
+        // An owner budget only adds a refusal; the per-job cap above still applies.
+        ownerBudget?.check(job, reservedSeconds);
       } catch (error) {
         // Let running chunks finish; pause once nothing else is in flight.
         if (slots.length === 0) {
@@ -380,22 +394,41 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       // the single-GPU path, so a slow preparation can't stall the search.
       if (sent > 0 && Date.now() - tickStarted > FILL_DEADLINE_MS) break;
       // This slot, its reservation and the never-resubmit marker share one conditional
-      // write before the paid POST. No result refunds time, including a lost response.
+      // write before the paid POST, with the owner's GPU budget when one is set. No
+      // result refunds time, including a lost response.
       const slot: SearchSlot = {
         stage: job.stage as SearchSlot["stage"],
         attempt,
         batchSubmission: submit.identity,
         submissionStartedAt: new Date().toISOString(),
       };
-      job.gpuBudgetReservedSeconds = reservedSeconds;
-      job.gpuSubmissions = (job.gpuSubmissions ?? 0) + 1;
-      job.status = "searching";
-      job.computeProvider = "aws-batch";
-      slots.push(slot);
+      const reserved = await saveGpuReservation(
+        store,
+        row,
+        version,
+        job,
+        reservedSeconds,
+        ownerBudget,
+        (next) => {
+          next.gpuBudgetReservedSeconds = reservedSeconds;
+          next.gpuSubmissions = (next.gpuSubmissions ?? 0) + 1;
+          next.status = "searching";
+          next.computeProvider = "aws-batch";
+          next.parallelSlots!.push(slot);
+          delete next.batchReplacementFor;
+          delete next.oneSubmissionAllowed;
+        },
+      );
+      if (!reserved) {
+        // Another withdrawal of this owner used the budget after the check: as above.
+        if (slots.length === 0) {
+          job.status = "paused";
+          job.error = OWNER_GPU_BUDGET_REACHED;
+        }
+        break;
+      }
+      version += 1;
       assigned.add(attempt);
-      delete job.batchReplacementFor;
-      delete job.oneSubmissionAllowed;
-      await persist();
       const result = await submit();
       slot.runpodId = result.id;
       await persist();

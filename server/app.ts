@@ -43,6 +43,14 @@ import { outputScript } from "../src/lib/transactions";
 import { hex } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
+import {
+  OwnerGpuBudget,
+  OwnerLimitsInvalid,
+  claimWithdrawalSlot,
+  ownerLimits,
+  type OwnerLimits,
+} from "./owner-limits";
+import { gpuSpendLimits, nextGpuReservation } from "./gpu-spend";
 import type { FundingLedger } from "./runtime/dispatcher";
 import { canonicalReservationWrites } from "./runtime/storage-authority";
 import {
@@ -84,6 +92,8 @@ export function createApp(
     inProcessHandoff?: boolean;
     /** Injected chain reads for supervised admission. Never the process-wide client by default. */
     fundingLedger?: FundingLedger;
+    /** Trusted test configuration; the deployment reads QSB_OWNER_* from the environment. */
+    ownerLimits?: OwnerLimits;
   } = {},
 ) {
   const ledger = dependencies.chain || chain,
@@ -91,6 +101,13 @@ export function createApp(
   const enabled = dependencies.enabled ?? transactionsEnabled;
   const mainnetUiOptions = { ...dependencies.mainnetUi };
   const mainnetUiRoutes = { creation: false, admission: false };
+  const limits = () => dependencies.ownerLimits ?? ownerLimits();
+  // Cost- and funds-moving routes only; sign-in and reads stay open so the app can show this.
+  const allowlisted = (owner: string) => limits().allowlist?.has(owner) ?? true;
+  const notAllowlisted = {
+    error: "This wallet is not on this deployment's allowlist.",
+    code: "owner_not_allowlisted",
+  };
   async function startWorkflow(job: Job) {
     if (!process.env.WORKFLOW_ARN) return;
     try {
@@ -128,6 +145,14 @@ export function createApp(
     }),
   );
   app.onError((e, c) => {
+    if (e instanceof OwnerLimitsInvalid)
+      return c.json(
+        {
+          error: "This deployment's owner limits are misconfigured. Nothing was changed.",
+          code: "owner_limits_invalid",
+        },
+        503,
+      );
     if (e instanceof SubmitDisabled) return c.json({ error: e.message }, 503);
     if (e instanceof ConsensusError) return c.json({ error: e.message }, 409);
     if (e instanceof MinerAuthenticationError)
@@ -152,6 +177,16 @@ export function createApp(
     );
   });
   app.get("/api/health", (c) => c.json({ ok: true, network: NETWORK_ID }));
+  /** The effective owner limits, never the allowlist itself. `allowlisted` is the signed-in caller's, else null. */
+  async function ownerLimitsConfig(authorization = "") {
+    const { allowlist, maxActiveJobs, maxGpuSeconds } = limits();
+    let listed: boolean | null = null;
+    if (allowlist && /^Bearer [A-Za-z0-9_-]{43}$/.test(authorization)) {
+      const session = await store.get(`SESSION#${hash(authorization.slice(7))}`, "AUTH");
+      if (session?.network === NETWORK_ID) listed = allowlist.has(session.owner as string);
+    }
+    return { allowlist: allowlist !== null, allowlisted: listed, maxActiveJobs, maxGpuSeconds };
+  }
   app.get("/api/config", async (c) => {
     c.header("Cache-Control", "no-store");
     return c.json({
@@ -172,6 +207,7 @@ export function createApp(
       maxBtc: null,
       withdrawalDeadline: null,
       computeBudget: null,
+      ownerLimits: await ownerLimitsConfig(c.req.header("Authorization")),
     });
   });
   app.get("/api/rates", async (c) => {
@@ -283,6 +319,8 @@ export function createApp(
     );
   });
   app.post("/api/vaults", async (c) => {
+    // A vault only its owner's withdrawal can spend: refuse it before a deposit could strand funds.
+    if (!allowlisted(c.get("owner"))) return c.json(notAllowlisted, 403);
     const vault = publicVaultSchema.parse(await c.req.json());
     if (
       vault.network !== NETWORK_ID ||
@@ -325,6 +363,7 @@ export function createApp(
         },
         503,
       );
+    if (!allowlisted(c.get("owner"))) return c.json(notAllowlisted, 403);
     const body = z
       .object({
         txid,
@@ -383,6 +422,7 @@ export function createApp(
       );
     if (!(dependencies.exactSubmit ?? exactSubmitEnabled()))
       return c.json({ error: "Deposit submission to the miner is disabled." }, 503);
+    if (!allowlisted(c.get("owner"))) return c.json(notAllowlisted, 403);
     const body = z
       .object({
         rawTxHex: z.string().regex(/^(?:[0-9a-fA-F]{2})+$/).max(200000),
@@ -407,6 +447,7 @@ export function createApp(
   app.get("/api/vaults/:id/fund/signed", async (c) => {
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")) || !(dependencies.exactSubmit ?? exactSubmitEnabled()))
       return c.json({ error: "Deposit submission is switched off." }, 503);
+    if (!allowlisted(c.get("owner"))) return c.json(notAllowlisted, 403);
     const row = await exportFunding(store, c.get("owner"), c.req.param("id"));
     if (!row) return c.json({ error: "This vault has no stored signed deposit." }, 404);
     const vault = row.vault as PublicVault;
@@ -427,6 +468,7 @@ export function createApp(
       );
     if (!(dependencies.exactSubmit ?? exactSubmitEnabled()))
       return c.json({ error: "Deposit submission to the miner is disabled." }, 503);
+    if (!allowlisted(c.get("owner"))) return c.json(notAllowlisted, 403);
     z.object({}).strict().parse(await c.req.json().catch(() => ({})));
     const row = await store.get(`OWNER#${c.get("owner")}`, `VAULT#${c.req.param("id")}`);
     if (!row) return c.json({ error: "Vault not found" }, 404);
@@ -620,6 +662,9 @@ export function createApp(
         },
         503,
       );
+    const { allowlist, maxActiveJobs, maxGpuSeconds } = limits();
+    // Before the idempotent replay too: a replay can restart the workflow.
+    if (allowlist?.has(c.get("owner")) === false) return c.json(notAllowlisted, 403);
     const owner = c.get("owner"),
       pk = `OWNER#${owner}`,
       id = manifest.idempotencyKey,
@@ -699,8 +744,32 @@ export function createApp(
       gpuBudgetReservedSeconds: 0,
       revision: 0,
     };
+    // Owner limits only add refusals, and a refusal writes and starts nothing.
+    const slot =
+      maxActiveJobs === null
+        ? undefined
+        : await claimWithdrawalSlot(store, owner, id, maxActiveJobs);
+    if (maxActiveJobs !== null && !slot)
+      return c.json(
+        {
+          error: `This wallet already has ${maxActiveJobs} active withdrawal${maxActiveJobs === 1 ? "" : "s"}, the most this deployment allows. Queued, searching and paused withdrawals count until they finish.`,
+          code: "owner_active_withdrawal_limit",
+        },
+        429,
+      );
+    // Its first paid submission would pause at once, with its inputs already reserved to it.
+    const budget = await OwnerGpuBudget.open(store, owner, maxGpuSeconds);
+    if (budget?.exceeds(job, nextGpuReservation(job, gpuSpendLimits.executionTimeoutMs)))
+      return c.json(
+        {
+          error: "This wallet has used its GPU-time budget on this deployment. No withdrawal was reserved.",
+          code: "owner_gpu_budget_reached",
+        },
+        429,
+      );
     await store.atomicPut([
       { row: { pk, sk, version: 0, job } },
+      ...(slot ? [slot] : []),
       ...(await canonicalReservationWrites(
         store,
         [manifest.funding, manifest.helper].map((point) => ({
@@ -762,6 +831,8 @@ export function createApp(
   app.post("/api/jobs/:id/resume", async (c) => {
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
       return c.json({ error: `${NETWORK_ID} withdrawals are disabled.` }, 503);
+    // No slot claim or budget check: a paused job keeps its slot, and resume may only poll paid work.
+    if (!allowlisted(c.get("owner"))) return c.json(notAllowlisted, 403);
     const pk = `OWNER#${c.get("owner")}`,
       sk = `JOB#${c.req.param("id")}`,
       row = await store.get(pk, sk);
