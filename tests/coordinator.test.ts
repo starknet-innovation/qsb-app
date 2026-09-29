@@ -676,7 +676,7 @@ it("marks a searching job with a lost POST response unknown before deployment pa
   await store.put({pk:`SESSION#${createHash("sha256").update(token).digest("hex")}`,sk:"AUTH",version:0,owner:event.owner,network:"mainnet"});
   const response = await createApp(store).request(`/api/jobs/${event.jobId}/resume`, {method:"POST",headers:{Authorization:`Bearer ${token}`}});
   expect(response.status).toBe(409);
-  expect(await response.json()).toEqual({error:"Reconcile the unknown compute provider submission before retrying."});
+  expect(await response.json()).toEqual({error:"Reconcile the unknown compute provider submission before retrying.",code:"reconcile_required"});
   await handler(event);
   expect(mocks.prepareRun).not.toHaveBeenCalled();
   expect(mocks.run).not.toHaveBeenCalled();
@@ -736,7 +736,7 @@ it.each(["AWS_BATCH_JOB_QUEUE", "REFERENCE_FUNCTION"])("preserves uncertain POST
   await store.put({pk:`SESSION#${createHash("sha256").update(token).digest("hex")}`,sk:"AUTH",version:0,owner:event.owner,network:"mainnet"});
   const response = await createApp(store).request(`/api/jobs/${event.jobId}/resume`, {method:"POST",headers:{Authorization:`Bearer ${token}`}});
   expect(response.status).toBe(409);
-  expect(await response.json()).toEqual({error:"Reconcile the unknown compute provider submission before retrying."});
+  expect(await response.json()).toEqual({error:"Reconcile the unknown compute provider submission before retrying.",code:"reconcile_required"});
   await handler(event);
   expect(mocks.prepareRun).not.toHaveBeenCalled();
   expect(mocks.run).not.toHaveBeenCalled();

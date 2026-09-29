@@ -4,6 +4,7 @@ import { matchedRoutes } from "hono/route";
 import { z } from "zod";
 import { NETWORK_ID } from "../src/lib/network";
 import { Conflict, type Row, type Store } from "./store";
+import { apiError } from "./api-errors";
 
 // API keys are minted with a BIP-322 wallet session and act for that owner.
 // Only the key's SHA-256 is stored, like sessions.
@@ -53,18 +54,12 @@ const bearerKey = /^Bearer (qsb_(mainnet|testnet4)_[A-Za-z0-9_-]{43})$/;
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 type OwnerEnv = { Variables: { owner: string } };
-const refuse = (
-  c: Context,
-  error: string,
-  code: string,
-  status: 401 | 403 | 503,
-) => c.json({ error, code }, status);
 const disabled = (c: Context) =>
-  refuse(
+  apiError(
     c,
-    "API keys are switched off for this deployment.",
-    "api_keys_disabled",
     503,
+    "api_keys_disabled",
+    "API keys are switched off for this deployment.",
   );
 
 /** Deploy-time switch, off by default. Turning it on needs the maintainer's explicit approval. */
@@ -89,24 +84,24 @@ export async function authorizeApiKey(
 ): Promise<Response | undefined> {
   if (!enabled) return disabled(c);
   const wrongNetwork = () =>
-    refuse(
+    apiError(
       c,
-      "API key belongs to a different Bitcoin network.",
-      "network_mismatch",
       401,
+      "network_mismatch",
+      "API key belongs to a different Bitcoin network.",
     );
   if (!key.startsWith(`qsb_${NETWORK_ID}_`)) return wrongNetwork();
   const row = await store.get(`APIKEY#${hash(key)}`, "AUTH");
   if (!row)
-    return refuse(
+    return apiError(
       c,
-      "API key is not valid or has expired.",
-      "api_key_invalid",
       401,
+      "api_key_invalid",
+      "API key is not valid or has expired.",
     );
   if (row.network !== NETWORK_ID) return wrongNetwork();
   if (row.revoked === true)
-    return refuse(c, "API key was revoked.", "api_key_revoked", 401);
+    return apiError(c, 401, "api_key_revoked", "API key was revoked.");
   // Every matched method route counts, not only the one that answers: a
   // pass-through route registered earlier cannot lower the scope needed.
   const scopes = matchedRoutes(c)
@@ -114,19 +109,19 @@ export async function authorizeApiKey(
     .map((r) => `${r.method} ${r.path}`)
     .map((p) => (Object.hasOwn(routeScopes, p) ? routeScopes[p] : null));
   if (!scopes.length || scopes.some((s) => !s))
-    return refuse(
+    return apiError(
       c,
-      "API keys cannot call this route. Use a wallet session.",
-      "api_key_not_allowed",
       403,
+      "api_key_not_allowed",
+      "API keys cannot call this route. Use a wallet session.",
     );
   const missing = scopes.find((s) => !(row.scopes as string[]).includes(s!));
   if (missing)
-    return refuse(
+    return apiError(
       c,
-      `API key lacks the ${missing} scope.`,
-      "api_key_scope_denied",
       403,
+      "api_key_scope_denied",
+      `API key lacks the ${missing} scope.`,
     );
   c.set("owner", row.owner as string);
 }
@@ -183,12 +178,11 @@ export function installApiKeyRoutes(
       (r) => r.revoked !== true && (r.expiresAt as number) > now,
     );
     if (active.length >= maxActiveApiKeys)
-      return c.json(
-        {
-          error: `This owner already has ${maxActiveApiKeys} active API keys. Revoke one first.`,
-          code: "api_key_limit_reached",
-        },
+      return apiError(
+        c,
         409,
+        "api_key_limit_reached",
+        `This owner already has ${maxActiveApiKeys} active API keys. Revoke one first.`,
       );
     const key = `qsb_${NETWORK_ID}_${randomBytes(32).toString("base64url")}`,
       keyHash = hash(key);
@@ -249,12 +243,11 @@ export function installApiKeyRoutes(
       listing &&
       (await store.get(`APIKEY#${listing.keyHash as string}`, "AUTH"));
     if (!listing || !lookup)
-      return c.json(
-        {
-          error: "API key not found or already expired.",
-          code: "api_key_not_found",
-        },
+      return apiError(
+        c,
         404,
+        "api_key_not_found",
+        "API key not found or already expired.",
       );
     if (listing.revoked === true)
       return c.json({ apiKey: metadata(listing, now) });

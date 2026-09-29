@@ -331,6 +331,7 @@ describe("API key authorization", () => {
       expect(r.status).toBe(401);
       expect(await r.json()).toEqual({
         error: "Connect and sign in with Xverse.",
+        code: "auth_required",
       });
     }
     const lookup = (await store.get(`APIKEY#${sha(key)}`, "AUTH"))!;
@@ -351,9 +352,11 @@ describe("API key authorization", () => {
     expect(r.status).toBe(401);
     expect(await r.json()).toEqual({
       error: "Session expired. Please reconnect.",
+      code: "session_expired",
     });
     expect(await (await call("GET", "/api/vaults")).json()).toEqual({
       error: "Connect and sign in with Xverse.",
+      code: "auth_required",
     });
   });
 
@@ -432,10 +435,7 @@ describe("API key authorization", () => {
     for (const route of app.routes) {
       if (route.method === "ALL") continue;
       const r = await call(route.method, concrete(route.path), "not-a-token");
-      if (
-        r.status === 401 &&
-        (await r.json()).error === "Connect and sign in with Xverse."
-      )
+      if (r.status === 401 && (await r.json()).code === "auth_required")
         guarded.add(`${route.method} ${route.path}`);
     }
     expect([...guarded].sort()).toEqual(Object.keys(routeScopes).sort());
