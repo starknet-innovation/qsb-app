@@ -68,6 +68,24 @@ const concrete = (pattern: string) =>
     .replace(":id", crypto.randomUUID());
 const split = (route: string) => route.split(" ") as [string, string];
 const passedAuth = (status: number) => status !== 401 && status !== 403;
+/** After race(), the next atomicPut waits until another one has written. */
+function racingStore() {
+  const store = new MemoryStore();
+  let waiting: Promise<void> | undefined,
+    release = () => {};
+  const gated = Object.create(store) as MemoryStore;
+  gated.atomicPut = async (writes) => {
+    const wait = waiting;
+    waiting = undefined;
+    if (wait) await wait;
+    else release();
+    return store.atomicPut(writes);
+  };
+  const race = () => {
+    waiting = new Promise<void>((r) => (release = r));
+  };
+  return { store, gated, race };
+}
 
 describe("API key issuance", () => {
   it("returns the key once, stores only its hash and lists metadata", async () => {
@@ -160,22 +178,11 @@ describe("API key issuance", () => {
   });
 
   it("holds the cap under concurrent issuance", async () => {
-    const store = new MemoryStore();
-    let race: Promise<void> | undefined,
-      release = () => {};
-    // The first issuance waits at its write until the second has written.
-    const gated = Object.create(store) as MemoryStore;
-    gated.atomicPut = async (writes) => {
-      const wait = race;
-      race = undefined;
-      if (wait) await wait;
-      else release();
-      return store.atomicPut(writes);
-    };
+    const { store, gated, race } = racingStore();
     const { session, mint } = await setup(gated);
     const token = await session();
     for (let i = 0; i < maxActiveApiKeys - 1; i++) await mint(token);
-    race = new Promise<void>((r) => (release = r));
+    race();
     const results = await Promise.all([mint(token), mint(token)]);
     expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
     // The fence refused the loser; both read nine active keys.
@@ -272,6 +279,24 @@ describe("API key authorization", () => {
       (await call("POST", `/api/api-keys/${crypto.randomUUID()}/revoke`, token))
         .status,
     ).toBe(404);
+  });
+
+  it("answers concurrent revocations of one key with the revoked key", async () => {
+    const { gated, race } = racingStore();
+    const { session, call, mint } = await setup(gated);
+    const token = await session();
+    const { key, apiKey } = (await mint(token)).body;
+    race();
+    const path = `/api/api-keys/${apiKey.id}/revoke`;
+    const results = await Promise.all([
+      call("POST", path, token),
+      call("POST", path, token),
+    ]);
+    for (const r of results) {
+      expect(r.status).toBe(200);
+      expect((await r.json()).apiKey).toMatchObject({ status: "revoked" });
+    }
+    expect((await call("GET", "/api/vaults", key)).status).toBe(401);
   });
 
   it("refuses expired, wrong-network, unknown and malformed keys", async () => {

@@ -3,7 +3,7 @@ import type { Context, Hono } from "hono";
 import { matchedRoutes } from "hono/route";
 import { z } from "zod";
 import { NETWORK_ID } from "../src/lib/network";
-import type { Row, Store } from "./store";
+import { Conflict, type Row, type Store } from "./store";
 
 // API keys are minted with a BIP-322 wallet session and act for that owner.
 // Only the key's SHA-256 is stored, like sessions.
@@ -211,7 +211,9 @@ export function installApiKeyRoutes(app: Hono<OwnerEnv>, store: Store) {
       .strict()
       .parse(await c.req.json().catch(() => ({})));
     const now = Math.floor(Date.now() / 1000);
-    const listing = await store.get(`OWNER#${c.get("owner")}`, `APIKEY#${id}`);
+    const pk = `OWNER#${c.get("owner")}`,
+      sk = `APIKEY#${id}`;
+    const listing = await store.get(pk, sk);
     const lookup =
       listing &&
       (await store.get(`APIKEY#${listing.keyHash as string}`, "AUTH"));
@@ -230,13 +232,21 @@ export function installApiKeyRoutes(app: Hono<OwnerEnv>, store: Store) {
       revokedAt: new Date(now * 1000).toISOString(),
     };
     const next = { ...listing, ...revoked, version: listing.version + 1 };
-    await store.atomicPut([
-      {
-        row: { ...lookup, ...revoked, version: lookup.version + 1 },
-        expected: lookup.version,
-      },
-      { row: next, expected: listing.version },
-    ]);
+    try {
+      await store.atomicPut([
+        {
+          row: { ...lookup, ...revoked, version: lookup.version + 1 },
+          expected: lookup.version,
+        },
+        { row: next, expected: listing.version },
+      ]);
+    } catch (e) {
+      // A concurrent revocation won: return its result, so retries stay idempotent.
+      const current = e instanceof Conflict && (await store.get(pk, sk));
+      if (current && current.revoked === true)
+        return c.json({ apiKey: metadata(current, now) });
+      throw e;
+    }
     return c.json({ apiKey: metadata(next, now) });
   });
 }
