@@ -8,6 +8,7 @@ import {
   Prompter,
   SignatureNeeded,
   UsageError,
+  assertNewFile,
   clearSession,
   externalSigner,
   filePendingDeposits,
@@ -216,6 +217,7 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
       case "vault create": {
         arity(2);
         const file = need("backup"), name = need("name");
+        assertNewFile(io, file);
         const secret = await passphrase(true);
         await signIn();
         say("Generating QSB keys locally…");
@@ -294,6 +296,7 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
       case "withdraw create": {
         arity(3);
         const vaultId = id("vault");
+        assertNewFile(io, values["out-backup"]);
         const text = await backup();
         const costAccepted = accepted();
         const secret = await passphrase();
@@ -341,6 +344,7 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
         arity(3);
         const jobId = id("job");
         const out = need("out");
+        assertNewFile(io, values["out-backup"]);
         const text = await backup();
         const secret = await passphrase();
         await signIn();
@@ -408,7 +412,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     stdout: process.stdout,
     stderr: process.stderr,
     interactive: Boolean(process.stdin.isTTY),
-    cwd: process.cwd(),
+    // npm runs scripts from the package root; paths are relative to where `npm run qsb` was typed.
+    cwd: process.env.INIT_CWD ?? process.cwd(),
   }).then((code) => {
     process.exitCode = code;
   });

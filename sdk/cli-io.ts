@@ -96,6 +96,11 @@ export async function readPassphrase(
 
 const resolveIn = (io: CliIo, file: string) => path.resolve(io.cwd, file);
 
+/** Refuse early, before any work, when a backup would land on an existing file. */
+export function assertNewFile(io: CliIo, file: string | undefined): void {
+  if (file !== undefined && existsSync(resolveIn(io, file)))
+    throw new UsageError(`${file} already exists. Backups are never overwritten; choose a new path.`);
+}
 /** Write a private file (a backup) owner-only, never over an existing file, then read it back. */
 export async function writeNewPrivateFile(io: CliIo, file: string, text: string): Promise<void> {
   const target = resolveIn(io, file);
@@ -187,6 +192,7 @@ export async function loadSession(home: string, api: string, address: string): P
       cached.api !== api ||
       cached.network !== NETWORK_ID ||
       cached.address !== address ||
+      !/^[A-Za-z0-9_-]{43}$/.test(cached.token) ||
       !(cached.expiresAt > Date.now() / 1000)
     )
       return undefined;

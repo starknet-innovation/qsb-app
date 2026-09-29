@@ -118,6 +118,10 @@ export type QsbClientOptions = {
 };
 
 const uuid = z.string().uuid();
+function id(value: string, label: "vault" | "job"): string {
+  if (!uuid.safeParse(value).success) throw new Error(`Invalid ${label} id.`);
+  return value;
+}
 const opts = { allowUnknownInputs: true, allowUnknownOutputs: true };
 const digest = (text: string) => hex.encode(sha256(new TextEncoder().encode(text)));
 export const preparedDepositSchema = z
@@ -270,11 +274,11 @@ export class QsbClient {
     }) => this.createWithdrawal(input),
     list: async () => (await this.session.api<{ jobs: Job[] }>("/jobs")).jobs,
     status: (jobId: string) =>
-      this.session.api<{ job: Job; [field: string]: unknown }>(`/jobs/${uuid.parse(jobId)}/status`),
+      this.session.api<{ job: Job; [field: string]: unknown }>(`/jobs/${id(jobId, "job")}/status`),
     pause: (jobId: string) =>
-      this.session.api<{ job: Job }>(`/jobs/${uuid.parse(jobId)}/pause`, {}),
+      this.session.api<{ job: Job }>(`/jobs/${id(jobId, "job")}/pause`, {}),
     resume: (jobId: string) =>
-      this.session.api<{ job: Job }>(`/jobs/${uuid.parse(jobId)}/resume`, {}),
+      this.session.api<{ job: Job }>(`/jobs/${id(jobId, "job")}/resume`, {}),
     /**
      * Rebuild the withdrawal locally from the backup and the coordinator's
      * public solved result, seal the signing backup (`saveBackup`) if the
@@ -288,9 +292,9 @@ export class QsbClient {
       this.submitWithdrawal(signed, input),
   };
 
-  private async vault(id: string): Promise<PublicVault> {
-    uuid.parse(id);
-    const vault = (await this.vaults.list()).vaults.find((v) => v.id === id);
+  private async vault(vaultId: string): Promise<PublicVault> {
+    id(vaultId, "vault");
+    const vault = (await this.vaults.list()).vaults.find((v) => v.id === vaultId);
     if (!vault) throw new Error("Vault not found for this address.");
     return vault;
   }
@@ -535,7 +539,7 @@ export class QsbClient {
     return { ...result, txid: deposit.txid };
   }
   private async resubmitDeposit(vaultId: string) {
-    uuid.parse(vaultId);
+    id(vaultId, "vault");
     const waiting = await this.pending.get(vaultId);
     if (waiting) return this.sendDeposit(vaultId, waiting);
     return this.session.api<Omit<DepositSubmission, "txid">>(`/vaults/${vaultId}/fund/resubmit`, {});
@@ -546,7 +550,7 @@ export class QsbClient {
       status: { confirmed: boolean; confirmations?: number };
       submission?: string;
       previousTxHex: string;
-    }>(`/vaults/${uuid.parse(vaultId)}/funding`);
+    }>(`/vaults/${id(vaultId, "vault")}/funding`);
     const waiting = await this.pending.get(vaultId);
     if (waiting && status.vault.funding?.txid === waiting.txid && status.status.confirmed)
       await this.pending.delete(vaultId);
