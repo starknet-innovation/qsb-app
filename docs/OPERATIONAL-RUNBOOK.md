@@ -403,6 +403,8 @@ exported credentials out of the parent shell; never print or share credentials:
   export QSB_NETWORK='mainnet'
   # Set explicitly to the verified deployed switch; false refuses mainnet polling.
   export QSB_MAINNET_ENABLED='false'
+  # Set explicitly to the deployed owner_max_active_jobs, or off when it is null.
+  export QSB_OWNER_MAX_ACTIVE_JOBS='off'
   npx tsx scripts/reconcile-submission.ts OWNER JOB --provider-id PROVIDER_ID --operator OPERATOR --evidence audit://incident/reference
 )
 ```
