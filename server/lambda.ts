@@ -13,7 +13,7 @@ export function deployedApiApp(
   network: NetworkId = NETWORK_ID,
   records: Store = store,
 ) {
-  if (network === "mainnet") return createApp(records);
+  if (network === "mainnet") return createApp(records, { versionedAlias: true });
   return createSupervisedCreationApp(records, {
     enabled: process.env.SUPERVISED_EXECUTION_ENABLED === "true",
   });
