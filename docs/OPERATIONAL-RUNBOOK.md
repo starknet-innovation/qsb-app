@@ -12,6 +12,7 @@ The checked-in capability limit is `providerGpuLimit: 1` in `server/mainnet-capa
 - `maxGpuWorkers`: 1 (supervised runtime; the coordinator uses `workersMax` below)
 - `minIdleWorkers`: 0
 - The coordinator path uses `server/gpu-spend.json`: `workersMax` (1–16; see [Parallel GPU search](#parallel-gpu-search)), `workersMin` 0, `executionTimeoutMs` 900000, and `maxJobGpuSeconds` 14745600 (4,096 GPU-hours per job, reserved across retries and all stages). A 64-hit output is not credited as a finished range. These checks do not start a worker, evaluate the USD ceiling, or authorize a spend.
+- Optional per-owner limits (allowlist, active withdrawals, GPU seconds) are off by default; see [Per-owner limits](#per-owner-limits).
 - `costUnit` is `operator-units`. `maxCostUnits` is a positive integer of those units. The operator cost field is not the experimental USD ceiling. A plan that labels the field as USD, or that supplies `vaultUsd`, `feeUsd`, or `gpuUsd` on the runbook, is refused with `CostFieldIsNotUsdCeiling`.
 - The experimental USD limits are vault 10000, fee 1000, and GPU 1000. They are encoded only in `assertExperimentalUsdLimits`. That check cannot run while `release.mainnetEnabled` and `broadcastAuthorized` are false: it throws `UsdLimitCheckClosed` and does not compare amounts. It does not read `maxCostUnits`, approve activation, or authorize a spend.
 - A missing or zero operator cost ceiling is refused. A plan above the concurrency cap is refused. `acceptOperationalRunbook` does not provision workers. `executed`, `provisioned`, and `usdLimitsEvaluated` stay false. `costFieldIsUsdCeiling` stays false.
@@ -88,10 +89,13 @@ Required environment: `TABLE_NAME` (the CLI refuses MemoryStore), `AWS_REGION`,
 (`mainnet` or `testnet4`). On mainnet, also set `QSB_MAINNET_ENABLED` explicitly to
 `"true"` or `"false"`. It must match the deployed value: verify
 `terraform output -raw transactions_enabled` or uncached `GET /api/config`
-(`operationsEnabled`, with `network` equal to `mainnet`). Missing or malformed
+(`operationsEnabled`, with `network` equal to `mainnet`). Always set
+`QSB_OWNER_MAX_ACTIVE_JOBS` to the deployment's `owner_max_active_jobs`: a positive
+integer, or the literal `off` when that variable is null (check `ownerLimits.maxActiveJobs`
+in uncached `GET /api/config`); see [Per-owner limits](#per-owner-limits). Missing or malformed
 values refuse before application imports. Both modes validate the required values before application imports,
 credentials, or database/provider reads and writes. The CLI needs GetItem on job/vault records, transactional PutItem
-on the job, `RECONCILIATION#` and `RECONCILIATION_REQUEST#` audit rows, Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. The CLI never submits or cancels Batch jobs and does not broadcast; the `qsb-operator` session itself has broader deployment and data permissions.
+on the job, `RECONCILIATION#` and `RECONCILIATION_REQUEST#` audit rows (and, when a `--provider-id` decision claims an owner's withdrawal slot, Query on the owner's `JOB#` rows and PutItem on its `LIMIT#ACTIVE_JOBS` row), Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. The CLI never submits or cancels Batch jobs and does not broadcast; the `qsb-operator` session itself has broader deployment and data permissions.
 
 To attach a known provider ID from AWS Batch's console and matching operator logs:
 
@@ -266,6 +270,98 @@ blindly. The 90-second coordinator timeout budgets the CPU export (25 seconds),
 endpoint check (20 seconds), paid POST (20 seconds), and persistence overhead;
 it reduces timeout exposure but does not make a POST and database write atomic.
 
+### Per-owner limits
+
+Three Terraform variables, all off by default, limit one owner for the partner
+phase. They reach the API and coordinator Lambdas only and only add refusals: the
+per-job cap above always applies. See [docs/API.md](API.md#per-owner-limits) for the
+routes and error codes.
+
+**Every limit is per address.** An owner is the address string exactly as the wallet
+signed in, with no normalisation: a differently spelled form of the same wallet
+address is another owner, with its own `OWNER#` partition, slots and GPU budget.
+Without an allowlist, a fresh address gets fresh limits; with one, a partner with N
+listed addresses gets N of each.
+
+**`owner_allowlist`** (`QSB_OWNER_ALLOWLIST`): only listed addresses may register
+vaults, deposit, or create or resume withdrawals. Terraform refuses a list over 2500
+characters (joined with commas), so both Lambdas keep room under their 4 KB
+environment limit and an apply can't update one and fail the other. Before setting or
+shrinking it:
+- **Inventory owners with a confirmed vault or a live withdrawal.** An unlisted owner
+  with a funded vault can't create a withdrawal at all (403), and only that owner's
+  withdrawal can spend the vault, so the funds wait until the owner is listed.
+  Leaving `POST /api/jobs/:id/submit` open only helps an owner whose withdrawal is
+  already solved.
+- **Unlisted owners' live withdrawals pause at their next coordinator tick**, and their
+  executions end. Their running AWS Batch jobs aren't cancelled: that time is already
+  reserved, and they run to completion with nothing polling them. Resume stays
+  refused (403) until the owner is listed again; then resume polls the saved provider
+  IDs. Re-list promptly, while AWS Batch still holds the results (verify its
+  retention).
+
+**`owner_max_active_jobs`** (`QSB_OWNER_MAX_ACTIVE_JOBS`): a withdrawal holds a slot
+only while queued or searching. Pausing it, or its reaching failed,
+awaiting_authorization, submitted or confirmed, frees the slot on that status write.
+The only ways back to queued or searching claim a slot again, in the same transaction
+as that write, through the owner's `LIMIT#ACTIVE_JOBS` row: creation, resume (429
+`owner_active_withdrawal_limit` at the limit, nothing written or started) and an
+operator's provider-id reconciliation of a paused job. The fence row also names the
+last claimant, so a half-visible concurrent claim still counts. Of two claims racing
+for the last slot, one gets a conflict and writes nothing. Withdrawals created before
+the limit was set count too. The coordinator never un-pauses a job, and pause stays
+unrestricted.
+- **Some pauses leave GPU work running.** The limit caps concurrent claims, not
+  instantaneous GPU use. A pause from a disabled deployment, allowlist removal, missing
+  compute configuration or, on the parallel path, a stopped chunk, a failed CPU check
+  or a failed preparation frees the slot but doesn't cancel the chunks already running;
+  they finish with nothing polling them, and the owner may create or resume another
+  withdrawal meanwhile. The overlap is bounded by the chunks in flight at the pause,
+  each at most one `executionTimeoutMs`, and each was charged to the owner's GPU
+  budget before its POST, so total spend stays capped. A user pause cancels them.
+- **Reconciliation.** The reconcile CLI refuses before any write unless
+  `QSB_OWNER_MAX_ACTIVE_JOBS` is the deployed value, a positive integer, or `off`, as
+  above. A `--provider-id` decision on a paused job claims a slot with the attachment;
+  at the limit it refuses with `OwnerActiveWithdrawalLimit` and writes nothing, so pause
+  another of the owner's withdrawals or raise the limit, then retry. With `off` it
+  refuses with `OwnerActiveJobLimitRecorded` if the owner has a `LIMIT#ACTIVE_JOBS`
+  row, since a limit has been in force: check the deployment's value again. If the limit
+  really is off now, delete that row (it only fences claims) and retry. A
+  `--not-submitted` decision leaves the job paused and claims nothing; its resume
+  claims. The claim needs Query, which `qsb-operator` has but the dormant scoped
+  reconcile role (`terraform/policies/operator-reconcile-records.json`) doesn't.
+  Activating that role for reconciliation would need an `OWNER#`-conditioned
+  `dynamodb:Query` added: an IAM change, so warn the AWS administrator first.
+
+**`owner_max_gpu_seconds`** (`QSB_OWNER_MAX_GPU_SECONDS`), at least one submission's
+reservation (`executionTimeoutMs` in `server/gpu-spend.json`, 900 seconds today);
+Terraform refuses less, and the Lambdas treat less as invalid:
+- **IAM sandbox check first.** With this set, the coordinator writes the job row and
+  the owner's `LIMIT#GPU_SECONDS` row in one `TransactWriteItems` of two conditional
+  `OWNER#` Puts. Its `PutItem` grant requires `dynamodb:LeadingKeys`, and whether AWS
+  sets that key for each item of a transaction is unverified; the live sandbox
+  ([APP-ROLE-SANDBOX.md](APP-ROLE-SANDBOX.md)) has only run the API role. Before this
+  variable is ever set, run that transaction as the coordinator role in the sandbox.
+  If it's denied, every paid submission would fail with AccessDenied: nothing is
+  written or sent, but all GPU work stops. Don't set the variable then. The fix is an
+  IAM change, which goes to the AWS administrator first.
+- **Charging.** Before each paid POST, on the one-GPU and the parallel path, the
+  coordinator charges the owner in the same conditional write as the job's
+  reservation: what the job has reserved beyond its `ownerGpuChargedSeconds`. A job
+  that started before the limit was set is charged its earlier reservations at its
+  next submission; withdrawals that finished earlier are never charged. Charges are
+  never refunded, whatever the outcome.
+- **At the budget** the coordinator behaves as at the per-job cap: it starts no new
+  paid submission, lets running chunks finish, and pauses with "Owner GPU-time budget
+  reached". It never touches or resubmits in-flight work. Job creation is refused
+  once less than one submission's reservation is left, and fails with a 409 if
+  another withdrawal charges the budget in between, so no inputs are reserved to a
+  withdrawal that can't search.
+
+To give an owner more GPU time, raise the variable and apply, then resume their
+paused withdrawals. Lowering a limit below current use refuses new work only. Record
+any change in the deployment record, as for the mainnet switches.
+
 ### App-role IAM merge gate
 
 See [APP-ROLE-SANDBOX.md](APP-ROLE-SANDBOX.md) for the reproducible 60-decision
@@ -315,6 +411,8 @@ exported credentials out of the parent shell; never print or share credentials:
   export QSB_NETWORK='mainnet'
   # Set explicitly to the verified deployed switch; false refuses mainnet polling.
   export QSB_MAINNET_ENABLED='false'
+  # Set explicitly to the deployed owner_max_active_jobs, or off when it is null.
+  export QSB_OWNER_MAX_ACTIVE_JOBS='off'
   npx tsx scripts/reconcile-submission.ts OWNER JOB --provider-id PROVIDER_ID --operator OPERATOR --evidence audit://incident/reference
 )
 ```

@@ -218,3 +218,5 @@ historical descriptors remain available for inspection. Publication/enrollment
 and live endpoint-response verification remain prerequisites before #22.
 
 Mainnet funding/search is controlled by `mainnet_enabled` (default false), wired identically to API and coordinator. Exact submission additionally needs `exact_submit_enabled` (default false). Enablement requires explicit issue #22 approval; no source toggle or frontend rebuild is needed. See [switch matrix and deployment checks](../docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches).
+
+`owner_allowlist`, `owner_max_active_jobs` and `owner_max_gpu_seconds` (default: off) set the partner-phase [per-owner limits](../docs/OPERATIONAL-RUNBOOK.md#per-owner-limits) on the API and coordinator. They add no IAM grant and enable nothing.
