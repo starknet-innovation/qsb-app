@@ -18,10 +18,30 @@ def role(name, trust=OPERATOR):
         'assume_role_policy': json.dumps({'Statement': [{'Principal': {'AWS': [trust]}}]})}}
 
 
+def workflow(retry=None, catch=None, fail=None):
+    """The parts of terraform/workflow.tf's definition the checker reads."""
+    task = {'Type': 'Task', 'Resource': 'arn:aws:lambda:eu-west-1:123456789012:function:qsb-app-coordinator',
+            'Retry': [{'ErrorEquals': ['Lambda.TooManyRequestsException'], 'IntervalSeconds': 3, 'BackoffRate': 2,
+                       'MaxAttempts': 6, 'JitterStrategy': 'FULL'}],
+            'Catch': [{'ErrorEquals': ['States.ALL'], 'ResultPath': '$.failure', 'Next': 'NeedsOperatorAttention'}],
+            'Next': 'SearchFinished'}
+    for key, value in (('Retry', retry), ('Catch', catch)):
+        if value == 'absent':
+            task.pop(key)
+        elif value is not None:
+            task[key] = value
+    states = {'CoordinateSearch': task, 'NeedsOperatorAttention': {'Type': 'Fail', 'Error': 'WorkflowInterrupted'}}
+    if fail == 'absent':
+        states.pop('NeedsOperatorAttention')
+    elif fail is not None:
+        states['NeedsOperatorAttention'] = fail
+    return json.dumps({'StartAt': 'CoordinateSearch', 'States': states})
+
+
 def plan():
     rows = [{'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed', 'values': {'name': 'qsb-app-records'}},
             {'type': 'aws_s3_bucket', 'name': 'frontend', 'mode': 'managed', 'values': {}},
-            {'type': 'aws_sfn_state_machine', 'name': 'withdrawal', 'mode': 'managed', 'values': {}}]
+            {'type': 'aws_sfn_state_machine', 'name': 'withdrawal', 'mode': 'managed', 'values': {'definition': workflow()}}]
     # Like the real stack: api and coordinator read the table; the reference Lambda has no environment.
     rows += [{'type': 'aws_lambda_function', 'name': f, 'mode': 'managed',
               'values': {'function_name': f'qsb-app-{f}', 'environment': [{'variables': {'TABLE_NAME': 'qsb-app-records'}}]}}
@@ -239,6 +259,42 @@ class DeployChecks(unittest.TestCase):
             with self.subTest(action=action):
                 self.refused(self.with_miner_credential(grant={'Effect': 'Allow', 'Action': action, 'Resource': '*'},
                                                         policy_name='logs'), 'Only the miner_credential policy')
+
+    def with_workflow(self, **changes):
+        doc = plan()
+        machine = next(r for r in doc['planned_values']['root_module']['resources'] if r['type'] == 'aws_sfn_state_machine')
+        machine['values']['definition'] = workflow(**changes)
+        return doc
+
+    def test_only_a_throttled_coordinator_invoke_is_retried(self):
+        throttled = {'ErrorEquals': ['Lambda.TooManyRequestsException'], 'MaxAttempts': 6}
+        for retry in ('absent', [], [{'ErrorEquals': ['States.ALL'], 'MaxAttempts': 6}],
+                      [{'ErrorEquals': ['States.TaskFailed'], 'MaxAttempts': 6}],
+                      [{'ErrorEquals': ['Lambda.TooManyRequestsException', 'Lambda.ServiceException'], 'MaxAttempts': 6}],
+                      [{'ErrorEquals': ['TooManyRequestsException'], 'MaxAttempts': 6}],
+                      [throttled, {'ErrorEquals': ['States.Timeout'], 'MaxAttempts': 1}],
+                      [{'ErrorEquals': ['Lambda.TooManyRequestsException']}],
+                      [dict(throttled, MaxAttempts=99999999)], [dict(throttled, MaxAttempts=0)],
+                      [dict(throttled, MaxAttempts=True)]):
+            with self.subTest(retry=retry):
+                self.refused(self.with_workflow(retry=retry), 'retry only Lambda.TooManyRequestsException')
+
+    def test_every_other_coordinator_error_needs_an_operator(self):
+        for catch in ('absent', [], [{'ErrorEquals': ['States.ALL'], 'ResultPath': '$.failure', 'Next': 'SearchFinished'}],
+                      [{'ErrorEquals': ['Lambda.TooManyRequestsException'], 'ResultPath': '$.failure',
+                        'Next': 'NeedsOperatorAttention'}]):
+            with self.subTest(catch=catch):
+                self.refused(self.with_workflow(catch=catch), 'must end in NeedsOperatorAttention')
+        doc = plan()
+        next(r for r in doc['planned_values']['root_module']['resources']
+             if r['type'] == 'aws_sfn_state_machine')['values'].pop('definition')
+        self.refused(doc, 'definition must be known at plan')
+
+    def test_needs_operator_attention_stays_a_fail_state(self):
+        # Otherwise an unreconciled outcome would end as a succeeded execution and the failure alarm would stay silent.
+        for fail in ('absent', {'Type': 'Pass', 'End': True}, {'Type': 'Succeed'}):
+            with self.subTest(fail=fail):
+                self.refused(self.with_workflow(fail=fail), 'NeedsOperatorAttention must stay a Fail state')
 
     def test_flags_need_a_saved_plan(self):
         events = [{'type': 'test_run', '@testrun': 'baseline'}, {'type': 'test_summary', 'test_summary': {'status': 'pass'}}]
