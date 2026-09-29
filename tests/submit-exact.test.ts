@@ -317,6 +317,40 @@ describe("submitExact durable one-shot submission", () => {
       expect(f.miner.submit).not.toHaveBeenCalled();
     },
   );
+  it("resolves two racing submits exactly as without the recorder: one POST, the loser reads the winner", async () => {
+    const race = async (recording: boolean) => {
+      const f = await fixture();
+      const store = recording ? recordOwnerEvents(f.store) : f.store;
+      // Both pass every check before either writes, so the second intent transaction is refused.
+      let arrived = 0;
+      let release!: () => void;
+      const barrier = new Promise<void>((resolve) => (release = resolve));
+      f.consensus.verify.mockImplementation(async () => {
+        if (++arrived === 2) release();
+        await barrier;
+      });
+      const transactions = vi.spyOn(f.store, "atomicPut");
+      const reads = vi.spyOn(f.store, "get");
+      const results = await Promise.all([
+        submitExact(f.stored.owner, f.stored.id, f.raw, { ...f.deps, store }),
+        submitExact(f.stored.owner, f.stored.id, f.raw, { ...f.deps, store }),
+      ]);
+      const settled = await Promise.allSettled(transactions.mock.results.map((r) => r.value));
+      return {
+        results,
+        posts: f.miner.submit.mock.calls.length,
+        refused: settled.map((r) => r.status),
+        intentReads: reads.mock.calls.filter(([, sk]) => sk === `TX#${f.id}`).length,
+        events: [...f.store.rows.values()].filter((row) => row.sk.startsWith("EVENT#")).length,
+      };
+    };
+    const main = await race(false),
+      recording = await race(true);
+    expect(main.refused).toEqual(["fulfilled", "rejected"]);
+    expect({ ...recording, events: 0 }).toEqual({ ...main, events: 0 });
+    expect(main.posts).toBe(1);
+    expect(recording.events).toBe(1);
+  });
   it("records withdrawal.submitted in the intent's transaction, before the POST, once", async () => {
     const f = await fixture();
     const store = recordOwnerEvents(f.store);

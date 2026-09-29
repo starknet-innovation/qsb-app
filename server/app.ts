@@ -1,7 +1,7 @@
 import { deployedSolver, deployedSolverId } from "./solver-deployment";
 import { observeWithdrawal } from "./withdrawal-status";
 import { submitExact, SubmitDisabled } from "./submit-exact";
-import { exportFunding, submitFunding } from "./submit-funding";
+import { exportFunding, submitFunding, type FundingDependencies } from "./submit-funding";
 import {
   CoreConsensus,
   ConsensusError,
@@ -20,6 +20,7 @@ import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Verifier } from "bip322-js";
 import { z } from "zod";
 import {
@@ -61,6 +62,8 @@ import {
   eventQuery,
   listOwnerEvents,
   recordOwnerEvents,
+  type OwnerEventStore,
+  type StatusMemory,
 } from "./owner-events";
 import {
   WebhookLimitError,
@@ -106,8 +109,22 @@ export function createApp(
     webhooks?: Partial<Delivery>;
   } = {},
 ) {
-  // Routes write through this, so withdrawal and deposit status changes become owner events.
-  const store = recordOwnerEvents(records);
+  // Routes write through `store`, so withdrawal and deposit status changes become owner
+  // events. Each request gets its own recorder, so its events and webhook work stay its own;
+  // only the memory of row statuses by version, which are facts, is shared.
+  const memory: StatusMemory = new Map();
+  const requestEvents = new AsyncLocalStorage<OwnerEventStore>();
+  const current = () => requestEvents.getStore() ?? recordOwnerEvents(records, memory);
+  const store: OwnerEventStore = {
+    get: (pk, sk) => current().get(pk, sk),
+    put: (row, expected, options) => current().put(row, expected, options),
+    delete: (pk, sk, expected) => current().delete(pk, sk, expected),
+    list: (pk, prefix) => current().list(pk, prefix),
+    reservationRows: () => current().reservationRows(),
+    atomicPut: (writes) => current().atomicPut(writes),
+    recordDropped: (owner, vaultId) => current().recordDropped(owner, vaultId),
+    settle: (options) => current().settle(options),
+  };
   const delivery: Delivery = {
     transport: dependencies.webhooks?.transport ?? httpsTransport,
     resolve: dependencies.webhooks?.resolve ?? systemResolver,
@@ -157,9 +174,10 @@ export function createApp(
   // Nothing here can change the response.
   app.use("*", async (c, next) => {
     const started = Date.now();
-    await next();
+    const events = recordOwnerEvents(records, memory);
+    await requestEvents.run(events, next);
     const owner = c.get("owner");
-    await store.settle({
+    await events.settle({
       delivery,
       owners: owner ? [owner] : [],
       budgetMs: Math.min(SETTLE_CAP_MS, REQUEST_BUDGET_MS - (Date.now() - started)),
@@ -338,6 +356,35 @@ export function createApp(
       return c.json({ error: "Webhook not found.", code: "webhook_not_found" }, 404);
     return c.json({ deleted: true });
   });
+  /**
+   * submitFunding, watching the miner's answers without changing them. When the resend logic
+   * finds the miner no longer has a submitted deposit, and the resend isn't accepted either,
+   * the deposit is recorded as dropped after the decision is made.
+   */
+  async function submitDeposit(owner: string, vaultId: string, raw: string, amount: bigint) {
+    const observed = { unknown: false, accepted: false };
+    const watched: FundingDependencies["miner"] = {
+      credential: () => miner.credential(),
+      seen: async (txid, credential) => {
+        const known = await miner.seen(txid, credential);
+        if (!known) observed.unknown = true;
+        return known;
+      },
+      submitFunding: async (rawTx, permit, credential) => {
+        const response = await miner.submitFunding(rawTx, permit, credential);
+        observed.accepted = true;
+        return response;
+      },
+    };
+    const result = await submitFunding(owner, vaultId, raw, amount, {
+      store,
+      miner: watched,
+      enabled: dependencies.exactSubmit ?? exactSubmitEnabled(),
+    });
+    if (observed.unknown && !observed.accepted && result.vault.status === "submitted")
+      await store.recordDropped(owner, vaultId);
+    return result;
+  }
   app.get("/api/vaults", async (c) => {
     const rows = await store.list(`OWNER#${c.get("owner")}`, "VAULT#");
     return c.json({
@@ -471,12 +518,11 @@ export function createApp(
       })
       .strict()
       .parse(await c.req.json());
-    const result = await submitFunding(
+    const result = await submitDeposit(
       c.get("owner"),
       c.req.param("id"),
       body.rawTxHex,
       BigInt(body.amount),
-      { store, miner, enabled: dependencies.exactSubmit ?? exactSubmitEnabled() },
     );
     // 201 for every outcome: `submission` says whether MARA accepted, refused or is unknown.
     return c.json(result, 201);
@@ -513,12 +559,11 @@ export function createApp(
     const vault = row.vault as PublicVault;
     if (!vault.funding || typeof row.fundingRawTxHex !== "string" || !row.fundingRawTxHex)
       return c.json({ error: "This vault has no stored Slipstream deposit to resend." }, 409);
-    const result = await submitFunding(
+    const result = await submitDeposit(
       c.get("owner"),
       c.req.param("id"),
       row.fundingRawTxHex,
       BigInt(vault.funding.value),
-      { store, miner, enabled: dependencies.exactSubmit ?? exactSubmitEnabled() },
     );
     return c.json(result, 201);
   });

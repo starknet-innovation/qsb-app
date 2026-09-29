@@ -9,14 +9,20 @@ vi.mock("../src/lib/releases/registry.generated", async () => {
 });
 import { createApp } from "../server/app";
 import { Conflict, MemoryStore } from "../server/store";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   EVENT_SETTLE_MS,
+  EVENT_WRITE_TIMEOUT_MS,
   listOwnerEvents,
   recordOwnerEvents,
   type OwnerEvent,
 } from "../server/owner-events";
+import { inventoryRows } from "../server/runtime/storage-authority";
+import { inventorySnapshot } from "../scripts/storage-inventory";
 import {
   FAILING_AFTER,
+  LEASE_MS,
   RETRY_DELAYS_MS,
   deliverDue,
   enqueueDeliveries,
@@ -241,37 +247,199 @@ describe("owner event log", () => {
     expect(eventRows(inner)).toHaveLength(1);
   });
 
-  it("returns from a write without waiting for its event, and bounds the wait at settle", async () => {
+  const job = { pk: "OWNER#a", sk: "JOB#j", version: 0, job: { id: "j", status: "queued", stage: "pinning" } };
+  it("writes the event before put returns, so nothing is left running after a request or tick", async () => {
     const inner = new MemoryStore();
     const store = recordOwnerEvents(inner);
     const put = inner.put.bind(inner);
-    vi.spyOn(inner, "put").mockImplementation((row, expected) =>
-      row.sk.startsWith("EVENT#") ? new Promise(() => {}) : put(row, expected),
-    );
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    await store.put({ pk: "OWNER#a", sk: "JOB#j", version: 0, job: { id: "j", status: "queued", stage: "pinning" } });
-    expect((await inner.get("OWNER#a", "JOB#j"))?.job).toMatchObject({ status: "queued" });
-    const started = Date.now();
-    await store.settle({ budgetMs: 200 });
-    expect(Date.now() - started).toBeLessThan(1000);
-  });
-
-  it("keeps the caller's write when the event write fails, and records the event at settle", async () => {
-    const inner = new MemoryStore();
-    const store = recordOwnerEvents(inner);
-    const put = inner.put.bind(inner);
-    let failing = true;
     vi.spyOn(inner, "put").mockImplementation(async (row, expected) => {
-      if (row.sk.startsWith("EVENT#") && failing) throw new Error("throttled");
+      if (row.sk.startsWith("EVENT#")) await new Promise((resolve) => setTimeout(resolve, 50));
       return put(row, expected);
     });
+    await store.put(job);
+    expect(eventRows(inner)).toHaveLength(1);
+  });
+
+  it("cancels an event write that runs past its timeout, and keeps the caller's write", async () => {
+    const inner = new MemoryStore();
+    const store = recordOwnerEvents(inner);
+    const put = inner.put.bind(inner);
+    const signals: AbortSignal[] = [];
+    vi.spyOn(inner, "put").mockImplementation((row, expected, options) => {
+      if (!row.sk.startsWith("EVENT#")) return put(row, expected);
+      signals.push(options!.signal!);
+      return new Promise((_, reject) => options!.signal!.addEventListener("abort", () => reject(new Error("AbortError"))));
+    });
     vi.spyOn(console, "error").mockImplementation(() => {});
-    await store.put({ pk: "OWNER#a", sk: "JOB#j", version: 0, job: { id: "j", status: "queued", stage: "pinning" } });
+    const started = Date.now();
+    await store.put(job);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(EVENT_WRITE_TIMEOUT_MS - 50);
+    expect(Date.now() - started).toBeLessThan(EVENT_WRITE_TIMEOUT_MS + 500);
+    expect(signals).toHaveLength(1);
+    expect(signals[0].aborted).toBe(true);
+    expect((await inner.get("OWNER#a", "JOB#j"))?.job).toMatchObject({ status: "queued" });
+  });
+
+  it("drops a failed event write and keeps the caller's write", async () => {
+    const inner = new MemoryStore();
+    const store = recordOwnerEvents(inner);
+    const put = inner.put.bind(inner);
+    vi.spyOn(inner, "put").mockImplementation(async (row, expected) => {
+      if (row.sk.startsWith("EVENT#")) throw new Error("throttled");
+      return put(row, expected);
+    });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    await store.put(job);
+    await store.settle();
     expect((await inner.get("OWNER#a", "JOB#j"))?.job).toMatchObject({ status: "queued" });
     expect(eventRows(inner)).toHaveLength(0);
-    failing = false;
+    expect(logged.mock.calls.flat().join(" ")).not.toContain("throttled");
+  });
+
+  it("keeps one request's events and webhook work out of another owner's request", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // This route takes longer than the request budget, so its settle() does no webhook work.
+    const chain = {
+      status: vi.fn(async () => {
+        vi.setSystemTime(Date.now() + 30_000);
+        return { confirmed: true, confirmations: 3 };
+      }),
+    };
+    const f = await setup({ chain: chain as never });
+    const a = await f.as("owner-a"),
+      b = await f.as("owner-b");
+    await a.post("/api/webhooks", { url: "https://hooks.example.com/a" });
+    const vault = { id: crypto.randomUUID(), network: "mainnet", status: "confirmed" } as PublicVault;
+    const job = await seedJob(f.store, "owner-a", { status: "submitted", stage: "verification", vaultId: vault.id, txid: "ab".repeat(32) });
+    await f.store.put({ pk: "OWNER#owner-a", sk: `VAULT#${vault.id}`, version: 0, vault });
+    await f.store.put({ pk: "OWNER#owner-a", sk: `TX#${job.txid}`, version: 0, txid: job.txid, jobId: job.id });
+    expect((await a.get(`/api/jobs/${job.id}/status`)).status).toBe(200);
+    expect((await b.get("/api/webhooks")).status).toBe(200);
+    expect(f.hooks.transport).not.toHaveBeenCalled();
+    expect((await recorded(f.store, "owner-a")).map((e) => e.type)).toEqual(["withdrawal.confirmed", "deposit.spent"]);
+  });
+
+  it("returns the same result as before when a job-creation transaction with an event is refused", async () => {
+    vi.stubEnv("SOLVER_RELEASE_ID", servedFixture.id);
+    vi.stubEnv("WORKFLOW_ARN", "arn:aws:states:eu-west-1:123456789012:stateMachine:test");
+    const payment = btc.p2wpkh(hex.decode("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"));
+    const owner = payment.address!;
+    const funding = { txid: "11".repeat(32), vout: 0, value: "1000" };
+    const run = async (plain: boolean) => {
+      vi.restoreAllMocks();
+      const started = vi.spyOn(SFNClient.prototype, "send").mockResolvedValue({} as never);
+      // Both requests pass their chain checks before either writes, so they race to commit.
+      let arrived = 0;
+      let release!: () => void;
+      const barrier = new Promise<void>((resolve) => (release = resolve));
+      const unspent = vi.fn(async () => {
+        if (++arrived === 2) release();
+        await barrier;
+        return {};
+      });
+      const f = await setup({ chain: { unspent } as never });
+      const records = plain ? f.store : undefined;
+      const a = await f.as(owner);
+      const vault = { ...fixtureVault, id: "00000000-0000-4000-8000-00000000000a", status: "confirmed", funding };
+      await f.store.put({ pk: `OWNER#${owner}`, sk: `VAULT#${vault.id}`, version: 0, vault });
+      const manifest = { vaultId: vault.id, funding, helper: { txid: "22".repeat(32), vout: 0, value: "500" }, destination: owner, outputScript: hex.encode(payment.script), outputValue: "1200", fee: "300", idempotencyKey: "00000000-0000-4000-8000-00000000000b", costAccepted: true };
+      const app = plain ? createApp(records!, { enabled: true, chain: { unspent } as never }) : f.app;
+      const post = () =>
+        app.request("/api/jobs", { method: "POST", headers: { Authorization: `Bearer ${tokenFor(owner)}`, "Content-Type": "application/json" }, body: JSON.stringify(manifest) });
+      const responses = await Promise.all([post(), post()]);
+      const retry = await post();
+      const strip = (body: any) => (body.job ? { ...body, job: { ...body.job, createdAt: 0, updatedAt: 0 } } : body);
+      return {
+        statuses: responses.map((r) => r.status).sort(),
+        bodies: (await Promise.all(responses.map((r) => r.json()))).map(strip).sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))),
+        retry: [retry.status, strip(await retry.json())],
+        workflows: started.mock.calls.length,
+        events: eventRows(f.store).length,
+      };
+    };
+    const main = await run(true);
+    const recording = await run(false);
+    expect(main.statuses).toEqual([201, 409]);
+    expect({ ...recording, events: 0 }).toEqual({ ...main, events: 0 });
+    // The plain store here stands for main: it records nothing. The recording app records one.
+    expect(recording.events).toBe(1);
+  });
+});
+
+describe("the resend path", () => {
+  it("records a submitted deposit the miner no longer has, after the resend decides, and nothing else changes", async () => {
+    const address = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20) });
+    const scriptHex = "51".repeat(100);
+    const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true, version: 2 });
+    tx.addInput({ txid: new Uint8Array(32).fill(3), index: 0, sequence: 0xfffffffe });
+    tx.addOutput({ amount: 50_000n, script: hex.decode(scriptHex) });
+    const raw = hex.encode(tx.toBytes(true, false));
+    const run = async (outcome: "refused" | "accepted" | "known") => {
+      const miner = new Slipstream("https://slipstream.test", async () => undefined);
+      const f = await setup({ miner, exactSubmit: true });
+      const a = await f.as(address);
+      const id = crypto.randomUUID();
+      await f.store.put({ pk: `OWNER#${address}`, sk: `VAULT#${id}`, version: 0, fundingRawTxHex: raw, fundingSubmission: "submitted", vault: {
+        id, scriptHex, config: "A", publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
+        scriptHash: createHash("sha256").update(Buffer.from(scriptHex, "hex")).digest("hex"), paymentAddress: address, network: "mainnet", status: "submitted",
+        funding: { txid: transactionId(raw), vout: 0, value: "50000" },
+      } });
+      vi.spyOn(miner, "credential").mockResolvedValue({} as never);
+      const seen = vi.spyOn(miner, "seen").mockResolvedValue(outcome === "known");
+      const submit = vi.spyOn(miner, "submitFunding").mockImplementation(async () => {
+        if (outcome === "refused") throw new MinerRejection("txn-mempool-conflict");
+        return { status: "success" as const, message: transactionId(raw) };
+      });
+      const response = await a.post(`/api/vaults/${id}/fund/resubmit`);
+      const { fundingResubmittedAt, ...row } = (await f.store.get(`OWNER#${address}`, `VAULT#${id}`))!;
+      return { status: response.status, body: await response.json(), row: { ...row, version: 0 }, seen: seen.mock.calls.length, posts: submit.mock.calls.length, events: (await recorded(f.store, address)).map((e) => [e.type, e.subjectId === id, e.status]) };
+    };
+    const refused = await run("refused");
+    expect(refused).toMatchObject({ status: 201, body: { submission: "submitted", vault: { status: "submitted" } }, seen: 1, posts: 1, events: [["deposit.dropped", true, "dropped"]] });
+    expect(refused.row).toMatchObject({ fundingSubmission: "submitted", vault: { status: "submitted" } });
+    expect((await run("accepted")).events).toEqual([]);
+    expect(await run("known")).toMatchObject({ posts: 0, events: [] });
+  });
+});
+
+describe("operator notes", () => {
+  it("lists every row the reconcile CLIs now write, and who can read webhook secrets", async () => {
+    const runbook = readFileSync(path.join(process.cwd(), "docs/OPERATIONAL-RUNBOOK.md"), "utf8");
+    // What a reconcile writes through the recorder beyond its own rows.
+    const inner = new MemoryStore();
+    await registerWebhook(inner, "owner-a", { url: "https://hooks.example.com/" }, receiver().resolve);
+    const store = recordOwnerEvents(inner);
+    const touched = new Set<string>();
+    for (const method of ["put", "get", "atomicPut"] as const) {
+      const original = (inner[method] as (...args: any[]) => Promise<any>).bind(inner);
+      vi.spyOn(inner, method).mockImplementation((async (...args: any[]) => {
+        const rows = method === "atomicPut" ? args[0].map((w: any) => w.row) : method === "put" ? [args[0]] : [{ sk: args[1] }];
+        for (const row of rows) touched.add(String(row.sk).split("#")[0]);
+        return original(...args);
+      }) as never);
+    }
+    await store.atomicPut([{ row: { pk: "OWNER#owner-a", sk: "JOB#j", version: 0, job: { id: "j", status: "confirmed", stage: "verification" } } }]);
     await store.settle();
-    expect((await recorded(inner, "a")).map((e) => e.type)).toEqual(["withdrawal.queued"]);
+    for (const kind of [...touched].filter((k) => k !== "JOB")) expect(runbook).toContain(kind === "EVENT" ? "`EVENT#`" : `\`${kind}\``);
+    const section = runbook.slice(runbook.indexOf("### Webhook signing secrets"));
+    expect(section).toContain("coordinator role");
+    expect(readFileSync(path.join(process.cwd(), "terraform/data.tf"), "utf8")).toMatch(/point_in_time_recovery \{ enabled = true \}/);
+    expect(section).toContain("point-in-time recovery");
+    expect(section).toContain("doesn't purge");
+  });
+
+  it("inventories event and webhook rows, leaving the signing secret out rather than refusing", async () => {
+    const store = new MemoryStore();
+    const { secret } = await registerWebhook(store, "owner-a", { url: "https://hooks.example.com/" }, receiver().resolve);
+    await recordOwnerEvents(store).put({ pk: "OWNER#owner-a", sk: "JOB#j", version: 0, job: { id: "j", status: "queued", stage: "pinning" } });
+    const rows = [...store.rows.values()];
+    const report = inventoryRows(rows);
+    expect(report.counts).toMatchObject({ operational: 2, job: 1, unclassified: 0 });
+    expect(report.unclassifiedKeys).toEqual([]);
+    expect(JSON.stringify(inventorySnapshot({ rows }))).not.toContain(secret);
+    expect(JSON.stringify(rows)).toContain(secret);
+    // Only that field is dropped: anything else credential-shaped still refuses.
+    expect(() => inventoryRows([...rows, { pk: "OWNER#owner-a", sk: "WEBHOOKS", version: 1, hooks: [], apiKey: "x" }])).toThrow(/CredentialMaterialRejected/);
   });
 });
 
@@ -374,6 +542,19 @@ describe("webhooks", () => {
     expect((await recorded(f.store, "owner-a")).map((e) => e.id)).toEqual([event.id]);
   });
 
+  it("checks every resolved address and connects to an IPv4 one", async () => {
+    const f = await setup();
+    const a = await f.as("owner-a");
+    f.hooks.resolve.mockResolvedValue([
+      { address: "2606:4700:4700::1111", family: 6 },
+      { address: PUBLIC, family: 4 },
+    ]);
+    await a.post("/api/webhooks", { url: "https://dual.example.com/" });
+    await a.post(`/api/jobs/${(await seedJob(f.store, "owner-a")).id}/pause`);
+    expect(f.hooks.calls[0]).toMatchObject({ hostname: "dual.example.com", address: PUBLIC, family: 4 });
+    expect(f.hooks.resolve).toHaveBeenLastCalledWith("dual.example.com", expect.any(Number));
+  });
+
   it("delivers only subscribed event types", async () => {
     const f = await setup();
     const a = await f.as("owner-a");
@@ -422,7 +603,7 @@ describe("webhook retries", () => {
     await registerWebhook(store, "owner-a", { url: "https://hooks.example.com/" }, hooks.resolve);
     const event = { id: `evt_${"a".repeat(32)}`, type: "withdrawal.searching", subjectId: "j", status: "searching", at: new Date().toISOString() } as OwnerEvent;
     await enqueueDeliveries(store, "owner-a", [event, event]);
-    const flush = () => deliverDue(store, "owner-a", hooks, Date.now() + 3000);
+    const flush = () => deliverDue(store, "owner-a", hooks, { deadline: Date.now() + 3000 });
     const hook = async () => ((await store.get("OWNER#owner-a", "WEBHOOKS"))!.hooks as any[])[0];
     return { store, hooks, flush, hook, event };
   }
@@ -453,6 +634,30 @@ describe("webhook retries", () => {
     await enqueueDeliveries(f.store, "owner-a", [{ ...f.event, id: `evt_${"b".repeat(32)}` }]);
     await f.flush();
     expect(f.hooks.transport).toHaveBeenCalledTimes(FAILING_AFTER);
+    expect((await f.store.get("OWNER#owner-a", "WEBHOOKS"))!.pending).toEqual([]);
+  });
+
+  it("a round that outlived its lease leaves a delivery another round has claimed alone", async () => {
+    const f = await queued();
+    const answers: ((status: number) => void)[] = [];
+    f.hooks.transport.mockImplementation(() => new Promise((resolve) => answers.push((status) => resolve({ status }))));
+    const stale = f.flush();
+    await vi.waitFor(() => expect(answers).toHaveLength(1));
+    // Frozen past its lease: another round claims the same delivery and is still sending it.
+    vi.setSystemTime(Date.now() + LEASE_MS + 1);
+    const fresh = f.flush();
+    await vi.waitFor(() => expect(answers).toHaveLength(2));
+    answers[0](500);
+    await stale;
+    const [pending] = (await f.store.get("OWNER#owner-a", "WEBHOOKS"))!.pending as any[];
+    expect(pending.nextAt).toBeGreaterThan(Date.now());
+    expect(pending.attempts).toBe(0);
+    expect(await f.hook()).toMatchObject({ failures: 0 });
+    // So a third round still doesn't send it again.
+    await f.flush();
+    expect(f.hooks.transport).toHaveBeenCalledTimes(2);
+    answers[1](200);
+    await fresh;
     expect((await f.store.get("OWNER#owner-a", "WEBHOOKS"))!.pending).toEqual([]);
   });
 

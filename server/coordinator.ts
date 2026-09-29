@@ -8,7 +8,7 @@ import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
 import { chain } from "./chain";
 import { store as records, type Store } from "./store";
-import { recordOwnerEvents, SETTLE_CAP_MS } from "./owner-events";
+import { recordOwnerEvents } from "./owner-events";
 import { httpsTransport, systemResolver } from "./webhook-transport";
 import { validationTick } from "./validation-search";
 import { configuredCompute, computeConfigured } from "./compute-provider";
@@ -36,7 +36,14 @@ async function cpu(payload: unknown) {
     throw new Error("ReferenceVerificationFailed");
   return JSON.parse(Buffer.from(response.Payload).toString());
 }
-/** Webhook work never runs into the Lambda timeout: it stops this long before. */
+/**
+ * Webhook work after a tick stays short, since ticks share a small reserved concurrency:
+ * deliveries only with ample Lambda time left, within a small budget.
+ */
+const TICK_DELIVERY_BUDGET_MS = 2000;
+const TICK_REQUEST_TIMEOUT_MS = 1000;
+const TICK_DELIVERY_NEEDS_MS = 30_000;
+/** Queuing webhooks for this tick's events stops this long before the Lambda timeout. */
 const TIMEOUT_MARGIN_MS = 15_000;
 // Only identifiers enter workflow history. Recovery secrets never enter AWS.
 export async function handler(
@@ -65,8 +72,9 @@ export async function handler(
     const remaining = context?.getRemainingTimeInMillis?.() ?? Infinity;
     await store.settle({
       delivery: { transport: httpsTransport, resolve: systemResolver },
-      owners: [event.owner],
-      budgetMs: Math.min(SETTLE_CAP_MS, remaining - TIMEOUT_MARGIN_MS),
+      owners: remaining >= TICK_DELIVERY_NEEDS_MS ? [event.owner] : [],
+      budgetMs: Math.min(TICK_DELIVERY_BUDGET_MS, remaining - TIMEOUT_MARGIN_MS),
+      requestTimeoutMs: TICK_REQUEST_TIMEOUT_MS,
     });
   }
 }

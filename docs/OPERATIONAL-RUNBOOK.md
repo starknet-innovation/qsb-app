@@ -83,7 +83,7 @@ Required environment: `TABLE_NAME` (the CLI refuses MemoryStore), `AWS_REGION`,
 (`operationsEnabled`, with `network` equal to `mainnet`). Missing or malformed
 values refuse before application imports. Both modes validate the required values before application imports,
 credentials, or database/provider reads and writes. The CLI needs GetItem on job/vault records, transactional PutItem
-on the job, `RECONCILIATION#` and `RECONCILIATION_REQUEST#` audit rows, Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. The CLI never submits or cancels Batch jobs and does not broadcast; the `qsb-operator` session itself has broader deployment and data permissions.
+on the job, `RECONCILIATION#` and `RECONCILIATION_REQUEST#` audit rows and the owner's `EVENT#` row, GetItem and PutItem on the owner's `WEBHOOKS` row (to queue webhooks, never to send them), Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. The CLI never submits or cancels Batch jobs and does not broadcast; the `qsb-operator` session itself has broader deployment and data permissions.
 
 To attach a known provider ID from AWS Batch's console and matching operator logs:
 
@@ -342,7 +342,11 @@ replacement bytes for the vault.
    ```
 
    This command records a conditional observation of the existing original
-   intent. It performs chain/miner GETs and OWNER-row database writes only.
+   intent. It performs chain/miner GETs and OWNER-row database writes only:
+   transactional PutItem on the `TX#` and `JOB#` rows and the owner's `EVENT#`
+   row, then GetItem and PutItem on the owner's `WEBHOOKS` row to queue
+   webhooks (they are sent by the API or coordinator, never from the operator's
+   machine).
    It takes no transaction bytes, new signature, provider ID, retry or submit
    option. It does not need a Runpod endpoint or provider secret. Miner status
    authentication, if required by the deployment, uses the service's configured
@@ -362,11 +366,37 @@ replacement bytes for the vault.
 
 See [EXACT-SUBMIT.md](EXACT-SUBMIT.md) for byte binding and uncertainty semantics.
 
+Each transactional Put is authorized as `dynamodb:PutItem` with its own leading
+key, so the `EVENT#` row needs no grant beyond `OWNER#*` PutItem. That is AWS's
+per-item authorization of TransactWriteItems; verify it against the current AWS
+documentation before relying on a narrower policy.
+
 The withdrawal API Lambda has a 120-second timeout; API Gateway still returns
 a timeout after its 30-second integration budget. A caller timeout does not stop
 an already running Lambda or prove the miner never received the POST. Treat it as
 an uncertain withdrawal and follow the TX# observation procedure above. Do not
 retry the POST or reset its durable intent.
+
+### Webhook signing secrets
+
+Each owner's `OWNER#<address>` / `WEBHOOKS` row holds the signing secret of each
+registered webhook in plaintext, because HMAC signing needs it (see
+[API.md](API.md)). Handle it as a credential:
+
+- Readers: the API role, the coordinator role (its GetItem is not
+  prefix-restricted) and any operator session with table read access.
+- Backups: point-in-time recovery is on for the table, so a secret stays in its
+  backups until they age out of the recovery window (35 days unless the table is
+  configured shorter; check the table's setting). Deleting a webhook doesn't purge
+  backups. Treat a restore or backup export as containing live secrets.
+- Exports: `npm run inventory:storage` drops `hooks[].secret` before it checks a
+  snapshot for credentials. Any other export or copy of the table must drop that
+  field too. Never paste a `WEBHOOKS` row into an issue or log.
+- Rotation: the owner deletes the webhook and registers it again.
+- Follow-up, not built: envelope encryption with KMS or a Secrets Manager key
+  would keep plaintext secrets out of the table and its backups. It needs new IAM
+  grants for the API and coordinator roles, so it needs the AWS admin's heads-up
+  first.
 
 ## Deploy-time mainnet and submit switches
 

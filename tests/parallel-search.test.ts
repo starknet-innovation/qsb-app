@@ -70,7 +70,7 @@ import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job, type SearchSlot } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
-import { EVENT_SETTLE_MS, SETTLE_CAP_MS, listOwnerEvents } from "../server/owner-events";
+import { EVENT_SETTLE_MS, listOwnerEvents } from "../server/owner-events";
 import { registerWebhook } from "../server/webhooks";
 
 const event = { owner: "test", jobId: "test-job", revision: 0 };
@@ -445,10 +445,38 @@ it.each(["throws", "hangs"])("a webhook receiver that %s changes nothing in a pa
   const plain = await tick(false);
   const started = Date.now();
   const hooked = await tick(true);
-  expect(Date.now() - started).toBeLessThan(SETTLE_CAP_MS + 500);
+  expect(Date.now() - started).toBeLessThan(2500);
   expect(hooked).toEqual(plain);
   expect(plain.runs).toBe(4);
   expect(mocks.transport).toHaveBeenCalledTimes(1);
   const { events } = await listOwnerEvents(store, event.owner, { limit: 10 }, Date.now() + EVENT_SETTLE_MS + 1000);
   expect(events.map((e) => e.type)).toEqual(["withdrawal.searching"]);
+}, 15_000);
+
+it.each(["throws", "hangs"])("a WEBHOOKS row that %s changes nothing in a parallel tick", async (mode) => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const tick = async (hooked: boolean) => {
+    (store as MemoryStore).rows.clear();
+    mocks.run.mockClear();
+    submitted = 0;
+    await seed();
+    if (hooked) await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    const memory = store as MemoryStore;
+    const get = MemoryStore.prototype.get.bind(memory);
+    const reads = vi.spyOn(memory, "get").mockImplementation((key, sort) =>
+      hooked && sort === "WEBHOOKS"
+        ? mode === "hangs" ? new Promise<never>(() => {}) : Promise.reject(Error("ThrottlingException"))
+        : get(key, sort),
+    );
+    const started = Date.now();
+    const result = await handler(event);
+    const elapsed = Date.now() - started;
+    reads.mockRestore();
+    const { updatedAt, parallelSlots, ...job } = await saved();
+    return { outcome: { result, job, slots: parallelSlots!.map(({ submissionStartedAt, ...s }) => s), runs: mocks.run.mock.calls.length }, elapsed };
+  };
+  const plain = await tick(false);
+  const faulted = await tick(true);
+  expect(faulted.outcome).toEqual(plain.outcome);
+  expect(faulted.elapsed).toBeLessThan(2500);
 }, 15_000);

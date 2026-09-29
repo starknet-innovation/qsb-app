@@ -76,7 +76,7 @@ import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
-import { EVENT_SETTLE_MS, SETTLE_CAP_MS, listOwnerEvents } from "../server/owner-events";
+import { EVENT_SETTLE_MS, listOwnerEvents } from "../server/owner-events";
 import { registerWebhook } from "../server/webhooks";
 import { decideAppRoleAccess } from "../server/runtime/app-role-records";
 const event = { owner: "test", jobId: "test-job", revision: 0 };
@@ -766,15 +766,40 @@ it.each(["configuration", "prepare"])("retains pending request allowance during 
 describe("owner events and webhooks", () => {
   const events = async () =>
     (await listOwnerEvents(store, event.owner, { limit: 100 }, Date.now() + EVENT_SETTLE_MS + 1000)).events;
-  async function tick(hooked: boolean) {
+  async function tick(hooked: boolean, faults?: () => () => void) {
     (store as MemoryStore).rows.clear();
     mocks.run.mockClear();
     await seed();
     if (hooked) await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
-    const result = await handler(event);
+    const restore = faults?.();
+    const started = Date.now();
+    const result = await handler(event).catch((error: Error) => ({ threw: error.message }));
+    const elapsed = Date.now() - started;
+    restore?.();
     const { updatedAt, submissionStartedAt, ...job } = (await store.get(pk, sk))!.job as Job;
-    return { result, job, runs: mocks.run.mock.calls.length };
+    return { outcome: { result, job, runs: mocks.run.mock.calls.length }, elapsed };
   }
+  /** The table failing under the webhook work: the WEBHOOKS row or an EVENT# write. */
+  const fault = (target: string, mode: string) => () => {
+    const memory = store as MemoryStore;
+    const get = MemoryStore.prototype.get.bind(memory),
+      put = MemoryStore.prototype.put.bind(memory);
+    const fail = () =>
+      mode === "hangs" ? new Promise<never>(() => {}) : Promise.reject(Error("AccessDeniedException"));
+    const reads = vi.spyOn(memory, "get").mockImplementation((key, sort) =>
+      target === "WEBHOOKS get" && sort === "WEBHOOKS" ? fail() : get(key, sort),
+    );
+    const writes = vi.spyOn(memory, "put").mockImplementation((row, expected, options) =>
+      (target === "WEBHOOKS put" && row.sk === "WEBHOOKS") ||
+      (target === "EVENT put" && row.sk.startsWith("EVENT#"))
+        ? fail()
+        : put(row, expected, options),
+    );
+    return () => {
+      reads.mockRestore();
+      writes.mockRestore();
+    };
+  };
 
   it("records the tick's status change once", async () => {
     await seed();
@@ -791,10 +816,10 @@ describe("owner events and webhooks", () => {
       mode === "hangs" ? () => new Promise(() => {}) : async () => { throw Error("ECONNRESET"); },
     );
     const plain = await tick(false);
-    const started = Date.now();
     const hooked = await tick(true);
-    expect(Date.now() - started).toBeLessThan(SETTLE_CAP_MS + 500);
-    expect(hooked).toEqual(plain);
+    // Coordinator delivery has a two-second budget, less than the API's.
+    expect(hooked.elapsed).toBeLessThan(2500);
+    expect(hooked.outcome).toEqual(plain.outcome);
     expect(mocks.transport).toHaveBeenCalledTimes(1);
     expect((await events()).map((e) => e.type)).toEqual(["withdrawal.searching"]);
   }, 15_000);
@@ -824,12 +849,32 @@ describe("owner events and webhooks", () => {
     expect(new Set(keys)).toEqual(new Set([pk]));
     expect(decideAppRoleAccess("dynamodb:PutItem", [pk], "coordinator")).toBe("allow");
     expect(decideAppRoleAccess("dynamodb:GetItem", [pk], "coordinator")).toBe("allow");
+    for (const spy of [puts, gets, ...other]) spy.mockRestore();
   });
 
-  it("skips delivery when the Lambda is close to its timeout, and still records", async () => {
+  it.each(["WEBHOOKS get", "WEBHOOKS put", "EVENT put"])(
+    "a failing or hanging %s changes nothing in a tick",
+    async (target) => {
+      mocks.transport.mockResolvedValue({ status: 204 });
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const plain = await tick(false);
+      for (const mode of ["throws", "hangs"]) {
+        const faulted = await tick(true, fault(target, mode));
+        expect(faulted.outcome).toEqual(plain.outcome);
+        expect(faulted.elapsed).toBeLessThan(3500);
+      }
+      // A tick that fails still fails with its own error.
+      mocks.run.mockRejectedValueOnce(Error("lost response"));
+      const failing = await tick(true, fault(target, "throws"));
+      expect(failing.outcome.result).toEqual({ threw: "lost response" });
+    },
+    20_000,
+  );
+
+  it("skips delivery unless the Lambda has ample time left, and still records", async () => {
     await seed();
     await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
-    expect(await handler(event, { getRemainingTimeInMillis: () => 10_000 })).toMatchObject({ done: false });
+    expect(await handler(event, { getRemainingTimeInMillis: () => 20_000 })).toMatchObject({ done: false });
     expect(mocks.transport).not.toHaveBeenCalled();
     expect((await events()).map((e) => e.type)).toEqual(["withdrawal.searching"]);
   });

@@ -25,7 +25,7 @@ export const FAILING_AFTER = 8;
 export const RETRY_DELAYS_MS = [30e3, 120e3, 600e3, 1800e3, 3600e3, 7200e3, 14400e3];
 export const REQUEST_TIMEOUT_MS = 3000;
 /** Deliveries a round claims, so two flushes don't send the same ones. Longer than any flush. */
-const LEASE_MS = 30_000;
+export const LEASE_MS = 30_000;
 const ROUND_LIMIT = 10;
 
 export type WebhookRequest = {
@@ -39,7 +39,11 @@ export type WebhookRequest = {
   timeoutMs: number;
 };
 export type WebhookTransport = (request: WebhookRequest) => Promise<{ status: number }>;
-export type Resolver = (hostname: string) => Promise<{ address: string; family: number }[]>;
+/** Every A and AAAA answer for `hostname`, given up after `timeoutMs`. */
+export type Resolver = (
+  hostname: string,
+  timeoutMs: number,
+) => Promise<{ address: string; family: number }[]>;
 export type Delivery = { transport: WebhookTransport; resolve: Resolver };
 
 type Hook = {
@@ -56,7 +60,14 @@ type Hook = {
   lastFailureAt?: string;
   lastError?: string;
 };
-type Pending = { hook: string; event: OwnerEvent; attempts: number; nextAt: number };
+type Pending = {
+  hook: string;
+  event: OwnerEvent;
+  attempts: number;
+  nextAt: number;
+  /** The round that holds this delivery until nextAt. */
+  claim?: string;
+};
 type WebhookRow = Row & { hooks: Hook[]; pending: Pending[] };
 
 export type WebhookUrlCode =
@@ -139,14 +150,17 @@ export function parseWebhookUrl(input: string): URL {
   return url;
 }
 
-/** The address to connect to: every address the name resolves to must be public. */
+/**
+ * The address to connect to: every address the name resolves to must be public. IPv4 is
+ * preferred, since a Lambda outside a VPC may have no IPv6 route.
+ */
 async function pinAddress(url: URL, resolve: Resolver, timeoutMs: number) {
   const host = url.hostname.replace(/^\[|\]$/g, "");
   const literal = isIP(host);
   if (literal) return { hostname: host, address: host, family: literal as 4 | 6 };
   let addresses: { address: string; family: number }[];
   try {
-    addresses = await within(resolve(host), timeoutMs);
+    addresses = await within(resolve(host, timeoutMs), timeoutMs);
   } catch {
     throw new WebhookUrlError("webhook_url_unresolvable", "Webhook host name does not resolve.");
   }
@@ -154,8 +168,8 @@ async function pinAddress(url: URL, resolve: Resolver, timeoutMs: number) {
     throw new WebhookUrlError("webhook_url_unresolvable", "Webhook host name does not resolve.");
   if (addresses.some((a) => !publicAddress(a.address)))
     throw new WebhookUrlError("webhook_url_forbidden", "Webhook host name resolves to a private or reserved address.");
-  const [first] = addresses;
-  return { hostname: host, address: first.address, family: (isIP(first.address) || 4) as 4 | 6 };
+  const pinned = addresses.find((a) => isIP(a.address) === 4) ?? addresses[0];
+  return { hostname: host, address: pinned.address, family: isIP(pinned.address) as 4 | 6 };
 }
 
 export function webhookSignature(secret: string, timestamp: number, body: string) {
@@ -271,20 +285,26 @@ export async function enqueueDeliveries(
 type Outcome = { hook: string; eventId: string; result: "ok" | "failed" | "skipped"; reason?: string };
 
 /** One round for one webhook: resolve and check the host once, then send in parallel. */
-async function round(hook: Hook, due: Pending[], delivery: Delivery, deadline: number): Promise<Outcome[]> {
+async function round(
+  hook: Hook,
+  due: Pending[],
+  delivery: Delivery,
+  deadline: number,
+  requestTimeoutMs: number,
+): Promise<Outcome[]> {
   const skipped = (reason?: string) =>
     due.map((p) => ({ hook: hook.id, eventId: p.event.id, result: "skipped" as const, reason }));
   if (deadline - Date.now() <= 0) return skipped();
   let target: Awaited<ReturnType<typeof pinAddress>>;
   try {
-    target = await pinAddress(parseWebhookUrl(hook.url), delivery.resolve, Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now()));
+    target = await pinAddress(parseWebhookUrl(hook.url), delivery.resolve, Math.min(requestTimeoutMs, deadline - Date.now()));
   } catch (error) {
     const reason = error instanceof WebhookUrlError ? error.code.replace("webhook_url_", "url_") : "url_invalid";
     return due.map((p) => ({ hook: hook.id, eventId: p.event.id, result: "failed" as const, reason }));
   }
   return Promise.all(
     due.map(async (p): Promise<Outcome> => {
-      const timeoutMs = Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now());
+      const timeoutMs = Math.min(requestTimeoutMs, deadline - Date.now());
       if (timeoutMs <= 0) return { hook: hook.id, eventId: p.event.id, result: "skipped" };
       const body = JSON.stringify(p.event);
       const timestamp = Math.floor(Date.now() / 1000);
@@ -314,18 +334,23 @@ async function round(hook: Hook, due: Pending[], delivery: Delivery, deadline: n
 }
 
 /**
- * Send the owner's due deliveries before `deadline`. At least once and best-effort: claimed
- * deliveries are leased, so a flush that dies midway is retried after the lease; the pull
- * endpoint is the record. A webhook's failed round backs it off; after FAILING_AFTER in a
- * row it is marked failing and gets no more deliveries.
+ * Send the owner's due deliveries before `deadline`. At least once and best-effort; the pull
+ * endpoint is the record.
+ * - A round claims its deliveries with a token until the lease ends, so a concurrent round
+ *   skips them. Results are written back only to deliveries this round still holds; one that
+ *   another round has since claimed is left alone. A round that outlived its lease (for
+ *   example frozen with its Lambda) counts no failures, only successes.
+ * - A webhook's failed round backs it off; after FAILING_AFTER in a row it is marked failing
+ *   and gets no more deliveries.
  */
 export async function deliverDue(
   store: Pick<Store, "get" | "put">,
   owner: string,
   delivery: Delivery,
-  deadline: number,
+  { deadline, requestTimeoutMs = REQUEST_TIMEOUT_MS }: { deadline: number; requestTimeoutMs?: number },
 ) {
   const now = Date.now();
+  const claim = randomBytes(8).toString("hex");
   let claimed: Pending[] = [];
   const row = await update(store, owner, (row) => {
     claimed = [];
@@ -335,7 +360,7 @@ export async function deliverDue(
     );
     claimed = row.pending.filter((p) => ready.has(p.hook) && p.nextAt <= now).slice(0, ROUND_LIMIT);
     if (!claimed.length) return false;
-    for (const p of claimed) p.nextAt = now + LEASE_MS;
+    for (const p of claimed) Object.assign(p, { nextAt: now + LEASE_MS, claim });
     return row;
   });
   if (!row || !claimed.length) return;
@@ -343,20 +368,25 @@ export async function deliverDue(
     await Promise.all(
       row.hooks.map((hook) => {
         const due = claimed.filter((p) => p.hook === hook.id);
-        return due.length ? round(hook, due, delivery, deadline) : [];
+        return due.length ? round(hook, due, delivery, deadline, requestTimeoutMs) : [];
       }),
     )
   ).flat();
   const at = new Date().toISOString();
+  const expired = Date.now() > now + LEASE_MS;
   await update(store, owner, (row) => {
     if (!row) return false;
+    const held = (o: Outcome) =>
+      row.pending.some((p) => p.hook === o.hook && p.event.id === o.eventId && p.claim === claim);
+    const applied = outcomes.filter(held);
+    if (!applied.length) return false;
     for (const hook of row.hooks) {
-      const mine = outcomes.filter((o) => o.hook === hook.id);
+      const mine = applied.filter((o) => o.hook === hook.id);
       if (mine.some((o) => o.result === "ok")) {
         hook.failures = 0;
         delete hook.retryAt;
         hook.lastDeliveryAt = at;
-      } else if (mine.some((o) => o.result === "failed")) {
+      } else if (!expired && mine.some((o) => o.result === "failed")) {
         hook.failures += 1;
         hook.retryAt = Date.now() + RETRY_DELAYS_MS[Math.min(hook.failures, RETRY_DELAYS_MS.length) - 1];
         hook.lastFailureAt = at;
@@ -367,12 +397,28 @@ export async function deliverDue(
     const failing = new Set(row.hooks.filter((h) => h.status !== "active").map((h) => h.id));
     row.pending = row.pending.flatMap((p) => {
       if (failing.has(p.hook)) return [];
-      const outcome = outcomes.find((o) => o.hook === p.hook && o.eventId === p.event.id);
+      if (p.claim !== claim) return [p];
+      const outcome = applied.find((o) => o.hook === p.hook && o.eventId === p.event.id);
+      const { claim: _released, ...rest } = p;
       if (!outcome) return [p];
       if (outcome.result === "ok") return [];
-      const attempts = p.attempts + (outcome.result === "failed" ? 1 : 0);
-      return attempts >= MAX_ATTEMPTS ? [] : [{ ...p, attempts, nextAt: 0 }];
+      const attempts = rest.attempts + (outcome.result === "failed" && !expired ? 1 : 0);
+      return attempts >= MAX_ATTEMPTS ? [] : [{ ...rest, attempts, nextAt: 0 }];
     });
     return row;
   });
+}
+
+/**
+ * Rows with webhook signing secrets removed, for a storage inventory or export. Everything
+ * else is left as it is, so the usual credential check still applies to it.
+ */
+export function withoutWebhookSecrets<T>(rows: T): T {
+  if (!Array.isArray(rows)) return rows;
+  return rows.map((row) => {
+    const r = row as Partial<WebhookRow> | null;
+    if (!r || r.sk !== "WEBHOOKS" || !r.pk?.startsWith("OWNER#") || !Array.isArray(r.hooks))
+      return row;
+    return { ...r, hooks: r.hooks.map(({ secret: _secret, ...hook }) => hook) };
+  }) as T;
 }

@@ -18,7 +18,7 @@ Withdrawals take hours. Instead of polling each job, read your account's event l
 | `deposit.submitted` | A deposit is recorded as sent, and not yet confirmed. |
 | `deposit.confirmed` | The deposit is confirmed. |
 | `deposit.spent` | The vault's deposit was spent by its withdrawal. |
-| `deposit.dropped` | The miner refused the deposit and doesn't have it; the vault is unfunded again. |
+| `deposit.dropped` | The miner doesn't have the deposit. Either it refused a new deposit (the vault is unfunded again), or a resend found it no longer had a submitted deposit and the resend wasn't accepted (the vault stays `submitted`; resend or contact the operator). |
 
 An event is thin: identifiers and statuses, never transaction bytes, scripts or anything secret.
 
@@ -30,11 +30,11 @@ An event is thin: identifiers and statuses, never transaction bytes, scripts or 
 
 ### Pull: `GET /api/events?after=<cursor>&limit=<1-100>`
 
-Returns `{ events, next, hasMore }`, oldest first. Keep `next` and pass it as `after` on the next call; without `after` you get everything retained. Events are kept for 30 days, and are listed once they are 10 seconds old, so a write still in flight can't land behind your cursor. The log is the record: a webhook only tells you to read it.
+Returns `{ events, next, hasMore }`, oldest first. Keep `next` and pass it as `after` on the next call; without `after` you get everything retained. Events are kept for 30 days, and are listed once they are 10 seconds old, so in normal operation a write still in flight can't land behind your cursor. The log is the record: a webhook only tells you to read it.
 
 ### Webhooks
 
-- `POST /api/webhooks` with `{ "url": "https://…", "events": ["withdrawal.awaiting_authorization"] }` (omit `events` for all types) returns `{ webhook, secret }`. **The secret is shown only in this response.** At most 5 per account.
+- `POST /api/webhooks` with `{ "url": "https://…", "events": ["withdrawal.awaiting_authorization"] }` (omit `events` for all types) returns `{ webhook, secret }`. **The secret is shown only in this response.** At most 5 per account. The service keeps the secret to sign deliveries, and it stays in the service's database backups for up to 35 days after you delete the webhook. To rotate it, delete the webhook and register it again.
 - `GET /api/webhooks` lists them, with `status` (`active` or `failing`), `failures`, `pending`, and the last delivery and failure. Never the secret.
 - `POST /api/webhooks/:id/delete` removes one and its queued deliveries.
 
@@ -60,13 +60,13 @@ export function verify(secret: string, header: string, rawBody: string, toleranc
 }
 ```
 
-Answer with any 2xx within 3 seconds; the response body is ignored.
+Answer with any 2xx within 1 second; slower answers can time out, and the response body is ignored.
 
 ### Delivery and retries
 
 At least once, best effort; **the pull endpoint is authoritative**.
 
-- Deliveries are sent right after the change that caused them, from the request or coordinator step that made it, within a few seconds' budget. Retries go out on later coordinator steps and later API calls for your account, so an idle account's retries wait for its next activity.
+- Deliveries are sent right after the change that caused them, from the request or coordinator step that made it, within a budget of a few seconds (API) or two seconds (coordinator). Retries go out on later coordinator steps and later API calls for your account, so an idle account's retries wait for its next activity.
 - After a failed attempt the webhook waits 30 s, 2 min, 10 min, 30 min, 1 h, 2 h, then 4 h between tries. An event is dropped after 8 failed attempts, and a webhook that fails 8 times in a row is marked `failing` and gets no more deliveries: delete it and register it again.
 - Up to 100 deliveries wait per account; past that the oldest are dropped.
 - Deliveries can arrive out of order or more than once. Use `at`, `QSB-Event-Id` and the pull endpoint to reconcile.
