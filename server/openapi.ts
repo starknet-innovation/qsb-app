@@ -397,30 +397,112 @@ const merge = (...sets: Errors[]): Errors => {
   return out;
 };
 const writes: Errors = { 409: ["state_conflict"] };
+
+// Errors raised inside helpers, each with the sites it covers in
+// tests/api-error-sites.json (`file | function`). tests/openapi.test.ts checks
+// every helper site's code is listed by a source that covers it, or that the
+// site is in unreachedErrorSites. Routes merge the sources of the helpers they call.
+const sources = new Map<Errors, readonly string[]>();
+const source = (sites: readonly string[], errors: Errors) => {
+  sources.set(errors, sites);
+  return errors;
+};
+/** The helper error sources, with the snapshot sites each covers. */
+export const errorSources = () =>
+  [...sources].map(([errors, sites]) => ({ sites, errors }));
+/** Helper sites whose error never reaches a response, and why. */
+export const unreachedErrorSites: Record<string, string> = {
+  "chain.ts | withdrawalInclusion":
+    "observeWithdrawal settles it; a conflicting spender becomes the response's `alert`.",
+  "transaction-checks.ts | assertWithdrawalSpendAgainstJob":
+    "It rethrows its own errors as exact_spend_mismatch.",
+  "transaction-checks.ts | helperSighashAll":
+    "Only assertWithdrawalSpendAgainstJob calls it, which rethrows as exact_spend_mismatch.",
+  "transaction-checks.ts | assertOutput":
+    "assertWithdrawalSpendAgainstJob rethrows it as exact_spend_mismatch; checkFunding isn't called by a route.",
+  "transaction-checks.ts | parse":
+    "assertWithdrawalSpendAgainstJob rethrows it as exact_spend_mismatch; checkWithdrawal parses the same bytes only after that passed; checkFunding isn't called by a route.",
+  "transaction-checks.ts | checkFunding": "No route calls it.",
+};
+
 // Any chain read checks the provider's network first. An error status is a
 // 409 chain_unavailable, a request that fails before any response a 500 one.
 // A malformed answer is chain_error: a 400 when it fails its zod parse,
 // otherwise a 500.
-const chainRead: Errors = {
-  400: ["chain_error"],
-  409: ["chain_unavailable", "chain_error"],
-  500: ["chain_unavailable", "chain_error"],
-};
-const chainLookup = merge(chainRead, { 409: ["chain_transaction_not_found"] });
+const chainRead = source(
+  ["chain.ts | read", "chain.ts | answer", "chain.ts | assertNetwork"],
+  {
+    400: ["chain_error"],
+    409: ["chain_unavailable", "chain_error"],
+    500: ["chain_unavailable", "chain_error"],
+  },
+);
+const chainLookup = source(
+  ["chain.ts | read", "chain.ts | raw", "chain.ts | status"],
+  merge(chainRead, { 409: ["chain_transaction_not_found"] }),
+);
 // A vout past the previous transaction's outputs is a 500.
-const inputCheck = merge(chainLookup, {
-  409: ["input_unavailable"],
-  500: ["input_unavailable"],
+const inputCheck = source(
+  ["chain.ts | unspent"],
+  merge(chainLookup, {
+    409: ["input_mismatch", "input_unconfirmed", "input_spent"],
+    500: ["input_not_found"],
+  }),
+);
+// A failed secret read is a 500; a refused credential a 503.
+const minerCredential = source(["providers.ts | credential"], {
+  500: ["miner_unavailable"],
+  503: ["miner_unavailable"],
 });
-const deposit = merge(writes, {
-  409: [
-    "funding_transaction_invalid",
-    "vault_not_found",
-    "funding_intent_exists",
-    "exact_spend_mismatch",
+// A miner status lookup: a malformed answer that fails its zod parse is a
+// 400, any other failure a 500, and a 401 or 403 from the miner a 503.
+const minerLookup = source(
+  ["providers.ts | request", "providers.ts | status"],
+  {
+    400: ["miner_request_failed"],
+    500: ["miner_request_failed"],
+    503: ["miner_unavailable"],
+  },
+);
+const fundingMatch = source(["transaction-checks.ts | invalid"], {
+  409: ["funding_transaction_invalid"],
+});
+const fundingExport = source(
+  ["submit-funding.ts | exportFunding"],
+  merge(writes),
+);
+// submitFunding; a retry asks the miner whether it already has the deposit.
+const deposit = source(
+  [
+    "submit-funding.ts | submitFunding",
+    "submit-funding.ts | touch",
+    "submit-funding.ts | record",
   ],
-  503: ["operations_disabled", "submit_disabled", "miner_unavailable"],
-});
+  merge(writes, fundingMatch, minerCredential, minerLookup, {
+    409: [
+      "funding_transaction_invalid",
+      "vault_not_found",
+      "funding_intent_exists",
+    ],
+    503: ["submit_disabled"],
+  }),
+);
+// submitExact, with checkWithdrawal's chain checks and the consensus check.
+const exactSubmit = source(
+  ["submit-exact.ts | submitExact", "transaction-checks.ts | checkWithdrawal"],
+  merge(inputCheck, writes, minerCredential, {
+    409: [
+      "job_not_found",
+      "job_unsupported",
+      "job_state_invalid",
+      "exact_spend_mismatch",
+      "intent_conflict",
+      "vault_not_found",
+      "consensus_rejected",
+    ],
+    503: ["submit_disabled"],
+  }),
+);
 
 const vaultId = describe(z.string(), "The vault id.");
 const jobId = describe(
@@ -582,13 +664,9 @@ export const apiRoutes: readonly ApiRoute[] = [
     responses: {
       201: { description: "The deposit was recorded.", schema: vaultResponse },
     },
-    errors: merge(chainLookup, writes, {
+    errors: merge(chainLookup, writes, fundingMatch, {
       404: ["vault_not_found"],
-      409: [
-        "network_mismatch",
-        "funding_intent_exists",
-        "funding_transaction_invalid",
-      ],
+      409: ["network_mismatch", "funding_intent_exists"],
       503: ["operations_disabled"],
     }),
   },
@@ -608,7 +686,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: fundingSubmissionResponse,
       },
     },
-    errors: deposit,
+    errors: merge(deposit, { 503: ["operations_disabled", "submit_disabled"] }),
   },
   {
     method: "get",
@@ -630,7 +708,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         }),
       },
     },
-    errors: merge(writes, {
+    errors: merge(fundingExport, {
       404: ["signed_deposit_not_found"],
       503: ["submit_disabled"],
     }),
@@ -655,6 +733,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     errors: merge(deposit, {
       404: ["vault_not_found"],
       409: ["signed_deposit_not_found"],
+      503: ["operations_disabled", "submit_disabled"],
     }),
   },
   {
@@ -677,7 +756,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         }),
       },
     },
-    errors: merge(chainLookup, writes, {
+    errors: merge(chainLookup, fundingExport, writes, {
       404: ["vault_not_found"],
       409: ["network_mismatch", "vault_not_funded"],
     }),
@@ -778,18 +857,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: submitWithdrawalResponse,
       },
     },
-    errors: merge(inputCheck, writes, {
-      409: [
-        "job_not_found",
-        "job_unsupported",
-        "job_state_invalid",
-        "exact_spend_mismatch",
-        "intent_conflict",
-        "vault_not_found",
-        "consensus_rejected",
-      ],
-      503: ["submit_disabled", "miner_unavailable"],
-    }),
+    errors: merge(exactSubmit, { 503: ["submit_disabled"] }),
   },
   {
     method: "post",

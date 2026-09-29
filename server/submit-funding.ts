@@ -13,6 +13,7 @@ import {
 } from "./exact-submit-permit";
 import { MinerRejection, type MinerCredential } from "./providers";
 import { SubmitDisabled } from "./submit-exact";
+import { withApiErrorCode } from "./api-errors";
 
 export type FundingSubmission = "submitted" | "uncertain" | "rejected";
 export type FundingDependencies = {
@@ -83,7 +84,11 @@ export async function submitFunding(
   } catch {
     throw new ChainError("Invalid funding transaction.", "funding_transaction_invalid");
   }
-  const txid = transactionId(raw);
+  // readTransaction refuses bytes over its size limit as ExactSpendMismatch. For a deposit
+  // that's an invalid funding transaction; nothing has been read, written or sent yet.
+  const txid = withApiErrorCode("funding_transaction_invalid", () =>
+    transactionId(raw),
+  );
   const pk = `OWNER#${owner}`,
     sk = `VAULT#${vaultId}`;
   const row = await store.get(pk, sk);

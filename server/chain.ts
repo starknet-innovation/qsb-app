@@ -185,7 +185,7 @@ export class Esplora {
     outpoint.parse(point);
     const { tx, raw } = await this.raw(point.txid);
     // A vout past the previous transaction's outputs is a missing input.
-    const output = withApiErrorCode("input_unavailable", () =>
+    const output = withApiErrorCode("input_not_found", () =>
       tx.getOutput(point.vout),
     );
     if (
@@ -195,7 +195,7 @@ export class Esplora {
     )
       throw new ChainError(
         "Previous output amount or script mismatch.",
-        "input_unavailable",
+        "input_mismatch",
       );
     const [s, spent] = await Promise.all([
       this.status(point.txid),
@@ -204,13 +204,13 @@ export class Esplora {
     if (!s.confirmed)
       throw new ChainError(
         "Input is unconfirmed or was reorganized out of the chain.",
-        "input_unavailable",
+        "input_unconfirmed",
       );
     const outspend = answer(() =>
       z.object({ spent: z.boolean() }).parse(JSON.parse(spent)),
     );
     if (outspend.spent)
-      throw new ChainError("Input has already been spent.", "input_unavailable");
+      throw new ChainError("Input has already been spent.", "input_spent");
     return { previousTxHex: raw, confirmations: s.confirmations };
   }
   async paymentUtxos(address: string) {

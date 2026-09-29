@@ -7,9 +7,11 @@ import type { Esplora } from "../server/chain";
 import type { Slipstream } from "../server/providers";
 import {
   apiRoutes,
+  errorSources,
   openApiDocument,
   openApiPath,
   routeErrors,
+  unreachedErrorSites,
   serializeOpenApi,
 } from "../server/openapi";
 
@@ -139,6 +141,75 @@ describe("OpenAPI document", () => {
         auth: body.code === "auth_required",
       }).toEqual({ route: route.operationId, auth: route.auth });
     }
+  });
+
+  it("lists every error site in tests/api-error-sites.json", () => {
+    const lines = JSON.parse(
+      readFileSync(new URL("./api-error-sites.json", import.meta.url), "utf8"),
+    ) as string[];
+    const sites = lines.map((line) => {
+      const [file, where, kind, code] = line.split(" | ");
+      // An HTTP status, or the class app.onError answers with a 409.
+      const status = /^\d{3}$/.test(kind)
+        ? Number(kind)
+        : ["ChainError", "ChainNotFound", "WithdrawalConflict"].includes(kind)
+          ? 409
+          : undefined;
+      return {
+        line,
+        key: `${file} | ${where}`,
+        file,
+        where,
+        kind,
+        code,
+        status,
+      };
+    });
+    const listed = (
+      errors: Partial<Record<number, readonly string[]>>,
+      status?: number,
+    ) =>
+      status === undefined
+        ? Object.values(errors).flatMap((codes) => codes ?? [])
+        : (errors[status] ?? []);
+    const byRoute = new Map(
+      apiRoutes.map((r) => [`${r.method.toUpperCase()} ${r.path}`, r]),
+    );
+    for (const site of sites) {
+      if (site.file === "app.ts") {
+        // A route's own sites, the auth and body-limit middleware, and onError's
+        // class mappings (which the sources below account for).
+        const routes =
+          site.where === "auth"
+            ? apiRoutes.filter((r) => r.auth)
+            : site.where === "bodyLimit"
+              ? apiRoutes.filter((r) => r.method === "post")
+              : [byRoute.get(site.where)];
+        if (site.where === "onError") continue;
+        expect(routes[0], site.line).toBeDefined();
+        for (const route of routes)
+          expect(listed(routeErrors(route!), site.status), site.line).toContain(
+            site.code,
+          );
+        continue;
+      }
+      if (site.key in unreachedErrorSites) continue;
+      // A helper's site: a code attached to any error class can have any status.
+      if (site.kind !== "attached")
+        expect(site.status, site.line).toBeDefined();
+      const covering = errorSources().filter((s) => s.sites.includes(site.key));
+      expect(covering.length, site.line).toBeGreaterThan(0);
+      expect(
+        covering.some((s) => listed(s.errors, site.status).includes(site.code)),
+        site.line,
+      ).toBe(true);
+    }
+    const keys = sites.map((site) => site.key);
+    for (const key of [
+      ...errorSources().flatMap((s) => s.sites),
+      ...Object.keys(unreachedErrorSites),
+    ])
+      expect(keys).toContain(key);
   });
 
   it("describes every field /api/health and /api/config return", async () => {

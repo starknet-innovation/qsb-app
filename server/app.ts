@@ -68,6 +68,18 @@ import {
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
+// A thrown ZodError built by parse (unlike `new z.ZodError`) is an Error, which Hono's onError needs.
+const notJson = z.custom<never>(() => false, "Request body is not valid JSON.");
+/** The request's JSON body. Malformed JSON is a 400 invalid_request, like a schema failure. */
+async function jsonBody(c: { req: { json(): Promise<unknown> } }) {
+  try {
+    return await c.req.json();
+  } catch (error) {
+    // Only a syntax error: a body over the limit must still reach bodyLimit's 413.
+    if (!(error instanceof SyntaxError)) throw error;
+    return notJson.parse(undefined);
+  }
+}
 function supervisedServiceJob(job: unknown): boolean {
   if (!job || typeof job !== "object") return false;
   const execution = (job as { execution?: { kind?: string } }).execution;
@@ -139,6 +151,9 @@ export function createApp(
     }),
   );
   app.onError((e, c) => {
+    // A code attached at a boundary (a chain or miner provider, a deposit's bytes) keeps
+    // the status and body its error class gets here.
+    const attached = attachedApiErrorCode(e);
     if (e instanceof SubmitDisabled)
       return apiError(c, 503, "submit_disabled", e.message);
     if (e instanceof ConsensusError)
@@ -150,14 +165,13 @@ export function createApp(
       return apiError(
         c,
         409,
-        e.message === "ExactSpendMismatch"
-          ? "exact_spend_mismatch"
-          : "inclusion_check_failed",
+        attached ??
+          (e.message === "ExactSpendMismatch"
+            ? "exact_spend_mismatch"
+            : "inclusion_check_failed"),
         e.message,
       );
     if (e instanceof ChainError) return apiError(c, 409, e.code, e.message);
-    // A chain provider failure keeps these statuses and bodies, with its own code.
-    const attached = attachedApiErrorCode(e);
     if (e instanceof z.ZodError)
       return apiError(c, 400, attached ?? "invalid_request", "Invalid request", {
         issues: e.issues.map((i) => ({ path: i.path, message: i.message })),
@@ -213,7 +227,7 @@ export function createApp(
     }
   });
   app.post("/api/auth/challenge", async (c) => {
-    const { address } = challengeRequest.parse(await c.req.json());
+    const { address } = challengeRequest.parse(await jsonBody(c));
     try {
       outputScript(address);
     } catch {
@@ -239,7 +253,7 @@ export function createApp(
     return c.json({ id, message });
   });
   app.post("/api/auth/verify", async (c) => {
-    const { id, signature } = verifyRequest.parse(await c.req.json());
+    const { id, signature } = verifyRequest.parse(await jsonBody(c));
     const challenge = await store.get(`CHALLENGE#${id}`, "AUTH");
     if (!challenge || challenge.network !== NETWORK_ID)
       return apiError(
@@ -322,13 +336,13 @@ export function createApp(
     c.json({ utxos: await ledger.paymentUtxos(c.get("owner")) }),
   );
   app.post("/api/payment-input", async (c) => {
-    const point = outpoint.parse(await c.req.json());
+    const point = outpoint.parse(await jsonBody(c));
     return c.json(
       await ledger.unspent(point, hex.encode(outputScript(c.get("owner")))),
     );
   });
   app.post("/api/vaults", async (c) => {
-    const vault = publicVaultSchema.parse(await c.req.json());
+    const vault = publicVaultSchema.parse(await jsonBody(c));
     if (
       vault.network !== NETWORK_ID ||
       vault.paymentAddress !== c.get("owner") ||
@@ -341,10 +355,21 @@ export function createApp(
         "vault_invalid",
         "Invalid vault ownership or funding state.",
       );
-    validatePublicState(vault.publicStateJson);
-    assertVaultConfiguration(vault);
-    vault.configuration ??= vaultConfiguration(vault);
-    const publicState = JSON.parse(vault.publicStateJson);
+    // These check the request's own public state, before any write, so a refusal is a 400.
+    let publicState;
+    try {
+      validatePublicState(vault.publicStateJson);
+      assertVaultConfiguration(vault);
+      vault.configuration ??= vaultConfiguration(vault);
+      publicState = JSON.parse(vault.publicStateJson);
+    } catch {
+      return apiError(
+        c,
+        400,
+        "vault_invalid",
+        "Vault public state or configuration is invalid.",
+      );
+    }
     if (
       publicState.full_script_hex !== vault.scriptHex ||
       createHash("sha256")
@@ -374,7 +399,7 @@ export function createApp(
         `${NETWORK_ID} funding is disabled pending validation and operator configuration.`,
         { checks: release.checks },
       );
-    const body = fundRequest.parse(await c.req.json());
+    const body = fundRequest.parse(await jsonBody(c));
     const pk = `OWNER#${c.get("owner")}`,
       sk = `VAULT#${c.req.param("id")}`;
     const row = await store.get(pk, sk);
@@ -433,7 +458,7 @@ export function createApp(
         "submit_disabled",
         "Deposit submission to the miner is disabled.",
       );
-    const body = fundSubmitRequest.parse(await c.req.json());
+    const body = fundSubmitRequest.parse(await jsonBody(c));
     const result = await submitFunding(
       c.get("owner"),
       c.req.param("id"),
@@ -691,7 +716,7 @@ export function createApp(
     }
   });
   app.post("/api/jobs", async (c) => {
-    const manifest = withdrawalSchema.parse(await c.req.json());
+    const manifest = withdrawalSchema.parse(await jsonBody(c));
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
       return apiError(
         c,
@@ -754,9 +779,13 @@ export function createApp(
         "withdrawal_invalid",
         "Funding outpoint does not match this vault.",
       );
-    if (
-      hex.encode(outputScript(manifest.destination)) !== manifest.outputScript
-    )
+    // An address that doesn't decode for this network has no script: the same 400, before
+    // any reservation or chain read.
+    let destinationScript: string | undefined;
+    try {
+      destinationScript = hex.encode(outputScript(manifest.destination));
+    } catch {}
+    if (destinationScript !== manifest.outputScript)
       return apiError(
         c,
         400,
@@ -832,7 +861,7 @@ export function createApp(
         "submit_disabled",
         `${NETWORK_ID} withdrawals are disabled.`,
       );
-    const body = submitRequest.parse(await c.req.json());
+    const body = submitRequest.parse(await jsonBody(c));
     const result = await submitExact(
       c.get("owner"),
       c.req.param("id"),

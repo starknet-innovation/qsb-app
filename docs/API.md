@@ -12,11 +12,11 @@ It's generated; don't edit it by hand. After changing a route, a request schema 
 npm run openapi
 ```
 
-[`server/openapi.ts`](../server/openapi.ts) holds the route registry. Request schemas are the zod objects the handlers parse ([`server/api-schemas.ts`](../server/api-schemas.ts) and [`src/lib/model.ts`](../src/lib/model.ts)). [`tests/openapi.test.ts`](../tests/openapi.test.ts) fails when the committed file is stale, when `createApp` serves a route the document lacks (or the reverse), or when a route's sign-in requirement differs from the server's. [`tests/api-errors.test.ts`](../tests/api-errors.test.ts) also checks that the document lists each status and code it drives.
+[`server/openapi.ts`](../server/openapi.ts) holds the route registry. Request schemas are the zod objects the handlers parse ([`server/api-schemas.ts`](../server/api-schemas.ts) and [`src/lib/model.ts`](../src/lib/model.ts)). [`tests/openapi.test.ts`](../tests/openapi.test.ts) fails when the committed file is stale, when `createApp` serves a route the document lacks (or the reverse), or when a route's sign-in requirement differs from the server's. It also fails when an error site in [`tests/api-error-sites.json`](../tests/api-error-sites.json) isn't listed: a route's own site for that route and status, and a helper's site by an error source in the registry that covers it, unless the registry records why it never reaches a response. [`tests/api-errors.test.ts`](../tests/api-errors.test.ts) also checks that the document lists each status and code it drives.
 
 ## Errors
 
-Every error response has a JSON body with a message and a code:
+Every error that `createApp` returns has a JSON body with a message and a code:
 
 ```json
 { "error": "Vault not found", "code": "vault_not_found" }
@@ -24,10 +24,12 @@ Every error response has a JSON body with a message and a code:
 
 - `error` is for people. Its wording can change, so don't parse it.
 - `code` is stable and machine-readable. Branch on it.
-- Some errors add fields. `invalid_request` adds `issues`, each with a `path` and a `message`. `operations_disabled` from `POST /api/vaults/:id/fund` adds the release `checks`.
-- A code isn't tied to one HTTP status. For example, `vault_not_found` is a 404 from the vault routes and a 409 from deposit submission. A chain provider request that fails before any response is `chain_unavailable` with a 500, and a malformed provider answer is `chain_error` with a 400 or a 500. Adding the codes didn't change any status or message.
+- Some errors add fields. `invalid_request` adds `issues`, each with a `path` and a `message`; a body that isn't valid JSON is one too. `operations_disabled` from `POST /api/vaults/:id/fund` adds the release `checks`.
+- A code isn't tied to one HTTP status. For example, `vault_not_found` is a 404 from the vault routes and a 409 from deposit submission. A chain or miner request that fails before any answer is `chain_unavailable` or `miner_request_failed` with a 500, and a malformed provider answer is `chain_error` or `miner_request_failed` with a 400 or a 500.
 
-[`server/api-errors.ts`](../server/api-errors.ts) is the source of truth. It exports `apiErrorCodes` (each code and its meaning), the `ApiErrorCode` type and the `API_ERROR_CODES` list. [`tests/api-errors.test.ts`](../tests/api-errors.test.ts) drives every code through `createApp` and checks that this table lists each one.
+Errors produced in front of the app have no `code`. That includes errors from the API gateway, for example on throttling or when the function fails or times out (these can be JSON with only a `message` field), other non-JSON proxy errors, and Hono's plain-text 404 for a route that doesn't exist.
+
+[`server/api-errors.ts`](../server/api-errors.ts) is the source of truth. It exports `apiErrorCodes` (each code and its meaning), the `ApiErrorCode` type and the `API_ERROR_CODES` list. [`tests/api-errors.test.ts`](../tests/api-errors.test.ts) drives every code through `createApp`, checks that this table lists each one, and pins each error site's status, code and message in [`tests/api-error-sites.json`](../tests/api-error-sites.json).
 
 | Area | Codes |
 |---|---|
@@ -37,9 +39,8 @@ Every error response has a JSON body with a message and a code:
 | Vaults and deposits | `vault_invalid`, `vault_not_found`, `vault_not_funded`, `vault_not_confirmed`, `funding_intent_exists`, `funding_transaction_invalid`, `signed_deposit_not_found` |
 | Withdrawal jobs | `job_not_found`, `job_unsupported`, `job_state_invalid`, `idempotency_conflict`, `withdrawal_invalid`, `solver_not_served`, `solved_result_unavailable`, `reconcile_required`, `operator_review_required`, `coverage_stopped` |
 | Withdrawal submission | `intent_not_found`, `intent_conflict`, `exact_spend_mismatch`, `consensus_rejected`, `inclusion_check_failed` |
-| Chain and miner | `input_unavailable`, `chain_transaction_not_found`, `chain_unavailable`, `chain_error`, `miner_unavailable`, `miner_rate_unavailable` |
+| Inputs | `input_not_found`, `input_mismatch`, `input_unconfirmed`, `input_spent` |
+| Chain and miner | `chain_transaction_not_found`, `chain_unavailable`, `chain_error`, `miner_unavailable`, `miner_request_failed`, `miner_rate_unavailable` |
 | General | `state_conflict`, `internal_error` |
 
-A route that doesn't exist gets Hono's plain-text 404, not a JSON error.
-
-In the browser client, a failed request throws `ApiRequestError` ([`src/lib/session.ts`](../src/lib/session.ts)). It carries the `status`, and the `code` when the body has one; a non-JSON failure, such as a gateway 502, has no code.
+In the browser client, a failed request throws `ApiRequestError` ([`src/lib/session.ts`](../src/lib/session.ts)). It carries the `status`, and the `code` when the body has one. A failure whose body isn't a JSON object has no code.

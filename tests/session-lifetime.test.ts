@@ -46,6 +46,11 @@ async function main(){
  const c=createSessionClient(async()=>new Response('404 Not Found',{status:404}));
  const error=await c.api('/missing').catch((e:unknown)=>e);assert.ok(error instanceof ApiRequestError);
  assert.equal(error.status,404);assert.equal(error.code,undefined);assert.match(error.message,/app API is unavailable/);
+ for(const body of ['null','5','"text"']){
+  const c=createSessionClient(async()=>new Response(body,{status:502}));
+  const error=await c.api('/read').catch((e:unknown)=>e);assert.ok(error instanceof ApiRequestError,body);
+  assert.equal(error.status,502);assert.equal(error.code,undefined);assert.match(error.message,/app API is unavailable/);
+ }
  const ok=createSessionClient(async()=>new Response('not json'));
  const invalid=await ok.api('/read').catch((e:unknown)=>e);assert.ok(invalid instanceof Error&&!(invalid instanceof ApiRequestError));passed++;
  }

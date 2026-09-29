@@ -54,13 +54,18 @@ export const apiErrorCodes = {
     "The signed transaction doesn't match the approved inputs, output, amount and fee.",
   consensus_rejected: "The offline Bitcoin Core consensus check refused the transaction.",
   inclusion_check_failed: "The inclusion evidence for this transaction was refused.",
-  input_unavailable:
-    "An input is missing, spent, unconfirmed, or doesn't match the stated amount or script.",
+  input_not_found: "The input's transaction has no output at this index.",
+  input_mismatch: "The input's output doesn't have the stated amount or script.",
+  input_unconfirmed:
+    "The input's transaction is unconfirmed or was reorganized out. Wait and retry.",
+  input_spent: "The input is already spent. Choose another.",
   chain_transaction_not_found: "The chain provider doesn't know this transaction (yet).",
   chain_unavailable: "A chain provider request failed. Retry later.",
   chain_error:
     "The chain provider's answer was malformed, inconsistent, too large or for another network.",
   miner_unavailable: "The miner credential or authorization is unavailable.",
+  miner_request_failed:
+    "A miner request failed, or its answer was malformed. Retry later.",
   miner_rate_unavailable: "The miner's live fee quote is unavailable. Retry later.",
   state_conflict: "The record changed during the request. Refresh and retry.",
   internal_error: "An unexpected server error. Retry.",
