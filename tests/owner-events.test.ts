@@ -706,6 +706,45 @@ describe("webhooks", () => {
     expect((await b.post("/api/webhooks/wh_missing/delete")).status).toBe(404);
   });
 
+  it("ignores Idempotency-Key on registration, so no response with a secret is ever stored or replayed", async () => {
+    const f = await setup();
+    const token = tokenFor("owner-a");
+    await f.as("owner-a");
+    const register = () =>
+      f.app.request("/api/webhooks", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Idempotency-Key": "register-once-1" },
+        body: JSON.stringify({ url: "https://hooks.example.com/" }),
+      });
+    const [first, second] = [await register(), await register()];
+    expect([first.status, second.status]).toEqual([201, 201]);
+    expect(second.headers.get("Idempotency-Replayed")).toBeNull();
+    const [a, b] = [await first.json(), await second.json()];
+    expect(a.webhook.id).not.toBe(b.webhook.id);
+    expect(a.secret).not.toBe(b.secret);
+    const rows = [...f.store.rows.values()];
+    expect(rows.filter((row) => row.sk.startsWith("IDEMPOTENCY#"))).toEqual([]);
+    for (const secret of [a.secret, b.secret])
+      expect(rows.filter((row) => JSON.stringify(row).includes(secret)).map((row) => row.sk)).toEqual(["WEBHOOKS"]);
+  });
+
+  it("records no event for an idempotent replay, which doesn't run the handler", async () => {
+    const f = await setup({ versionedAlias: true });
+    const token = tokenFor("owner-a");
+    await f.as("owner-a");
+    const job = await seedJob(f.store, "owner-a");
+    const pause = () =>
+      f.app.request(`/v1/jobs/${job.id}/pause`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "pause-once-01" },
+      });
+    const first = await pause();
+    const replay = await pause();
+    expect([first.status, replay.status]).toEqual([200, 200]);
+    expect(replay.headers.get("Idempotency-Replayed")).toBe("true");
+    expect((await recorded(f.store, "owner-a")).map((e) => e.type)).toEqual(["withdrawal.paused"]);
+  });
+
   it("delivers a signed, thin notification to the address it checked", async () => {
     const f = await setup();
     const a = await f.as("owner-a");

@@ -399,6 +399,7 @@ function primaryKind(row: Row): InventoryKind {
     row.sk.startsWith("TX#") ||
     row.sk.startsWith("EVENT#") ||
     row.sk === "WEBHOOKS" ||
+    row.sk.startsWith("IDEMPOTENCY#") ||
     row.sk.startsWith("LIMIT#") ||
     row.pk.startsWith("CHALLENGE#") ||
     row.pk.startsWith("SESSION#")
