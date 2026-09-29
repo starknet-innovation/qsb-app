@@ -11,7 +11,7 @@ Don't reopen these in code or PRs.
 
 These are the funds-safety invariants:
 
-- Keys, passphrases and one-time material stay in the browser.
+- Keys, passphrases and one-time material stay on the user's machine (browser, SDK or CLI) and never reach any request body.
 - Job creation writes outpoint reservations atomically (`attribute_not_exists`).
 - A paid provider submission is never resubmitted. An unknown outcome is reconciled by an operator.
 - The CPU re-checks every GPU hit.

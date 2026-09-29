@@ -53,7 +53,7 @@ Errors produced in front of the app have no `code`. That includes errors from th
 | Chain and miner | `chain_transaction_not_found`, `chain_unavailable`, `chain_error`, `miner_unavailable`, `miner_request_failed`, `miner_rate_unavailable` |
 | General | `state_conflict`, `internal_error` |
 
-In the browser client, a failed request throws `ApiRequestError` ([`src/lib/session.ts`](../src/lib/session.ts)). It carries the `status`, and the `code` when the body has one. A failure whose body isn't a JSON object has no code.
+In the browser client and the SDK ([`sdk/`](../sdk/README.md)), a failed request throws `ApiRequestError` ([`src/lib/session.ts`](../src/lib/session.ts)). It carries the `status`, and the `code` when the body has one. A failure whose body isn't a JSON object has no code.
 
 ## Per-owner limits
 

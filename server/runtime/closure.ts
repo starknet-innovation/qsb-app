@@ -98,6 +98,7 @@ export const unpackagedReleaseScripts = [
   "build:optimized:queue",
   "test:runtime-build",
   "test:optimized-image",
+  "qsb",
 ] as const;
 
 const localSpecifier =

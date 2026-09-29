@@ -8,6 +8,7 @@ A research application for constructing and recovering quantum-safe Bitcoin vaul
 
 - `src/`: React application, encrypted local backups, wallet integration, and staged signing/recovery flows.
 - `server/`: API, durable storage interfaces, search coordination, and transaction checks.
+- [`sdk/`](sdk/README.md): TypeScript SDK and `qsb` CLI for the same API. Recovery state, passphrases and keys stay on the caller's machine.
 - `worker/cpu/`: independent public CPU parameter export and hit verification. GPU images live in [qsb-solver](https://github.com/starknet-innovation/qsb-solver).
 - `tests/`: application unit tests, browser harnesses, and reference tests.
 - [terraform/](terraform/README.md): single-pipeline AWS infrastructure: static site, API, Step Functions coordinator, CPU verifier, records table and MFA-required reconciliation role. GPU pinning and subset searches use the separate AWS Batch stack in `terraform/gpu`; transactions stay disabled.
