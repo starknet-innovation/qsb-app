@@ -9,6 +9,7 @@ import {
   GetSecretValueCommand,
 } from "@aws-sdk/client-secrets-manager";
 import { minerBase } from "./network";
+import { withApiErrorCode } from "./api-errors";
 import {
   transactionId,
   assertBroadcastPermit,
@@ -145,10 +146,11 @@ export class Slipstream {
   async credential(): Promise<MinerCredential> {
     // Teststream is intentionally credential-free. Never resolve or forward the
     // production miner credential to a rehearsal or custom destination.
+    // A failed read keeps its error and reports miner_unavailable, like MinerAuthenticationError.
     const resolved =
       this.base === "https://teststream.mara.com"
         ? undefined
-        : await this.secret();
+        : await withApiErrorCode("miner_unavailable", () => this.secret());
     const secret: MinerSecret = typeof resolved === "string" ? { authorization: resolved } : (resolved ?? {});
     if ((secret.authorization || secret.clientCode) && this.base !== "https://slipstream.mara.com")
       throw new MinerAuthenticationError(
@@ -168,31 +170,35 @@ export class Slipstream {
       .sort((a, b) => b.length - a.length);
     const headers = new Headers(init?.headers);
     if (authorization) headers.set("Authorization", authorization);
-    const response = await fetch(`${this.base}${path}`, {
-      ...init,
-      headers,
-      redirect: "error",
-      signal: AbortSignal.timeout(20000),
+    // A failed request, an error status or a malformed answer keeps its error and reports
+    // miner_request_failed. 401 and 403 stay MinerAuthenticationError (miner_unavailable).
+    return withApiErrorCode("miner_request_failed", async () => {
+      const response = await fetch(`${this.base}${path}`, {
+        ...init,
+        headers,
+        redirect: "error",
+        signal: AbortSignal.timeout(20000),
+      });
+      if (response.status === 401 || response.status === 403)
+        throw new MinerAuthenticationError(
+          "Miner API authorization is unavailable. Contact the service operator before signing or submitting.",
+        );
+      if (!response.ok) {
+        let detail: string | undefined, minerStatus: string | undefined;
+        try {
+          const body = (await response.json()) as { message?: unknown; status?: unknown };
+          // The miner's message is stored and shown to users, so it never carries the credential.
+          if (typeof body.message === "string") {
+            let text: string = body.message;
+            for (const value of sent) text = text.split(value).join("[redacted]");
+            detail = text.slice(0, 300);
+          }
+          if (typeof body.status === "string") minerStatus = body.status;
+        } catch { /* A body that isn't JSON carries no detail. */ }
+        throw new MinerHttpError(response.status, detail, minerStatus);
+      }
+      return response.json();
     });
-    if (response.status === 401 || response.status === 403)
-      throw new MinerAuthenticationError(
-        "Miner API authorization is unavailable. Contact the service operator before signing or submitting.",
-      );
-    if (!response.ok) {
-      let detail: string | undefined, minerStatus: string | undefined;
-      try {
-        const body = (await response.json()) as { message?: unknown; status?: unknown };
-        // The miner's message is stored and shown to users, so it never carries the credential.
-        if (typeof body.message === "string") {
-          let text: string = body.message;
-          for (const value of sent) text = text.split(value).join("[redacted]");
-          detail = text.slice(0, 300);
-        }
-        if (typeof body.status === "string") minerStatus = body.status;
-      } catch { /* A body that isn't JSON carries no detail. */ }
-      throw new MinerHttpError(response.status, detail, minerStatus);
-    }
-    return response.json();
   }
   async rates() {
     return slipstreamRatesSchema.parse(await this.request("/api/rates"));
@@ -203,10 +209,12 @@ export class Slipstream {
     // Held but not mined: MARA knows it, so report it seen and unconfirmed.
     if (slipstreamPendingSchema.safeParse(body).success && !("transaction" in body))
       return { transaction: { txid: id.toLowerCase(), status: { confirmed: false } }, pending: true as const };
-    const result = slipstreamStatusSchema.parse(body);
-    if (result.transaction.txid.toLowerCase() !== id.toLowerCase())
-      throw new Error("Miner transaction hash mismatch");
-    return result;
+    return withApiErrorCode("miner_request_failed", () => {
+      const result = slipstreamStatusSchema.parse(body);
+      if (result.transaction.txid.toLowerCase() !== id.toLowerCase())
+        throw new Error("Miner transaction hash mismatch");
+      return result;
+    });
   }
   /** Whether the miner knows this transaction. It answers 400 "Transaction not found" for unknown ones. */
   async seen(id: string, credential?: MinerCredential): Promise<boolean> {

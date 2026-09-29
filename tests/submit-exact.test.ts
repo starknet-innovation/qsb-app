@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { MemoryStore } from "../server/store";
-import { Esplora } from "../server/chain";
+import { ChainError, Esplora } from "../server/chain";
 import { submitExact, type SubmitDependencies } from "../server/submit-exact";
 import { consumeExactSubmitPermit } from "../server/exact-submit-permit";
 import {
@@ -220,6 +220,23 @@ describe("submitExact durable one-shot submission", () => {
     expect(f.miner.submit).toHaveBeenCalledOnce();
     expect(f.miner.submit.mock.calls[0][2]).toBe(placeholder);
   });
+  it.each(["queued", "searching", "paused", "failed"] as const)(
+    "refuses a %s job without a solution as not ready, before any other read, write or miner call",
+    async (status) => {
+      const f = await fixture();
+      const early = job({ status, solution: undefined });
+      await f.store.put({ pk: f.pk, sk: `JOB#${early.id}`, version: 1, job: early }, 0);
+      const get = vi.spyOn(f.store, "get");
+      const writes = [vi.spyOn(f.store, "put"), vi.spyOn(f.store, "atomicPut")];
+      const error = await submitExact(f.stored.owner, f.stored.id, f.raw, f.deps).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ChainError);
+      expect(error).toMatchObject({ message: "Withdrawal is not ready for authorization.", code: "job_state_invalid" });
+      // Only the job itself was read: no TX# or vault lookup, chain read, consensus or miner call.
+      expect(get.mock.calls).toEqual([[f.pk, `JOB#${early.id}`]]);
+      for (const spy of [...writes, f.unspent, f.consensus.verify, f.miner.credential, f.miner.submit])
+        expect(spy).not.toHaveBeenCalled();
+    },
+  );
   it("disabled configuration makes no chain, consensus, or miner call", async () => {
     const f = await fixture();
     await expect(

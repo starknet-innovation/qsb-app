@@ -19,6 +19,7 @@ import {
   type OwnerEvent,
 } from "../server/owner-events";
 import { inventoryRows } from "../server/runtime/storage-authority";
+import { withApiErrorCode } from "../server/api-errors";
 import { inventorySnapshot } from "../scripts/storage-inventory";
 import {
   FAILING_AFTER,
@@ -470,7 +471,7 @@ describe("owner event log", () => {
     for (const recordEvents of [false, true]) {
       const r = await run(recordEvents);
       expect([...r.statuses].sort()).toEqual([201, 409]);
-      expect(r.refused).toEqual({ error: "State changed. Refresh and try again." });
+      expect(r.refused).toEqual({ error: "State changed. Refresh and try again.", code: "state_conflict" });
       // The same-key retry returns the committed job and starts its workflow again.
       expect(r.retry).toEqual([200, { job: r.committed }]);
       expect(r.workflows).toBe(2);
@@ -521,6 +522,46 @@ describe("the resend path", () => {
     expect(refused.row).toMatchObject({ fundingSubmission: "submitted", vault: { status: "submitted" } });
     expect((await run("accepted")).events).toEqual([]);
     expect(await run("known")).toMatchObject({ posts: 0, events: [] });
+  });
+});
+
+describe("error codes", () => {
+  it("pass through the watched miner and the event recorder unchanged", async () => {
+    const address = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20) });
+    const scriptHex = "51".repeat(100);
+    const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true, version: 2 });
+    tx.addInput({ txid: new Uint8Array(32).fill(6), index: 0, sequence: 0xfffffffe });
+    tx.addOutput({ amount: 50_000n, script: hex.decode(scriptHex) });
+    const raw = hex.encode(tx.toBytes(true, false));
+    const miner = new Slipstream("https://slipstream.test", async () => undefined);
+    const f = await setup({ miner, exactSubmit: true });
+    const a = await f.as(address);
+    const vault = (status: string, id = crypto.randomUUID()) => ({
+      pk: `OWNER#${address}`, sk: `VAULT#${id}`, version: 0, fundingRawTxHex: raw, vault: {
+        id, scriptHex, config: "A", publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
+        scriptHash: createHash("sha256").update(Buffer.from(scriptHex, "hex")).digest("hex"), paymentAddress: address, network: "mainnet", status,
+        ...(status === "submitted" ? { funding: { txid: transactionId(raw), vout: 0, value: "50000" } } : {}),
+      },
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(miner, "credential").mockResolvedValue({} as never);
+    // A miner error coded where it's thrown keeps its code through the resend path's watcher.
+    const resend = vault("submitted");
+    await f.store.put(resend);
+    vi.spyOn(miner, "seen").mockImplementation(() =>
+      withApiErrorCode("miner_request_failed", () => Promise.reject(new Error("upstream"))),
+    );
+    const refused = await a.post(`/api/vaults/${(resend.vault as PublicVault).id}/fund/resubmit`);
+    expect({ status: refused.status, code: (await refused.json()).code }).toEqual({ status: 500, code: "miner_request_failed" });
+    // So does a store error through the event recorder.
+    const fresh = vault("unfunded");
+    await f.store.put(fresh);
+    const put = MemoryStore.prototype.put.bind(f.store);
+    vi.spyOn(f.store, "put").mockImplementation((row, expected, options) =>
+      row.sk === fresh.sk ? withApiErrorCode("chain_unavailable", () => Promise.reject(new Error("table"))) : put(row, expected, options),
+    );
+    const failed = await a.post(`/api/vaults/${(fresh.vault as PublicVault).id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
+    expect({ status: failed.status, code: (await failed.json()).code }).toEqual({ status: 500, code: "chain_unavailable" });
   });
 });
 

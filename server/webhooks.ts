@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { BlockList, isIP } from "node:net";
+import type { ApiErrorCode } from "./api-errors";
 import type { EventType, OwnerEvent } from "./owner-events";
 import { Conflict, type Row, type Store } from "./store";
 
@@ -70,10 +71,10 @@ type Pending = {
 };
 type WebhookRow = Row & { hooks: Hook[]; pending: Pending[] };
 
-export type WebhookUrlCode =
-  | "webhook_url_invalid"
-  | "webhook_url_forbidden"
-  | "webhook_url_unresolvable";
+export type WebhookUrlCode = Extract<
+  ApiErrorCode,
+  "webhook_url_invalid" | "webhook_url_forbidden" | "webhook_url_unresolvable"
+>;
 export class WebhookUrlError extends Error {
   constructor(
     readonly code: WebhookUrlCode,
