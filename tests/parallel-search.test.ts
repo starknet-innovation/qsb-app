@@ -24,6 +24,19 @@ vi.mock("../server/network", async (importOriginal) => {
   const actual = await importOriginal<any>();
   return { ...actual, get transactionsEnabled() { return mocks.enabled; } };
 });
+vi.mock("../server/chain", async (importOriginal) => {
+  const actual = await importOriginal<any>();
+  const { NETWORK_CONFIG } = await import("../src/lib/network");
+  // Answers only the network check, so no test reaches a public Esplora API.
+  return {
+    ...actual,
+    chain: new actual.Esplora("https://chain.test", async (url: any) => {
+      if (new URL(String(url)).pathname === "/block-height/0")
+        return new Response(NETWORK_CONFIG.genesisHash);
+      throw Error(`Unexpected chain lookup ${url}`);
+    }),
+  };
+});
 vi.mock("../server/providers", () => ({ slipstream: {} }));
 vi.mock("../server/compute-provider", () => ({
   computeConfigured: () => true,
