@@ -64,11 +64,13 @@ Nothing live changes in this phase.
    - **MFA.** The two access roles no longer check MFA themselves, because Identity Center enforces it for the
      whole instance, not per permission set. Confirm that Identity Center prompts for MFA at every sign-in
      ("always-on") and requires users to register an MFA device.
-   - Create the GitHub OIDC provider (`token.actions.githubusercontent.com`), which the deploy role trusts.
+   - Create the GitHub OIDC provider (`token.actions.githubusercontent.com`), which the deploy role trusts. This must
+     exist before `bootstrap.py` runs in step 4.
    - **GPU capacity.** Check that `g5.xlarge` is offered in the subnets you'll use:
      `aws ec2 describe-instance-type-offerings --region eu-west-2 --location-type availability-zone --filters Name=instance-type,Values=g5.xlarge`.
      Then request the Service Quotas "Running On-Demand G and VT instances" quota, at least the compute
-     environment's 4 vCPUs.
+     environment's maximum vCPUs. That's 32 today: `workersMax` 8 in `server/gpu-spend.json`, times 4 vCPUs per
+     `g5.xlarge`, the same as the approved eu-west-1 quota. A lower quota caps how many GPUs a withdrawal can use.
    - **GPU AMI.** Find the Ireland AMI's name with `aws ec2 describe-images --region eu-west-1 --image-ids ami-05db4db06e751ab89 --query 'Images[0].Name'`.
      Then find the image with the same name in eu-west-2:
      `aws ec2 describe-images --region eu-west-2 --owners amazon --filters Name=name,Values=<that name> --query 'Images[0].ImageId'`.
@@ -79,7 +81,8 @@ Nothing live changes in this phase.
      - Lambda reserved concurrency: the app reserves 2 for each of its 3 functions, and a new account's quota may be
        lower.
      - CloudFront: new accounts sometimes need AWS to verify them before they can create a distribution.
-     - If the app's `alarm_actions` is used, create its SNS topic in the new account.
+     - Alert routing: the AWS admin sets up where the app's alarms go (the SNS topic for `alarm_actions`) and runs a
+       delivery test.
 3. **Private inventory** (AWS admin). Write it for the new account with:
    - `account` (the new one), `region` `eu-west-2`, `subject` (the same GitHub main-branch subject) and a new
      `state_bucket` name;
@@ -189,6 +192,17 @@ Nothing live changes in this phase.
       `QSB_AWS_ROLE_ARN` (the new `qsb-github-deploy`).
     - Point the local `qsb-view` and `qsb-operator` profiles at the new account's roles through Identity Center,
       with region eu-west-2.
+
+## Admin steps after the move
+
+These stay with the AWS admin, even once `qsb-operator` manages the stack:
+- **IAM changes.** When a change to `ops/github-aws/render.py` or `access.py` lands on main, the AWS admin runs
+  `update_installed.py`, checks its plan against the merged diff, then runs it with `--apply`.
+- **Temp admin role for the day,** as for the first apply, to:
+  - replace a registered resource (the CloudFront distribution, API, origin access control or response-headers
+    policy) and register the new ID;
+  - change the API's access logs.
+- **Alerts.** Alert routing, and its delivery test.
 
 ## Rollback
 

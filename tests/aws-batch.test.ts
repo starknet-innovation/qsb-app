@@ -2,6 +2,11 @@ import { BatchClient } from "@aws-sdk/client-batch";
 import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
 import command from "../server/aws-batch-command.json";
+// One GPU per withdrawal (maxvCpus 4); tests/aws-batch-parallel.test.ts covers more.
+vi.mock("../server/gpu-spend", async (importOriginal) => {
+  const actual = await importOriginal<any>();
+  return { ...actual, gpuSpendLimits: { ...actual.gpuSpendLimits, workersMax: 1 } };
+});
 import { AwsBatch } from "../server/aws-batch";
 const transport = vi.hoisted(() => ({ handle: vi.fn() }));
 vi.mock("@aws-sdk/client-batch", async (original) => {

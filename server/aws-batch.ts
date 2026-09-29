@@ -189,7 +189,8 @@ export class AwsBatch implements ComputeProvider {
       c?.type !== "EC2" ||
       c.allocationStrategy !== "BEST_FIT" ||
       c.minvCpus !== 0 ||
-      c.maxvCpus !== 4 ||
+      // One g5.xlarge (4 vCPUs, one A10G) per parallel worker.
+      c.maxvCpus !== 4 * gpuSpendLimits.workersMax ||
       c.instanceTypes?.length !== 1 ||
       c.instanceTypes[0] !== "g5.xlarge"
     )

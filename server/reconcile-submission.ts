@@ -6,6 +6,7 @@ import {
   type Job,
   type PublicVault,
   type BatchSubmissionIdentity,
+  type SearchSlot,
 } from "../src/lib/model";
 import { NETWORK_ID } from "../src/lib/network";
 import { assertSolverPin, solverRelease } from "../src/lib/provenance";
@@ -125,22 +126,35 @@ export async function reconcileUnknownSubmission(input: {
   if (!row || !job) throw new ReconciliationError("JobNotFound");
   if (job.owner !== owner || job.id !== jobId)
     throw new ReconciliationError("JobIdentityMismatch");
+  // A parallel search keeps each paid chunk in its own slot. The decision applies to
+  // the one slot whose POST outcome is unknown, or the slot already holding the ID.
+  const slots = job.parallelSlots;
+  const unknownSlots = slots?.filter((s) => !s.runpodId) ?? [];
+  if (slots && unknownSlots.length > 1)
+    throw new ReconciliationError("SingleUnknownSubmissionRequired");
+  let target: SearchSlot | undefined = unknownSlots[0];
+  const identity = () => (slots ? target?.batchSubmission : job.batchSubmission);
   if (decision.kind === "provider-id" && decision.providerId === "discover") {
-    if (!job.batchSubmission || !lookup.findRequest)
+    if (!identity() || !lookup.findRequest)
       throw new ReconciliationError("BatchRequestIdentityRequired");
-    const found = await lookup.findRequest(job.batchSubmission);
+    const found = await lookup.findRequest(identity()!);
     if (!found) throw new ReconciliationError("BatchRequestNotFound");
     decision.providerId = found;
   }
+  const recordedSlot =
+    slots && decision.kind === "provider-id"
+      ? slots.find((s) => s.runpodId === decision.providerId)
+      : undefined;
   const recorded =
     decision.kind === "provider-id" &&
     job.status === "searching" &&
-    job.runpodId === decision.providerId;
+    (slots ? Boolean(recordedSlot) : job.runpodId === decision.providerId);
+  if (recorded && recordedSlot) target = recordedSlot;
   if (
     !recorded &&
     !(
       job.status === "paused" &&
-      !job.runpodId &&
+      (slots ? Boolean(target) : !job.runpodId) &&
       job.error?.includes("Submission outcome unknown")
     )
   )
@@ -162,16 +176,14 @@ export async function reconcileUnknownSubmission(input: {
   )
     throw new ReconciliationError("SolverRuntimeMismatch");
   let replacementRequestKey: string | undefined;
+  let replacedRequest: BatchSubmissionIdentity | undefined;
   const now = input.now ?? new Date().toISOString();
   if (!Number.isFinite(Date.parse(now)))
     throw new ReconciliationError("InvalidTime");
   if (decision.kind === "provider-id") {
-    if (!job.batchSubmission)
+    if (!identity())
       throw new ReconciliationError("BatchRequestIdentityRequired");
-    const result = await lookup.status(
-      decision.providerId,
-      job.batchSubmission,
-    );
+    const result = await lookup.status(decision.providerId, identity());
     if (result.id !== decision.providerId)
       throw new ReconciliationError("ProviderIdMismatch");
     if (
@@ -197,11 +209,13 @@ export async function reconcileUnknownSubmission(input: {
           workRange: z.record(z.string(), z.unknown()),
         })
         .parse(result.output);
-      const range = workRange(job.stage, job.attempt);
+      const stage = slots ? target!.stage : job.stage,
+        attempt = slots ? target!.attempt : job.attempt;
+      const range = workRange(stage, attempt);
       if (
         output.manifestHash !== job.manifestHash ||
-        output.stage !== job.stage ||
-        output.attempt !== job.attempt ||
+        output.stage !== stage ||
+        output.attempt !== attempt ||
         output.kernelCommit !== selected.kernelCommit ||
         Object.entries(range).some(([k, v]) => output.workRange[k] !== v) ||
         Object.keys(output.workRange).some((k) => !(k in range))
@@ -212,7 +226,8 @@ export async function reconcileUnknownSubmission(input: {
     // STANDARD execution names cannot be reused after the execution closes.
     // Commit that revision and audit row atomically before starting the workflow.
     if (!recorded) {
-      job.runpodId = decision.providerId;
+      if (slots) target!.runpodId = decision.providerId;
+      else job.runpodId = decision.providerId;
       job.computeProvider = "aws-batch";
       job.status = "searching";
       delete job.error;
@@ -225,16 +240,18 @@ export async function reconcileUnknownSubmission(input: {
     if (decision.reason === "ttl-expired")
       throw new ReconciliationError("AwsBatchHasNoSubmissionTtl");
     if (decision.reason === "batch-window-elapsed") {
-      const started = Date.parse(job.submissionStartedAt ?? "");
+      const started = Date.parse(
+        (slots ? target?.submissionStartedAt : job.submissionStartedAt) ?? "",
+      );
       const elapsed = Date.parse(now) - started;
       if (!Number.isFinite(elapsed) || elapsed < 35 * 60 * 1000)
         throw new ReconciliationError("BatchRecoveryWindowRequired");
-      if (!job.batchSubmission || !lookup.findRequest)
+      if (!identity() || !lookup.findRequest)
         throw new ReconciliationError("BatchRequestIdentityRequired");
-      replacementRequestKey = `RECONCILIATION_REQUEST#${jobId}#${job.batchSubmission.jobName}`;
+      replacementRequestKey = `RECONCILIATION_REQUEST#${jobId}#${identity()!.jobName}`;
       if (await store.get(pk, replacementRequestKey))
         throw new ReconciliationError("BatchReplacementAlreadyUsed");
-      const found = await lookup.findRequest(job.batchSubmission);
+      const found = await lookup.findRequest(identity()!);
       if (found)
         return reconcileUnknownSubmission({
           ...input,
@@ -249,9 +266,13 @@ export async function reconcileUnknownSubmission(input: {
     const health = await lookup.health();
     if (health.jobs.inQueue !== 0 || health.jobs.inProgress !== 0)
       throw new ReconciliationError("EndpointNotDrained");
+    const request = identity();
     if (decision.reason === "batch-window-elapsed")
-      job.batchReplacementFor = job.batchSubmission!.jobName;
+      job.batchReplacementFor = request!.jobName;
     job.oneSubmissionAllowed = true;
+    // The chunk goes back to the pool; resume submits it once more, with a new intent.
+    if (slots && target) slots.splice(slots.indexOf(target), 1);
+    replacedRequest = request;
   }
   const priorRevision = job.revision;
   job.revision += 1;
@@ -268,7 +289,7 @@ export async function reconcileUnknownSubmission(input: {
           pk,
           sk: replacementRequestKey,
           version: 0,
-          request: job.batchSubmission,
+          request: replacedRequest ?? identity(),
           decision: job.submissionReconciliation,
         } }]
       : []),
@@ -308,7 +329,10 @@ export async function reconcileUnknownSubmission(input: {
 }
 
 async function startPolling(job: Job): Promise<PollingStart> {
-  if (!job.runpodId) return { started: false, reason: "provider-id-missing" };
+  const hasId = job.parallelSlots
+    ? job.parallelSlots.some((s) => s.runpodId)
+    : Boolean(job.runpodId);
+  if (!hasId) return { started: false, reason: "provider-id-missing" };
   if (!pollingStartAllowed(job.owner))
     return { started: false, reason: "transactions-disabled" };
   const arn = process.env.WORKFLOW_ARN;

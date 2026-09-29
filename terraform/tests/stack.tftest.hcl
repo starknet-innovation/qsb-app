@@ -70,8 +70,8 @@ run "baseline" {
     error_message = "Do not add generic automatic retries around billable coordination."
   }
   assert {
-    condition     = aws_lambda_function.coordinator.environment[0].variables.GPU_WORKERS_MAX == "1" && aws_lambda_function.coordinator.environment[0].variables.GPU_WORKERS_MIN == "0" && aws_lambda_function.coordinator.environment[0].variables.GPU_EXECUTION_TIMEOUT_MS == tostring(local.gpu_spend.executionTimeoutMs) && aws_lambda_function.coordinator.environment[0].variables.MAX_JOB_GPU_SECONDS == (tostring(local.gpu_spend.maxJobGpuSeconds)) && output.gpu_limits.workersMax == 1 && output.gpu_limits.workersMin == 0 && output.gpu_limits.executionTimeoutMs == local.gpu_spend.executionTimeoutMs
-    error_message = "Deployed configuration must show workersMax=1, workersMin=0, and the execution timeout."
+    condition     = aws_lambda_function.coordinator.environment[0].variables.GPU_WORKERS_MAX == tostring(local.gpu_spend.workersMax) && local.gpu_spend.workersMax >= 1 && local.gpu_spend.workersMax <= 16 && aws_lambda_function.coordinator.environment[0].variables.GPU_WORKERS_MIN == "0" && aws_lambda_function.coordinator.environment[0].variables.GPU_EXECUTION_TIMEOUT_MS == tostring(local.gpu_spend.executionTimeoutMs) && aws_lambda_function.coordinator.environment[0].variables.MAX_JOB_GPU_SECONDS == (tostring(local.gpu_spend.maxJobGpuSeconds)) && output.gpu_limits.workersMax == local.gpu_spend.workersMax && output.gpu_limits.workersMin == 0 && output.gpu_limits.executionTimeoutMs == local.gpu_spend.executionTimeoutMs
+    error_message = "Deployed configuration must show the reviewed workersMax (1-16), workersMin=0, and the execution timeout."
   }
 }
 run "reject_network_mismatch" {

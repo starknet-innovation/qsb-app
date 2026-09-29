@@ -4,7 +4,8 @@ import raw from "./gpu-spend.json";
 /** Single bundled per-job execution-time allowance, reviewed before deployment. */
 export const gpuSpendSchema = z
   .object({
-    workersMax: z.literal(1),
+    /** GPUs one withdrawal may use at once. Size it to the approved GPU-instance quota. */
+    workersMax: z.number().int().min(1).max(16),
     workersMin: z.literal(0),
     executionTimeoutMs: z.number().int().positive().max(900000),
     maxJobGpuSeconds: z.number().int().positive().max(31_536_000),

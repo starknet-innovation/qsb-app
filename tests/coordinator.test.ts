@@ -16,7 +16,8 @@ vi.mock("../server/gpu-spend", async (importOriginal) => {
   const actual = await importOriginal<any>();
   return {
     ...actual,
-    gpuSpendLimits: { ...actual.gpuSpendLimits, maxJobGpuSeconds: 36000 },
+    // The single-GPU path; parallel search is covered by tests/parallel-search.test.ts.
+    gpuSpendLimits: { ...actual.gpuSpendLimits, workersMax: 1, maxJobGpuSeconds: 36000 },
   };
 });
 vi.mock("../server/network", async (importOriginal) => {

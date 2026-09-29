@@ -4,14 +4,14 @@
 
 Publishing research source is not deployment or activation. Feature enablement is not authorization to spend. `release.mainnetEnabled` stays false. `broadcastAuthorized` is not set. No step below starts a worker, contacts a provider, or broadcasts a transaction.
 
-The checked-in capability limit is `providerGpuLimit: 1` in `server/mainnet-capability.json`. Until a later reviewed decision changes that file, the concurrency cap is one concurrent search and one GPU worker. The minimum idle worker count is zero. This is not a measured production capacity plan.
+The checked-in capability limit is `providerGpuLimit: 1` in `server/mainnet-capability.json`. It governs the supervised runtime: until a later reviewed decision changes that file, that runtime's cap is one concurrent search and one GPU worker. The AWS Batch coordinator's GPUs per withdrawal are `workersMax` in `server/gpu-spend.json` instead (see [Parallel GPU search](#parallel-gpu-search)). The minimum idle worker count is zero. This is not a measured production capacity plan.
 
 ## Concurrency and cost caps
 
 - `maxConcurrentSearches`: 1
-- `maxGpuWorkers`: 1
+- `maxGpuWorkers`: 1 (supervised runtime; the coordinator uses `workersMax` below)
 - `minIdleWorkers`: 0
-- The coordinator path uses `server/gpu-spend.json`: `workersMax` 1, `workersMin` 0, `executionTimeoutMs` 900000, and `maxJobGpuSeconds` 14745600 (4,096 GPU-hours per job, reserved across retries and all stages). A 64-hit output is not credited as a finished range. These checks do not start a worker, evaluate the USD ceiling, or authorize a spend.
+- The coordinator path uses `server/gpu-spend.json`: `workersMax` (1–16; see [Parallel GPU search](#parallel-gpu-search)), `workersMin` 0, `executionTimeoutMs` 900000, and `maxJobGpuSeconds` 14745600 (4,096 GPU-hours per job, reserved across retries and all stages). A 64-hit output is not credited as a finished range. These checks do not start a worker, evaluate the USD ceiling, or authorize a spend.
 - `costUnit` is `operator-units`. `maxCostUnits` is a positive integer of those units. The operator cost field is not the experimental USD ceiling. A plan that labels the field as USD, or that supplies `vaultUsd`, `feeUsd`, or `gpuUsd` on the runbook, is refused with `CostFieldIsNotUsdCeiling`.
 - The experimental USD limits are vault 10000, fee 1000, and GPU 1000. They are encoded only in `assertExperimentalUsdLimits`. That check cannot run while `release.mainnetEnabled` and `broadcastAuthorized` are false: it throws `UsdLimitCheckClosed` and does not compare amounts. It does not read `maxCostUnits`, approve activation, or authorize a spend.
 - A missing or zero operator cost ceiling is refused. A plan above the concurrency cap is refused. `acceptOperationalRunbook` does not provision workers. `executed`, `provisioned`, and `usdLimitsEvaluated` stay false. `costFieldIsUsdCeiling` stays false.
@@ -197,6 +197,29 @@ Local builds and source flags are not live-configuration evidence. A clean pushe
 ## Spend authorization
 
 Every proposed mainnet spend requires a separate exact-transaction authorization. The activation decision does not carry the transaction id, amount, or fee, and it does not set `broadcastAuthorized`. An exact spend record is still not a broadcast. This checkout grants neither.
+
+### Parallel GPU search
+
+`workersMax` in `server/gpu-spend.json` (1–16) is how many GPUs one withdrawal may use at once. Size it to the account's approved "Running On-Demand G and VT instances" quota in the stack's region: one `g5.xlarge` uses 4 vCPUs, so `workersMax` is at most quota ÷ 4. Both stacks follow the same value: the GPU stack sets the compute environment's `max_vcpus` to 4 × `workersMax`, and the coordinator refuses to submit ("nothing was submitted") unless the live compute environment matches exactly.
+
+With `workersMax` 1 the single-submission path is unchanged. Above 1, the coordinator runs chunks of one stage side by side:
+
+- **Each chunk is its own paid submission.** Its slot (stage, chunk, request identity) and its 900-second reservation are saved in one conditional write before its `SubmitJob`, exactly as for one GPU. Nothing is resubmitted automatically.
+- **Credit is contiguous.** Chunks can finish out of order; `attempt` only moves past chunks that have all finished, and finished chunks above it are kept in `completedAttempts`.
+- **A verified hit moves the whole withdrawal to the next stage.** Chunks still running for the old stage are cancelled and never credited; their reservations are not refunded.
+- **Any interrupted or incomplete chunk pauses the withdrawal.** The other chunks keep running and their results are kept; resume repeats the interrupted chunk once.
+- **A slot without a provider ID is an unknown outcome** and pauses the withdrawal, as on the single-GPU path.
+- **The budget is unchanged per chunk:** N GPUs reserve N × 900 seconds at a time. Search finishes up to N times sooner, and the total reserved per chunk is the same.
+
+A single-GPU job that is resumed after `workersMax` is raised has its running submission adopted as a slot and stays on the parallel path from then on, even if `workersMax` later returns to 1.
+
+**Changing `workersMax`** is a capacity change: never while a chunk is running.
+1. Pause each running withdrawal in the app and wait until its GPU jobs have stopped (the queue is empty).
+2. Confirm the quota covers 4 × `workersMax` vCPUs; request an increase first if not.
+3. Change `server/gpu-spend.json` through a reviewed PR, then apply the GPU stack and the app stack from that commit. Either order fails closed until both match.
+4. Resume the withdrawals.
+
+**Reconciling a parallel search** uses the same CLI. The decision applies to the single chunk whose POST outcome is unknown (more than one unknown chunk is refused): discovery and `--provider-id` attach to that chunk, the 35-minute window is measured from that chunk's own start, and the queue must be drained, so pause the withdrawal first and wait for its other chunks to stop. A `not-submitted` decision returns just that chunk to the pool, and resume submits it once more with a new intent.
 
 ### Coordinator GPU-time allowance
 
