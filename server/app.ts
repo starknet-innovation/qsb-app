@@ -11,6 +11,18 @@ import { exactSubmitEnabled } from "./exact-submit-permit";
 import { mainnetUiConfig, type MainnetUiOptions } from "./mainnetConfig";
 import { apiError, attachedApiErrorCode } from "./api-errors";
 import {
+  CHALLENGE_SECONDS,
+  SESSION_SECONDS,
+  challengeRequest,
+  fundRequest,
+  fundResubmitRequest,
+  fundSubmitRequest,
+  submitRequest,
+  transactionIdParam,
+  verifyRequest,
+  webhookRequest,
+} from "./api-schemas";
+import {
   assertVaultConfiguration,
   pinSolver,
   solverRelease,
@@ -31,9 +43,7 @@ import {
   release,
   type Job,
   type PublicVault,
-  sats,
   outpoint,
-  txid,
 } from "../src/lib/model";
 import { Conflict, store as defaultStore, type Store } from "./store";
 import { slipstream, MinerAuthenticationError } from "./providers";
@@ -58,7 +68,6 @@ import {
   reportEsploraInclusion,
 } from "./runtime/miner-inclusion";
 import {
-  EVENT_TYPES,
   SETTLE_CAP_MS,
   eventQuery,
   listOwnerEvents,
@@ -295,10 +304,7 @@ export function createApp(
     }
   });
   app.post("/api/auth/challenge", async (c) => {
-    const { address } = z
-      .object({ address: z.string().min(14).max(100) })
-      .strict()
-      .parse(await jsonBody(c));
+    const { address } = challengeRequest.parse(await jsonBody(c));
     try {
       outputScript(address);
     } catch {
@@ -310,7 +316,7 @@ export function createApp(
       );
     }
     const id = randomUUID(),
-      expiresAt = Math.floor(Date.now() / 1000) + 300;
+      expiresAt = Math.floor(Date.now() / 1000) + CHALLENGE_SECONDS;
     const message = `QSB Vault sign-in\nOrigin: ${origin}\nAddress: ${address}\nNetwork: bitcoin-${NETWORK_ID}\nNonce: ${id}\nExpires: ${new Date(expiresAt * 1000).toISOString()}\nThis signature authorizes this session only. It does not authorize a Bitcoin transaction.`;
     await store.put({
       pk: `CHALLENGE#${id}`,
@@ -324,10 +330,7 @@ export function createApp(
     return c.json({ id, message });
   });
   app.post("/api/auth/verify", async (c) => {
-    const { id, signature } = z
-      .object({ id: z.string().uuid(), signature: z.string().max(4096) })
-      .strict()
-      .parse(await jsonBody(c));
+    const { id, signature } = verifyRequest.parse(await jsonBody(c));
     const challenge = await store.get(`CHALLENGE#${id}`, "AUTH");
     if (!challenge || challenge.network !== NETWORK_ID)
       return apiError(
@@ -360,7 +363,7 @@ export function createApp(
       version: 0,
       owner: challenge.address,
       network: NETWORK_ID,
-      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      expiresAt: Math.floor(Date.now() / 1000) + SESSION_SECONDS,
     });
     return c.json({ token });
   });
@@ -412,19 +415,18 @@ export function createApp(
     return c.json({ webhooks: await listWebhooks(records, c.get("owner")) });
   });
   app.post("/api/webhooks", async (c) => {
-    const body = z
-      .object({
-        url: z.string().max(2048),
-        events: z.array(z.enum(EVENT_TYPES)).min(1).max(EVENT_TYPES.length).optional(),
-      })
-      .strict()
-      .parse(await jsonBody(c));
+    const body = webhookRequest.parse(await jsonBody(c));
     c.header("Cache-Control", "no-store");
     try {
       // The signing secret is in this response only.
       return c.json(await registerWebhook(records, c.get("owner"), body, delivery.resolve), 201);
     } catch (e) {
-      if (e instanceof WebhookUrlError) return apiError(c, 400, e.code, e.message);
+      if (e instanceof WebhookUrlError)
+        return e.code === "webhook_url_forbidden"
+          ? apiError(c, 400, "webhook_url_forbidden", e.message)
+          : e.code === "webhook_url_unresolvable"
+            ? apiError(c, 400, "webhook_url_unresolvable", e.message)
+            : apiError(c, 400, "webhook_url_invalid", e.message);
       if (e instanceof WebhookLimitError)
         return apiError(c, 409, "webhook_limit_reached", e.message);
       throw e;
@@ -546,14 +548,7 @@ export function createApp(
         `${NETWORK_ID} funding is disabled pending validation and operator configuration.`,
         { checks: release.checks },
       );
-    const body = z
-      .object({
-        txid,
-        amount: sats,
-        costAccepted: z.literal(true),
-      })
-      .strict()
-      .parse(await jsonBody(c));
+    const body = fundRequest.parse(await jsonBody(c));
     const pk = `OWNER#${c.get("owner")}`,
       sk = `VAULT#${c.req.param("id")}`;
     const row = await store.get(pk, sk);
@@ -612,14 +607,7 @@ export function createApp(
         "submit_disabled",
         "Deposit submission to the miner is disabled.",
       );
-    const body = z
-      .object({
-        rawTxHex: z.string().regex(/^(?:[0-9a-fA-F]{2})+$/).max(200000),
-        amount: sats,
-        costAccepted: z.literal(true),
-      })
-      .strict()
-      .parse(await jsonBody(c));
+    const body = fundSubmitRequest.parse(await jsonBody(c));
     const result = await submitDeposit(
       c.get("owner"),
       c.req.param("id"),
@@ -673,7 +661,7 @@ export function createApp(
         "submit_disabled",
         "Deposit submission to the miner is disabled.",
       );
-    z.object({}).strict().parse(await c.req.json().catch(() => ({})));
+    fundResubmitRequest.parse(await c.req.json().catch(() => ({})));
     const row = await store.get(`OWNER#${c.get("owner")}`, `VAULT#${c.req.param("id")}`);
     if (!row) return apiError(c, 404, "vault_not_found", "Vault not found");
     const vault = row.vault as PublicVault;
@@ -695,10 +683,7 @@ export function createApp(
   // Reconcile the durable intent without submitting it again. Private miner
   // visibility is distinct from independent canonical-chain confirmation.
   app.get("/api/transactions/:id/status", async (c) => {
-    const id = z
-      .string()
-      .regex(/^[a-f0-9]{64}$/)
-      .parse(c.req.param("id"));
+    const id = transactionIdParam.parse(c.req.param("id"));
     const pk = `OWNER#${c.get("owner")}`;
     const row = await store.get(pk, `TX#${id}`);
     if (!row)
@@ -1023,10 +1008,7 @@ export function createApp(
         "submit_disabled",
         `${NETWORK_ID} withdrawals are disabled.`,
       );
-    const body = z
-      .object({ rawTxHex: z.string().max(150000) })
-      .strict()
-      .parse(await jsonBody(c));
+    const body = submitRequest.parse(await jsonBody(c));
     const result = await submitExact(
       c.get("owner"),
       c.req.param("id"),

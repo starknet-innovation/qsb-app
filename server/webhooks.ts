@@ -1,7 +1,8 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { BlockList, isIP } from "node:net";
 import type { ApiErrorCode } from "./api-errors";
-import type { EventType, OwnerEvent } from "./owner-events";
+import type { EventType } from "./api-schemas";
+import type { OwnerEvent } from "./owner-events";
 import { Conflict, type Row, type Store } from "./store";
 
 export class Timeout extends Error {}

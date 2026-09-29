@@ -1,22 +1,9 @@
 import { createHash } from "node:crypto";
 import type { Job, PublicVault } from "../src/lib/model";
+import { EVENT_TYPES, eventsCursorParam, eventsLimitParam, type EventType } from "./api-schemas";
 import { Conflict, type AtomicWrite, type Row, type Store } from "./store";
 import { deliverDue, enqueueDeliveries, within, type Delivery } from "./webhooks";
 
-export const EVENT_TYPES = [
-  "withdrawal.queued",
-  "withdrawal.searching",
-  "withdrawal.paused",
-  "withdrawal.failed",
-  "withdrawal.awaiting_authorization",
-  "withdrawal.submitted",
-  "withdrawal.confirmed",
-  "deposit.submitted",
-  "deposit.confirmed",
-  "deposit.spent",
-  "deposit.dropped",
-] as const;
-export type EventType = (typeof EVENT_TYPES)[number];
 /** What the pull endpoint lists and a webhook carries: identifiers and statuses, nothing secret. */
 export type OwnerEvent = {
   id: string;
@@ -303,11 +290,11 @@ export function eventQuery(
 ): { after?: string; limit: number } | undefined {
   let position: string | undefined;
   if (after !== undefined) {
-    if (!/^[A-Za-z0-9_-]{1,120}$/.test(after)) return;
+    if (!eventsCursorParam.safeParse(after).success) return;
     position = Buffer.from(after, "base64url").toString("utf8");
     if (!CURSOR.test(position)) return;
   }
-  if (limit !== undefined && !/^(?:[1-9]\d?|100)$/.test(limit)) return;
+  if (limit !== undefined && !eventsLimitParam.safeParse(limit).success) return;
   return { after: position, limit: limit === undefined ? 50 : Number(limit) };
 }
 const cursor = (sk: string) => Buffer.from(sk.slice("EVENT#".length)).toString("base64url");
