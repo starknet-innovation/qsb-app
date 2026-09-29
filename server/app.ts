@@ -177,9 +177,17 @@ export function createApp(
     );
   });
   app.get("/api/health", (c) => c.json({ ok: true, network: NETWORK_ID }));
-  /** The effective owner limits, never the allowlist itself. `allowlisted` is the signed-in caller's, else null. */
+  /** The effective owner limits, never the allowlist itself. `allowlisted` is the signed-in caller's, else null.
+   * Null when a limit is malformed: config stays readable while the gated routes refuse. */
   async function ownerLimitsConfig(authorization = "") {
-    const { allowlist, maxActiveJobs, maxGpuSeconds } = limits();
+    let current: OwnerLimits;
+    try {
+      current = limits();
+    } catch (e) {
+      if (e instanceof OwnerLimitsInvalid) return null;
+      throw e;
+    }
+    const { allowlist, maxActiveJobs, maxGpuSeconds } = current;
     let listed: boolean | null = null;
     if (allowlist && /^Bearer [A-Za-z0-9_-]{43}$/.test(authorization)) {
       const session = await store.get(`SESSION#${hash(authorization.slice(7))}`, "AUTH");

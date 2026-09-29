@@ -871,6 +871,17 @@ describe("owner limits", () => {
     expect(await budgetRow()).toMatchObject({ version: 0, reservedSeconds: 900 });
   });
 
+  it("keeps the owner's charge for a POST whose outcome is unknown, and never replays it", async () => {
+    vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "36000");
+    await seed();
+    mocks.run.mockRejectedValueOnce(Error("timeout"));
+    await expect(handler(event)).rejects.toThrow("timeout");
+    await handler(event);
+    expect(mocks.run).toHaveBeenCalledOnce();
+    expect(await job()).toMatchObject({ status: "paused", error: expect.stringContaining("outcome unknown"), ownerGpuChargedSeconds: 900 });
+    expect(await budgetRow()).toMatchObject({ version: 0, reservedSeconds: 900 });
+  });
+
   it("pauses before any paid request when the owner budget setting is malformed", async () => {
     vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "36000s");
     await seed();

@@ -214,6 +214,11 @@ describe("owner allowlist", () => {
     expect(f.jobs()).toHaveLength(0);
     expect(f.written()).toEqual(before);
     expect(f.workflow).not.toHaveBeenCalled();
+    // Reads stay open: the config reports no limits rather than failing.
+    const config = await f.get("/api/config");
+    expect(config.status).toBe(200);
+    expect((await config.json()).ownerLimits).toBeNull();
+    expect((await f.get("/api/jobs")).status).toBe(200);
   });
 });
 
