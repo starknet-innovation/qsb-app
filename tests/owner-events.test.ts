@@ -241,6 +241,21 @@ describe("owner event log", () => {
     expect(eventRows(inner)).toHaveLength(1);
   });
 
+  it("returns from a write without waiting for its event, and bounds the wait at settle", async () => {
+    const inner = new MemoryStore();
+    const store = recordOwnerEvents(inner);
+    const put = inner.put.bind(inner);
+    vi.spyOn(inner, "put").mockImplementation((row, expected) =>
+      row.sk.startsWith("EVENT#") ? new Promise(() => {}) : put(row, expected),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await store.put({ pk: "OWNER#a", sk: "JOB#j", version: 0, job: { id: "j", status: "queued", stage: "pinning" } });
+    expect((await inner.get("OWNER#a", "JOB#j"))?.job).toMatchObject({ status: "queued" });
+    const started = Date.now();
+    await store.settle({ budgetMs: 200 });
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
   it("keeps the caller's write when the event write fails, and records the event at settle", async () => {
     const inner = new MemoryStore();
     const store = recordOwnerEvents(inner);

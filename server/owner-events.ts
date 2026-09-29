@@ -30,8 +30,8 @@ export type OwnerEvent = {
 export const EVENT_RETENTION_SECONDS = 30 * 86400;
 /** Listed only once this old, so an event write still in flight can't land behind a cursor. */
 export const EVENT_SETTLE_MS = 10_000;
-/** Bound on the one event write that follows a status change outside a transaction. */
-const RECORD_TIMEOUT_MS = 1000;
+/** Bound on the event write that follows a status change outside a transaction. */
+const RECORD_TIMEOUT_MS = 2000;
 /** Bound on everything settle() does at the end of a request or tick. */
 export const SETTLE_CAP_MS = 4000;
 const SEEN_LIMIT = 2000;
@@ -123,7 +123,8 @@ export type OwnerEventStore = Store & { settle(options?: SettleOptions): Promise
  * change written through it. It never changes what the caller's writes do:
  * - atomicPut adds the event rows to the caller's transaction. Their keys are new (a fresh
  *   timestamp and the subject's new version), so they can't be why a transaction is refused.
- * - put writes the event just after, bounded and best-effort; a failure is retried at settle().
+ * - put starts the event write just after and returns without waiting for it; settle() waits
+ *   for it, bounded, and retries a failed one.
  * - settle(), at the end of a request or tick, enqueues and delivers webhooks within a budget.
  * Errors from recording or delivery are logged and swallowed.
  */
@@ -131,6 +132,7 @@ export function recordOwnerEvents(inner: Store): OwnerEventStore {
   const seen = new Map<string, string>();
   const deferred: Candidate[] = [];
   const recorded: Candidate[] = [];
+  const inflight: Promise<void>[] = [];
   const remember = (row: Row) => {
     try {
       const status = subjectStatus(row);
@@ -185,7 +187,7 @@ export function recordOwnerEvents(inner: Store): OwnerEventStore {
       const item = candidate(row, expected, new Date().toISOString());
       await inner.put(row, expected);
       remember(row);
-      if (item && !(await write(item, RECORD_TIMEOUT_MS))) defer(item);
+      if (item) inflight.push(write(item, RECORD_TIMEOUT_MS).then((ok) => (ok ? undefined : defer(item))));
     },
     async atomicPut(writes: AtomicWrite[]) {
       const at = new Date().toISOString();
@@ -202,12 +204,13 @@ export function recordOwnerEvents(inner: Store): OwnerEventStore {
     },
     async settle(options: SettleOptions = {}) {
       const owners = new Set(options.owners ?? []);
-      if (!deferred.length && !recorded.length && !owners.size) return;
+      if (!inflight.length && !deferred.length && !recorded.length && !owners.size) return;
       const started = Date.now();
       const budget = Math.min(options.budgetMs ?? SETTLE_CAP_MS, SETTLE_CAP_MS);
       if (budget <= 0) return;
-      const retry = deferred.splice(0);
       const work = (async () => {
+        await Promise.all(inflight.splice(0));
+        const retry = deferred.splice(0);
         for (const item of retry)
           if (!(await write(item, Math.max(0, started + budget - Date.now())))) defer(item);
         const done = recorded.splice(0);
