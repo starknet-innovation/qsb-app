@@ -285,7 +285,7 @@ describe("API key authorization", () => {
     const body = randomBytes(32).toString("base64url");
     expect(await code(`qsb_testnet4_${body}`)).toEqual([
       401,
-      "api_key_wrong_network",
+      "network_mismatch",
     ]);
     expect(await code(`qsb_mainnet_${body}`)).toEqual([401, "api_key_invalid"]);
     for (const malformed of [
@@ -302,7 +302,7 @@ describe("API key authorization", () => {
     }
     const lookup = (await store.get(`APIKEY#${sha(key)}`, "AUTH"))!;
     await store.put({ ...lookup, network: "testnet4", version: 1 }, 0);
-    expect(await code(key)).toEqual([401, "api_key_wrong_network"]);
+    expect(await code(key)).toEqual([401, "network_mismatch"]);
     await store.put({ ...lookup, expiresAt: 1, version: 2 }, 1);
     expect(await code(key)).toEqual([401, "api_key_invalid"]);
     const listed = await (await call("GET", "/api/api-keys", token)).json();

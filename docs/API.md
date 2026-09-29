@@ -38,6 +38,6 @@ added.
 ### Errors
 
 Refusals carry a `code`: `api_key_invalid` (unknown or expired),
-`api_key_revoked`, `api_key_wrong_network` (all 401), `api_key_not_allowed`
+`api_key_revoked`, `network_mismatch` (all 401), `api_key_not_allowed`
 (session-only or unmapped route), `api_key_scope_denied` (both 403),
 `api_key_limit_reached` (409) and `api_key_not_found` (404, on revoke).

@@ -48,6 +48,8 @@ export const routeScopes: Readonly<Record<string, ApiKeyScope | null>> = {
 };
 
 const bearerKey = /^Bearer (qsb_(mainnet|testnet4)_[A-Za-z0-9_-]{43})$/;
+// SHA-256, not a password KDF: a key is 32 random bytes, not a user-chosen
+// password, and its hash is the deterministic lookup key, as for SESSION# tokens.
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 type OwnerEnv = { Variables: { owner: string } };
@@ -69,7 +71,7 @@ export async function authorizeApiKey(
     refuse(
       c,
       "API key belongs to a different Bitcoin network.",
-      "api_key_wrong_network",
+      "network_mismatch",
       401,
     );
   if (!key.startsWith(`qsb_${NETWORK_ID}_`)) return wrongNetwork();
