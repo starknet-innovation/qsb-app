@@ -9,7 +9,7 @@ import {
 } from "./consensus";
 import { exactSubmitEnabled } from "./exact-submit-permit";
 import { mainnetUiConfig, type MainnetUiOptions } from "./mainnetConfig";
-import { apiError } from "./api-errors";
+import { apiError, attachedApiErrorCode } from "./api-errors";
 import {
   CHALLENGE_SECONDS,
   SESSION_SECONDS,
@@ -156,8 +156,10 @@ export function createApp(
         e.message,
       );
     if (e instanceof ChainError) return apiError(c, 409, e.code, e.message);
+    // A chain provider failure keeps these statuses and bodies, with its own code.
+    const attached = attachedApiErrorCode(e);
     if (e instanceof z.ZodError)
-      return apiError(c, 400, "invalid_request", "Invalid request", {
+      return apiError(c, 400, attached ?? "invalid_request", "Invalid request", {
         issues: e.issues.map((i) => ({ path: i.path, message: i.message })),
       });
     if (e instanceof Conflict)
@@ -171,7 +173,7 @@ export function createApp(
     return apiError(
       c,
       500,
-      "internal_error",
+      attached ?? "internal_error",
       "Unable to complete the request. Please retry.",
     );
   });

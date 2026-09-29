@@ -25,7 +25,7 @@ Every error response has a JSON body with a message and a code:
 - `error` is for people. Its wording can change, so don't parse it.
 - `code` is stable and machine-readable. Branch on it.
 - Some errors add fields. `invalid_request` adds `issues`, each with a `path` and a `message`. `operations_disabled` from `POST /api/vaults/:id/fund` adds the release `checks`.
-- A code isn't tied to one HTTP status. For example, `vault_not_found` is a 404 from the vault routes and a 409 from deposit submission. Adding the codes didn't change any status or message.
+- A code isn't tied to one HTTP status. For example, `vault_not_found` is a 404 from the vault routes and a 409 from deposit submission. A chain provider request that fails before any response is `chain_unavailable` with a 500, and a malformed provider answer is `chain_error` with a 400 or a 500. Adding the codes didn't change any status or message.
 
 [`server/api-errors.ts`](../server/api-errors.ts) is the source of truth. It exports `apiErrorCodes` (each code and its meaning), the `ApiErrorCode` type and the `API_ERROR_CODES` list. [`tests/api-errors.test.ts`](../tests/api-errors.test.ts) drives every code through `createApp` and checks that this table lists each one.
 
@@ -42,4 +42,4 @@ Every error response has a JSON body with a message and a code:
 
 A route that doesn't exist gets Hono's plain-text 404, not a JSON error.
 
-In the browser client, a failed request throws `ApiRequestError` ([`src/lib/session.ts`](../src/lib/session.ts)), which carries the `status` and the `code`.
+In the browser client, a failed request throws `ApiRequestError` ([`src/lib/session.ts`](../src/lib/session.ts)). It carries the `status`, and the `code` when the body has one; a non-JSON failure, such as a gateway 502, has no code.

@@ -397,14 +397,21 @@ const merge = (...sets: Errors[]): Errors => {
   return out;
 };
 const writes: Errors = { 409: ["state_conflict"] };
-// Any chain read checks the provider's network first. app.onError returns a
-// provider answer that fails its zod parse as invalid_request.
+// Any chain read checks the provider's network first. An error status is a
+// 409 chain_unavailable, a request that fails before any response a 500 one.
+// A malformed answer is chain_error: a 400 when it fails its zod parse,
+// otherwise a 500.
 const chainRead: Errors = {
-  400: ["invalid_request"],
+  400: ["chain_error"],
   409: ["chain_unavailable", "chain_error"],
+  500: ["chain_unavailable", "chain_error"],
 };
 const chainLookup = merge(chainRead, { 409: ["chain_transaction_not_found"] });
-const inputCheck = merge(chainLookup, { 409: ["input_unavailable"] });
+// A vout past the previous transaction's outputs is a 500.
+const inputCheck = merge(chainLookup, {
+  409: ["input_unavailable"],
+  500: ["input_unavailable"],
+});
 const deposit = merge(writes, {
   409: [
     "funding_transaction_invalid",

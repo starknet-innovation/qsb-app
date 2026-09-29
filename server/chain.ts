@@ -11,7 +11,7 @@ import {
 
 import { NETWORK_ID, NETWORK_CONFIG } from "../src/lib/network";
 import { chainBase, testnet4Genesis } from "./network";
-import type { ApiErrorCode } from "./api-errors";
+import { withApiErrorCode, type ApiErrorCode } from "./api-errors";
 
 const statusSchema = z.object({
   confirmed: z.boolean(),
@@ -33,22 +33,28 @@ export class ChainNotFound extends ChainError {
 // Only these lookups can mean "unknown transaction". A 404 from the network check, a block
 // height or anything else is a provider failure, not evidence about the transaction.
 const transactionLookup = /^\/tx\/[0-9a-f]{64}\/(?:hex|status)$/;
+/** Parse a provider's answer. A malformed one keeps its error and reports chain_error. */
+const answer = <T>(parse: () => T): T => withApiErrorCode("chain_error", parse);
 export class Esplora {
   constructor(
     private base = chainBase,
     private request: typeof fetch = fetch,
   ) {}
   private async read(path: string) {
-    const r = await this.request(`${this.base}${path}`, {
-      signal: AbortSignal.timeout(15000),
-    });
+    // A request that fails before a response (DNS, refused, timeout) keeps its error and
+    // reports chain_unavailable, like an error status.
+    const r = await withApiErrorCode("chain_unavailable", () =>
+      this.request(`${this.base}${path}`, {
+        signal: AbortSignal.timeout(15000),
+      }),
+    );
     if (!r.ok) {
       const message = `Chain lookup failed (${r.status}). Retry before signing.`;
       throw r.status === 404 && transactionLookup.test(path)
         ? new ChainNotFound(message)
         : new ChainError(message, "chain_unavailable");
     }
-    const text = await r.text();
+    const text = await withApiErrorCode("chain_unavailable", () => r.text());
     if (text.length > 8000000)
       throw new ChainError("Chain response exceeds limit.");
     return text;
@@ -66,10 +72,12 @@ export class Esplora {
     await this.assertNetwork();
     txid.parse(id);
     const raw = (await this.read(`/tx/${id}/hex`)).trim();
-    const tx = btc.Transaction.fromRaw(hex.decode(raw), {
-      allowUnknownInputs: true,
-      allowUnknownOutputs: true,
-    });
+    const tx = answer(() =>
+      btc.Transaction.fromRaw(hex.decode(raw), {
+        allowUnknownInputs: true,
+        allowUnknownOutputs: true,
+      }),
+    );
     if (tx.id !== id.toLowerCase())
       throw new ChainError("Previous transaction hash mismatch.");
     return { tx, raw };
@@ -77,9 +85,8 @@ export class Esplora {
   async status(id: string) {
     await this.assertNetwork();
     txid.parse(id);
-    const s = statusSchema.parse(
-      JSON.parse(await this.read(`/tx/${id}/status`)),
-    );
+    const text = await this.read(`/tx/${id}/status`);
+    const s = answer(() => statusSchema.parse(JSON.parse(text)));
     if (!s.confirmed) return { confirmed: false, confirmations: 0 };
     if (s.block_height === undefined || !s.block_hash)
       throw new ChainError("Incomplete block status.");
@@ -102,22 +109,21 @@ export class Esplora {
   async withdrawalInclusion(manifest: Withdrawal) {
     const approved = withdrawalSchema.parse(manifest);
     await this.assertNetwork();
-    const spent = z
-      .discriminatedUnion("spent", [
-        z.object({ spent: z.literal(false) }),
-        z.object({
-          spent: z.literal(true),
-          txid,
-          vin: z.number().int().min(0).max(0xffffffff),
-        }),
-      ])
-      .parse(
-        JSON.parse(
-          await this.read(
-            `/tx/${approved.funding.txid}/outspend/${approved.funding.vout}`,
-          ),
-        ),
-      );
+    const text = await this.read(
+      `/tx/${approved.funding.txid}/outspend/${approved.funding.vout}`,
+    );
+    const spent = answer(() =>
+      z
+        .discriminatedUnion("spent", [
+          z.object({ spent: z.literal(false) }),
+          z.object({
+            spent: z.literal(true),
+            txid,
+            vin: z.number().int().min(0).max(0xffffffff),
+          }),
+        ])
+        .parse(JSON.parse(text)),
+    );
     if (!spent.spent)
       return {
         confirmed: false,
@@ -178,7 +184,10 @@ export class Esplora {
   async unspent(point: z.infer<typeof outpoint>, script: string) {
     outpoint.parse(point);
     const { tx, raw } = await this.raw(point.txid);
-    const output = tx.getOutput(point.vout);
+    // A vout past the previous transaction's outputs is a missing input.
+    const output = withApiErrorCode("input_unavailable", () =>
+      tx.getOutput(point.vout),
+    );
     if (
       output.amount !== BigInt(point.value) ||
       !output.script ||
@@ -197,27 +206,29 @@ export class Esplora {
         "Input is unconfirmed or was reorganized out of the chain.",
         "input_unavailable",
       );
-    if (z.object({ spent: z.boolean() }).parse(JSON.parse(spent)).spent)
+    const outspend = answer(() =>
+      z.object({ spent: z.boolean() }).parse(JSON.parse(spent)),
+    );
+    if (outspend.spent)
       throw new ChainError("Input has already been spent.", "input_unavailable");
     return { previousTxHex: raw, confirmations: s.confirmations };
   }
   async paymentUtxos(address: string) {
     await this.assertNetwork();
     outputScript(address); // Configured-network address checksum validation before URL construction.
-    const rows = z
-      .array(
-        z.object({
-          txid,
-          vout: z.number().int().nonnegative(),
-          value: z.number().int().nonnegative().max(2100000000000000),
-          status: statusSchema,
-        }),
-      )
-      .parse(
-        JSON.parse(
-          await this.read(`/address/${encodeURIComponent(address)}/utxo`),
-        ),
-      );
+    const text = await this.read(`/address/${encodeURIComponent(address)}/utxo`);
+    const rows = answer(() =>
+      z
+        .array(
+          z.object({
+            txid,
+            vout: z.number().int().nonnegative(),
+            value: z.number().int().nonnegative().max(2100000000000000),
+            status: statusSchema,
+          }),
+        )
+        .parse(JSON.parse(text)),
+    );
     return rows
       .filter((x) => x.status.confirmed)
       .map((x) => ({ txid: x.txid, vout: x.vout, value: String(x.value) }));

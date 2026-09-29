@@ -55,11 +55,11 @@ export const apiErrorCodes = {
   consensus_rejected: "The offline Bitcoin Core consensus check refused the transaction.",
   inclusion_check_failed: "The inclusion evidence for this transaction was refused.",
   input_unavailable:
-    "An input is spent, unconfirmed, or doesn't match the stated amount or script.",
+    "An input is missing, spent, unconfirmed, or doesn't match the stated amount or script.",
   chain_transaction_not_found: "The chain provider doesn't know this transaction (yet).",
   chain_unavailable: "A chain provider request failed. Retry later.",
   chain_error:
-    "The chain provider's answer was inconsistent, too large or for another network.",
+    "The chain provider's answer was malformed, inconsistent, too large or for another network.",
   miner_unavailable: "The miner credential or authorization is unavailable.",
   miner_rate_unavailable: "The miner's live fee quote is unavailable. Retry later.",
   state_conflict: "The record changed during the request. Refresh and retry.",
@@ -77,4 +77,35 @@ export function apiError(
   extra?: Record<string, unknown>,
 ) {
   return c.json({ error, code, ...extra }, status);
+}
+
+const attached = new WeakMap<object, ApiErrorCode>();
+/**
+ * Run `run`. If it throws or rejects, rethrow the same error with `code` attached.
+ * The error keeps its class and message, so callers' catches and app.onError's
+ * status and body don't change; only the response's `code` does. The innermost
+ * code wins.
+ */
+export function withApiErrorCode<T>(code: ApiErrorCode, run: () => T): T {
+  const attach = (error: unknown) => {
+    if (typeof error === "object" && error !== null && !attached.has(error))
+      attached.set(error, code);
+    return error;
+  };
+  try {
+    const result = run();
+    return result instanceof Promise
+      ? (result.catch((error) => {
+          throw attach(error);
+        }) as T)
+      : result;
+  } catch (error) {
+    throw attach(error);
+  }
+}
+/** The code withApiErrorCode attached to `error`, if any. */
+export function attachedApiErrorCode(error: unknown): ApiErrorCode | undefined {
+  return typeof error === "object" && error !== null
+    ? attached.get(error)
+    : undefined;
 }
