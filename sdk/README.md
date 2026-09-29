@@ -8,7 +8,7 @@ A non-custodial client for the existing `/api` routes in [`server/app.ts`](../se
 
 Never leaves your machine, and is never in a request body, URL or header:
 
-- the recovery state (`stateJson`, including the 300 one-time HORS secrets);
+- the recovery state (`stateJson`: the one-time HORS secrets and the signature nonces). The unrevealed HORS secrets never leave your machine. The signed withdrawal reveals the preimages for the solved indices (15 of the 300), as every QSB spend does, which is why a vault is assembled only once;
 - the recovery passphrase, and the encrypted backup files themselves;
 - wallet keys: the SDK only asks a `Signer` for BIP-322 signatures and PSBT signatures.
 
