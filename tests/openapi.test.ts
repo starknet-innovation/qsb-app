@@ -63,6 +63,30 @@ const offline = () =>
     } as unknown as Slipstream,
   });
 
+/** The only query parameters in the document. */
+const queryParameters: Record<string, string[]> = { "get /events": ["after", "limit"] };
+/**
+ * Path parameters match the template; query parameters are exactly those listed above, all
+ * optional strings; the only other parameter is the optional Idempotency-Key header.
+ */
+function checkParameters(method: string, path: string, params: Json[]) {
+  const templated = [...path.matchAll(/\{(\w+)\}/g)].map(([, n]) => n);
+  const inPath = params.filter((p) => p.in === "path");
+  expect(inPath.map((p) => p.name)).toEqual(templated);
+  for (const p of inPath) expect(p).toMatchObject({ required: true, schema: {} });
+  const query = params.filter((p) => p.in === "query");
+  expect(query.map((p) => p.name), `${method} ${path}`).toEqual(queryParameters[`${method} ${path}`] ?? []);
+  for (const p of query)
+    expect(p).toMatchObject({ required: false, schema: { type: "string", pattern: expect.any(String) } });
+  for (const p of params.filter((p) => p.in !== "path" && p.in !== "query"))
+    expect(p).toMatchObject({
+      name: "Idempotency-Key",
+      in: "header",
+      required: false,
+      schema: { type: "string", pattern: expect.any(String) },
+    });
+}
+
 describe("OpenAPI document", () => {
   it("matches docs/api/openapi.json (npm run openapi regenerates it)", () => {
     const committed = readFileSync(
@@ -173,24 +197,7 @@ describe("OpenAPI document", () => {
       expect(path).toMatch(/^\/(?!api\/|v1\/)/);
       expect(["get", "post"]).toContain(method);
       expect(operation.summary).toEqual(expect.any(String));
-      const templated = [...path.matchAll(/\{(\w+)\}/g)].map(([, n]) => n);
-      const params = (operation.parameters ?? []) as Json[];
-      const inPath = params.filter((p) => p.in === "path");
-      expect(inPath.map((p) => p.name)).toEqual(templated);
-      for (const p of inPath)
-        expect(p).toMatchObject({ required: true, schema: {} });
-      // The others are optional query parameters and the optional Idempotency-Key header.
-      for (const p of params.filter((p) => p.in !== "path"))
-        expect(p).toMatchObject(
-          p.in === "query"
-            ? { required: false, schema: {} }
-            : {
-                name: "Idempotency-Key",
-                in: "header",
-                required: false,
-                schema: { type: "string", pattern: expect.any(String) },
-              },
-        );
+      checkParameters(method, path, (operation.parameters ?? []) as Json[]);
       for (const requirement of operation.security ?? [])
         for (const name of Object.keys(requirement))
           expect(schemes).toContain(name);
@@ -222,6 +229,19 @@ describe("OpenAPI document", () => {
       expect(components).toContain(ref.replace("#/components/schemas/", ""));
     for (const id of components)
       expect(refs).toContain(`#/components/schemas/${id}`);
+  });
+
+  it("refuses a query parameter anywhere but GET /events's after and limit", () => {
+    const params = (method: string, path: string) =>
+      (document.paths[path][method].parameters ?? []) as Json[];
+    const stray = { name: "stray", in: "query", required: false, schema: { type: "string", pattern: "^x$" } };
+    expect(() => checkParameters("get", "/vaults", [...params("get", "/vaults"), stray])).toThrow();
+    expect(() => checkParameters("get", "/events", [...params("get", "/events"), stray])).toThrow();
+    expect(() => checkParameters("get", "/events", params("get", "/events").slice(0, 1))).toThrow();
+    expect(() =>
+      checkParameters("get", "/events", params("get", "/events").map((p) => ({ ...p, required: true }))),
+    ).toThrow();
+    checkParameters("get", "/events", params("get", "/events"));
   });
 
   it("requires a session exactly where the server does", async () => {
