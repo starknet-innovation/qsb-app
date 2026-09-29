@@ -85,8 +85,12 @@ function supervisedServiceJob(job: unknown): boolean {
 type Env = { Variables: { owner: string } };
 export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
 export type AuthenticatedJobPostRoutes = Pick<Hono<Env>, "post">;
-/** API Gateway gives up after 30 seconds; webhook work stops well before that. */
+/**
+ * API Gateway gives up after 30 seconds. Webhook sending stops 25 s into a request, and all
+ * event work (rows, queuing, sending) 28 s into it, so it can't turn a response into a 504.
+ */
 const REQUEST_BUDGET_MS = 25_000;
+const REQUEST_LIMIT_MS = 28_000;
 export function createApp(
   records: Store = defaultStore,
   dependencies: {
@@ -183,18 +187,21 @@ export function createApp(
     }),
   );
   // After the route has answered: write its event rows, queue their webhooks and deliver this
-  // owner's due ones, bounded. Delivery stops at the request budget; recording and queuing
-  // don't. Nothing here can change the response.
+  // owner's due ones, all by REQUEST_LIMIT_MS into the request, delivery by REQUEST_BUDGET_MS.
+  // With no time left the event work is skipped (logged); the job and vault endpoints still
+  // carry the current status. Nothing here can change the response.
   app.use("*", async (c, next) => {
     if (dependencies.recordEvents === false) return next();
     const started = Date.now();
     const events = recordOwnerEvents(records, memory);
     await requestEvents.run(events, next);
     const owner = c.get("owner");
+    const elapsed = Date.now() - started;
     await events.settle({
       delivery,
       owners: owner ? [owner] : [],
-      deliveryMs: Math.min(SETTLE_CAP_MS, REQUEST_BUDGET_MS - (Date.now() - started)),
+      limitMs: Math.max(0, Math.min(SETTLE_CAP_MS, REQUEST_LIMIT_MS - elapsed)),
+      deliveryMs: Math.max(0, Math.min(SETTLE_CAP_MS, REQUEST_BUDGET_MS - elapsed)),
     });
   });
   app.onError((e, c) => {

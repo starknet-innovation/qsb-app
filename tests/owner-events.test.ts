@@ -364,11 +364,47 @@ describe("owner event log", () => {
     expect(JSON.parse(hooks.calls[0].body)).toMatchObject({ type: "withdrawal.queued" });
   });
 
+  it("finishes a slow request's event work by the 28 s mark, even with a hanging table", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    const address = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20) });
+    const scriptHex = "51".repeat(100);
+    const deposit = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true, version: 2 });
+    deposit.addInput({ txid: new Uint8Array(32).fill(5), index: 0, sequence: 0xfffffffe });
+    deposit.addOutput({ amount: 50_000n, script: hex.decode(scriptHex) });
+    // The route takes 27 s, then its vault write becomes an event whose row write hangs.
+    const chain = {
+      raw: vi.fn(async () => ({ tx: deposit, raw: hex.encode(deposit.toBytes(true, false)) })),
+      status: vi.fn(async () => {
+        vi.setSystemTime(Date.now() + 27_000);
+        return { confirmed: true, confirmations: 1 };
+      }),
+    };
+    const f = await setup({ chain: chain as never });
+    const a = await f.as(address);
+    const id = crypto.randomUUID();
+    await f.store.put({ pk: `OWNER#${address}`, sk: `VAULT#${id}`, version: 0, vault: {
+      id, scriptHex, config: "A", publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
+      scriptHash: createHash("sha256").update(Buffer.from(scriptHex, "hex")).digest("hex"), paymentAddress: address, network: "mainnet", status: "unfunded",
+    } });
+    const put = MemoryStore.prototype.put.bind(f.store);
+    vi.spyOn(f.store, "put").mockImplementation((row, expected, options) =>
+      row.sk.startsWith("EVENT#") ? new Promise(() => {}) : put(row, expected, options),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const started = Date.now();
+    const response = await a.post(`/api/vaults/${id}/fund`, { txid: deposit.id, amount: "50000", costAccepted: true });
+    expect(response.status).toBe(201);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(27_000);
+    expect(Date.now() - started).toBeLessThan(28_250);
+    expect((await response.json()).vault.status).toBe("confirmed");
+  });
+
   it("queues webhooks for events past the delivery budget, and a later request delivers them", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const chain = {
       status: vi.fn(async () => {
-        vi.setSystemTime(Date.now() + 30_000);
+        // Past the 25 s delivery budget, inside the 28 s limit for event work.
+        vi.setSystemTime(Date.now() + 26_000);
         return { confirmed: true, confirmations: 3 };
       }),
     };

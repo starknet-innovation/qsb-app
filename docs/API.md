@@ -66,7 +66,7 @@ Answer with any 2xx within 1 second; slower answers can time out, and the respon
 
 At least once, best effort; **the pull endpoint is authoritative**.
 
-- Deliveries are sent right after the change that caused them, from the request or coordinator step that made it, within a budget of a few seconds (API) or two seconds (coordinator). When a step has no time left to send, its deliveries are still queued. Retries and queued deliveries go out on later coordinator steps and later API calls for your account, so an idle account's deliveries wait for its next activity.
+- Deliveries are sent right after the change that caused them, from the request or coordinator step that made it, within a budget of a few seconds (API) or two seconds (coordinator). When a step has no time left to send, its deliveries are still queued. An API request that has already taken about 28 seconds skips this work, so its response still beats API Gateway's 30-second timeout. A change it made outside a transaction can then be missing from the event log; the job and vault endpoints still show it. Retries and queued deliveries go out on later coordinator steps and later API calls for your account, so an idle account's deliveries wait for its next activity.
 - After a failed attempt the webhook waits 30 s, 2 min, 10 min, 30 min, 1 h, 2 h, then 4 h between tries. An event is dropped after 8 failed attempts, and a webhook that fails 8 times in a row is marked `failing` and gets no more deliveries: delete it and register it again.
 - Up to 100 deliveries wait per account; past that the oldest are dropped.
 - Deliveries can arrive out of order or more than once. Use `at`, `QSB-Event-Id` and the pull endpoint to reconcile.
