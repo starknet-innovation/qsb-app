@@ -282,7 +282,7 @@ describe("API key authorization", () => {
   });
 
   it("answers concurrent revocations of one key with the revoked key", async () => {
-    const { gated, race } = racingStore();
+    const { store, gated, race } = racingStore();
     const { session, call, mint } = await setup(gated);
     const token = await session();
     const { key, apiKey } = (await mint(token)).body;
@@ -296,6 +296,10 @@ describe("API key authorization", () => {
       expect(r.status).toBe(200);
       expect((await r.json()).apiKey).toMatchObject({ status: "revoked" });
     }
+    expect((await store.get(`APIKEY#${sha(key)}`, "AUTH"))?.revoked).toBe(true);
+    expect(
+      (await store.get(`OWNER#${owner}`, `APIKEY#${apiKey.id}`))?.revoked,
+    ).toBe(true);
     expect((await call("GET", "/api/vaults", key)).status).toBe(401);
   });
 
