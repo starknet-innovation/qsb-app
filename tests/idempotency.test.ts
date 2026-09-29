@@ -252,6 +252,22 @@ describe("Idempotency-Key", () => {
     expect(f.seen).toHaveBeenCalledOnce();
   });
 
+  it("does not store an uncertain withdrawal submission: the retry reaches submitExact, which never POSTs again", async () => {
+    const f = await fixture();
+    const w = await f.exact();
+    f.submit.mockRejectedValueOnce(new Error("timeout"));
+    const uncertain = { txid: transactionId(w.raw), status: "uncertain" };
+    expect(await json(await w.post({ key }))).toEqual({ status: 200, body: uncertain });
+    const [row] = await f.keys();
+    expect(row.response).toBeUndefined();
+    expect(row.leaseUntil).toBe(0);
+    const retry = await w.post({ key });
+    expect(retry.headers.get("idempotency-replayed")).toBeNull();
+    expect(await json(retry)).toEqual({ status: 200, body: uncertain });
+    expect(f.submit).toHaveBeenCalledOnce();
+    expect(f.consensus.verify).toHaveBeenCalledOnce();
+  });
+
   it("an unfinished request's lease lapses to the handler, which never resubmits a withdrawal", async () => {
     const f = await fixture();
     const w = await f.exact();
