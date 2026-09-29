@@ -75,7 +75,7 @@ it("attaches a discovered provider ID to the one unknown chunk, looked up by tha
 it("a not-submitted decision returns only that chunk to the pool, measured from its own start time", async () => {
   await seed([slot(0, "c0"), slot(1, undefined, "2026-09-29T00:20:00.000Z")]);
   const decision = { kind: "not-submitted", reason: "batch-window-elapsed", operator: "op", evidence: "audit://2" } as const;
-  // 40 minutes since the job's first chunk, but only 40 since this chunk: measured per chunk.
+  // The first chunk started 60 minutes ago and this one 40: the window is measured per chunk.
   await expect(run(decision)).resolves.toMatchObject({ outcome: "not-submitted" });
   const saved = await job();
   expect(saved.parallelSlots!.map((s) => s.attempt)).toEqual([0]);

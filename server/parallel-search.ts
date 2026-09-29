@@ -43,11 +43,13 @@ function legacySlot(job: Job): SearchSlot | undefined {
     submissionStartedAt: job.submissionStartedAt ?? "",
   };
   if (job.runpodId) return { ...base, runpodId: job.runpodId };
-  // A saved intent without a provider ID: the paid POST outcome is unknown.
+  // Searching without a provider ID: the paid POST outcome is unknown, as on the single-GPU
+  // path, even for older records that saved no request identity. Keep it as an ID-less slot
+  // so the unknown-outcome pause applies; reconcile then refuses it for lack of an identity.
   const unknown =
     job.status === "searching" ||
     (job.status === "paused" && Boolean(job.error?.includes("Submission outcome unknown")));
-  return unknown && job.batchSubmission ? base : undefined;
+  return unknown ? base : undefined;
 }
 
 /** In-flight paid submissions, whichever way the job stores them. */

@@ -290,6 +290,17 @@ it("adopts a single-GPU job's running submission as a slot with its chunk and ID
   expect(mocks.run.mock.calls.map((c) => c[0].attempt)).toEqual([6, 7, 8]);
 });
 
+it("pauses an older searching job with no provider ID or request identity instead of sending new work", async () => {
+  await seed({ status: "searching", attempt: 3 });
+  expect(await handler(event)).toMatchObject({ done: true });
+  const job = await saved();
+  expect(job).toMatchObject({ status: "paused", error: expect.stringContaining("Submission outcome unknown") });
+  expect(job.parallelSlots).toEqual([expect.objectContaining({ stage: "pinning", attempt: 3 })]);
+  expect(job.parallelSlots![0].runpodId).toBeUndefined();
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
 it("pauses as exhausted only after the last chunk of a stage has finished", async () => {
   const last = 2 ** 31 / 16 - 1;
   await seed({ attempt: last });
