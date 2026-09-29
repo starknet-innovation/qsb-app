@@ -144,6 +144,9 @@ Nothing live changes in this phase.
       then plan, check and apply. The switches alone don't stop writes: creating a vault and the status reads still
       write to the table. With no concurrency, every function is throttled, so nothing reads or writes the old
       table.
+    - Concurrency 0 stops new invocations but not ones already running. So wait at least 3 minutes after the apply,
+      longer than any application function's timeout (the API's 120 seconds is the longest). Then re-check that the
+      state machine has no running executions and the GPU queue is empty.
     - Confirm the freeze: `curl -s -o /dev/null -w '%{http_code}' <old URL>/api/config` returns a throttling error
       (429 or 5xx), not 200. From here only DynamoDB's own TTL deletes of challenges and sessions touch the old table,
       and the copy ignores those rows.
