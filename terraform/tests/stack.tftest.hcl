@@ -131,7 +131,7 @@ run "configured_single_pipeline" {
     condition = jsonencode(jsondecode(aws_iam_role_policy.batch[0].policy).Statement) == jsonencode([
       { Effect = "Allow", Action = ["batch:DescribeJobs", "batch:DescribeJobDefinitions", "batch:DescribeJobQueues", "batch:DescribeComputeEnvironments", "batch:ListJobs"], Resource = "*", Condition = { StringEquals = { "aws:RequestedRegion" = var.region } } },
       { Effect = "Allow", Action = "batch:SubmitJob", Resource = [var.batch_job_queue, var.batch_job_definition] },
-      { Effect = "Allow", Action = "batch:TagResource", Resource = "arn:aws:batch:${var.region}:${var.aws_account_id}:job/*", Condition = { StringEquals = { "aws:RequestTag/Project" = "qsb-gpu" }, "ForAllValues:StringEquals" = { "aws:TagKeys" = ["Project", "QsbRequest", "InputSha256"] } } },
+      { Effect = "Allow", Action = "batch:TagResource", Resource = ["arn:aws:batch:${var.region}:${var.aws_account_id}:job/*", var.batch_job_queue, var.batch_job_definition], Condition = { StringEquals = { "aws:RequestTag/Project" = "qsb-gpu" }, "ForAllValues:StringEquals" = { "aws:TagKeys" = ["Project", "QsbRequest", "InputSha256"] } } },
       { Effect = "Allow", Action = ["batch:CancelJob", "batch:TerminateJob"], Resource = "arn:aws:batch:${var.region}:${var.aws_account_id}:job/*", Condition = { StringEquals = { "aws:ResourceTag/Project" = "qsb-gpu" } } },
       { Effect = "Allow", Action = "s3:PutObject", Resource = "arn:aws:s3:::${var.batch_job_bucket}/inputs/*" },
       { Effect = "Allow", Action = "s3:GetObject", Resource = "arn:aws:s3:::${var.batch_job_bucket}/outputs/*" }

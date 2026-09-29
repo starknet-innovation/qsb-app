@@ -58,7 +58,7 @@ class SinglePipelinePolicies(unittest.TestCase):
     def test_batch_read_tag_and_artifact_resources_are_exact(self):
         expected = {
             'BatchRead': (['batch:DescribeJobs','batch:DescribeJobDefinitions','batch:DescribeJobQueues','batch:DescribeComputeEnvironments','batch:ListJobs'], ['*'], {'StringEquals':{'aws:RequestedRegion':'eu-west-1'}}),
-            'BatchTag': (['batch:TagResource'], ['arn:aws:batch:eu-west-1:123456789012:job/*'], {'StringEquals':{'aws:RequestTag/Project':'qsb-gpu'},'ForAllValues:StringEquals':{'aws:TagKeys':['Project','QsbRequest','InputSha256']}}),
+            'BatchTag': (['batch:TagResource'], ['arn:aws:batch:eu-west-1:123456789012:job/*', 'arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu', 'arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:*'], {'StringEquals':{'aws:RequestTag/Project':'qsb-gpu'},'ForAllValues:StringEquals':{'aws:TagKeys':['Project','QsbRequest','InputSha256']}}),
             'GpuInputs': (['s3:PutObject'], ['arn:aws:s3:::qsb-gpu-123456789012-eu-west-1-jobs/inputs/*'], None),
             'GpuOutputs': (['s3:GetObject'], ['arn:aws:s3:::qsb-gpu-123456789012-eu-west-1-jobs/outputs/*'], None),
         }
