@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import { Writable } from "node:stream";
@@ -113,22 +113,28 @@ export async function writeNewPrivateFile(io: CliIo, file: string, text: string)
   }
   if ((await readFile(target, "utf8")) !== text) throw new Error(`${file} did not save correctly.`);
 }
-/** Write a public file (an unsigned PSBT, a signed transaction). */
+/** Write a public file (an unsigned PSBT, a signed transaction), owner-only like everything else here. */
 export async function writePublicFile(io: CliIo, file: string, text: string): Promise<string> {
   const target = resolveIn(io, file);
-  await writeFile(target, text);
+  await writeFile(target, text, { mode: 0o600 });
   return target;
 }
+/** Read a file through one handle, so its size is checked on the bytes that are read. */
+async function readBounded(target: string, file: string): Promise<Buffer> {
+  const handle = await open(target, "r");
+  try {
+    if ((await handle.stat()).size > 4000000) throw new UsageError(`${file} is too large.`);
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
+}
 export async function readTextFile(io: CliIo, file: string): Promise<string> {
-  const target = resolveIn(io, file);
-  if ((await stat(target)).size > 4000000) throw new UsageError(`${file} is too large.`);
-  return readFile(target, "utf8");
+  return (await readBounded(resolveIn(io, file), file)).toString("utf8");
 }
 /** A PSBT file as base64: base64 text, or binary starting with the PSBT magic bytes. */
 export async function readPsbtFile(io: CliIo, file: string): Promise<string> {
-  const target = resolveIn(io, file);
-  if ((await stat(target)).size > 4000000) throw new UsageError(`${file} is too large.`);
-  const bytes = await readFile(target);
+  const bytes = await readBounded(resolveIn(io, file), file);
   if (bytes.subarray(0, 5).equals(Buffer.from("70736274ff", "hex"))) return base64.encode(bytes);
   return bytes.toString("utf8").trim();
 }
@@ -184,9 +190,15 @@ const sessionPath = (home: string) => path.join(home, "session.json");
 /** A cached bearer token for this API, network and address, if still fresh and owner-only. */
 export async function loadSession(home: string, api: string, address: string): Promise<string | undefined> {
   try {
-    const file = sessionPath(home);
-    if ((await stat(file)).mode & 0o077) return undefined;
-    const cached = JSON.parse(await readFile(file, "utf8")) as CachedSession;
+    const handle = await open(sessionPath(home), "r");
+    let text: string;
+    try {
+      if ((await handle.stat()).mode & 0o077) return undefined;
+      text = await handle.readFile("utf8");
+    } finally {
+      await handle.close();
+    }
+    const cached = JSON.parse(text) as CachedSession;
     if (
       cached.format !== "qsb-cli-session-v1" ||
       cached.api !== api ||

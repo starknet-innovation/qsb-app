@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync, existsSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
@@ -19,6 +19,16 @@ beforeEach(() => vi.stubEnv("SOLVER_RELEASE_ID", awsRelease.id));
 afterEach(() => vi.unstubAllEnvs());
 
 const passphrase = "disposable sdk e2e passphrase";
+/** An owner-only file's text, checked and read through one descriptor. */
+function readOwnerOnly(file: string): string {
+  const fd = openSync(file, "r");
+  try {
+    expect(fstatSync(fd).mode & 0o777).toBe(0o600);
+    return readFileSync(fd, "utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
 
 /** Every value that must stay on the caller's machine. */
 async function secrets(backups: string[], wif: string, privateKey: Uint8Array) {
@@ -83,14 +93,13 @@ it("drives vault creation, deposit, withdrawal, local assembly and approved subm
   // Sign-in caches only the bearer token, owner-only.
   expect((await qsbCli("--signer", "test-key", "login")).code).toBe(0);
   const session = path.join(home, "session.json");
-  expect(statSync(session).mode & 0o777).toBe(0o600);
-  expect(Object.keys(JSON.parse(readFileSync(session, "utf8"))).sort()).toEqual([
+  expect(Object.keys(JSON.parse(readOwnerOnly(session))).sort()).toEqual([
     "address", "api", "expiresAt", "format", "network", "token",
   ]);
 
   // Vault creation: generated locally, the backup written owner-only, only public state registered.
   const { vault } = (await ok("vault", "create", "--name", "cli e2e", "--backup", "vault.json")) as { vault: PublicVault };
-  expect(statSync(path.join(cwd, "vault.json")).mode & 0o777).toBe(0o600);
+  readOwnerOnly(path.join(cwd, "vault.json"));
   expect((await ok("vault", "list")).vaults.map((v: PublicVault) => v.id)).toEqual([vault.id]);
   // A backup is never overwritten.
   expect((await qsbCli("--signer", "test-key", "vault", "create", "--name", "again", "--backup", "vault.json")).code).toBe(2);
@@ -123,7 +132,7 @@ it("drives vault creation, deposit, withdrawal, local assembly and approved subm
   expect(job).toMatchObject({ status: "queued", vaultId: vault.id });
   expect(job.manifest.destination).toBe(destination);
   expect(BigInt(job.manifest.outputValue) + BigInt(job.manifest.fee)).toBe(250000n);
-  expect(statSync(path.join(cwd, "withdrawal.json")).mode & 0o777).toBe(0o600);
+  readOwnerOnly(path.join(cwd, "withdrawal.json"));
   // Creating it again from the same backup resumes the same intent.
   expect((await ok("withdraw", "create", vault.id, "--backup", "withdrawal.json", "--accept-costs")).job.id).toBe(job.id);
 
@@ -155,11 +164,11 @@ it("drives vault creation, deposit, withdrawal, local assembly and approved subm
   w.chain.mine(signed.txid);
   expect((await ok("withdraw", "status", job.id)).job.status).toBe("confirmed");
 
-  const backups = ["vault.json", "withdrawal.json", "signing.json"].map((f) => readFileSync(path.join(cwd, f), "utf8"));
+  const backups = ["vault.json", "withdrawal.json", "signing.json"].map((f) => readOwnerOnly(path.join(cwd, f)));
   const values = await secrets(backups, owner.wif, owner.privateKey);
   assertNothingLeaks(w.requests, values);
   for (const raw of w.minerSubmissions) for (const value of values) expect(raw.includes(value)).toBe(false);
-  const cached = readFileSync(session, "utf8");
+  const cached = readOwnerOnly(session);
   for (const value of values) expect(cached.includes(value)).toBe(false);
   for (const route of ["POST /api/vaults", "POST /api/vaults/*/fund/submit", "POST /api/jobs", "POST /api/jobs/*/submit"])
     expect(
