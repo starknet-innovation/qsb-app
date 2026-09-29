@@ -99,6 +99,11 @@ variable "exact_submit_enabled" {
     error_message = "Exact submission is implemented for mainnet only."
   }
 }
+variable "api_keys_enabled" {
+  description = "Scoped API keys (#85) for the API Lambda only. Keep false until the maintainer explicitly approves third-party access. Does not enable mainnet, deposits, withdrawals or submission."
+  type        = bool
+  default     = false
+}
 variable "slipstream_secret_arn" {
   description = "Optional existing Secrets Manager secret qsb/slipstream, created by an administrator in this account and region with the default aws/secretsmanager key and holding a JSON object with client_code (MARA's client code, added to the body of transaction submissions only), authorization (sent as the Authorization header) or both. Both go to MARA Slipstream only. Empty sends no credential. Terraform only references it: the value never enters state or plans."
   type        = string
