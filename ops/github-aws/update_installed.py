@@ -206,19 +206,20 @@ targets.append(('qsb-github-deploy trust', 'policy', live_deploy_role['AssumeRol
                 update_deploy_trust))
 
 user = human['user']
-live_user = aws('iam', 'get-user-policy', '--user-name', user['name'], '--policy-name', 'assume-qsb-roles', readable=True)
-live_user = UNREADABLE if live_user is None else live_user['PolicyDocument']
+# With an Identity Center permission set there is no IAM user here; its policy lives in Identity Center.
+if user:
+    live_user = aws('iam', 'get-user-policy', '--user-name', user['name'], '--policy-name', 'assume-qsb-roles',
+                    readable=True)
+    live_user = UNREADABLE if live_user is None else live_user['PolicyDocument']
 
+    def update_user():
+        aws('iam', 'put-user-policy', '--user-name', user['name'], '--policy-name', 'assume-qsb-roles',
+            '--policy-document', json.dumps(user['inline']))
+        read_back(f"{user['name']}/assume-qsb-roles",
+                  lambda: aws('iam', 'get-user-policy', '--user-name', user['name'],
+                              '--policy-name', 'assume-qsb-roles')['PolicyDocument'], user['inline'])
 
-def update_user():
-    aws('iam', 'put-user-policy', '--user-name', user['name'], '--policy-name', 'assume-qsb-roles',
-        '--policy-document', json.dumps(user['inline']))
-    read_back(f"{user['name']}/assume-qsb-roles",
-              lambda: aws('iam', 'get-user-policy', '--user-name', user['name'],
-                          '--policy-name', 'assume-qsb-roles')['PolicyDocument'], user['inline'])
-
-
-targets.append((f"{user['name']}/assume-qsb-roles", 'policy', live_user, user['inline'], update_user))
+    targets.append((f"{user['name']}/assume-qsb-roles", 'policy', live_user, user['inline'], update_user))
 
 def update_trust(spec):
     aws('iam', 'update-assume-role-policy', '--role-name', spec['name'], '--policy-document', json.dumps(spec['trust']))
@@ -245,7 +246,7 @@ for role in ('viewonly', 'operator'):
                     lambda spec=spec: update_session(spec)))
 
 # The updater corrects documents; it never moves who a role trusts. That comes from the inventory
-# (operator_user, subject) and needs its own reviewed step.
+# (operator_user or operator_sso_permission_set, subject) and needs its own reviewed step.
 for label, kind, installed, wanted, _ in targets:
     if label.endswith(' trust') and installed is not UNREADABLE and installed != wanted \
             and trusted(installed) != trusted(wanted):

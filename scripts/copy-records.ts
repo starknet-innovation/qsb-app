@@ -17,6 +17,9 @@ import {
  *   npx tsx scripts/copy-records.ts --from eu-west-1:SOURCE_TABLE --to eu-west-2:DEST_TABLE
  *   npx tsx scripts/copy-records.ts --from eu-west-1:SOURCE_TABLE --to eu-west-2:DEST_TABLE --apply
  *
+ * When the tables are in different accounts, name each side's AWS profile with --from-profile and
+ * --to-profile. Otherwise both sides use the default credentials.
+ *
  * Without --apply it only counts. With --apply it copies and verifies. A re-run after a partial copy is
  * safe: the destination may only hold items identical to source items.
  */
@@ -124,10 +127,16 @@ export async function runCopyRecordsCli(args: string[]) {
     const from = parseTarget(args.includes("--from") ? flag("--from") : undefined, "--from");
     const to = parseTarget(args.includes("--to") ? flag("--to") : undefined, "--to");
     if (from.region === to.region && from.table === to.table) throw new Error("--from and --to are the same table.");
+    const profile = (name: string) => {
+      if (!args.includes(name)) return {};
+      const value = flag(name);
+      if (!value || !/^[\w+=,.@-]{1,128}$/.test(value)) throw new Error(`${name} must name an AWS profile.`);
+      return { profile: value };
+    };
     const result = await copyRecords(
-      new DynamoDBClient({ region: from.region }),
+      new DynamoDBClient({ region: from.region, ...profile("--from-profile") }),
       from.table,
-      new DynamoDBClient({ region: to.region }),
+      new DynamoDBClient({ region: to.region, ...profile("--to-profile") }),
       to.table,
       args.includes("--apply"),
     );

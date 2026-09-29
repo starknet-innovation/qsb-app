@@ -25,6 +25,15 @@ class SinglePipelinePolicies(unittest.TestCase):
     def statement(self, policy, sid):
         return next(s for s in self.policies[policy]['Statement'] if s['Sid'] == sid)
 
+    def test_a_new_account_without_registered_edge_ids_renders_valid_policies(self):
+        empty = render(dict(self.inventory, distributions=[], apis=[], origin_access_controls=[], response_headers_policies=[]))
+        sids = {s['Sid'] for s in empty['deploy']['Statement']}
+        self.assertNotIn('RegisteredQsbCloudFront', sids)
+        self.assertNotIn('RegisteredQsbApis', sids)
+        self.assertTrue(all(s['Resource'] for s in empty['deploy']['Statement']))
+        # Registering the IDs later adds exactly those statements back.
+        self.assertIn('RegisteredQsbCloudFront', {s['Sid'] for s in self.policies['deploy']['Statement']})
+
     def test_removed_services_have_no_deploy_or_runtime_actions(self):
         removed = {'ec2', 'backup', 'sqs', 'events', 'ecr'}
         for kind in ('deploy', 'boundary'):

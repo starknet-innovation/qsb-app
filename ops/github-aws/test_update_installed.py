@@ -18,17 +18,21 @@ from render import render
 ROOT = Path(__file__).resolve().parent
 COMMIT = 'b' * 40
 ACCOUNT = '123456789012'
-INVENTORY = dict(account=ACCOUNT, region='eu-west-1', subject='repo:example/qsb:ref:refs/heads/main',
+INVENTORY = dict(account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
                  state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
                  origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
                  operator_user='qsb-operator-user', gpu_vpc='vpc-0test')
+SSO_INVENTORY = {**{k: v for k, v in INVENTORY.items() if k != 'operator_user'},
+                 'operator_sso_permission_set': 'QsbOperator'}
 WRITES = {'create-policy-version', 'put-role-policy', 'put-user-policy', 'update-assume-role-policy', 'update-role'}
 
 
 class UpdateInstalled(unittest.TestCase):
+    inventory = INVENTORY
+
     def installed(self):
         """IAM exactly as this commit renders it; tests then introduce drift."""
-        rendered, human = render(INVENTORY), access(INVENTORY)
+        rendered, human = render(self.inventory), access(self.inventory)
         policies = {'qsb-runtime-boundary': rendered['boundary'], 'qsb-gpu-boundary': human['gpu_boundary']['document']}
         for role in ('viewonly', 'operator'):
             for i, doc in enumerate(human[role]['policies'], 1):
@@ -41,7 +45,8 @@ class UpdateInstalled(unittest.TestCase):
         roles['qsb-github-deploy'] = {'trust': copy.deepcopy(rendered['trust']), 'max': 3600, 'attached': [],
                                       'inline': ['qsb-terraform-deployment']}
         return {'policies': {n: [copy.deepcopy(d)] for n, d in policies.items()},
-                'deploy': copy.deepcopy(rendered['deploy']), 'user': copy.deepcopy(human['user']['inline']),
+                'deploy': copy.deepcopy(rendered['deploy']),
+                'user': copy.deepcopy(human['user']['inline']) if human['user'] else None,
                 'roles': roles}
 
     def run_update(self, iam, apply=True, yes=True, branch='main', plan_hash='auto', tty=False, answer=None):
@@ -118,7 +123,7 @@ class UpdateInstalled(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'inventory.json'
-            path.write_text(json.dumps(INVENTORY))
+            path.write_text(json.dumps(self.inventory))
             argv = ['update_installed.py', '--profile', 'public-test', '--inventory', str(path)] + \
                 (['--apply'] if apply else []) + (['--yes'] if apply and yes else []) + \
                 (['--plan-hash', plan_hash] if apply and yes and plan_hash else [])
@@ -143,6 +148,14 @@ class UpdateInstalled(unittest.TestCase):
         self.run_update(self.installed())
         self.assertEqual(self.writes(), [])
         self.assertTrue(all(item['status'] == 'identical' for item in self.plan))
+
+    def test_identity_center_installation_has_no_user_target(self):
+        self.inventory = SSO_INVENTORY
+        self.run_update(self.installed())
+        self.assertEqual(self.writes(), [])
+        self.assertTrue(all(item['status'] == 'identical' for item in self.plan))
+        self.assertFalse([item for item in self.plan if 'assume-qsb-roles' in item['target']])
+        self.assertNotIn(('iam', 'get-user-policy'), self.calls)
 
     def test_stale_deploy_role_and_runtime_boundary_are_updated_and_read_back(self):
         iam = self.installed()

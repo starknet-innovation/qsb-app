@@ -66,6 +66,50 @@ class HumanAccess(unittest.TestCase):
         assume = self.sid(user['inline']['Statement'], 'AssumeQsbRoles')
         self.assertEqual(assume['Resource'], guard['NotResource'])
 
+    def sso(self, **extra):
+        inventory = dict(account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
+                         state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
+                         origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
+                         gpu_vpc='vpc-0test', **extra)
+        return access(inventory)
+
+    def test_an_identity_center_permission_set_can_be_the_trusted_principal(self):
+        out = self.sso(operator_sso_permission_set='QsbOperator')
+        pattern = f'arn:aws:iam::{ACCOUNT}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_QsbOperator_' + '?' * 16
+        for role in ('viewonly', 'operator'):
+            [statement] = out[role]['trust']['Statement']
+            # Only the permission set's role, under the reserved path no one can create roles in.
+            self.assertEqual(statement['Principal'], {'AWS': f'arn:aws:iam::{ACCOUNT}:root'})
+            self.assertEqual(statement['Action'], 'sts:AssumeRole')
+            self.assertEqual(statement['Condition'], {'ArnLike': {'aws:PrincipalArn': pattern}})
+            self.assertEqual(out[role]['max_session'], 3600)
+        self.assertTrue(fnmatch.fnmatchcase(
+            f'arn:aws:iam::{ACCOUNT}:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_QsbOperator_0123456789abcdef',
+            pattern))
+        self.assertFalse(fnmatch.fnmatchcase(
+            f'arn:aws:iam::{ACCOUNT}:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_QsbOperator_x_0123456789abcdef',
+            pattern))
+        # No IAM user; the permission set may assume the two roles and nothing else.
+        self.assertIsNone(out['user'])
+        policy = out['permission_set']['inline']['Statement']
+        roles = [f'arn:aws:iam::{ACCOUNT}:role/qsb/bootstrap/qsb-viewonly', f'arn:aws:iam::{ACCOUNT}:role/qsb/bootstrap/qsb-operator']
+        self.assertEqual(self.sid(policy, 'AssumeQsbRoles')['Resource'], roles)
+        self.assertEqual(self.sid(policy, 'OnlyTheseRoles')['NotResource'], roles)
+        self.assertEqual(set(self.sid(policy, 'NothingElse')['NotAction']), {'sts:AssumeRole', 'sts:GetCallerIdentity'})
+        self.assertEqual({a for a, _ in self.allowed(policy)}, {'sts:AssumeRole'})
+        # Everything the operator and viewonly roles may do is the same as with an IAM user.
+        self.assertEqual(out['operator']['policies'], self.out['operator']['policies'])
+        self.assertEqual(out['viewonly']['policies'], self.out['viewonly']['policies'])
+
+    def test_exactly_one_operator_identity_is_required(self):
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            self.sso()
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            self.sso(operator_user='qsb-operator-user', operator_sso_permission_set='QsbOperator')
+        for bad in ('Qsb Operator', 'a' * 33, 'x*', ''):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.sso(operator_sso_permission_set=bad)
+
     def test_viewonly_adds_only_reads_and_denies_data(self):
         self.assertEqual(self.out['viewonly']['managed'], ['arn:aws:iam::aws:policy/job-function/ViewOnlyAccess'])
         for action, _ in self.allowed(self.viewonly):

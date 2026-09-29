@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """Render the human access identities for the QSB account from the private inventory.
 
-No AWS mutations. Uses the render.py inventory plus `operator_user`, the name of
-the one IAM user (path /qsb/operators/) that may assume these roles with MFA, and
-`gpu_vpc`, the VPC the GPU stack's security group lives in:
+No AWS mutations. Uses the render.py inventory plus exactly one of:
+
+- `operator_user`: the name of the one IAM user (path /qsb/operators/) that may assume these
+  roles with MFA; or
+- `operator_sso_permission_set`: for an account reached through IAM Identity Center, the
+  permission set whose role may assume them. There's no IAM user, and Identity Center enforces
+  MFA at sign-in. The administrator attaches the rendered permission-set policy to that
+  permission set.
+
+and `gpu_vpc`, the VPC the GPU stack's security group lives in:
 
 - qsb-viewonly: AWS ViewOnlyAccess plus the Batch/Scheduler/IAM describe calls it
   lacks, with an explicit deny on reading data (objects, items, secrets, logs, code).
@@ -13,6 +20,7 @@ the one IAM user (path /qsb/operators/) that may assume these roles with MFA, an
 """
 import argparse
 import json
+import re
 from pathlib import Path
 
 from render import render
@@ -43,12 +51,27 @@ def chunk(statements, limit=6000):
     return [{'Version': '2012-10-17', 'Statement': s} for s in docs]
 
 
+# IAM Identity Center names a permission set's role AWSReservedSSO_<name>_<16-character suffix>.
+SSO_ROLE_SUFFIX = '?' * 16
+
+
+def operator_identity(c):
+    """('user', name) or ('sso', permission set name): who assumes the two bootstrap roles."""
+    user, permission_set = c.get('operator_user'), c.get('operator_sso_permission_set')
+    if bool(user) == bool(permission_set):
+        raise ValueError('Set exactly one of operator_user or operator_sso_permission_set in the inventory')
+    if permission_set and not re.fullmatch(r'[\w+=,.@-]{1,32}', permission_set):
+        raise ValueError('operator_sso_permission_set must be an IAM Identity Center permission set name')
+    return ('user', user) if user else ('sso', permission_set)
+
+
 def access(c):
-    account, region, user = c['account'], c['region'], c['operator_user']
+    account, region = c['account'], c['region']
+    kind, who = operator_identity(c)
     arn = lambda service, resource: f'arn:aws:{service}:{region}:{account}:{resource}'
     iam = lambda resource: f'arn:aws:iam::{account}:{resource}'
     in_region = {'StringEquals': {'aws:RequestedRegion': region}}
-    user_arn = iam('user/qsb/operators/' + user)
+    user_arn = iam('user/qsb/operators/' + who) if kind == 'user' else None
     viewonly_role, operator_role = iam('role/qsb/bootstrap/qsb-viewonly'), iam('role/qsb/bootstrap/qsb-operator')
     gpu_boundary = iam('policy/qsb/bootstrap/qsb-gpu-boundary')
     runtime_boundary = iam('policy/qsb/bootstrap/qsb-runtime-boundary')
@@ -67,11 +90,20 @@ def access(c):
     def deny(sid, actions, resources):
         return dict(Sid=sid, Effect='Deny', Action=actions, Resource=resources)
 
-    trust = {'Version': '2012-10-17', 'Statement': [{
-        'Effect': 'Allow', 'Principal': {'AWS': user_arn}, 'Action': 'sts:AssumeRole',
-        'Condition': {'Bool': {'aws:MultiFactorAuthPresent': 'true'},
-                      # Require recent MFA context when supplied; aws login refresh semantics need live verification.
-                      'NumericLessThanIfExists': {'aws:MultiFactorAuthAge': '3600'}}}]}
+    if kind == 'user':
+        trust = {'Version': '2012-10-17', 'Statement': [{
+            'Effect': 'Allow', 'Principal': {'AWS': user_arn}, 'Action': 'sts:AssumeRole',
+            'Condition': {'Bool': {'aws:MultiFactorAuthPresent': 'true'},
+                          # Require recent MFA context when supplied; aws login refresh semantics need live verification.
+                          'NumericLessThanIfExists': {'aws:MultiFactorAuthAge': '3600'}}}]}
+    else:
+        # Identity Center roles sit under the reserved /aws-reserved/sso.amazonaws.com/ path, which no
+        # one can create roles in, so only that permission set's role matches. The `*` covers the
+        # optional region segment of the path. MFA is enforced by Identity Center's sign-in.
+        trust = {'Version': '2012-10-17', 'Statement': [{
+            'Effect': 'Allow', 'Principal': {'AWS': iam('root')}, 'Action': 'sts:AssumeRole',
+            'Condition': {'ArnLike': {'aws:PrincipalArn': iam(
+                f'role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_{who}_{SSO_ROLE_SUFFIX}')}}}]}
 
     # The user can sign in (console, `aws login`) and assume the two bootstrap roles, which the
     # operator cannot edit; nothing else. The explicit denies also override any resource policy
@@ -84,7 +116,13 @@ def access(c):
         dict(Sid='NothingElse', Effect='Deny', NotAction=user_actions, Resource=['*']),
         allow('OwnPassword', ['iam:ChangePassword', 'iam:GetUser'], [user_arn]),
         allow('PasswordPolicy', ['iam:GetAccountPasswordPolicy'], ['*']),
-    ]}
+    ]} if kind == 'user' else None
+    # The same limits for an Identity Center permission set: it may assume the two roles and nothing else.
+    permission_set_policy = {'Version': '2012-10-17', 'Statement': [
+        allow('AssumeQsbRoles', ['sts:AssumeRole'], [viewonly_role, operator_role]),
+        dict(Sid='OnlyTheseRoles', Effect='Deny', Action=['sts:AssumeRole'], NotResource=[viewonly_role, operator_role]),
+        dict(Sid='NothingElse', Effect='Deny', NotAction=['sts:AssumeRole', 'sts:GetCallerIdentity'], Resource=['*']),
+    ]} if kind == 'sso' else None
 
     viewonly = {'Version': '2012-10-17', 'Statement': [
         allow('DescribeGaps', [
@@ -208,7 +246,9 @@ def access(c):
     ]}
 
     return {
-        'user': {'name': user, 'path': '/qsb/operators/', 'managed': [SIGN_IN_MANAGED], 'inline': user_policy},
+        'user': {'name': who, 'path': '/qsb/operators/', 'managed': [SIGN_IN_MANAGED], 'inline': user_policy}
+        if kind == 'user' else None,
+        'permission_set': {'name': who, 'inline': permission_set_policy} if kind == 'sso' else None,
         'viewonly': {'name': 'qsb-viewonly', 'path': '/qsb/bootstrap/', 'trust': trust, 'managed': [VIEW_ONLY_MANAGED],
                      # Sessions assumed from an `aws login` session count as chained: one hour at most.
                      'policies': [viewonly], 'max_session': 3600},
@@ -226,7 +266,10 @@ if __name__ == '__main__':
     a = p.parse_args()
     a.output.mkdir(parents=True, exist_ok=True)
     out = access(json.loads(a.inventory.read_text()))
-    (a.output / 'user.json').write_text(json.dumps(out['user']['inline'], indent=2) + '\n')
+    if out['user']:
+        (a.output / 'user.json').write_text(json.dumps(out['user']['inline'], indent=2) + '\n')
+    else:
+        (a.output / 'permission-set.json').write_text(json.dumps(out['permission_set']['inline'], indent=2) + '\n')
     (a.output / 'trust.json').write_text(json.dumps(out['viewonly']['trust'], indent=2) + '\n')
     (a.output / 'gpu-boundary.json').write_text(json.dumps(out['gpu_boundary']['document'], indent=2) + '\n')
     for role in ('viewonly', 'operator'):

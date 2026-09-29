@@ -105,7 +105,20 @@ review and apply that administrator-managed policy change separately.
 Day-to-day AWS work (checks, Terraform applies, GPU smoke runs, reconcile) must
 not use the account root. `access.py` renders three administrator-owned
 identities from the same private inventory, plus `operator_user` (the IAM user
-name) and `gpu_vpc` (the VPC of the `terraform/gpu` security group):
+name) and `gpu_vpc` (the VPC of the `terraform/gpu` security group).
+
+**In an account reached through IAM Identity Center**, set
+`operator_sso_permission_set` (the permission set's name) instead of
+`operator_user`. There is then no IAM user:
+- `qsb-viewonly` and `qsb-operator` trust only that permission set's role (an
+  `ArnLike` match on the reserved `/aws-reserved/sso.amazonaws.com/` path, which
+  no one can create roles in).
+- Identity Center enforces MFA at sign-in.
+- `access.py INVENTORY DIR` writes `permission-set.json` in place of `user.json`.
+  The administrator attaches it to the permission set as its inline policy: it
+  allows assuming those two roles and nothing else.
+
+Exactly one of the two must be set. See [REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md).
 
 | Identity | Path | Can | Cannot |
 | --- | --- | --- | --- |

@@ -39,10 +39,13 @@ def render(c):
     edge = [cf('distribution/'+x) for x in c['distributions']]
     edge += [cf('origin-access-control/'+x) for x in c['origin_access_controls']]
     edge += [cf('response-headers-policy/'+x) for x in c['response_headers_policies']]
-    allow('RegisteredQsbCloudFront', ['cloudfront:*'], edge)
+    # A new account has none registered until the administrator's first apply; IAM refuses an empty Resource.
+    if edge:
+        allow('RegisteredQsbCloudFront', ['cloudfront:*'], edge)
     allow('CloudFrontDiscovery', ['cloudfront:ListDistributions','cloudfront:ListOriginAccessControls','cloudfront:ListResponseHeadersPolicies','cloudfront:ListCachePolicies','cloudfront:GetCachePolicy','cloudfront:GetOriginRequestPolicy'], ['*'])
     api_resources = [f'arn:aws:apigateway:{region}::/apis/{x}'+suffix for x in c['apis'] for suffix in ['', '/*']]
-    allow('RegisteredQsbApis', ['apigateway:GET','apigateway:POST','apigateway:PUT','apigateway:PATCH','apigateway:DELETE'],api_resources)
+    if api_resources:
+        allow('RegisteredQsbApis', ['apigateway:GET','apigateway:POST','apigateway:PUT','apigateway:PATCH','apigateway:DELETE'],api_resources)
     allow('ApiDiscovery',['apigateway:GET'],[f'arn:aws:apigateway:{region}::/apis'])
     allow('CreateBoundedRuntimeRoles',['iam:CreateRole','iam:PutRolePolicy','iam:AttachRolePolicy','iam:UpdateAssumeRolePolicy','iam:PutRolePermissionsBoundary'],[runtime_roles],{'StringEquals':{'iam:PermissionsBoundary':boundary}})
     allow('ManageRuntimeRoles',['iam:GetRole','iam:ListInstanceProfilesForRole','iam:GetRolePolicy','iam:ListRolePolicies','iam:ListAttachedRolePolicies','iam:ListRoleTags','iam:TagRole','iam:UntagRole','iam:DeleteRolePolicy','iam:DetachRolePolicy','iam:DeleteRole','iam:UpdateRole','iam:UpdateRoleDescription'],[runtime_roles])

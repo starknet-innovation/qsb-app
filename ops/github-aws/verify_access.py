@@ -77,7 +77,7 @@ operator_cases = [
     ('pass gpu role to backup', 'iam:PassRole', gpu_role, False, [ctx('iam:PassedToService', 'backup.amazonaws.com')]),
     ('edit operator role', 'iam:PutRolePolicy', iam('role/qsb/bootstrap/qsb-operator'), False, gpu_bound),
     ('edit gpu boundary', 'iam:CreatePolicyVersion', iam('policy/qsb/bootstrap/qsb-gpu-boundary'), False, []),
-    ('edit operator user', 'iam:AttachUserPolicy', iam('user/qsb/operators/' + c['operator_user']), False, []),
+    ('edit operator user', 'iam:AttachUserPolicy', iam('user/qsb/operators/' + (c.get('operator_user') or 'anyone')), False, []),
     ('create access key', 'iam:CreateAccessKey', iam('user/anyone'), False, []),
     ('create user', 'iam:CreateUser', iam('user/anyone'), False, []),
     ('qsb function deploy', 'lambda:UpdateFunctionCode', arn('lambda', 'function:qsb-research-api'), True, []),
@@ -131,6 +131,8 @@ def simulate(label, documents, role, cases):
 simulate('operator', out['operator']['policies'], 'qsb-operator', operator_cases)
 simulate('viewonly', out['viewonly']['policies'], 'qsb-viewonly', viewonly_cases)
 simulate('gpu-boundary', [out['gpu_boundary']['document']], None, gpu_cases)
+# The IAM user's inline policy, or in an Identity Center account the permission-set policy: same limits.
+human = out['user'] or out['permission_set']
 user_cases = [
     ('assume operator', 'sts:AssumeRole', iam('role/qsb/bootstrap/qsb-operator'), True, []),
     ('assume the reconcile role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-operator-reconcile'),
@@ -138,8 +140,9 @@ user_cases = [
     ('assume operator-made runtime role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-api'), 'explicitDeny', []),
     ('read records directly', 'dynamodb:GetItem', arn('dynamodb', 'table/qsb-research-records'), 'explicitDeny', []),
     ('invoke a function directly', 'lambda:InvokeFunction', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
-    ('create access key', 'iam:CreateAccessKey', iam('user/qsb/operators/' + c['operator_user']), 'explicitDeny', []),
+    ('create access key', 'iam:CreateAccessKey',
+     iam('user/qsb/operators/' + c['operator_user'] if out['user'] else 'user/anyone'), 'explicitDeny', []),
 ]
-simulate('user', [out['user']['inline']], None, user_cases)
+simulate('user' if out['user'] else 'permission set', [human['inline']], None, user_cases)
 total = len(operator_cases) + len(viewonly_cases) + len(gpu_cases) + len(user_cases)
 print(f'Passed {total} IAM simulations.', flush=True)
