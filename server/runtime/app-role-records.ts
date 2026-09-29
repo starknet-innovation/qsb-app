@@ -12,6 +12,7 @@ export const coordinatorPathWrites = {
   api: [
     { prefix: "CHALLENGE#", actions: ["PutItem", "DeleteItem"] },
     { prefix: "SESSION#", actions: ["PutItem"] },
+    { prefix: "APIKEY#", actions: ["PutItem"] },
     { prefix: "OWNER#", actions: ["PutItem"] },
     { prefix: "OUTPOINT#", actions: ["PutItem"] },
   ],

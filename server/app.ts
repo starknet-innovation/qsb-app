@@ -34,6 +34,7 @@ import {
   txid,
 } from "../src/lib/model";
 import { Conflict, store as defaultStore, type Store } from "./store";
+import { authorizeApiKey, bearerApiKey, installApiKeyRoutes } from "./scoped-keys";
 import { slipstream, MinerAuthenticationError } from "./providers";
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { chain, ChainError, ChainNotFound, type Esplora } from "./chain";
@@ -248,8 +249,12 @@ export function createApp(
   app.use("/api/jobs", auth);
   app.use("/api/payment-utxos", auth);
   app.use("/api/payment-input", auth);
+  app.use("/api/api-keys/*", auth);
+  app.use("/api/api-keys", auth);
   async function auth(c: any, next: () => Promise<void>) {
     const bearer = c.req.header("Authorization") || "";
+    const apiKey = bearerApiKey(bearer);
+    if (apiKey) return (await authorizeApiKey(c, store, apiKey)) ?? next();
     if (!/^Bearer [A-Za-z0-9_-]{43}$/.test(bearer))
       return c.json({ error: "Connect and sign in with Xverse." }, 401);
     const session = await store.get(`SESSION#${hash(bearer.slice(7))}`, "AUTH");
@@ -258,6 +263,7 @@ export function createApp(
     c.set("owner", session.owner);
     await next();
   }
+  installApiKeyRoutes(app, store);
   app.get("/api/vaults", async (c) => {
     const rows = await store.list(`OWNER#${c.get("owner")}`, "VAULT#");
     return c.json({
