@@ -310,6 +310,9 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
       case "withdraw create": {
         arity(3);
         const vaultId = id("vault");
+        // A new intent is bound into a new backup before any paid work; a resume takes none of these.
+        if ((values.helper || values.destination || values["fee-rate"]) && !values["out-backup"])
+          throw new UsageError("A new withdrawal needs --out-backup <new file>: the backup that binds its payout is saved first.");
         assertOutputs(io, [values["out-backup"]], [values.backup], [values["message-out"]]);
         const text = await backup();
         const costAccepted = accepted();

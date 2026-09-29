@@ -225,6 +225,7 @@ export class QsbClient {
   private readonly wallet: Wallet;
   private readonly qsb: LocalQsb;
   private readonly pending: PendingDeposits;
+  private readonly authorizations: Pick<Storage, "getItem" | "setItem">;
   private readonly guard: ReturnType<typeof persistentGuard>;
   private readonly appOrigin: string;
 
@@ -236,9 +237,13 @@ export class QsbClient {
     this.wallet = signerWallet(options.signer);
     this.qsb = options.qsb ?? nodeQsb();
     this.pending = options.pendingDeposits ?? memoryPending();
-    this.guard = persistentGuard(options.authorizations ?? memoryStorage());
+    this.authorizations = options.authorizations ?? memoryStorage();
+    this.guard = persistentGuard(this.authorizations);
     this.session = transport(options);
     this.appOrigin = new URL(options.appOrigin ?? base.origin).origin;
+    // A raw-key signer must not sign another deployment's challenge relayed through a local proxy.
+    if (options.signer.loopbackOnly && !isLoopback(new URL(this.appOrigin)))
+      throw new Error("This signer holds a raw key and only signs in to a loopback app origin.");
     if (options.token) this.session.restoreSession(options.token);
   }
 
@@ -698,14 +703,19 @@ export class QsbClient {
       const manifestJson = JSON.stringify(manifest);
       const manifestHash = digest(manifestJson);
       await assertRecoveryAuthorization(recovery, manifestHash);
-      // This device keeps one intent per vault, as the webapp does, before anything is saved.
-      this.guard.claim(`qsb-intent:${vault.scriptHash}`, manifestHash);
+      // This device keeps one intent per vault, as the webapp does. A fresh intent can't match
+      // a remembered one, so refuse before saving anything.
+      const intentKey = `qsb-intent:${vault.scriptHash}`;
+      if (this.authorizations.getItem(intentKey) !== null)
+        throw new Error("This vault already authorizes a different withdrawal or assembly. Resume its original backup.");
       backup = await encryptRecovery(
         { ...recovery, authorization: { manifestJson, manifestHash } },
         input.passphrase,
       );
       // Keep the recovery before starting billable work: it binds the payout to the one-time keys.
+      // Remember the intent only once a backup holds it, so a failed save strands nothing.
       await input.saveBackup(backup);
+      this.guard.claim(intentKey, manifestHash);
     }
     const manifestHash = digest(JSON.stringify(manifest));
     const { job } = await this.session.api<{ job: Job }>("/jobs", manifest);

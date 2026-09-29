@@ -115,9 +115,13 @@ export function assertOutputs(
     if (seen.has(target)) throw new UsageError(`${file} is used twice. Give every output its own new path.`);
     seen.add(target);
   }
-  for (const file of outputs)
-    if (file !== undefined && existsSync(resolveIn(io, file)))
+  for (const file of outputs) {
+    if (file === undefined) continue;
+    if (existsSync(resolveIn(io, file)))
       throw new UsageError(`${file} already exists. Nothing is overwritten; choose a new path.`);
+    if (!existsSync(path.dirname(resolveIn(io, file))))
+      throw new UsageError(`The directory for ${file} doesn't exist.`);
+  }
 }
 /** Create `target` exclusively, write it, and flush it and its directory to disk. */
 async function writeExclusive(target: string, text: string) {

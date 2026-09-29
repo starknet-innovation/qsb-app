@@ -121,12 +121,15 @@ export function world() {
   const requests: Recorded[] = [];
   const transport = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (new URL(url).origin !== API) throw new Error(`Unexpected destination ${url}`);
+    if (typeof input !== "string" || new URL(url).origin !== API) throw new Error(`Unexpected destination ${url}`);
+    // The SDK sends JSON text only; any other body would go unrecorded, so it fails the test.
+    if (init?.body !== undefined && init.body !== null && typeof init.body !== "string")
+      throw new Error("Unrecorded request body");
     requests.push({
       method: init?.method ?? "GET",
       url,
       headers: Object.fromEntries(new Headers(init?.headers).entries()),
-      body: typeof init?.body === "string" ? init.body : "",
+      body: init?.body ?? "",
     });
     return app.fetch(new Request(url, init));
   }) as typeof fetch;

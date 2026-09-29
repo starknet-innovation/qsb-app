@@ -97,6 +97,8 @@ describe("local test signer", () => {
       expect(() => loopbackTestSigner(key, api)).toThrow();
     const signer = loopbackTestSigner(key, API);
     expect(() => new QsbClient({ baseUrl: "https://qsb.example", signer })).toThrow("loopback");
+    // Nor through a local relay: the challenge it would sign names the deployment's own origin.
+    expect(() => new QsbClient({ baseUrl: API, appOrigin: "https://qsb.example", signer })).toThrow("loopback app origin");
   });
   it("is refused by the CLI for a remote API before any request", async () => {
     const fetch = vi.fn();
@@ -143,7 +145,9 @@ describe("client boundaries", () => {
     await expect(new QsbClient({ baseUrl: API, signer, fetch: serving("https://qsb.example") }).login()).rejects.toThrow("Nothing was signed");
     expect(signMessage).not.toHaveBeenCalled();
     await new QsbClient({ baseUrl: API, signer, fetch: serving(API) }).login();
-    await new QsbClient({ baseUrl: API, appOrigin: "https://qsb.example/", signer, fetch: serving("https://qsb.example") }).login();
+    // A wallet signer (not loopback-only) signs in to a deployment whose app origin is set explicitly.
+    const wallet = { ...signer, loopbackOnly: undefined };
+    await new QsbClient({ baseUrl: "https://api.qsb.example", appOrigin: "https://qsb.example/", signer: wallet, fetch: serving("https://qsb.example") }).login();
     expect(signMessage).toHaveBeenCalledTimes(2);
   });
   it("carries a machine-readable code when the server sends one", async () => {

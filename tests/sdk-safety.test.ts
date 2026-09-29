@@ -223,6 +223,44 @@ describe("one intent and one assembly per vault on this device", () => {
     expect(existsSync(c.file("signed-2.json"))).toBe(false);
   }, 120000);
 
+  it("remembers an intent only once a backup holds it, so a failed save blocks nothing", async () => {
+    const f = await fundedVault(passphrase);
+    const create = (saveBackup: (text: string) => Promise<void>) =>
+      f.client.withdrawals.create({
+        vaultId: f.vault.id, backup: f.backups[0], passphrase, helper: { txid: f.owner.fundingTxid, vout: 1 },
+        destination: f.destination, feeRate: "3", costAccepted: true, saveBackup,
+      });
+    await expect(create(async () => { throw new Error("disk full"); })).rejects.toThrow("disk full");
+    expect(posts(f.w, "/api/jobs")).toBe(0);
+    const { job } = await create(f.keep);
+    expect(job.status).toBe("queued");
+  }, 120000);
+
+  it("asks for --out-backup before any work for a new withdrawal, and doesn't block the retry", async () => {
+    const w = world();
+    const owner = wallet(w.chain);
+    const c = cli(w, owner.wif);
+    const { vault } = JSON.parse((await c.run("vault", "create", "--name", "retry", "--backup", "vault.json")).out);
+    expect((await c.run("deposit", "prepare", vault.id, "--backup", "vault.json", "--amount", "0.002", "--fee-rate", "2",
+      "--utxo", `${owner.fundingTxid}:0`, "--out", "deposit.json")).code).toBe(0);
+    const prepared = JSON.parse(readFileSync(c.file("deposit.json"), "utf8"));
+    writeFileSync(c.file("signed.psbt"), await loopbackTestSigner(owner.wif, API).signPsbt(owner.address, prepared.psbt, prepared.signInputs));
+    const deposit = JSON.parse((await c.run("deposit", "submit", "--prepared", "deposit.json", "--signed", "signed.psbt", "--accept-costs")).out);
+    w.chain.mine(deposit.txid);
+    const withdraw = (...extra: string[]) =>
+      c.run("withdraw", "create", vault.id, "--backup", "vault.json", "--helper", `${owner.fundingTxid}:1`,
+        "--destination", owner.address, "--fee-rate", "3", "--accept-costs", ...extra);
+    const before = w.requests.length;
+    const missing = await withdraw();
+    expect(missing.code).toBe(2);
+    expect(missing.err).toContain("--out-backup");
+    expect((await withdraw("--out-backup", "no-such-dir/withdrawal.json")).code).toBe(2);
+    expect(w.requests.length).toBe(before);
+    expect(existsSync(c.file("home/authorizations"))).toBe(false);
+    expect((await withdraw("--out-backup", "withdrawal.json")).code).toBe(0);
+    expect(posts(w, "/api/jobs")).toBe(1);
+  }, 120000);
+
   it("won't make a second intent from the original backup when the first one's job wasn't created", async () => {
     let dropJobs = false;
     const f = await fundedVault(passphrase, {

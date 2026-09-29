@@ -5,7 +5,7 @@ import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
-import { hex } from "@scure/base";
+import { base64, hex } from "@scure/base";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import awsRelease from "../src/lib/releases/qsb-solver-aws-v0-1-0.json";
 import { decryptRecovery } from "../src/lib/backup";
@@ -15,8 +15,19 @@ import { runCli } from "../sdk/cli";
 import { loopbackTestSigner } from "../sdk";
 import { API, localQsb, solve, wallet, world, type Recorded } from "./sdk-fixture";
 
-beforeEach(() => vi.stubEnv("SOLVER_RELEASE_ID", awsRelease.id));
-afterEach(() => vi.unstubAllEnvs());
+// Every request must go through the recording transport: anything else fails the test.
+const stray: string[] = [];
+beforeEach(() => {
+  vi.stubEnv("SOLVER_RELEASE_ID", awsRelease.id);
+  vi.stubGlobal("fetch", async (input: unknown) => {
+    stray.push(String(input));
+    throw new Error("Unrecorded request");
+  });
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 const passphrase = "disposable sdk e2e passphrase";
 /** An owner-only file's text, checked and read through one descriptor. */
@@ -30,28 +41,55 @@ function readOwnerOnly(file: string): string {
   }
 }
 
-/** Every value that must stay on the caller's machine. */
-async function secrets(backups: string[], wif: string, privateKey: Uint8Array) {
+/** Encodings a leak could use: as-is, JSON-escaped, base64, and upper/lowercase hex. */
+function text(value: string) {
+  return [value, JSON.stringify(value).slice(1, -1), base64.encode(new TextEncoder().encode(value))];
+}
+function bytes(hexValue: string) {
+  return [hexValue.toLowerCase(), hexValue.toUpperCase(), base64.encode(hex.decode(hexValue))];
+}
+/**
+ * What must stay on the caller's machine. A QSB spend reveals the HORS preimages of the
+ * solution's signed indices in its scriptSig (cmd_assemble pushes the first t1s = 8 and
+ * t2s = 7 sorted indices of each round): the webapp submits the same bytes, and that is why
+ * a vault is assembled only once. So those preimages may appear in the withdrawal submit and
+ * the miner submission, and nowhere else. The other 285 secrets, the nonces (pin_k and each
+ * round's k, which bridge.py keeps out of the public state), the whole state, the passphrase,
+ * the key and the backups themselves must never appear anywhere. The assembler double puts a
+ * placeholder in the scriptSig, so here the revealed preimages appear nowhere at all.
+ */
+async function secrets(backups: string[], wif: string, privateKey: Uint8Array, solution: NonNullable<Job["solution"]>) {
   const recovery = await decryptRecovery(backups[0], passphrase);
   const state = JSON.parse(recovery.stateJson) as { hors_secrets: string[][] };
-  expect(state.hors_secrets.flat()).toHaveLength(300);
-  return [
-    recovery.stateJson,
-    JSON.stringify(recovery),
-    '"hors_secrets"',
-    ...state.hors_secrets.flat(),
-    passphrase,
-    wif,
-    hex.encode(privateKey),
+  const nonces = [...recovery.stateJson.matchAll(/"(?:pin_k|k)":\s*(\d+)/g)].map((m) => m[1]);
+  expect(nonces).toHaveLength(3);
+  const signed = [solution.round1, solution.round2].map((round, r) =>
+    [...round].sort((a, b) => a - b).slice(0, r === 0 ? 8 : 7).map((i) => state.hors_secrets[r][i]),
+  );
+  const revealed = new Set(signed.flat());
+  const unrevealed = state.hors_secrets.flat().filter((secret) => !revealed.has(secret));
+  expect([revealed.size, unrevealed.length]).toEqual([15, 285]);
+  const never = [
+    ...text(recovery.stateJson),
+    ...text(JSON.stringify(recovery)),
+    "hors_secrets",
+    ...unrevealed.flatMap(bytes),
+    ...nonces.flatMap((n) => [n, ...bytes(BigInt(n).toString(16).padStart(64, "0"))]),
+    ...text(passphrase),
+    ...text(wif),
+    ...bytes(hex.encode(privateKey)),
     // The encrypted backups are never uploaded either.
-    ...backups.map((text) => JSON.parse(text).ciphertext as string),
+    ...backups.map((backup) => JSON.parse(backup).ciphertext as string),
   ];
+  return { never, revealed: [...revealed].flatMap(bytes) };
 }
-function assertNothingLeaks(requests: Recorded[], values: string[]) {
+function assertNothingLeaks(requests: Recorded[], values: { never: string[]; revealed: string[] }) {
   expect(requests.length).toBeGreaterThan(10);
   for (const request of requests) {
     const sent = `${request.method} ${request.url}\n${JSON.stringify(request.headers)}\n${request.body}`;
-    for (const value of values) expect(sent.includes(value), `${request.method} ${request.url}`).toBe(false);
+    const withdrawal = request.method === "POST" && /\/api\/jobs\/[0-9a-f-]{36}\/submit$/.test(new URL(request.url).pathname);
+    for (const value of [...values.never, ...(withdrawal ? [] : values.revealed)])
+      expect(sent.includes(value), `${request.method} ${request.url}`).toBe(false);
   }
 }
 
@@ -64,6 +102,7 @@ it("drives vault creation, deposit, withdrawal, local assembly and approved subm
   const { qsb, assembled } = localQsb();
   const cwd = mkdtempSync(path.join(tmpdir(), "qsb-cli-"));
   const home = path.join(cwd, "home");
+  const printed: string[] = [];
   async function qsbCli(...argv: string[]) {
     const stdout = new PassThrough(), stderr = new PassThrough();
     let out = "", err = "";
@@ -82,6 +121,7 @@ it("drives vault creation, deposit, withdrawal, local assembly and approved subm
       },
       qsb,
     );
+    printed.push(out, err);
     return { code, out, err, json: () => JSON.parse(out) };
   }
   const ok = async (...argv: string[]) => {
@@ -165,11 +205,18 @@ it("drives vault creation, deposit, withdrawal, local assembly and approved subm
   expect((await ok("withdraw", "status", job.id)).job.status).toBe("confirmed");
 
   const backups = ["vault.json", "withdrawal.json", "signing.json"].map((f) => readOwnerOnly(path.join(cwd, f)));
-  const values = await secrets(backups, owner.wif, owner.privateKey);
+  const values = await secrets(backups, owner.wif, owner.privateKey, solution);
   assertNothingLeaks(w.requests, values);
-  for (const raw of w.minerSubmissions) for (const value of values) expect(raw.includes(value)).toBe(false);
-  const cached = readOwnerOnly(session);
-  for (const value of values) expect(cached.includes(value)).toBe(false);
+  // The deposit, then the withdrawal: only the withdrawal may carry the revealed preimages.
+  expect(w.minerSubmissions).toHaveLength(2);
+  expect(btc.Transaction.fromRaw(hex.decode(w.minerSubmissions[0]), { allowUnknownInputs: true, allowUnknownOutputs: true }).id).toBe(deposit.txid);
+  expect(w.minerSubmissions[1]).toBe(signed.rawTxHex);
+  for (const [i, raw] of w.minerSubmissions.entries())
+    for (const value of [...values.never, ...(i === 0 ? values.revealed : [])]) expect(raw.includes(value)).toBe(false);
+  // Nor in the session cache or anything the CLI printed.
+  for (const local of [readOwnerOnly(session), ...printed])
+    for (const value of [...values.never, ...values.revealed]) expect(local.includes(value)).toBe(false);
+  expect(stray).toEqual([]);
   for (const route of ["POST /api/vaults", "POST /api/vaults/*/fund/submit", "POST /api/jobs", "POST /api/jobs/*/submit"])
     expect(
       w.requests.some((r) => `${r.method} ${new URL(r.url).pathname.replace(/[0-9a-f-]{36}/g, "*")}` === route),
