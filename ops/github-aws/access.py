@@ -97,14 +97,17 @@ def access(c):
                           # Require recent MFA context when supplied; aws login refresh semantics need live verification.
                           'NumericLessThanIfExists': {'aws:MultiFactorAuthAge': '3600'}}}]}
     else:
-        # Identity Center roles sit under the reserved /aws-reserved/sso.amazonaws.com/ path, which no
-        # one can create roles in, so only that permission set's role matches. The `*` covers the
-        # optional region segment of the path. MFA isn't checked here: Identity Center enforces it for the
-        # whole instance, so the administrator must keep it always-on (docs/REGION-MIGRATION.md, step 2).
+        # Identity Center roles sit under the reserved /aws-reserved/sso.amazonaws.com/ path, optionally
+        # followed by a region segment. Both patterns anchor the role name on a `/`, so only this
+        # permission set's role matches, not one whose name merely ends the same way. MFA isn't checked
+        # here: Identity Center enforces it for the whole instance, so the administrator must keep it
+        # always-on (docs/REGION-MIGRATION.md, step 2).
+        role_name = f'AWSReservedSSO_{who}_{SSO_ROLE_SUFFIX}'
         trust = {'Version': '2012-10-17', 'Statement': [{
             'Effect': 'Allow', 'Principal': {'AWS': iam('root')}, 'Action': 'sts:AssumeRole',
-            'Condition': {'ArnLike': {'aws:PrincipalArn': iam(
-                f'role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_{who}_{SSO_ROLE_SUFFIX}')}}}]}
+            'Condition': {'ArnLike': {'aws:PrincipalArn': [
+                iam(f'role/aws-reserved/sso.amazonaws.com/{role_name}'),
+                iam(f'role/aws-reserved/sso.amazonaws.com/*/{role_name}')]}}}]}
 
     # The user can sign in (console, `aws login`) and assume the two bootstrap roles, which the
     # operator cannot edit; nothing else. The explicit denies also override any resource policy

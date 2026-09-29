@@ -152,25 +152,33 @@ Nothing live changes in this phase.
       and the copy ignores those rows.
     - Then take an on-demand backup of the old records table
       (`aws dynamodb create-backup --region eu-west-1 --table-name <name>-records --backup-name qsb-pre-move`).
-11. **Copy the data** (operator, both accounts). Use one profile per account:
-    `npx tsx scripts/copy-records.ts --from eu-west-1:<old>-records --from-profile qsb-copy-from --to eu-west-2:<new>-records --to-profile qsb-copy-to`.
-    - **Profiles.** The script can't answer an MFA prompt, so give it profiles that reuse credentials the CLI has
-      already obtained:
+11. **Copy the data** (operator, both accounts).
+    - **Freeze the new stack too.** Set its `lambda_concurrency` to 0, then plan and apply. Creating a vault writes
+      even with the switches off, so a write to the new table during the copy could otherwise escape verification.
+    - **Profiles.** One per account, with distinct names: during the move the old and new operator profiles can't
+      both be called `qsb-operator`. Keep the old account's as `qsb-operator`, and name the new account's
+      `qsb-new-operator` (use the profile example in `ops/github-aws/README.md`, with that name) until step 15. The
+      script can't answer an MFA prompt, so give it two helper profiles that reuse credentials the CLI already has:
       - In `~/.aws/config`, add `[profile qsb-copy-from]` with
-        `credential_process = aws configure export-credentials --profile qsb-operator --format process`. That's the
-        old account's operator profile. Run `aws sts get-caller-identity --profile qsb-operator` first, which
-        prompts for MFA once and caches the session.
-      - Add `[profile qsb-copy-to]` the same way for the new account's operator profile, after `aws sso login`.
-    - It counts first. Add `--apply` to copy.
-    - It copies every item unchanged, refuses a destination holding anything the source lacks, fails if the source
-      changes during the copy, and verifies both tables item by item. It resumes safely.
+        `credential_process = aws configure export-credentials --profile qsb-operator --format process`. Run
+        `aws sts get-caller-identity --profile qsb-operator` first, which prompts for MFA once and caches the session.
+      - Add `[profile qsb-copy-to]` with
+        `credential_process = aws configure export-credentials --profile qsb-new-operator --format process`, after
+        `aws sso login`.
+    - **Copy:** `npx tsx scripts/copy-records.ts --from eu-west-1:<old>-records --from-profile qsb-copy-from --to eu-west-2:<new>-records --to-profile qsb-copy-to`.
+      It counts first; add `--apply` to copy.
+    - It copies every item unchanged, overwrites any row an earlier interrupted copy left under the same key,
+      refuses a destination row whose key isn't in the source, fails if the source changes during the copy, and
+      verifies both tables item by item.
+    - **Unfreeze the new stack:** restore its `lambda_concurrency` to its previous value (2), then plan and apply.
     - It prints only counts and a digest. The data passes through the operator's machine, not any AI tool.
 12. **Verify** (operator). Sign in at the new URL. The vault, its deposit and its status must show as before.
 13. **Switch on** (operator, with the owner's OK). Set both switches on in the new stack, plan and apply.
 14. **Retire the old stack's services straight away** (operator, old account). Steps 1 and 2 of "Decommission the
     old stack" below destroy everything that could take a deposit, and keep the data. Afterwards nothing is left to
     switch back on by mistake. Deleting the kept data still waits for the cleanup.
-15. **Point the tooling at the new account.**
+15. **Point the tooling at the new account.** Rename the `qsb-new-operator` profile to `qsb-operator` once the old
+    account's profile is no longer needed.
     - Set the GitHub repository variables `QSB_AWS_ACCOUNT_ID`, `QSB_AWS_REGION` (eu-west-2) and
       `QSB_AWS_ROLE_ARN` (the new `qsb-github-deploy`).
     - Point the local `qsb-view` and `qsb-operator` profiles at the new account's roles through Identity Center,
@@ -203,7 +211,10 @@ after the new stack has run a full deposit and withdrawal.
      Treat it as retained until it expires, so the old account holds QSB data until then. After 35 days, confirm it has expired: `aws dynamodb list-backups --region eu-west-1 --backup-type SYSTEM`
      should list nothing for the old table;
    - the `qsb-solver` repository;
-   - the job and frontend buckets;
+   - the job and frontend buckets. The frontend bucket is versioned, so empty it first: delete every object
+     version and delete marker (for example with the S3 console's "Empty bucket"), confirm
+     `aws s3api list-object-versions --bucket <name>` lists nothing, then delete the bucket;
    - the old `qsb/slipstream` secret;
-   - the old state bucket;
+   - the old state bucket. It's versioned too, so empty every version and delete marker the same way before
+     deleting it;
    - the old IAM identities, following the organisation's process.

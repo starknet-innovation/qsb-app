@@ -84,11 +84,18 @@ describe("copyRecords", () => {
     expect(dest.items).toHaveLength(30);
   });
 
-  it("refuses a destination holding anything that isn't in the source", async () => {
+  it("refuses a destination row whose key isn't in the source", async () => {
     const { source, dest } = tables();
-    dest.items = [{ pk: { S: "SESSION#other" }, sk: { S: "x" } }];
-    await expect(copyRecords(source, "old", dest, "new", true, noPause)).rejects.toThrow("aren't in the source");
+    dest.items = [{ pk: { S: "OWNER#other" }, sk: { S: "x" } }];
+    await expect(copyRecords(source, "old", dest, "new", true, noPause)).rejects.toThrow("keys aren't in the source (OWNER)");
     expect(dest.writes).toBe(0);
+  });
+
+  it("resumes over a stale copy of a row the source has since changed", async () => {
+    const { source, dest } = tables();
+    dest.items = [{ ...source.items[4], version: { N: "999" } }];
+    expect((await copyRecords(source, "old", dest, "new", true, noPause)).copied).toBe(true);
+    expect(digest(dest.items)).toBe(digest(source.items));
   });
 
   it("retries unprocessed items with a pause", async () => {

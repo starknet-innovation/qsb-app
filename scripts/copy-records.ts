@@ -20,8 +20,9 @@ import {
  * When the tables are in different accounts, name each side's AWS profile with --from-profile and
  * --to-profile. Otherwise both sides use the default credentials.
  *
- * Without --apply it only counts. With --apply it copies and verifies. A re-run after a partial copy is
- * safe: the destination may only hold items identical to source items.
+ * Without --apply it only counts. With --apply it copies and verifies. A re-run after a partial or
+ * interrupted copy is safe: destination rows are overwritten by the source rows with the same key, and a
+ * destination row whose key isn't in the source stops the copy.
  *
  * Sign-in challenges and sessions (the rows with a TTL, `expiresAt`) are neither copied nor compared.
  * DynamoDB deletes them asynchronously on its own, which would make any comparison unstable, and everyone
@@ -74,6 +75,8 @@ function normalize(value: unknown, key?: string): unknown {
   return value;
 }
 export const canonical = (item: Item) => JSON.stringify(normalize(item));
+/** The row's primary key: the records table's partition and sort keys. */
+const key = (item: Item) => JSON.stringify([item.pk, item.sk].map((part) => normalize(part)));
 export function digest(items: Item[]) {
   const hash = createHash("sha256");
   for (const line of items.map(canonical).sort()) hash.update(line + "\n");
@@ -106,11 +109,15 @@ export async function copyRecords(
     digest: digest(items),
   };
   if (!apply) return { ...summary, copied: false };
-  // Only a partial earlier copy may be present: every destination item must match a source item.
-  const known = new Set(items.map(canonical));
-  const present = (await scanAll(dest, destTable)).filter((item) => !ephemeral(item));
-  if (present.some((item) => !known.has(canonical(item))))
-    throw new Error("The destination holds items that aren't in the source. Nothing was copied.");
+  // Only an earlier copy may be present. Its rows are overwritten by the current source rows with the same
+  // key (even if the source row changed since); a row whose key isn't in the source stops the copy.
+  const keys = new Set(items.map(key));
+  const strays = (await scanAll(dest, destTable)).filter((item) => !ephemeral(item) && !keys.has(key(item)));
+  if (strays.length)
+    throw new Error(
+      `The destination holds ${strays.length} rows whose keys aren't in the source (${Object.keys(prefixCounts(strays)).join(", ")}). ` +
+        "Nothing was copied. If they came from an earlier interrupted copy, remove them from the new table, then re-run.",
+    );
   for (let i = 0; i < items.length; i += 25) {
     let pending: Put[] = items.slice(i, i + 25).map((Item) => ({ PutRequest: { Item } }));
     for (let attempt = 0; pending.length; attempt++) {

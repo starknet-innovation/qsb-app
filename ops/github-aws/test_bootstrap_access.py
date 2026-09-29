@@ -180,7 +180,7 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
             trust = json.loads(args[args.index('--assume-role-policy-document') + 1])
             [statement] = trust['Statement']
             self.assertEqual(statement['Principal'], {'AWS': f'arn:aws:iam::{ACCOUNT}:root'})
-            self.assertIn('AWSReservedSSO_QsbOperator_', statement['Condition']['ArnLike']['aws:PrincipalArn'])
+            self.assertTrue(all('/AWSReservedSSO_QsbOperator_' in p for p in statement['Condition']['ArnLike']['aws:PrincipalArn']))
             self.assertIn('Identity Center permission set QsbOperator', args[args.index('--description') + 1])
 
     def test_role_creation_rides_out_new_user_propagation(self):

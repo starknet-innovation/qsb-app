@@ -75,20 +75,27 @@ class HumanAccess(unittest.TestCase):
 
     def test_an_identity_center_permission_set_can_be_the_trusted_principal(self):
         out = self.sso(operator_sso_permission_set='QsbOperator')
-        pattern = f'arn:aws:iam::{ACCOUNT}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_QsbOperator_' + '?' * 16
+        base = f'arn:aws:iam::{ACCOUNT}:role/aws-reserved/sso.amazonaws.com/'
+        name = 'AWSReservedSSO_QsbOperator_' + '?' * 16
+        patterns = [base + name, base + '*/' + name]
         for role in ('viewonly', 'operator'):
             [statement] = out[role]['trust']['Statement']
             # Only the permission set's role, under the reserved path no one can create roles in.
             self.assertEqual(statement['Principal'], {'AWS': f'arn:aws:iam::{ACCOUNT}:root'})
             self.assertEqual(statement['Action'], 'sts:AssumeRole')
-            self.assertEqual(statement['Condition'], {'ArnLike': {'aws:PrincipalArn': pattern}})
+            self.assertEqual(statement['Condition'], {'ArnLike': {'aws:PrincipalArn': patterns}})
             self.assertEqual(out[role]['max_session'], 3600)
-        self.assertTrue(fnmatch.fnmatchcase(
-            f'arn:aws:iam::{ACCOUNT}:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_QsbOperator_0123456789abcdef',
-            pattern))
-        self.assertFalse(fnmatch.fnmatchcase(
-            f'arn:aws:iam::{ACCOUNT}:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_QsbOperator_x_0123456789abcdef',
-            pattern))
+        matches = lambda arn: any(fnmatch.fnmatchcase(arn, p) for p in patterns)
+        suffix = '0123456789abcdef'
+        # With and without the region segment.
+        self.assertTrue(matches(f'{base}eu-west-2/AWSReservedSSO_QsbOperator_{suffix}'))
+        self.assertTrue(matches(f'{base}AWSReservedSSO_QsbOperator_{suffix}'))
+        # Not another permission set whose name ends or starts the same way.
+        for other in (f'AWSReservedSSO_OtherAWSReservedSSO_QsbOperator_{suffix}', f'AWSReservedSSO_QsbOperator_x_{suffix}',
+                      f'AWSReservedSSO_QsbOperatorX_{suffix}'):
+            with self.subTest(other=other):
+                self.assertFalse(matches(base + other))
+                self.assertFalse(matches(f'{base}eu-west-2/{other}'))
         # No IAM user; the permission set may assume the two roles and nothing else.
         self.assertIsNone(out['user'])
         policy = out['permission_set']['inline']['Statement']
