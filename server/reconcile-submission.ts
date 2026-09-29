@@ -14,6 +14,7 @@ import { rehearsalAddressAllowed, transactionsEnabled } from "./network";
 import { configuredCompute } from "./compute-provider";
 import { searchVersion, workRange } from "./search-ranges";
 import { store as defaultStore, type Store } from "./store";
+import { recordOwnerEvents } from "./owner-events";
 
 export class ReconciliationError extends Error {
   constructor(message: string) {
@@ -409,8 +410,10 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
     if (decision.kind === "provider-id" && !pollingStartAllowed(owner))
       throw new ReconciliationError("PollingNotAllowed");
     const endpoint = await configuredCompute();
+    // Records the owner event and queues its webhooks; the API or coordinator delivers them.
+    const store = recordOwnerEvents(defaultStore);
     const result = await reconcileUnknownSubmission({
-      store: defaultStore,
+      store,
       owner,
       jobId,
       decision,
@@ -421,7 +424,7 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
       },
       log: (entry) => process.stderr.write(`${JSON.stringify(entry)}\n`),
       resumePolling: startPolling,
-    });
+    }).finally(() => store.settle());
     process.stdout.write(`${JSON.stringify(result)}\n`);
     if (result.outcome === "provider-id" && !result.pollingStarted)
       process.exitCode = 1;

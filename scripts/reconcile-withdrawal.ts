@@ -36,13 +36,21 @@ export async function runWithdrawalReconciliationCli(
     }
     if (!options["--operator"] || !options["--evidence"])
       throw Error("OperatorAndEvidenceRequired");
-    const [{ store }, { chain }, { Slipstream }, { reconcileWithdrawal }] =
-      await Promise.all([
-        import("../server/store"),
-        import("../server/chain"),
-        import("../server/providers"),
-        import("../server/withdrawal-reconciliation"),
-      ]);
+    const [
+      { store: records },
+      { chain },
+      { Slipstream },
+      { reconcileWithdrawal },
+      { recordOwnerEvents },
+    ] = await Promise.all([
+      import("../server/store"),
+      import("../server/chain"),
+      import("../server/providers"),
+      import("../server/withdrawal-reconciliation"),
+      import("../server/owner-events"),
+    ]);
+    // Records the owner event and queues its webhooks; the API or coordinator delivers them.
+    const store = recordOwnerEvents(records);
     const result = await reconcileWithdrawal({
       store,
       chain,
@@ -51,7 +59,7 @@ export async function runWithdrawalReconciliationCli(
       jobId,
       operator: options["--operator"],
       evidence: options["--evidence"],
-    });
+    }).finally(() => store.settle());
     process.stdout.write(JSON.stringify(result) + "\n");
     if (result.alert) process.exitCode = 1;
   } catch {

@@ -7,7 +7,9 @@ import {
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
 import { chain } from "./chain";
-import { store } from "./store";
+import { store as records, type Store } from "./store";
+import { recordOwnerEvents, SETTLE_CAP_MS } from "./owner-events";
+import { httpsTransport, systemResolver } from "./webhook-transport";
 import { validationTick } from "./validation-search";
 import { configuredCompute, computeConfigured } from "./compute-provider";
 import { release, type Job, type PublicVault } from "../src/lib/model";
@@ -34,8 +36,13 @@ async function cpu(payload: unknown) {
     throw new Error("ReferenceVerificationFailed");
   return JSON.parse(Buffer.from(response.Payload).toString());
 }
+/** Webhook work never runs into the Lambda timeout: it stops this long before. */
+const TIMEOUT_MARGIN_MS = 15_000;
 // Only identifiers enter workflow history. Recovery secrets never enter AWS.
-export async function handler(event: Event | { action: "providerHealth" }) {
+export async function handler(
+  event: Event | { action: "providerHealth" },
+  context?: { getRemainingTimeInMillis?: () => number },
+) {
   // IAM-only Lambda diagnostic; no HTTP route exposes it. This reads provider
   // health only and cannot start compute or bypass the transaction release gate.
   if ("action" in event) {
@@ -49,6 +56,21 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       health: await provider.health(),
     };
   }
+  // Status changes become owner events; webhook delivery follows the tick, bounded, and
+  // can't change its result or error.
+  const store = recordOwnerEvents(records);
+  try {
+    return await coordinate(event, store);
+  } finally {
+    const remaining = context?.getRemainingTimeInMillis?.() ?? Infinity;
+    await store.settle({
+      delivery: { transport: httpsTransport, resolve: systemResolver },
+      owners: [event.owner],
+      budgetMs: Math.min(SETTLE_CAP_MS, remaining - TIMEOUT_MARGIN_MS),
+    });
+  }
+}
+async function coordinate(event: Event, store: Store) {
   const pk = `OWNER#${event.owner}`,
     sk = `JOB#${event.jobId}`,
     row = await store.get(pk, sk);

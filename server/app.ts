@@ -55,6 +55,22 @@ import {
   judgeInclusionEvidence,
   reportEsploraInclusion,
 } from "./runtime/miner-inclusion";
+import {
+  EVENT_TYPES,
+  SETTLE_CAP_MS,
+  eventQuery,
+  listOwnerEvents,
+  recordOwnerEvents,
+} from "./owner-events";
+import {
+  WebhookLimitError,
+  WebhookUrlError,
+  deleteWebhook,
+  listWebhooks,
+  registerWebhook,
+  type Delivery,
+} from "./webhooks";
+import { httpsTransport, systemResolver } from "./webhook-transport";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -66,8 +82,10 @@ function supervisedServiceJob(job: unknown): boolean {
 type Env = { Variables: { owner: string } };
 export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
 export type AuthenticatedJobPostRoutes = Pick<Hono<Env>, "post">;
+/** API Gateway gives up after 30 seconds; webhook work stops well before that. */
+const REQUEST_BUDGET_MS = 25_000;
 export function createApp(
-  store: Store = defaultStore,
+  records: Store = defaultStore,
   dependencies: {
     chain?: Esplora;
     miner?: typeof slipstream;
@@ -84,8 +102,16 @@ export function createApp(
     inProcessHandoff?: boolean;
     /** Injected chain reads for supervised admission. Never the process-wide client by default. */
     fundingLedger?: FundingLedger;
+    /** Webhook HTTP and DNS. Defaults to the network; tests inject fakes. */
+    webhooks?: Partial<Delivery>;
   } = {},
 ) {
+  // Routes write through this, so withdrawal and deposit status changes become owner events.
+  const store = recordOwnerEvents(records);
+  const delivery: Delivery = {
+    transport: dependencies.webhooks?.transport ?? httpsTransport,
+    resolve: dependencies.webhooks?.resolve ?? systemResolver,
+  };
   const ledger = dependencies.chain || chain,
     miner = dependencies.miner || slipstream;
   const enabled = dependencies.enabled ?? transactionsEnabled;
@@ -127,6 +153,18 @@ export function createApp(
       onError: (c) => c.json({ error: "Request is too large" }, 413),
     }),
   );
+  // After the route has answered: record, enqueue and deliver this owner's webhooks, bounded.
+  // Nothing here can change the response.
+  app.use("*", async (c, next) => {
+    const started = Date.now();
+    await next();
+    const owner = c.get("owner");
+    await store.settle({
+      delivery,
+      owners: owner ? [owner] : [],
+      budgetMs: Math.min(SETTLE_CAP_MS, REQUEST_BUDGET_MS - (Date.now() - started)),
+    });
+  });
   app.onError((e, c) => {
     if (e instanceof SubmitDisabled) return c.json({ error: e.message }, 503);
     if (e instanceof ConsensusError) return c.json({ error: e.message }, 409);
@@ -248,6 +286,9 @@ export function createApp(
   app.use("/api/jobs", auth);
   app.use("/api/payment-utxos", auth);
   app.use("/api/payment-input", auth);
+  app.use("/api/events", auth);
+  app.use("/api/webhooks", auth);
+  app.use("/api/webhooks/*", auth);
   async function auth(c: any, next: () => Promise<void>) {
     const bearer = c.req.header("Authorization") || "";
     if (!/^Bearer [A-Za-z0-9_-]{43}$/.test(bearer))
@@ -258,6 +299,45 @@ export function createApp(
     c.set("owner", session.owner);
     await next();
   }
+  // The owner's event log, oldest first. It is the record; webhooks only notify.
+  app.get("/api/events", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const query = eventQuery(c.req.query("after"), c.req.query("limit"));
+    if (!query)
+      return c.json(
+        { error: "Use a cursor from a previous page and a limit from 1 to 100.", code: "invalid_request" },
+        400,
+      );
+    return c.json(await listOwnerEvents(records, c.get("owner"), query));
+  });
+  app.get("/api/webhooks", async (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json({ webhooks: await listWebhooks(records, c.get("owner")) });
+  });
+  app.post("/api/webhooks", async (c) => {
+    const body = z
+      .object({
+        url: z.string().max(2048),
+        events: z.array(z.enum(EVENT_TYPES)).min(1).max(EVENT_TYPES.length).optional(),
+      })
+      .strict()
+      .parse(await c.req.json());
+    c.header("Cache-Control", "no-store");
+    try {
+      // The signing secret is in this response only.
+      return c.json(await registerWebhook(records, c.get("owner"), body, delivery.resolve), 201);
+    } catch (e) {
+      if (e instanceof WebhookUrlError) return c.json({ error: e.message, code: e.code }, 400);
+      if (e instanceof WebhookLimitError)
+        return c.json({ error: e.message, code: "webhook_limit_reached" }, 409);
+      throw e;
+    }
+  });
+  app.post("/api/webhooks/:id/delete", async (c) => {
+    if (!(await deleteWebhook(records, c.get("owner"), c.req.param("id"))))
+      return c.json({ error: "Webhook not found.", code: "webhook_not_found" }, 404);
+    return c.json({ deleted: true });
+  });
   app.get("/api/vaults", async (c) => {
     const rows = await store.list(`OWNER#${c.get("owner")}`, "VAULT#");
     return c.json({
@@ -925,7 +1005,7 @@ export function createApp(
   dependencies.installAuthenticatedJobRoutes?.(authenticatedGet);
   dependencies.installAuthenticatedJobPostRoutes?.(authenticatedPost);
   if (dependencies.inProcessHandoff === true) {
-    installSupervisedRoutes(authenticatedGet, authenticatedPost, store, {
+    installSupervisedRoutes(authenticatedGet, authenticatedPost, records, {
       post: !registeredPosts.has("/api/jobs/supervised"),
       ledger: dependencies.fundingLedger,
     });
