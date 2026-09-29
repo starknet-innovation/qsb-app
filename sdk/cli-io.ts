@@ -95,6 +95,8 @@ export async function readPassphrase(
 }
 
 const resolveIn = (io: CliIo, file: string) => path.resolve(io.cwd, file);
+/** Owner-only. Every open passes it; a read-only open ignores it, but no open here can create a wider file. */
+const PRIVATE = 0o600;
 
 /**
  * Refuse, before any work, an output that already exists, that is also one of the
@@ -119,14 +121,14 @@ export function assertOutputs(
 }
 /** Create `target` exclusively, write it, and flush it and its directory to disk. */
 async function writeExclusive(target: string, text: string) {
-  const handle = await open(target, "wx", 0o600);
+  const handle = await open(target, "wx", PRIVATE);
   try {
     await handle.writeFile(text);
     await handle.sync();
   } finally {
     await handle.close();
   }
-  const directory = await open(path.dirname(target), "r");
+  const directory = await open(path.dirname(target), "r", PRIVATE);
   try {
     await directory.sync();
   } finally {
@@ -155,7 +157,7 @@ export function writePublicFile(io: CliIo, file: string, text: string, sameConte
 }
 /** Read a file through one handle, so its size is checked on the bytes that are read. */
 async function readBounded(target: string, file: string): Promise<Buffer> {
-  const handle = await open(target, "r");
+  const handle = await open(target, "r", PRIVATE);
   try {
     if ((await handle.stat()).size > 4000000) throw new UsageError(`${file} is too large.`);
     return await handle.readFile();
@@ -224,7 +226,7 @@ const sessionPath = (home: string) => path.join(home, "session.json");
 /** A cached bearer token for this API, network and address, if still fresh and owner-only. */
 export async function loadSession(home: string, api: string, address: string): Promise<string | undefined> {
   try {
-    const handle = await open(sessionPath(home), "r");
+    const handle = await open(sessionPath(home), "r", PRIVATE);
     let text: string;
     try {
       if ((await handle.stat()).mode & 0o077) return undefined;
@@ -252,7 +254,7 @@ function writePrivateAtomically(file: string, text: string) {
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${process.pid}.tmp`;
   rmSync(temporary, { force: true });
-  const fd = openSync(temporary, "wx", 0o600);
+  const fd = openSync(temporary, "wx", PRIVATE);
   try {
     writeSync(fd, text);
     fsyncSync(fd);
@@ -260,7 +262,7 @@ function writePrivateAtomically(file: string, text: string) {
     closeSync(fd);
   }
   renameSync(temporary, file);
-  const directory = openSync(path.dirname(file), "r");
+  const directory = openSync(path.dirname(file), "r", PRIVATE);
   try {
     fsyncSync(directory);
   } finally {
