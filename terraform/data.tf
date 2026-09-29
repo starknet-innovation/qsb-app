@@ -103,5 +103,7 @@ resource "aws_s3_object" "frontend" {
   source_hash   = filesha256("${local.artifacts}/frontend/${each.value}")
   content_type  = lookup(local.mime, reverse(split(".", each.value))[0], "application/octet-stream")
   cache_control = startswith(each.value, "assets/") ? "public,max-age=31536000,immutable" : "no-cache,max-age=0,must-revalidate"
-  depends_on    = [terraform_data.release, aws_s3_bucket_public_access_block.frontend]
+  # Upload the bundle only after the API it calls is live: the distribution (its /v1/* and /api/* behaviours;
+  # the provider waits until it's Deployed) and the API Lambda. Otherwise a new index.html can reach viewers first.
+  depends_on = [terraform_data.release, aws_s3_bucket_public_access_block.frontend, aws_cloudfront_distribution.web, aws_lambda_function.api]
 }

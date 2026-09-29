@@ -44,9 +44,17 @@ it.each([
   expect(urls).toEqual([`${base}/config`, `${base}/jobs/${jobId}/mainnet-solved-state`]);
 });
 
+// A quoted string that starts with the whole /api or /v1 segment: `"/api-keys"` is a route, not a prefix.
+const prefixLiteral = /["'`]\/(api|v1)(?=[/"'`?$])/;
+it("flags a hard-coded prefix, not a route that starts with the same letters", () => {
+  for (const flagged of [`"/api/jobs"`, `'/api'+path`, "`/api${path}`", `"/v1"`, `"/api?x=1"`])
+    expect(prefixLiteral.test(flagged), flagged).toBe(true);
+  for (const allowed of [`api("/api-keys")`, `api("/v10")`, `"/apis"`, "see /api/rates"])
+    expect(prefixLiteral.test(allowed), allowed).toBe(false);
+});
 it("builds every webapp API URL from API_BASE_PATH", () => {
   const root = fileURLToPath(new URL("../src", import.meta.url));
   const sources = (readdirSync(root, { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f));
-  const literals = sources.filter((f) => /["'`]\/(api|v1)\b/.test(readFileSync(path.join(root, f), "utf8")));
+  const literals = sources.filter((f) => prefixLiteral.test(readFileSync(path.join(root, f), "utf8")));
   expect(literals).toEqual([path.join("lib", "network.ts")]);
 });
