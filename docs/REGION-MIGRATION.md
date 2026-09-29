@@ -11,7 +11,8 @@ The move is a new stack, never a change of `region` or account on an existing on
 
 **Built alongside, not replaced.** The new account is empty, so there are no IAM name clashes and the new stack is
 built beside the live one. Downtime is only the data copy and the switch-over.
-- **Until the switch-on (step 13):** the old stack stays intact but frozen, so rollback is just unfreezing it.
+- **Until the switch-on (step 13):** the old stack stays intact but frozen, so rollback is just unfreezing it. The new
+  stack stays frozen, or used read-only by the operator, and its URL isn't shared.
 - **At the switch-on:** the old stack's services are retired straight away (step 14), so nothing can take a deposit
   over the same vault rows. By then new deposits live only in the new account, so there's nothing to roll back to.
 - **Its data is kept:** the records table, the solver image and the buckets stay until the new stack has run a full
@@ -170,9 +171,14 @@ Nothing live changes in this phase.
     - It copies every item unchanged, overwrites any row an earlier interrupted copy left under the same key,
       refuses a destination row whose key isn't in the source, fails if the source changes during the copy, and
       verifies both tables item by item.
-    - **Unfreeze the new stack:** restore its `lambda_concurrency` to its previous value (2), then plan and apply.
+    - **Keep the new stack frozen** after the copy, and note the copy's output (item count and digest) for the
+      rollback check.
     - It prints only counts and a digest. The data passes through the operator's machine, not any AI tool.
-12. **Verify** (operator). Sign in at the new URL. The vault, its deposit and its status must show as before.
+12. **Verify** (operator).
+    - Unfreeze the new stack: restore its `lambda_concurrency` to its previous value, then plan and apply.
+    - Don't share the new URL before step 13. Until then only the operator uses it, read-only: creating a vault
+      works even with the switches off, and such a vault would exist only in the new table.
+    - Sign in at the new URL. The vault, its deposit and its status must show as before. Create nothing.
 13. **Switch on** (operator, with the owner's OK). Set both switches on in the new stack, plan and apply.
 14. **Retire the old stack's services straight away** (operator, old account). Steps 1 and 2 of "Decommission the
     old stack" below destroy everything that could take a deposit, and keep the data. Afterwards nothing is left to
@@ -186,8 +192,11 @@ Nothing live changes in this phase.
 
 ## Rollback
 
-- **Before step 13:** restore the old app's `lambda_concurrency` and its switches to their values before the freeze,
-  then plan and apply. Its table
+- **Before step 13:** first check that the new table holds nothing the copy didn't put there. Run the copy script in
+  reverse, count-only (`--from eu-west-2:<new>-records … --to eu-west-1:<old>-records …`, without `--apply`), and
+  compare its item count and digest with the copy's output from step 11. If they differ, stop: something was created
+  in the new stack and must be reconciled before rolling back. Then freeze the new stack again, restore the old app's
+  `lambda_concurrency` and switches to their values before the freeze, and plan and apply. Its table
   hasn't changed since the freeze, and nothing in the new stack has taken a deposit.
 - **After step 13:** new deposits live only in the new account, so don't roll back. Fix forward. Step 14 removes
   the old services, so the old stack can't be switched on by mistake.
