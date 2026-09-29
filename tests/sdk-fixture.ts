@@ -82,7 +82,7 @@ export class FakeChain {
 
 export type Recorded = { method: string; url: string; headers: Record<string, string>; body: string };
 
-export function world(server: { ownerLimits?: OwnerLimits } = {}) {
+export function world(server: { ownerLimits?: OwnerLimits; apiKeys?: boolean } = {}) {
   const store = new MemoryStore();
   const chain = new FakeChain();
   const minerSubmissions: string[] = [];

@@ -53,7 +53,9 @@ const tx = await qsb.withdrawals.assemble(job.id, { backup: withdrawalBackup, pa
 await qsb.withdrawals.submit(tx, { approve: async (review) => (await askUser(review)) ? review.txid : false });
 ```
 
-`QsbClient` options: `baseUrl`, `signer`, and optionally `basePath` (`/v1`, the default, or the webapp's `/api` alias), `appOrigin` (the origin the server's challenge names, its `APP_ORIGIN`; default `baseUrl`'s origin), `fetch`, `qsb` (the local runtime, default Pyodide in-process), `pendingDeposits` (where a signed deposit waits until MARA has it), `authorizations` (this device's one intent and one assembly per vault), `token` (a cached session) and `timeoutMs`. `pendingDeposits` and `authorizations` default to memory; the CLI keeps both under `~/.qsb`. `QSB_NETWORK` (`mainnet` or `testnet4`) must be set when the SDK is imported; it refuses a server on another network.
+`QsbClient` options: `baseUrl`, `signer`, and optionally `basePath` (`/v1`, the default, or the webapp's `/api` alias), `appOrigin` (the origin the server's challenge names, its `APP_ORIGIN`; default `baseUrl`'s origin), `fetch`, `qsb` (the local runtime, default Pyodide in-process), `pendingDeposits` (where a signed deposit waits until MARA has it), `authorizations` (this device's one intent and one assembly per vault), `token` (a cached session), `apiKey` and `timeoutMs`.
+
+`apiKey` is an API key the owner minted with a wallet session ([docs/API.md](../docs/API.md#api-keys)). The SDK sends it as `Authorization: Bearer qsb_<network>_…` instead of signing in; its scopes decide what it can do. Minting, listing and revoking keys still need a wallet session, and the SDK doesn't wrap those routes. The key goes only in that header: never in a URL, body, error or log. The signer is still needed for the PSBTs. `pendingDeposits` and `authorizations` default to memory; the CLI keeps both under `~/.qsb`. `QSB_NETWORK` (`mainnet` or `testnet4`) must be set when the SDK is imported; it refuses a server on another network.
 
 The routes below are the webapp's `/api` paths; the SDK calls the same routes under `/v1` unless `basePath` is `/api`.
 
@@ -110,7 +112,7 @@ The default signer is external: the CLI writes each request (the sign-in message
 
 `--signer test-key` uses a raw WIF key from `QSB_TEST_SIGNER_KEY`, for tests and local development against `npm run dev`. It refuses any API URL that isn't loopback (127.0.0.1, localhost or [::1]). With `npm run dev`, use `--api http://127.0.0.1:5173 --base-path /api`: Vite proxies `/api` only, and the challenge names that origin. Elsewhere the CLI calls `/v1`.
 
-`config` and `rates` need no wallet. Every other command needs `--address` and `--public-key`, or the test key.
+`config` and `rates` need no wallet. With an API key in `QSB_API_KEY` or `--api-key-fd <n>` (never an argument), the CLI skips the wallet sign-in and caches no session; it still needs `--address` and `--public-key` for the PSBTs. Every other command needs `--address` and `--public-key`, or the test key.
 
 ## Limits
 

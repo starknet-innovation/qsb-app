@@ -139,6 +139,11 @@ export type QsbClientOptions = {
   authorizations?: Pick<Storage, "getItem" | "setItem">;
   /** A session token from an earlier login by the same address. */
   token?: string;
+  /**
+   * An API key (`qsb_<network>_…`) minted by this owner, sent instead of a session. Its scopes
+   * decide what it can do; minting, listing and revoking keys still need a wallet session.
+   */
+  apiKey?: string;
   timeoutMs?: number;
 };
 
@@ -233,19 +238,29 @@ function signInMessage(address: string, origin: string) {
 }
 
 /** The HTTP transport: one origin, no redirects, a timeout, and the webapp's session client. */
-function transport(options: Pick<QsbClientOptions, "baseUrl" | "basePath" | "fetch" | "timeoutMs">) {
+const apiKeyFormat = /^qsb_(mainnet|testnet4)_[A-Za-z0-9_-]{43}$/;
+function transport(options: Pick<QsbClientOptions, "baseUrl" | "basePath" | "fetch" | "timeoutMs" | "apiKey">) {
+  const apiKey = options.apiKey;
+  // Never echo the key: it's a bearer credential.
+  if (apiKey !== undefined && (!apiKeyFormat.test(apiKey) || !apiKey.startsWith(`qsb_${NETWORK_ID}_`)))
+    throw new Error(`The API key isn't a ${NETWORK_ID} key (qsb_${NETWORK_ID}_…).`);
   const origin = apiBase(options.baseUrl).href.replace(/\/$/, "");
   const base = options.basePath ?? "/v1";
   if (base !== "/v1" && base !== "/api") throw new Error("The API base path is /v1 or /api.");
   const send = options.fetch ?? fetch;
   const timeout = options.timeoutMs ?? 60000;
   // The session client addresses the webapp's /api alias; integrators use the stable /v1 prefix.
-  return createSessionClient(((path: string, init?: RequestInit) =>
-    send(`${origin}${base}${path.replace(/^\/api(?=\/)/, "")}`, {
+  return createSessionClient(((path: string, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    // A wallet session, once signed in, takes precedence; otherwise the key authenticates.
+    if (apiKey && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${apiKey}`);
+    return send(`${origin}${base}${path.replace(/^\/api(?=\/)/, "")}`, {
       ...init,
+      headers,
       redirect: "error",
       signal: AbortSignal.timeout(timeout),
-    })) as typeof fetch);
+    });
+  }) as typeof fetch);
 }
 /** The unauthenticated routes, for looking at a deployment before any wallet is set up. */
 export function publicApi(options: Pick<QsbClientOptions, "baseUrl" | "basePath" | "fetch" | "timeoutMs">) {

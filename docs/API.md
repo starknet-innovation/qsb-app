@@ -1,6 +1,6 @@
 # API
 
-The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side. This page covers its prefixes, OpenAPI document, errors, per-owner limits and idempotency.
+The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side. This page covers its prefixes, OpenAPI document, errors, per-owner limits, idempotency and API keys.
 
 ## Prefixes
 
@@ -42,6 +42,7 @@ Errors produced in front of the app have no `code`. That includes errors from th
 |---|---|
 | Request | `invalid_request`, `request_too_large`, `network_mismatch` |
 | Sign-in | `auth_required`, `session_expired`, `challenge_expired`, `signature_invalid` |
+| API keys | `api_key_invalid`, `api_key_revoked`, `api_key_not_allowed`, `api_key_scope_denied`, `api_key_limit_reached`, `api_key_not_found`, `api_keys_disabled` |
 | Switches | `operations_disabled`, `submit_disabled` |
 | Idempotency | `idempotency_conflict`, `idempotency_in_progress` |
 | Owner limits | `owner_not_allowlisted`, `owner_active_withdrawal_limit`, `owner_gpu_budget_reached`, `owner_limits_invalid` |
@@ -66,7 +67,7 @@ A malformed value, including a GPU budget smaller than one submission's reservat
 
 Sign-in, reads and pause stay open, and so does `POST /api/jobs/:id/submit`: it sends the owner's own solved withdrawal and uses no GPU. Replaying an `idempotencyKey` returns the existing job and takes no slot.
 
-`GET /api/config` reports `ownerLimits`: `allowlist` (whether one is set), `allowlisted` (the signed-in caller's standing, or `null` without a session or an allowlist), `maxActiveJobs` and `maxGpuSeconds`. It never returns the list.
+`GET /api/config` reports `ownerLimits`: `allowlist` (whether one is set), `allowlisted` (the caller's standing, from its session or API key, or `null` without either or without an allowlist), `maxActiveJobs` and `maxGpuSeconds`. It never returns the list.
 
 ## Idempotency-Key
 
@@ -96,3 +97,52 @@ A replay is the first attempt's result, not the current state, and may be stale.
 **Submit safety.** The layer can only skip the handler; it never sends anything itself. Nothing is stored as final for a 4xx, a 5xx, or a 2xx whose `submission` or `status` is `"uncertain"`. Each attempt leases the key for 150 seconds from its start, longer than the API Lambda can run. If it stops before its outcome is recorded, a retry after the lease reaches the handler, and the handler's own intent rules decide what happens: a deposit resend asks MARA first and sends only the stored bytes; a withdrawal with a stored intent is never resubmitted.
 
 Records are rows `OWNER#<owner>` / `IDEMPOTENCY#<route>#<key>`, holding the request hash, a lease, the settled response and `expiresAt` (the table's TTL attribute).
+
+## API keys
+
+A BIP-322 wallet sign-in (`POST /api/auth/challenge`, then `/api/auth/verify`)
+remains the root of identity. Its 1-hour session token can mint API keys that act
+for the same owner address:
+
+- `POST /api/api-keys` with `{ "name", "scopes", "expiresInDays"? }` returns
+  `{ key, apiKey }`. The key is shown once. Only its SHA-256 is stored.
+- `GET /api/api-keys` lists metadata: id, name, scopes, network, createdAt,
+  expiresAt, revokedAt and status (`active`, `expired` or `revoked`).
+- `POST /api/api-keys/:id/revoke` revokes the key at once.
+
+Keys are off unless the deployment sets `api_keys_enabled = true` (Terraform),
+which sets `QSB_API_KEYS_ENABLED=true` on the API Lambda only. Turning it on
+needs the maintainer's explicit approval of third-party access, like the mainnet
+switches. While it's off, minting and every well-formed key get 503
+`api_keys_disabled`; sessions can still list and revoke keys. `GET /api/config`
+reports `apiKeysEnabled`. A key acts for its owner, so the per-owner limits,
+including the allowlist, apply to it as to the owner's session.
+
+These three routes take a wallet session only. An API key cannot mint, list or
+revoke keys. They don't take `Idempotency-Key`: its records keep the response
+body, and a minted key must never be stored. If a mint's response is lost, mint
+again and revoke the key you didn't receive.
+
+Send a key as `Authorization: Bearer qsb_<network>_<43 base64url characters>`.
+It works only on the network in its prefix. Expiry is required: 30 days by
+default, 90 at most. An owner can have at most 10 active keys.
+
+### Scopes
+
+- `read`: every authenticated `GET` except `/api/api-keys`, plus `POST /api/payment-input` (a chain lookup that writes nothing).
+- `vaults`: `POST /api/vaults`, `POST /api/vaults/:id/fund`, `/fund/submit`, `/fund/resubmit`.
+- `withdrawals`: `POST /api/jobs`, `POST /api/jobs/:id/pause`, `/resume`.
+- `submit`: `POST /api/jobs/:id/submit`.
+
+`routeScopes` in `server/scoped-keys.ts` is the single table. A request needs
+the scope of every route it matches. An authenticated route missing from the
+table is refused for API keys, and a test fails until it is added. In the OpenAPI
+document, each operation that takes a key has an `apiKey` security requirement
+naming its scope, derived from the same table.
+
+### Refusals
+
+Key refusals use the API keys codes in the table above: unknown or expired,
+revoked and wrong-network keys are 401 (`network_mismatch` for the network),
+session-only or unmapped routes and missing scopes are 403, the active-key cap
+is 409, revoking an unknown key is 404, and keys switched off are 503.

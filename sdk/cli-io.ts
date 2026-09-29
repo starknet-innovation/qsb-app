@@ -95,6 +95,15 @@ export async function readPassphrase(
   return passphrase;
 }
 
+/** An API key from a file descriptor or QSB_API_KEY. Never argv, and never printed. */
+export function readApiKey(io: CliIo, fd: string | undefined): string | undefined {
+  if (fd !== undefined) {
+    if (!/^\d+$/.test(fd)) throw new UsageError("--api-key-fd takes a file descriptor number.");
+    return readFileSync(Number(fd), "utf8").trim();
+  }
+  return io.env.QSB_API_KEY?.trim() || undefined;
+}
+
 const resolveIn = (io: CliIo, file: string) => path.resolve(io.cwd, file);
 /** Owner-only. Every open passes it; a read-only open ignores it, but no open here can create a wider file. */
 const PRIVATE = 0o600;

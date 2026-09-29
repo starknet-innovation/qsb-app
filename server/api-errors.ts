@@ -17,8 +17,17 @@ export const apiErrorCodes = {
   challenge_expired:
     "The sign-in challenge is unknown, expired, already used or for another network.",
   signature_invalid: "The BIP-322 signature doesn't verify for the challenge.",
+  api_key_invalid: "The API key is unknown or expired.",
+  api_key_revoked: "The API key was revoked.",
+  api_key_not_allowed:
+    "API keys can't call this route: it takes a wallet session, or has no scope mapping.",
+  api_key_scope_denied: "The API key lacks a scope this route needs.",
+  api_key_limit_reached:
+    "The owner already has the maximum number of active API keys. Revoke one first.",
+  api_key_not_found: "No unexpired API key with this id for the signed-in owner.",
+  api_keys_disabled: "API keys are switched off for this deployment.",
   network_mismatch:
-    "The address or vault is for a different Bitcoin network than this deployment.",
+    "The address, vault or API key is for a different Bitcoin network than this deployment.",
   operations_disabled:
     "Deposits and withdrawals are switched off for this deployment or address.",
   submit_disabled: "Submission to the miner is switched off.",

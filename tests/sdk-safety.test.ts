@@ -19,7 +19,7 @@ afterEach(() => vi.unstubAllEnvs());
 const passphrase = "disposable sdk safety passphrase";
 const opts = { allowUnknownInputs: true, allowUnknownOutputs: true };
 
-function cli(w: ReturnType<typeof world>, wif: string) {
+function cli(w: ReturnType<typeof world>, wif: string, extraEnv: Record<string, string> = {}) {
   const cwd = mkdtempSync(path.join(tmpdir(), "qsb-cli-"));
   const { qsb } = localQsb();
   const run = async (...argv: string[]) => {
@@ -30,7 +30,7 @@ function cli(w: ReturnType<typeof world>, wif: string) {
     const code = await runCli(
       ["--signer", "test-key", ...argv],
       {
-        env: { QSB_API_URL: API, QSB_HOME: path.join(cwd, "home"), QSB_PASSPHRASE: passphrase, QSB_TEST_SIGNER_KEY: wif },
+        env: { QSB_API_URL: API, QSB_HOME: path.join(cwd, "home"), QSB_PASSPHRASE: passphrase, QSB_TEST_SIGNER_KEY: wif, ...extraEnv },
         stdin: Readable.from([]),
         stdout,
         stderr,
@@ -502,5 +502,52 @@ describe("per-owner limits (#89)", () => {
     const result = await cli(w, owner.wif).run("withdraw", "status", crypto.randomUUID());
     expect(result.code).toBe(1);
     expect(result.err).toContain("qsb: Job not found (job_not_found)");
+  }, 120000);
+});
+
+describe("API keys (#87)", () => {
+  it("authenticates the CLI with an API key that appears only in the Authorization header", async () => {
+    const w = world({ apiKeys: true });
+    const owner = wallet(w.chain);
+    const session = new QsbClient({ baseUrl: API, signer: loopbackTestSigner(owner.wif, API), fetch: w.fetch, qsb: localQsb().qsb });
+    await session.login();
+    // The owner mints a key once with a wallet session; keys can't mint keys.
+    const minted = (await (
+      await w.fetch(`${API}/v1/api-keys`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.token}` },
+        body: JSON.stringify({ name: "sdk test", scopes: ["read", "vaults"], expiresInDays: 1 }),
+      })
+    ).json()) as { key: string };
+    expect(minted.key).toMatch(/^qsb_mainnet_[A-Za-z0-9_-]{43}$/);
+    const before = w.requests.length;
+    const c = cli(w, owner.wif, { QSB_API_KEY: minted.key });
+    const outputs: string[] = [];
+    for (const argv of [["vault", "create", "--name", "keyed", "--backup", "vault.json"], ["vault", "list"]]) {
+      const result = await c.run(...argv);
+      expect(result.code, result.err).toBe(0);
+      outputs.push(result.out, result.err);
+    }
+    const keyed = w.requests.slice(before);
+    expect(keyed.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toContain("POST /v1/vaults");
+    // No wallet sign-in, and the key only ever as the bearer credential.
+    expect(keyed.some((r) => r.url.includes("/auth/"))).toBe(false);
+    for (const request of w.requests) {
+      const { authorization, ...others } = request.headers;
+      if (keyed.includes(request)) expect(authorization).toBe(`Bearer ${minted.key}`);
+      const elsewhere = `${request.url}\n${decodeURIComponent(request.url)}\n${JSON.stringify(others)}\n${request.body}`;
+      expect(elsewhere.includes(minted.key)).toBe(false);
+    }
+    for (const output of outputs) expect(output.includes(minted.key)).toBe(false);
+    expect(existsSync(c.file("home/session.json"))).toBe(false);
+    // Never from arguments, and never echoed in a refusal.
+    const argv = await cli(w, owner.wif).run("--api-key", minted.key, "vault", "list");
+    expect(argv.code).toBe(2);
+    expect(argv.err.includes(minted.key)).toBe(false);
+    const testnet = `qsb_testnet4_${minted.key.slice("qsb_mainnet_".length)}`;
+    const wrong = await cli(w, owner.wif, { QSB_API_KEY: testnet }).run("vault", "list");
+    expect(wrong.code).toBe(1);
+    expect(wrong.err).toContain("isn't a mainnet key");
+    expect(wrong.err.includes(testnet)).toBe(false);
   }, 120000);
 });

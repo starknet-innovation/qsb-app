@@ -14,6 +14,7 @@ import {
   fileAuthorizations,
   filePendingDeposits,
   loadSession,
+  readApiKey,
   readPassphrase,
   readPsbtFile,
   readTextFile,
@@ -61,6 +62,8 @@ Options
                          test-key: raw key from QSB_TEST_SIGNER_KEY, loopback API only.
   --passphrase-fd <n>    Read the recovery passphrase from a file descriptor (or QSB_PASSPHRASE,
                          or a terminal prompt). Passphrases are never taken from arguments.
+  --api-key-fd <n>       Authenticate with an API key read from a file descriptor (or QSB_API_KEY)
+                         instead of a wallet sign-in. Keys are never taken from arguments.
   --home <dir>           Session cache and pending deposits (or QSB_HOME; default ~/.qsb)
   --no-cache             Keep the session token in memory only
   --psbt-out <file>      Where the external signer writes an unsigned PSBT
@@ -75,6 +78,7 @@ const options = {
   "public-key": { type: "string" },
   signer: { type: "string" },
   "passphrase-fd": { type: "string" },
+  "api-key-fd": { type: "string" },
   home: { type: "string" },
   "no-cache": { type: "boolean" },
   "psbt-out": { type: "string" },
@@ -176,7 +180,9 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
           );
     if (!signer.address || !signer.publicKey)
       throw new UsageError("Set --address and --public-key (or QSB_ADDRESS and QSB_PUBLIC_KEY).");
-    const cache = !values["no-cache"];
+    const apiKey = readApiKey(io, values["api-key-fd"]);
+    // With a key there's no wallet sign-in, so nothing to cache.
+    const cache = !values["no-cache"] && !apiKey;
     const token = cache ? await loadSession(home, api, signer.address) : undefined;
     const client = new QsbClient({
       baseUrl: api,
@@ -188,8 +194,10 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
       pendingDeposits: filePendingDeposits(home),
       authorizations: fileAuthorizations(home),
       token,
+      apiKey,
     });
     const signIn = async () => {
+      if (apiKey) return;
       if (token) {
         try {
           await client.vaults.list();
