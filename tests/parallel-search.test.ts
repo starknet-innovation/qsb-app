@@ -360,6 +360,7 @@ it("a slow preparation never stalls the first chunk, but stops further chunks th
   await handler(event);
   job = await saved();
   expect(mocks.run.mock.calls.map((c) => c[0].attempt)).toEqual([0, 1]);
+  expect(job.parallelSlots!.map((s) => s.attempt)).toEqual([0, 1]);
   clock.mockRestore();
 });
 
