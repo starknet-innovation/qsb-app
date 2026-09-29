@@ -197,7 +197,10 @@ Nothing live changes in this phase.
 
 These stay with the AWS admin, even once `qsb-operator` manages the stack:
 - **IAM changes.** When a change to `ops/github-aws/render.py` or `access.py` lands on main, the AWS admin runs
-  `update_installed.py`, checks its plan against the merged diff, then runs it with `--apply`.
+  `update_installed.py`, checks its plan against the merged diff, then runs it with `--apply`. The updater also
+  compares the permission set's provisioned policy with the rendered `permission-set.json`, and refuses to run if
+  they differ, because it can't change Identity Center. When the rendered policy changes, the admin first attaches
+  the new `permission-set.json` in Identity Center and re-provisions the permission set, then runs the update.
 - **Temp admin role for the day,** as for the first apply, to:
   - replace a registered resource (the CloudFront distribution, API, origin access control or response-headers
     policy) and register the new ID;

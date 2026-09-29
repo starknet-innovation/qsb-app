@@ -44,6 +44,11 @@ class UpdateInstalled(unittest.TestCase):
                  for spec in (human['viewonly'], human['operator'])}
         roles['qsb-github-deploy'] = {'trust': copy.deepcopy(rendered['trust']), 'max': 3600, 'attached': [],
                                       'inline': ['qsb-terraform-deployment']}
+        if human['permission_set']:
+            # The role Identity Center provisions in the account for the permission set.
+            roles[f"AWSReservedSSO_{human['permission_set']['name']}_0123456789abcdef"] = {
+                'trust': {}, 'max': 3600, 'attached': [], 'inline': ['AwsSSOInlinePolicy'], 'reserved': True,
+                'document': copy.deepcopy(human['permission_set']['inline'])}
         return {'policies': {n: [copy.deepcopy(d)] for n, d in policies.items()},
                 'deploy': copy.deepcopy(rendered['deploy']),
                 'user': copy.deepcopy(human['user']['inline']) if human['user'] else None,
@@ -90,9 +95,14 @@ class UpdateInstalled(unittest.TestCase):
                 out = {'PolicyNames': iam['roles'][opt('--role-name')]['inline']}
             elif operation == 'list-attached-role-policies':
                 out = {'AttachedPolicies': [{'PolicyArn': x} for x in iam['roles'][opt('--role-name')]['attached']]}
+            elif operation == 'get-role-policy' and iam['roles'][opt('--role-name')].get('reserved'):
+                out = {'PolicyDocument': iam['roles'][opt('--role-name')]['document']}
             elif operation == 'get-role-policy':
                 self.assertEqual((opt('--role-name'), opt('--policy-name')), ('qsb-github-deploy', 'qsb-terraform-deployment'))
                 out = {'PolicyDocument': iam['deploy']}
+            elif operation == 'list-roles':
+                self.assertEqual(opt('--path-prefix'), '/aws-reserved/sso.amazonaws.com/')
+                out = {'Roles': [{'RoleName': n} for n, r in iam['roles'].items() if r.get('reserved')]}
             elif operation == 'put-role-policy':
                 if not iam.get('ignore_writes'):
                     iam['deploy'] = json.loads(opt('--policy-document'))
@@ -156,6 +166,21 @@ class UpdateInstalled(unittest.TestCase):
         self.assertTrue(all(item['status'] == 'identical' for item in self.plan))
         self.assertFalse([item for item in self.plan if 'assume-qsb-roles' in item['target']])
         self.assertNotIn(('iam', 'get-user-policy'), self.calls)
+
+    def test_a_drifted_or_missing_permission_set_blocks_the_run(self):
+        self.inventory = SSO_INVENTORY
+        drifted = self.installed()
+        reserved = next(n for n, r in drifted['roles'].items() if r.get('reserved'))
+        drifted['roles'][reserved]['document']['Statement'].append(
+            {'Sid': 'Extra', 'Effect': 'Allow', 'Action': ['s3:*'], 'Resource': ['*']})
+        with self.assertRaisesRegex(SystemExit, 'differs from the rendered permission-set.json'):
+            self.run_update(drifted)
+        self.assertEqual(self.writes(), [])
+        unassigned = self.installed()
+        del unassigned['roles'][reserved]
+        with self.assertRaisesRegex(SystemExit, 'expected one provisioned role'):
+            self.run_update(unassigned)
+        self.assertEqual(self.writes(), [])
 
     def test_a_renamed_permission_set_counts_as_moving_the_trust(self):
         self.inventory = SSO_INVENTORY

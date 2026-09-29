@@ -226,6 +226,36 @@ if user:
 
     targets.append((f"{user['name']}/assume-qsb-roles", 'policy', live_user, user['inline'], update_user))
 
+permission_set = human['permission_set']
+if permission_set:
+    # Identity Center provisions the permission set into this account as a reserved role carrying its policy.
+    # This tool can't change it (that's done in Identity Center), so a difference blocks the run instead.
+    label = f"permission set {permission_set['name']} (Identity Center)"
+    listed_roles = aws('iam', 'list-roles', '--path-prefix', '/aws-reserved/sso.amazonaws.com/', readable=True)
+    if listed_roles is None:
+        targets.append((label, 'external', UNREADABLE, permission_set['inline'], None))
+    else:
+        name = re.compile(rf"AWSReservedSSO_{re.escape(permission_set['name'])}_[0-9A-Za-z]{{16}}")
+        found = [r['RoleName'] for r in listed_roles['Roles'] if name.fullmatch(r['RoleName'])]
+        if len(found) != 1:
+            blockers.append(f'{label}: expected one provisioned role in this account, found {len(found)}; '
+                            'assign the permission set to this account first')
+        else:
+            reserved = found[0]
+            if aws('iam', 'list-attached-role-policies', '--role-name', reserved)['AttachedPolicies']:
+                blockers.append(f'{label}: carries managed policies this commit does not render; remove them in '
+                                'Identity Center')
+            names = aws('iam', 'list-role-policies', '--role-name', reserved)['PolicyNames']
+            if len(names) != 1:
+                blockers.append(f'{label}: has {len(names)} inline policies, not the one rendered')
+            else:
+                installed = aws('iam', 'get-role-policy', '--role-name', reserved, '--policy-name', names[0])['PolicyDocument']
+                targets.append((label, 'external', installed, permission_set['inline'], None))
+                if installed != permission_set['inline']:
+                    blockers.append(f"{label}: differs from the rendered permission-set.json. Attach it in Identity "
+                                    "Center and re-provision the permission set, then re-run; this tool can't change it")
+
+
 def update_trust(spec):
     aws('iam', 'update-assume-role-policy', '--role-name', spec['name'], '--policy-document', json.dumps(spec['trust']))
     read_back(f"{spec['name']} trust",

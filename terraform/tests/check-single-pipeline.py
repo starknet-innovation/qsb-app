@@ -266,6 +266,11 @@ def region_checks(plan):
 def deploy_checks(plan, first_apply):
     """What the scoped deploy and operator roles need in order to manage what an admin first applied."""
     region = region_checks(plan)
+    # A wrong backend bucket or state key loads an empty state, and a plan against it only creates, so it
+    # would start a second stack while the live one stays unmanaged. Only a first apply may start empty.
+    existing = module_resources((plan.get('prior_state') or {}).get('values', {}).get('root_module', {}))
+    require(first_apply or existing, 'the state holds no resources: wrong backend bucket or key? A new stack '
+                                     'needs --first-apply')
     rows = module_resources(plan['planned_values']['root_module'])
     roles = [r['values'] for r in rows if r['type'] == 'aws_iam_role']
     for role in roles:

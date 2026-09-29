@@ -31,8 +31,12 @@ def plan():
     # The validator expects five aws_iam_role rows in an expanded plan (a real plan has three `lambda`
     # roles, one `workflow` and one `operator_reconcile`); any five with those names satisfy it.
     rows += [role('lambda'), role('workflow'), role('operator_reconcile'), role('lambda'), role('workflow')]
+    # An existing stack: its state already holds resources (a first apply's state is empty).
+    existing = [{'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed',
+                 'values': {'arn': 'arn:aws:dynamodb:eu-west-2:123456789012:table/qsb-app-records'}}]
     return {'planned_values': {'root_module': {'resources': rows}},
             'variables': {'region': {'value': 'eu-west-2'}},
+            'prior_state': {'values': {'root_module': {'resources': existing}}},
             'resource_changes': [{'mode': 'managed', 'change': {'actions': ['create']}}]}
 
 
@@ -262,6 +266,13 @@ class DeployChecks(unittest.TestCase):
         doc = plan()
         del doc['variables']
         self.refused(doc, 'must set var.region', '--deploy')
+
+    def test_an_empty_state_needs_first_apply(self):
+        # A wrong backend bucket or key loads no resources; only a first apply may start from nothing.
+        doc = plan()
+        del doc['prior_state']
+        self.refused(doc, 'the state holds no resources', '--deploy')
+        self.assertEqual(self.run_check(doc, '--deploy', '--first-apply')[0], 0)
 
     def test_flags_need_a_saved_plan(self):
         events = [{'type': 'test_run', '@testrun': 'baseline'}, {'type': 'test_summary', 'test_summary': {'status': 'pass'}}]
