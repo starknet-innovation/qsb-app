@@ -178,6 +178,10 @@ describe("API key issuance", () => {
     race = new Promise<void>((r) => (release = r));
     const results = await Promise.all([mint(token), mint(token)]);
     expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    // The fence refused the loser; both read nine active keys.
+    expect(results.find((r) => r.status === 409)!.body.code).not.toBe(
+      "api_key_limit_reached",
+    );
     const listed = [...store.rows.values()].filter(
       (r) => r.pk === `OWNER#${owner}` && r.sk.startsWith("APIKEY#"),
     );
