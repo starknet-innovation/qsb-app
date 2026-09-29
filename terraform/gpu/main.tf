@@ -56,6 +56,9 @@ locals {
     jsondecode(file("${path.module}/../../src/lib/releases/${name}")).id => jsondecode(file("${path.module}/../../src/lib/releases/${name}"))
   }
   enrolled_solver = try(local.enrolled_releases[local.release_build.identities.solver.id], null)
+  # One g5.xlarge (4 vCPUs, one A10G) per GPU a withdrawal may use at once. The coordinator
+  # refuses to submit unless the live compute environment matches this exactly.
+  gpu_workers = jsondecode(file("${path.module}/../../server/gpu-spend.json")).workersMax
 }
 resource "terraform_data" "release_identity" {
   input = local.release_build.identities
@@ -322,7 +325,7 @@ resource "aws_batch_compute_environment" "gpu" {
     type                = "EC2"
     allocation_strategy = "BEST_FIT"
     min_vcpus           = 0
-    max_vcpus           = 4
+    max_vcpus           = 4 * local.gpu_workers
     instance_type       = ["g5.xlarge"]
     instance_role       = aws_iam_instance_profile.gpu.arn
     subnets             = var.subnets
