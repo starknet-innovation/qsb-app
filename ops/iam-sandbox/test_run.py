@@ -129,7 +129,7 @@ class SandboxRunner(unittest.TestCase):
         policy = json.loads((HERE.parents[1] / 'terraform/policies/app-records.json').read_text())
         self.assertEqual([dict(s, Resource=None) for s in self.role_policy['Statement']],
                          [dict(s, Resource=None) for s in policy])
-        self.assertTrue(all(s['Resource'].startswith(f'arn:aws:dynamodb:eu-west-1:{ACCOUNT}:table/qsb-iam-sandbox-')
+        self.assertTrue(all(s['Resource'].startswith(f'arn:aws:dynamodb:eu-west-2:{ACCOUNT}:table/qsb-iam-sandbox-')
                             for s in self.role_policy['Statement']))
         self.assertIn('/qsb/runtime/', self.role_args)
         self.assertIn(f'arn:aws:iam::{ACCOUNT}:policy/qsb/bootstrap/qsb-runtime-boundary', self.role_args)
@@ -314,7 +314,7 @@ class SandboxHandler(unittest.TestCase):
 
     def test_denials_are_attributed_without_arns(self):
         message = ('User: arn:aws:sts::123456789012:assumed-role/x/y is not authorized to perform: dynamodb:PutItem '
-                   'on resource: arn:aws:dynamodb:eu-west-1:123456789012:table/t with an explicit deny in an '
+                   'on resource: arn:aws:dynamodb:eu-west-2:123456789012:table/t with an explicit deny in an '
                    'identity-based policy')
         self.raise_error = self.ClientError({'Error': {'Code': 'AccessDeniedException', 'Message': message}}, 'x')
         result = self.run_step('denied-transaction')

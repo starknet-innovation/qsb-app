@@ -13,7 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parent
 COMMIT = 'a' * 40
 ACCOUNT = '123456789012'
-ARN = f'arn:aws:access-analyzer:eu-west-1:{ACCOUNT}:analyzer/qsb-external-access'
+ARN = f'arn:aws:access-analyzer:eu-west-2:{ACCOUNT}:analyzer/qsb-external-access'
 PROPAGATION = {'MalformedPolicyDocument': 'Invalid principal in policy: "AWS":"arn:aws:iam::123456789012:user/x"'}
 READS = {'list-roles', 'list-users', 'list-policies', 'get-policy-version', 'list-policy-versions',
          'list-entities-for-policy', 'get-user-policy', 'get-role', 'list-attached-user-policies', 'list-user-policies',
@@ -29,7 +29,7 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
         errors = {key: list(codes) for key, codes in (errors or {}).items()}
         states = iter(statuses)
         last = 'CREATING'
-        inventory = dict(account=ACCOUNT, region='eu-west-1',
+        inventory = dict(account=ACCOUNT, region='eu-west-2',
             subject='repo:example/qsb:ref:refs/heads/main', state_bucket='qsb-test-state',
             distributions=['TESTCDN'], apis=['testapi'], origin_access_controls=['TESTOAC'],
             response_headers_policies=['TESTHEADERS'], operator_user='qsb-operator-user', gpu_vpc='vpc-0test')
@@ -190,7 +190,7 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
     def partial_run(self, **drift):
         """IAM as the interrupted run left it: policies and user created, no roles."""
         from access import access
-        out = access(dict(account=ACCOUNT, region='eu-west-1', subject='repo:example/qsb:ref:refs/heads/main',
+        out = access(dict(account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
                           state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
                           origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
                           operator_user='qsb-operator-user', gpu_vpc='vpc-0test'))
@@ -246,7 +246,7 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
     def with_roles(self, responses, **role):
         """Add an existing qsb-viewonly role to a partial run, optionally drifted."""
         from access import access
-        out = access(dict(account=ACCOUNT, region='eu-west-1', subject='repo:example/qsb:ref:refs/heads/main',
+        out = access(dict(account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
                           state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
                           origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
                           operator_user='qsb-operator-user', gpu_vpc='vpc-0test'))

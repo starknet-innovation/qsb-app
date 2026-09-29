@@ -163,21 +163,21 @@ profiles in `~/.aws/config` (account number and MFA device ARN are yours to fill
 
 ```ini
 [profile qsb-user]
-region = eu-west-1
+region = eu-west-2
 
 [profile qsb-view]
 role_arn = arn:aws:iam::ACCOUNT:role/qsb/bootstrap/qsb-viewonly
 source_profile = qsb-user
 mfa_serial = arn:aws:iam::ACCOUNT:mfa/DEVICE
 duration_seconds = 3600
-region = eu-west-1
+region = eu-west-2
 
 [profile qsb-operator]
 role_arn = arn:aws:iam::ACCOUNT:role/qsb/bootstrap/qsb-operator
 source_profile = qsb-user
 mfa_serial = arn:aws:iam::ACCOUNT:mfa/DEVICE
 duration_seconds = 3600
-region = eu-west-1
+region = eu-west-2
 ```
 
 The intended flow is that the first call on each role profile asks for an MFA

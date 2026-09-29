@@ -46,7 +46,7 @@ node terraform/scripts/build.mjs --network=mainnet
 export TF_VAR_source_commit="$(git rev-parse HEAD)"
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 # Edit terraform.tfvars: intended account, region/name; optional existing AWS Batch references.
-terraform -chdir=terraform init -backend-config="bucket=${QSB_STATE_BUCKET:?Set the bootstrap state bucket}"
+terraform -chdir=terraform init -backend-config="bucket=${QSB_STATE_BUCKET:?Set the bootstrap state bucket}" -backend-config=region=eu-west-2
 terraform -chdir=terraform validate
 terraform -chdir=terraform plan -out=deployment.tfplan
 terraform -chdir=terraform show -json deployment.tfplan > /tmp/qsb-plan.json
@@ -64,6 +64,7 @@ State is kept in the bootstrap state bucket under `qsb/main/terraform.tfstate`, 
 
 | Variable | Value | Why |
 | --- | --- | --- |
+| `region` | `eu-west-2` | organisation requirement; required, with no default. A region move is a new stack, never an in-place change: see [REGION-MIGRATION.md](../docs/REGION-MIGRATION.md) |
 | `name` | starts with `qsb-`, not `qsb-gpu` (for example `qsb-app`) | the deploy and operator grants match `qsb-*` Lambda, DynamoDB, Step Functions, alarm, log and bucket names; `qsb-gpu-*` roles may carry only the GPU boundary |
 | `iam_role_path` | `/qsb/runtime/` | the scoped roles can read, change and pass only runtime roles there |
 | `iam_permissions_boundary_arn` | the `qsb-runtime-boundary` ARN (`/qsb/bootstrap/`) | they can create or change runtime roles only with that boundary |

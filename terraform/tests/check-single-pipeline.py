@@ -242,8 +242,28 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
             'frontendObjects': types.get('aws_s3_object', 0), 'resourceTypes': dict(sorted(types.items()))}
 
 
+def region_checks(plan):
+    """A region change on an existing stack would replan it elsewhere and orphan the original.
+
+    Refreshing state against the wrong region (or account) finds none of its resources, so the plan
+    reports them as deleted outside Terraform and recreates them: refuse any such drift. Also refuse
+    existing resources whose ARN names a region other than var.region. See docs/REGION-MIGRATION.md."""
+    region = (plan.get('variables', {}).get('region') or {}).get('value')
+    require(isinstance(region, str) and region, 'the plan must set var.region explicitly')
+    gone = [r['address'] for r in plan.get('resource_drift', [])
+            if r.get('mode') == 'managed' and 'delete' in r.get('change', {}).get('actions', [])]
+    require(not gone, f'{len(gone)} resources in state were not found (e.g. {", ".join(gone[:3])}): wrong '
+                      'region or account, or deleted outside Terraform. Investigate before applying')
+    for row in module_resources((plan.get('prior_state') or {}).get('values', {}).get('root_module', {})):
+        parts = str(row.get('values', {}).get('arn') or '').split(':')
+        if len(parts) > 3 and parts[3]:  # global services (IAM, CloudFront, S3 buckets) carry no region
+            require(parts[3] == region, f"{row['type']}.{row['name']} is in {parts[3]}, not {region}")
+    return region
+
+
 def deploy_checks(plan, first_apply):
     """What the scoped deploy and operator roles need in order to manage what an admin first applied."""
+    region = region_checks(plan)
     rows = module_resources(plan['planned_values']['root_module'])
     roles = [r['values'] for r in rows if r['type'] == 'aws_iam_role']
     for role in roles:
@@ -263,7 +283,7 @@ def deploy_checks(plan, first_apply):
         actions = {tuple(r['change']['actions']) for r in plan.get('resource_changes', []) if r.get('mode') == 'managed'}
         require(actions <= {('create',)}, 'first apply must be create-only: the state key must be empty and no '
                                           'resource may already exist')
-    return {'deployChecks': 'passed', 'roles': len(roles), 'firstApply': first_apply}
+    return {'deployChecks': 'passed', 'roles': len(roles), 'firstApply': first_apply, 'region': region}
 
 
 def unknown_lambda_env(changes):

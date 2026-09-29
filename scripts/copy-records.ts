@@ -1,0 +1,147 @@
+import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
+import {
+  BatchWriteItemCommand,
+  DynamoDBClient,
+  ScanCommand,
+  type AttributeValue,
+} from "@aws-sdk/client-dynamodb";
+
+/**
+ * Copies the QSB records table from one region to another for the move in docs/REGION-MIGRATION.md.
+ *
+ * Items are copied as raw DynamoDB attribute values, so nothing is re-marshalled. Both tables are then
+ * compared item by item. Run it only while both stacks' mainnet switches are off and nobody is signed
+ * in to the new stack. It prints counts per key prefix and a digest, never item contents.
+ *
+ *   npx tsx scripts/copy-records.ts --from eu-west-1:SOURCE_TABLE --to eu-west-2:DEST_TABLE
+ *   npx tsx scripts/copy-records.ts --from eu-west-1:SOURCE_TABLE --to eu-west-2:DEST_TABLE --apply
+ *
+ * Without --apply it only counts. With --apply it copies and verifies. A re-run after a partial copy is
+ * safe: the destination may only hold items identical to source items.
+ */
+export type Item = Record<string, AttributeValue>;
+type Command = ScanCommand | BatchWriteItemCommand;
+export interface TableClient {
+  send(command: Command): Promise<unknown>;
+}
+type Put = { PutRequest: { Item: Item } };
+
+export async function scanAll(client: TableClient, table: string): Promise<Item[]> {
+  const items: Item[] = [];
+  let start: Item | undefined;
+  do {
+    const page = (await client.send(
+      new ScanCommand({ TableName: table, ConsistentRead: true, ExclusiveStartKey: start }),
+    )) as { Items?: Item[]; LastEvaluatedKey?: Item };
+    items.push(...(page.Items ?? []));
+    start = page.LastEvaluatedKey;
+  } while (start);
+  return items;
+}
+
+/** A stable encoding: sorted keys, and DynamoDB set members sorted, since sets have no order. */
+function normalize(value: unknown, key?: string): unknown {
+  if (value instanceof Uint8Array) return { $bytes: Buffer.from(value).toString("base64") };
+  if (Array.isArray(value)) {
+    const out = value.map((member) => normalize(member));
+    return key === "SS" || key === "NS" || key === "BS"
+      ? out.map((member) => JSON.stringify(member)).sort()
+      : out;
+  }
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((k) => [k, normalize((value as Record<string, unknown>)[k], k)]),
+    );
+  return value;
+}
+export const canonical = (item: Item) => JSON.stringify(normalize(item));
+export function digest(items: Item[]) {
+  const hash = createHash("sha256");
+  for (const line of items.map(canonical).sort()) hash.update(line + "\n");
+  return hash.digest("hex");
+}
+/** Items per partition-key prefix (the part before "#"), without revealing any key. */
+export function prefixCounts(items: Item[]) {
+  const counts: Record<string, number> = {};
+  for (const item of items) {
+    const prefix = (item.pk?.S ?? "?").split("#")[0] || "?";
+    counts[prefix] = (counts[prefix] ?? 0) + 1;
+  }
+  return counts;
+}
+
+export async function copyRecords(
+  source: TableClient,
+  sourceTable: string,
+  dest: TableClient,
+  destTable: string,
+  apply: boolean,
+  pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+) {
+  const items = await scanAll(source, sourceTable);
+  const summary = { items: items.length, prefixes: prefixCounts(items), digest: digest(items) };
+  if (!apply) return { ...summary, copied: false };
+  // Only a partial earlier copy may be present: every destination item must match a source item.
+  const known = new Set(items.map(canonical));
+  const present = await scanAll(dest, destTable);
+  if (present.some((item) => !known.has(canonical(item))))
+    throw new Error("The destination holds items that aren't in the source. Nothing was copied.");
+  for (let i = 0; i < items.length; i += 25) {
+    let pending: Put[] = items.slice(i, i + 25).map((Item) => ({ PutRequest: { Item } }));
+    for (let attempt = 0; pending.length; attempt++) {
+      if (attempt === 8)
+        throw new Error("DynamoDB kept returning unprocessed items. Re-run the copy; it resumes safely.");
+      if (attempt) await pause(100 * 2 ** attempt);
+      const out = (await dest.send(
+        new BatchWriteItemCommand({ RequestItems: { [destTable]: pending } }),
+      )) as { UnprocessedItems?: Record<string, Put[]> };
+      pending = out.UnprocessedItems?.[destTable] ?? [];
+    }
+  }
+  const after = digest(await scanAll(source, sourceTable));
+  if (after !== summary.digest)
+    throw new Error("The source changed during the copy. Is the old stack still switched on? Re-run once it's frozen.");
+  const copied = await scanAll(dest, destTable);
+  if (copied.length !== items.length || digest(copied) !== summary.digest)
+    throw new Error(
+      `Verification failed: the destination has ${copied.length} items, the source ${items.length}. Don't switch the new stack on.`,
+    );
+  return { ...summary, copied: true };
+}
+
+export function parseTarget(value: string | undefined, flag: string) {
+  const match = /^([a-z]{2}-[a-z]+-\d):([A-Za-z0-9_.-]{3,255})$/.exec(value ?? "");
+  if (!match) throw new Error(`${flag} must be REGION:TABLE, for example eu-west-2:qsb-app-records.`);
+  return { region: match[1], table: match[2] };
+}
+
+export async function runCopyRecordsCli(args: string[]) {
+  try {
+    const flag = (name: string) => args[args.indexOf(name) + 1];
+    const from = parseTarget(args.includes("--from") ? flag("--from") : undefined, "--from");
+    const to = parseTarget(args.includes("--to") ? flag("--to") : undefined, "--to");
+    if (from.region === to.region && from.table === to.table) throw new Error("--from and --to are the same table.");
+    const result = await copyRecords(
+      new DynamoDBClient({ region: from.region }),
+      from.table,
+      new DynamoDBClient({ region: to.region }),
+      to.table,
+      args.includes("--apply"),
+    );
+    process.stdout.write(JSON.stringify({ from, to, ...result }, null, 2) + "\n");
+  } catch (error) {
+    // Only this script's own messages are shown in full. An AWS error shows its name (for example
+    // AccessDeniedException), since its message can carry request details.
+    const own =
+      error instanceof Error && !("$metadata" in error)
+        ? error.message
+        : `The copy failed: ${error instanceof Error ? error.name : "unknown error"}.`;
+    process.stderr.write(JSON.stringify({ action: "refuse", reason: own }) + "\n");
+    process.exitCode = 1;
+  }
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  void runCopyRecordsCli(process.argv.slice(2));

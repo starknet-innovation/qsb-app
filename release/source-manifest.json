@@ -51,7 +51,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "8b410059809015ce0c34656b8a495b8015210bb5779cac7423e4291ab815d314",
+      "api": "3bd5e23ed5368c1207ab4a39c713380d86ff55fa1786d06c78b35f4b12dd1ded",
       "build-metadata": "2c4804c98f40b16adda8fde8e13f053d59cc53e26f951906064834edd469b1c6",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "8c276496b523e301ce420596c7c9c6c414445adedce6f4927cb7fc8ec6ceb25b",
@@ -158,7 +158,7 @@
       "src/lib/backup.ts": "bc8be06c10e970dad3ef335f9f2788bb58628c350490052155cf37a54840c572",
       "src/lib/model.ts": "e988581383b8556420829f8c0ab6edee80a2c83ccaa87de5ba841ff661b2781b",
       "src/lib/network.ts": "9e395ac12ee9af3fb4eccd3e56078ca081a0a903983fac35fec038f0aab9455b",
-      "src/lib/provenance.ts": "7206167a10b39f729c51317b6845f16e029219754453fd35149846e6434b0249",
+      "src/lib/provenance.ts": "9467d5bcd1f34eec1497b0594ef9cae42931d4b3e1d90f6273b46f8dfad815fc",
       "src/lib/qsb-worker.ts": "a4e7b2665c9311e791336c3ec6afaf7070fba31388a76d108437ccdf2cba5bfa",
       "src/lib/qsb.ts": "7595c7ae373325cefe4a77c2ec15f863880c8e2f79550e2bbc3be2b930a80132",
       "src/lib/readiness.ts": "39e2b789e24fbb7ea9978460f34928384fb30a16ef740b8b8baaa1be99a58d13",

@@ -8,10 +8,10 @@ The worker image is a digest in private ECR, built from a clean pushed qsb-solve
 
 ## Deploy
 
-Use an operator-configured AWS profile and explicitly supply the expected `aws_account_id`, in eu-west-1. Commit and push source first and verify `git status --porcelain` is empty. Initialize a separate encrypted backend:
+Use an operator-configured AWS profile and explicitly supply the expected `aws_account_id` and `region` (eu-west-2; see [docs/REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md)). Commit and push source first and verify `git status --porcelain` is empty. Initialize a separate encrypted backend:
 
 ```
-terraform init -backend-config="bucket=${QSB_STATE_BUCKET:?Set the operator state bucket}" -backend-config=key=qsb/gpu/terraform.tfstate -backend-config=region=eu-west-1 -backend-config=encrypt=true -backend-config=use_lockfile=true
+terraform init -backend-config="bucket=${QSB_STATE_BUCKET:?Set the operator state bucket}" -backend-config=key=qsb/gpu/terraform.tfstate -backend-config=region=eu-west-2 -backend-config=encrypt=true -backend-config=use_lockfile=true
 ```
 
 Supply `release_manifest_path` (the generated app `terraform/.build/manifest.json` built with `--solver-release=RELEASE_ID`), `source_commit` (that clean pushed app commit), `image` (verified ECR digest), `vpc_id` and public `subnets` with an Internet gateway. Also supply the required `gpu_permissions_boundary_arn`:

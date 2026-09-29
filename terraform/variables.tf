@@ -1,6 +1,10 @@
 variable "region" {
-  type    = string
-  default = "eu-west-1"
+  description = "Deploy region, set explicitly in every tfvars. QSB runs in eu-west-2 (organisation requirement); eu-west-1 only while the legacy stack is torn down. Moving region is a new stack, never an in-place change: see docs/REGION-MIGRATION.md."
+  type        = string
+  validation {
+    condition     = can(regex("^[a-z]{2}-[a-z]+-[0-9]$", var.region))
+    error_message = "Use an AWS region name such as eu-west-2."
+  }
 }
 variable "aws_account_id" {
   description = "Explicit intended AWS account; prevents accidental deployment elsewhere."

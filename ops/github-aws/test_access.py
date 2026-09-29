@@ -22,7 +22,7 @@ def matches(action, patterns):
 class HumanAccess(unittest.TestCase):
     def setUp(self):
         self.out = access(dict(
-            account=ACCOUNT, region='eu-west-1', subject='repo:example/qsb:ref:refs/heads/main',
+            account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
             state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
             origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
             operator_user='qsb-operator-user', gpu_vpc='vpc-0test'))
@@ -129,7 +129,7 @@ class HumanAccess(unittest.TestCase):
 
     def test_smoke_jobs_and_role_passing_stay_exact(self):
         smoke = self.sid(self.operator, 'GpuSmokeJobs')
-        self.assertEqual(smoke['Resource'], [f'arn:aws:batch:eu-west-1:{ACCOUNT}:job/*'])
+        self.assertEqual(smoke['Resource'], [f'arn:aws:batch:eu-west-2:{ACCOUNT}:job/*'])
         self.assertEqual(smoke['Condition'], {'StringEquals': {'aws:ResourceTag/Project': 'qsb-gpu'}})
         tags = self.sid(self.operator, 'GpuSmokeJobTags')
         self.assertEqual(tags['Condition'], {'StringEquals': {'aws:RequestTag/Project': 'qsb-gpu'}})
@@ -151,19 +151,19 @@ class HumanAccess(unittest.TestCase):
         self.assertFalse(any('Ingress' in a for a in manage['Action']))
         for action, statement in self.allowed(self.operator):
             if statement['Sid'] == 'SecurityGroupInGpuVpc':
-                self.assertEqual(statement['Resource'], [f'arn:aws:ec2:eu-west-1:{ACCOUNT}:vpc/vpc-0test'])
+                self.assertEqual(statement['Resource'], [f'arn:aws:ec2:eu-west-2:{ACCOUNT}:vpc/vpc-0test'])
             elif action.startswith('ec2:') and not action.startswith(('ec2:Describe', 'ec2:GetLaunchTemplateData')):
                 self.assertIn('Condition', statement, (action, statement['Sid']))
             if action.startswith('ec2:Describe'):
-                self.assertEqual(statement['Condition'], {'StringEquals': {'aws:RequestedRegion': 'eu-west-1'}})
+                self.assertEqual(statement['Condition'], {'StringEquals': {'aws:RequestedRegion': 'eu-west-2'}})
 
     def test_paid_work_is_limited_to_the_qsb_queue(self):
         batch = self.sid(self.operator, 'GpuBatch')
         self.assertEqual(batch['Resource'], [
-            f'arn:aws:batch:eu-west-1:{ACCOUNT}:compute-environment/qsb-gpu',
-            f'arn:aws:batch:eu-west-1:{ACCOUNT}:job-queue/qsb-gpu',
-            f'arn:aws:batch:eu-west-1:{ACCOUNT}:job-definition/qsb-gpu-solver',
-            f'arn:aws:batch:eu-west-1:{ACCOUNT}:job-definition/qsb-gpu-solver:*'])
+            f'arn:aws:batch:eu-west-2:{ACCOUNT}:compute-environment/qsb-gpu',
+            f'arn:aws:batch:eu-west-2:{ACCOUNT}:job-queue/qsb-gpu',
+            f'arn:aws:batch:eu-west-2:{ACCOUNT}:job-definition/qsb-gpu-solver',
+            f'arn:aws:batch:eu-west-2:{ACCOUNT}:job-definition/qsb-gpu-solver:*'])
         for action, statement in self.allowed(self.operator):
             if action in ('batch:*', 'batch:SubmitJob'):
                 self.assertTrue(all('qsb-gpu' in r for r in statement['Resource']), statement['Sid'])
@@ -183,7 +183,7 @@ class HumanAccess(unittest.TestCase):
         for action in ('batch:SubmitJob', 'ec2:RunInstances', 'iam:PassRole', 'secretsmanager:GetSecretValue', 's3:*'):
             self.assertFalse(matches(action, granted), action)
         inputs = self.sid(boundary, 'JobInputs')
-        self.assertEqual(inputs['Resource'], [f'arn:aws:s3:::qsb-gpu-{ACCOUNT}-eu-west-1-jobs/inputs/*'])
+        self.assertEqual(inputs['Resource'], [f'arn:aws:s3:::qsb-gpu-{ACCOUNT}-eu-west-2-jobs/inputs/*'])
 
     def test_operator_cannot_add_external_resource_grants(self):
         guard = self.sid(self.operator, 'OnlyRequiredLambdaPrincipals')

@@ -8,6 +8,7 @@ variables {
   solver_release_id       = try(jsondecode(file(".build/manifest.json")).identities.solver.id, "")
   operator_principal_arns = ["arn:aws:iam::123456789012:user/reconcile-test"]
   aws_account_id          = "123456789012"
+  region                  = "eu-west-2"
   name                    = "qsb-test"
   network                 = "mainnet"
 }
@@ -82,7 +83,7 @@ run "reject_partial_compute_config" {
   command = plan
   variables {
     network         = "mainnet"
-    batch_job_queue = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu"
+    batch_job_queue = "arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu"
   }
   expect_failures = [terraform_data.release]
 }
@@ -111,8 +112,8 @@ run "configured_single_pipeline" {
   command = plan
   variables {
     network              = "mainnet"
-    batch_job_queue      = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu"
-    batch_job_definition = "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:1"
+    batch_job_queue      = "arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu"
+    batch_job_definition = "arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-gpu-solver:1"
     batch_job_bucket     = "qsb-gpu-jobs"
   }
   assert {
@@ -144,8 +145,8 @@ run "operator_reconcile_scope" {
   command = plan
   variables {
     network                      = "mainnet"
-    batch_job_queue              = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu"
-    batch_job_definition         = "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:1"
+    batch_job_queue              = "arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu"
+    batch_job_definition         = "arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-gpu-solver:1"
     batch_job_bucket             = "qsb-gpu-jobs"
     operator_principal_arns      = ["arn:aws:iam::123456789012:user/alice", "arn:aws:iam::123456789012:role/operators"]
     iam_role_path                = "/qsb/runtime/"
@@ -206,7 +207,7 @@ run "reject_provider_definition_wildcard" {
   command = plan
   variables {
     network              = "mainnet"
-    batch_job_definition = "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-*"
+    batch_job_definition = "arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-*"
   }
   expect_failures = [var.batch_job_definition]
 }
@@ -222,7 +223,7 @@ run "miner_credential_api_only" {
   command = plan
   variables {
     network               = "mainnet"
-    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/slipstream-AbC123"
+    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:qsb/slipstream-AbC123"
   }
   assert {
     condition = length(aws_iam_role_policy.miner_credential) == 1 && jsonencode(jsondecode(aws_iam_role_policy.miner_credential[0].policy).Statement) == jsonencode([
@@ -239,7 +240,7 @@ run "reject_miner_credential_other_secret" {
   command = plan
   variables {
     network               = "mainnet"
-    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/other-AbC123"
+    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:qsb/other-AbC123"
   }
   expect_failures = [var.slipstream_secret_arn]
 }
@@ -247,7 +248,7 @@ run "reject_miner_credential_other_account" {
   command = plan
   variables {
     network               = "mainnet"
-    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-1:210987654321:secret:qsb/slipstream-AbC123"
+    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-2:210987654321:secret:qsb/slipstream-AbC123"
   }
   expect_failures = [var.slipstream_secret_arn]
 }
@@ -258,6 +259,30 @@ run "reject_miner_credential_other_region" {
     slipstream_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:qsb/slipstream-AbC123"
   }
   expect_failures = [var.slipstream_secret_arn]
+}
+run "reject_miner_credential_legacy_region" {
+  command = plan
+  variables {
+    network               = "mainnet"
+    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/slipstream-AbC123"
+  }
+  expect_failures = [var.slipstream_secret_arn]
+}
+run "region_is_pinned" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition     = terraform_data.region_pin.triggers_replace == "eu-west-2"
+    error_message = "The state must be pinned to its region, so a region change can't replan the stack elsewhere."
+  }
+}
+run "reject_malformed_region" {
+  command = plan
+  variables {
+    network = "mainnet"
+    region  = "London"
+  }
+  expect_failures = [var.region]
 }
 run "exact_submit_default_off" {
   command = plan
@@ -357,7 +382,7 @@ run "reject_provider_queue_wildcard" {
   command = plan
   variables {
     network         = "mainnet"
-    batch_job_queue = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-*"
+    batch_job_queue = "arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-*"
   }
   expect_failures = [var.batch_job_queue]
 }
@@ -382,7 +407,7 @@ run "reject_changed_solver_selection_including_omission" {
 run "reject_reference_identity_mismatch" {
   command = plan
   variables {
-    network = "mainnet"
+    network             = "mainnet"
     build_manifest_path = ".build/test-bad-reference.json"
   }
   expect_failures = [terraform_data.release]
@@ -391,7 +416,7 @@ run "reject_reference_identity_mismatch" {
 run "reject_manifest_solver_override" {
   command = plan
   variables {
-    network = "mainnet"
+    network             = "mainnet"
     build_manifest_path = ".build/test-bad-solver.json"
   }
   expect_failures = [terraform_data.release]

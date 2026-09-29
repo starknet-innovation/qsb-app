@@ -16,8 +16,8 @@ resource "aws_cloudwatch_log_group" "watchdog" {
 resource "aws_iam_role_policy" "watchdog" {
   role = aws_iam_role.watchdog.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = ["batch:ListJobs", "batch:DescribeJobs"], Resource = "*", Condition = { StringEquals = { "aws:RequestedRegion" = "eu-west-1" } } },
-    { Effect = "Allow", Action = ["batch:TerminateJob"], Resource = "arn:aws:batch:eu-west-1:${var.aws_account_id}:job/*", Condition = { StringEquals = { "aws:ResourceTag/Project" = "qsb-gpu" } } },
+    { Effect = "Allow", Action = ["batch:ListJobs", "batch:DescribeJobs"], Resource = "*", Condition = { StringEquals = { "aws:RequestedRegion" = var.region } } },
+    { Effect = "Allow", Action = ["batch:TerminateJob"], Resource = "arn:aws:batch:${var.region}:${var.aws_account_id}:job/*", Condition = { StringEquals = { "aws:ResourceTag/Project" = "qsb-gpu" } } },
     { Effect = "Allow", Action = ["logs:CreateLogStream", "logs:PutLogEvents"], Resource = "${aws_cloudwatch_log_group.watchdog.arn}:*" }
   ] })
 }

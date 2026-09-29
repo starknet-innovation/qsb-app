@@ -4,9 +4,11 @@ mock_provider "archive" {}
 variables {
   release_manifest_path        = "../.build/test-gpu-valid.json"
   aws_account_id               = "123456789012"
+  region                       = "eu-west-2"
+  gpu_ami                      = "ami-0123456789abcdef0"
   gpu_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-gpu-boundary"
   source_commit                = jsondecode(file("../.build/manifest.json")).commit
-  image                        = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../../src/lib/releases/qsb-solver-aws-v0-1-0.json")).image)[1]}"
+  image                        = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../../src/lib/releases/qsb-solver-aws-v0-1-0.json")).image)[1]}"
   subnets                      = ["subnet-0123456789abcdef0"]
   vpc_id                       = "vpc-0123456789abcdef0"
 }
@@ -48,7 +50,7 @@ run "reject_other_policy_path" {
 
 run "reject_solver_digest_mismatch" {
   command = plan
-  variables { image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@sha256:1111111111111111111111111111111111111111111111111111111111111111" }
+  variables { image = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/qsb-solver@sha256:1111111111111111111111111111111111111111111111111111111111111111" }
   expect_failures = [terraform_data.release_identity]
 }
 run "reject_app_source_mismatch" {
@@ -67,7 +69,7 @@ run "reject_historical_schema" {
   command = plan
   variables {
     release_manifest_path = "../.build/test-gpu-historical-schema.json"
-    image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../.build/test-gpu-historical-schema.json")).identities.solver.image)[1]}"
+    image                 = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../.build/test-gpu-historical-schema.json")).identities.solver.image)[1]}"
   }
   expect_failures = [terraform_data.release_identity]
 }
@@ -76,7 +78,7 @@ run "reject_wrong_image" {
   command = plan
   variables {
     release_manifest_path = "../.build/test-gpu-wrong-image.json"
-    image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../.build/test-gpu-wrong-image.json")).identities.solver.image)[1]}"
+    image                 = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../.build/test-gpu-wrong-image.json")).identities.solver.image)[1]}"
   }
   expect_failures = [terraform_data.release_identity]
 }
@@ -97,4 +99,16 @@ run "reject_wrong_file" {
   command = plan
   variables { release_manifest_path = "../.build/test-gpu-wrong-file.json" }
   expect_failures = [terraform_data.release_identity]
+}
+run "region_follows_the_variable" {
+  command = plan
+  assert {
+    condition     = aws_s3_bucket.jobs.bucket == "qsb-gpu-123456789012-eu-west-2-jobs" && terraform_data.region_pin.triggers_replace == "eu-west-2"
+    error_message = "The job bucket and the state pin must follow var.region."
+  }
+}
+run "reject_image_from_another_region" {
+  command = plan
+  variables { image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../../src/lib/releases/qsb-solver-aws-v0-1-0.json")).image)[1]}" }
+  expect_failures = [var.image]
 }

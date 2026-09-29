@@ -32,6 +32,7 @@ def plan():
     # roles, one `workflow` and one `operator_reconcile`); any five with those names satisfy it.
     rows += [role('lambda'), role('workflow'), role('operator_reconcile'), role('lambda'), role('workflow')]
     return {'planned_values': {'root_module': {'resources': rows}},
+            'variables': {'region': {'value': 'eu-west-2'}},
             'resource_changes': [{'mode': 'managed', 'change': {'actions': ['create']}}]}
 
 
@@ -239,6 +240,28 @@ class DeployChecks(unittest.TestCase):
             with self.subTest(action=action):
                 self.refused(self.with_miner_credential(grant={'Effect': 'Allow', 'Action': action, 'Resource': '*'},
                                                         policy_name='logs'), 'Only the miner_credential policy')
+
+    def test_a_region_change_on_an_existing_stack_is_refused(self):
+        # Refreshing against the wrong region finds nothing, so Terraform reports the state as deleted.
+        doc = plan()
+        doc['resource_drift'] = [{'address': 'aws_dynamodb_table.records', 'mode': 'managed',
+                                  'change': {'actions': ['delete']}}]
+        self.refused(doc, 'resources in state were not found', '--deploy')
+        # Existing resources in another region than the plan's.
+        doc = plan()
+        doc['prior_state'] = {'values': {'root_module': {'resources': [
+            {'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed',
+             'values': {'arn': 'arn:aws:dynamodb:eu-west-1:123456789012:table/qsb-app-records'}}]}}}
+        self.refused(doc, 'is in eu-west-1, not eu-west-2', '--deploy')
+        # Global resources carry no region, and same-region resources pass.
+        doc['prior_state']['values']['root_module']['resources'] = [
+            {'type': 'aws_iam_role', 'name': 'lambda', 'mode': 'managed', 'values': {'arn': 'arn:aws:iam::123456789012:role/x'}},
+            {'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed',
+             'values': {'arn': 'arn:aws:dynamodb:eu-west-2:123456789012:table/qsb-app-records'}}]
+        self.assertEqual(self.run_check(doc, '--deploy')[0], 0)
+        doc = plan()
+        del doc['variables']
+        self.refused(doc, 'must set var.region', '--deploy')
 
     def test_flags_need_a_saved_plan(self):
         events = [{'type': 'test_run', '@testrun': 'baseline'}, {'type': 'test_summary', 'test_summary': {'status': 'pass'}}]

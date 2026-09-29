@@ -92,7 +92,7 @@ withdrawal.
 An authorized operator can persist the same observation and an audit reference:
 
 ```sh
-QSB_NETWORK=mainnet TABLE_NAME=your-records-table AWS_REGION=eu-west-1 \
+QSB_NETWORK=mainnet TABLE_NAME=your-records-table AWS_REGION=eu-west-2 \
   npx tsx scripts/reconcile-withdrawal.ts OWNER JOB \
     --operator OPERATOR --evidence audit://incident/reference
 ```
