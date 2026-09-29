@@ -20,7 +20,7 @@ Sent to the server:
 
 The server relays, reserves, searches and checks, as it does for the webapp. Before anything is signed or sent, the SDK re-checks locally: that the backup's state matches the vault's script, that a returned PSBT is the one it prepared, and that the withdrawal it assembled matches the approved intent. Before a withdrawal is submitted, it requires an approval callback that receives the exact destination, payout, fee, fee rate and transaction ID.
 
-The CLI writes backups owner-only (`0600`) and never overwrites one. It caches the session token owner-only in `~/.qsb/session.json` (or keeps it in memory with `--no-cache`). It reads passphrases from a terminal prompt, a file descriptor or `QSB_PASSPHRASE`, never from arguments.
+The CLI creates every file owner-only (`0600`) and never overwrites one: an output that already exists, or that is also an input, is refused before any work. Backups are flushed to disk before the next step. The CLI caches the session token owner-only in `~/.qsb/session.json` (or keeps it in memory with `--no-cache`). It reads passphrases from a terminal prompt, a file descriptor or `QSB_PASSPHRASE`, never from arguments.
 
 ## SDK
 
@@ -53,7 +53,7 @@ const tx = await qsb.withdrawals.assemble(job.id, { backup: withdrawalBackup, pa
 await qsb.withdrawals.submit(tx, { approve: async (review) => (await askUser(review)) ? review.txid : false });
 ```
 
-`QsbClient` options: `baseUrl`, `signer`, and optionally `fetch`, `qsb` (the local runtime, default Pyodide in-process), `pendingDeposits` (where a signed deposit waits until MARA has it, default memory), `token` (a cached session) and `timeoutMs`. `QSB_NETWORK` (`mainnet` or `testnet4`) must be set when the SDK is imported; it refuses a server on another network.
+`QsbClient` options: `baseUrl`, `signer`, and optionally `fetch`, `qsb` (the local runtime, default Pyodide in-process), `pendingDeposits` (where a signed deposit waits until MARA has it), `authorizations` (this device's one intent and one assembly per vault), `token` (a cached session) and `timeoutMs`. `pendingDeposits` and `authorizations` default to memory; the CLI keeps both under `~/.qsb`. `QSB_NETWORK` (`mainnet` or `testnet4`) must be set when the SDK is imported; it refuses a server on another network.
 
 | Call | Route | Local work |
 | --- | --- | --- |
@@ -71,7 +71,11 @@ await qsb.withdrawals.submit(tx, { approve: async (review) => (await askUser(rev
 
 Errors from the server are `ApiError`s with `status` and, when the server sends one, a machine-readable `code`.
 
-Two rules carry over from the webapp. A vault takes one deposit: a signed deposit is kept as pending before it is sent, and `deposits.prepare` refuses while one is pending or the vault is funded. A withdrawal's one-time keys are bound to one intent: `withdrawals.create` with a backup that already holds an intent resumes it unchanged, and `withdrawals.assemble` refuses a backup bound to another solution.
+Rules that carry over from the webapp:
+
+- A vault takes one deposit. A signed deposit is kept as pending before it is sent, and only those bytes are ever resent. `deposits.prepare` refuses while one is pending or the vault is funded, and MARA's floor is checked again right before a deposit is sent.
+- A withdrawal's one-time keys are bound to one intent and one assembly. `withdrawals.create` with a backup that already holds an intent resumes it unchanged, and `withdrawals.assemble` refuses a backup bound to another solution. Like the webapp's `qsb-intent:` and `qsb-assembly:` keys, `authorizations` remembers the intent and the assembled transaction per vault and refuses a different one, even from an older backup that doesn't bind it yet.
+- `withdrawals.submit` shows values only after checking that the stored intent hashes to the one bound at assembly. Only the server's own disabled refusal counts as "nothing was accepted"; any other failure, including a gateway 503, is reported as an uncertain outcome that must not be submitted again.
 
 ## CLI
 
@@ -94,7 +98,7 @@ npm run qsb -- withdraw assemble <job> --backup signing.json --out signed.json -
 npm run qsb -- withdraw submit --signed signed.json   # shows the transaction; type its ID to submit
 ```
 
-`npm run qsb -- --help` lists every command and option. Output on stdout is JSON; prompts and explanations go to stderr. Exit codes: 0 done, 1 refused or failed, 2 usage, 3 waiting for an external signature.
+`npm run qsb -- --help` lists every command and option. Output on stdout is JSON; prompts and explanations go to stderr. Exit codes: 0 done, 1 refused, failed or not final (for example, MARA's answer was lost), 2 usage, 3 waiting for an external signature.
 
 The default signer is external: the CLI writes each request (the sign-in message to stderr and `--message-out`, PSBTs to files) and reads the signature back from stdin or `--signed-psbt`, so any wallet can sign. `withdraw submit` prints the destination, payout, fee, fee rate and transaction ID, then submits only when you type that transaction ID (or pass it as `--approve-txid` after reviewing it).
 
@@ -103,6 +107,6 @@ The default signer is external: the CLI writes each request (the sign-in message
 ## Limits
 
 - Phase 1 of #85: the existing `/api` routes only. There is no `/v1`, API key, webhook or OpenAPI spec yet.
-- Withdrawal assembly uses the Step Functions coordinator's solved result, which the server delivers on mainnet only.
+- Withdrawal assembly uses the Step Functions coordinator's solved result, which the server delivers on mainnet only, so `withdrawals.assemble` and `withdrawals.submit` refuse on testnet4.
 - The tests can't run a GPU search. [`tests/sdk-e2e.test.ts`](../tests/sdk-e2e.test.ts) drives the CLI against `createApp` with the in-memory store, a fake chain and a fake miner; it stands in for the coordinator's solution and for the Python assembler, which refuses anything but a real hit ([`tests/sdk-runtime.test.ts`](../tests/sdk-runtime.test.ts)).
 - No licence has been chosen for the application code, including this SDK (see the top-level README).
