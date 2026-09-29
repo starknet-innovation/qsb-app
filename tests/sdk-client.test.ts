@@ -11,10 +11,9 @@ import { Signer as Bip322 } from "bip322-js";
 import awsRelease from "../src/lib/releases/qsb-solver-aws-v0-1-0.json";
 import { decryptRecovery } from "../src/lib/backup";
 import { transactionVsize } from "../src/lib/transactions";
-import { ApiError, QsbClient, type WithdrawalReview } from "../sdk/client";
+import { ApiError, QsbClient, loopbackTestSigner, type WithdrawalReview } from "../sdk";
 import { runCli } from "../sdk/cli";
 import type { CliIo } from "../sdk/cli-io";
-import { loopbackTestSigner } from "../sdk/test-signer";
 import { API, localQsb, solve, wallet, world } from "./sdk-fixture";
 
 beforeEach(() => vi.stubEnv("SOLVER_RELEASE_ID", awsRelease.id));

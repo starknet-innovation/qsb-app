@@ -11,7 +11,7 @@ import { Esplora } from "../server/chain";
 import { MinerHttpError, Slipstream } from "../server/providers";
 import { outputScript } from "../src/lib/transactions";
 import type { Job, Withdrawal } from "../src/lib/model";
-import { nodeQsb, type LocalQsb } from "../sdk/runtime";
+import { nodeQsb, type LocalQsb } from "../sdk";
 
 const opts = { allowUnknownInputs: true, allowUnknownOutputs: true };
 const GENESIS = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f";

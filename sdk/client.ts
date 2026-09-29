@@ -197,9 +197,6 @@ export class QsbClient {
   get token(): string | undefined {
     return this.session.currentToken();
   }
-  get address(): string {
-    return this.wallet.address;
-  }
 
   /** BIP-322 sign-in. The challenge must be the app's session-only message for this address. */
   async login(): Promise<void> {
@@ -209,9 +206,6 @@ export class QsbClient {
         throw new Error("The sign-in challenge is not the app's session-only message. Nothing was signed.");
       return this.signer.signMessage(this.wallet.address, message);
     });
-  }
-  logout(): void {
-    this.session.clearSession();
   }
   config(): Promise<ApiConfig> {
     return this.session.api<ApiConfig>("/config");

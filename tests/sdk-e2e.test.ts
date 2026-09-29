@@ -12,7 +12,7 @@ import { decryptRecovery } from "../src/lib/backup";
 import { release, type Job, type PublicVault } from "../src/lib/model";
 import capability from "../server/mainnet-capability.json";
 import { runCli } from "../sdk/cli";
-import { loopbackTestSigner } from "../sdk/test-signer";
+import { loopbackTestSigner } from "../sdk";
 import { API, localQsb, solve, wallet, world, type Recorded } from "./sdk-fixture";
 
 beforeEach(() => vi.stubEnv("SOLVER_RELEASE_ID", awsRelease.id));
