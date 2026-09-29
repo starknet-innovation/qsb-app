@@ -4,12 +4,12 @@
 
 Publishing research source is not deployment or activation. Feature enablement is not authorization to spend. `release.mainnetEnabled` stays false. `broadcastAuthorized` is not set. No step below starts a worker, contacts a provider, or broadcasts a transaction.
 
-The checked-in capability limit is `providerGpuLimit: 1` in `server/mainnet-capability.json`. Until a later reviewed decision changes that file, the concurrency cap is one concurrent search and one GPU worker. The minimum idle worker count is zero. This is not a measured production capacity plan.
+The checked-in capability limit is `providerGpuLimit: 1` in `server/mainnet-capability.json`. It governs the supervised runtime: until a later reviewed decision changes that file, that runtime's cap is one concurrent search and one GPU worker. The AWS Batch coordinator's GPUs per withdrawal are `workersMax` in `server/gpu-spend.json` instead (see [Parallel GPU search](#parallel-gpu-search)). The minimum idle worker count is zero. This is not a measured production capacity plan.
 
 ## Concurrency and cost caps
 
 - `maxConcurrentSearches`: 1
-- `maxGpuWorkers`: 1
+- `maxGpuWorkers`: 1 (supervised runtime; the coordinator uses `workersMax` below)
 - `minIdleWorkers`: 0
 - The coordinator path uses `server/gpu-spend.json`: `workersMax` (1–16; see [Parallel GPU search](#parallel-gpu-search)), `workersMin` 0, `executionTimeoutMs` 900000, and `maxJobGpuSeconds` 14745600 (4,096 GPU-hours per job, reserved across retries and all stages). A 64-hit output is not credited as a finished range. These checks do not start a worker, evaluate the USD ceiling, or authorize a spend.
 - `costUnit` is `operator-units`. `maxCostUnits` is a positive integer of those units. The operator cost field is not the experimental USD ceiling. A plan that labels the field as USD, or that supplies `vaultUsd`, `feeUsd`, or `gpuUsd` on the runbook, is refused with `CostFieldIsNotUsdCeiling`.

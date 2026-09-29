@@ -82,7 +82,12 @@ function remove(slots: SearchSlot[], slot: SearchSlot) {
  * reconcile, and nothing is ever resubmitted automatically. Stage order and CPU checks
  * are the single-GPU path's; only chunks of one stage run side by side.
  */
+/** Start no new paid POST after this long in one tick, so a slow tick can't time out
+ * mid-submission (the coordinator Lambda allows 90 seconds). The next tick fills the rest. */
+export const FILL_DEADLINE_MS = 20_000;
+
 export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cpu) {
+  const tickStarted = Date.now();
   const job = row.job as Job;
   const pk = `OWNER#${event.owner}`;
   let version = row.version;
@@ -199,9 +204,16 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       : {}),
   });
 
+  // An explicit resume allows each chunk it found in flight to be repeated once if it turns
+  // out to have stopped, however many ticks that takes. Chunks sent later never inherit it.
+  if (job.retryRequested) {
+    for (const s of slots) s.retryOnStop = true;
+    delete job.retryRequested;
+  }
   // Poll every chunk. Results are credited only after the same checks as one GPU.
-  const retry = job.retryRequested === true;
   let stop: { stage: string; error: string } | undefined;
+  // A failed CPU check needs operator review: it outranks any other pause reason.
+  let review: { stage: string; error: string } | undefined;
   const completed = new Set(job.completedAttempts ?? []);
   for (const slot of [...slots]) {
     const r = await provider.status(slot.runpodId!, slot.batchSubmission);
@@ -214,7 +226,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     }
     if (STOPPED.includes(r.status)) {
       remove(slots, slot);
-      if (!retry)
+      if (!slot.retryOnStop)
         stop ??= {
           stage: slot.stage,
           error: "Compute interrupted. Resume will repeat this bounded range without skipping it.",
@@ -261,7 +273,9 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       job.status =
         job.stage === "verification" ? "awaiting_authorization" : "queued";
     } else if (output.candidates.length && checked.derOnly !== true) {
-      stop ??= { stage: slot.stage, error: "GPU candidates failed independent CPU verification." };
+      // Keep the chunk and its provider ID for the operator review this blocks resume on.
+      slots.push(slot);
+      review ??= { stage: slot.stage, error: "GPU candidates failed independent CPU verification." };
     } else if (
       output.status === "completed" &&
       output.checkpoint === "range-complete"
@@ -272,7 +286,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
         completed.delete(job.attempt);
         job.attempt++;
       }
-    } else if (!retry) {
+    } else if (!slot.retryOnStop) {
       stop ??= {
         stage: slot.stage,
         error: "Incomplete work unit. Resume repeats this bounded range; it has not been skipped.",
@@ -280,11 +294,11 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     }
   }
   job.completedAttempts = [...completed].sort((a, b) => a - b);
-  if (retry) delete job.retryRequested;
-  // An interruption in a stage that a verified hit has already finished no longer matters.
-  if (stop && stop.stage === job.stage && ["queued", "searching"].includes(job.status)) {
+  // A reason in a stage that a verified hit has already finished no longer matters.
+  const reason = [review, stop].find((r) => r?.stage === job.stage);
+  if (reason && ["queued", "searching"].includes(job.status)) {
     job.status = "paused";
-    job.error = stop.error;
+    job.error = reason.error;
   }
 
   // Fill free GPUs with the lowest chunks not yet done or running. Superseded chunks
@@ -296,6 +310,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     let attempt = job.attempt;
     let parameters: { parameterBase64: string; parameterSha256: string } | undefined;
     while (slots.length < gpuSpendLimits.workersMax) {
+      if (Date.now() - tickStarted > FILL_DEADLINE_MS) break;
       while (assigned.has(attempt) || completed.has(attempt)) attempt++;
       try {
         workRange(job.stage, attempt);
@@ -373,7 +388,6 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       slots.push(slot);
       assigned.add(attempt);
       delete job.batchReplacementFor;
-      delete job.retryRequested;
       delete job.oneSubmissionAllowed;
       await persist();
       const result = await submit();

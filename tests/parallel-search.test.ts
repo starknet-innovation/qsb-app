@@ -290,6 +290,55 @@ it("adopts a single-GPU job's running submission as a slot with its chunk and ID
   expect(mocks.run.mock.calls.map((c) => c[0].attempt)).toEqual([6, 7, 8]);
 });
 
+it("a failed CPU check outranks an interruption in the same tick and keeps that chunk's ID for review", async () => {
+  await seed({ status: "searching", parallelSlots: [slot(0), slot(1), slot(2)] });
+  states.c0 = { status: "FAILED" };
+  states.c1 = output("pinning", 1, ["candidate"]); // CPU verifier answers { valid: false }
+  expect(await handler(event)).toMatchObject({ done: true });
+  const job = await saved();
+  expect(job).toMatchObject({ status: "paused", error: "GPU candidates failed independent CPU verification." });
+  // The rejected chunk stays recorded with its provider ID; the interrupted one is dropped.
+  expect(job.parallelSlots!.map((s) => [s.attempt, s.runpodId]).sort()).toEqual([[1, "c1"], [2, "c2"]]);
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it("a resume repeats chunks found stopped even several ticks later, but never chunks sent after it", async () => {
+  // The resume route's effect on a withdrawal whose chunks the pause is still cancelling.
+  await seed({ status: "queued", retryRequested: true, parallelSlots: [slot(0), slot(1)] });
+  await handler(event);
+  let job = await saved();
+  expect(job.retryRequested).toBeUndefined();
+  expect(job.parallelSlots!.filter((s) => s.retryOnStop).map((s) => s.attempt)).toEqual([0, 1]);
+  expect(mocks.run.mock.calls.map((c) => c[0].attempt)).toEqual([2, 3]);
+  // Next tick: the cancellations land. Those two chunks are repeated, not a new pause...
+  states.c0 = states.c1 = { status: "CANCELLED" };
+  await handler(event);
+  job = await saved();
+  expect(job.status).toBe("searching");
+  expect(mocks.run.mock.calls.map((c) => c[0].attempt)).toEqual([2, 3, 0, 1]);
+  expect(job.parallelSlots!.some((s) => s.retryOnStop)).toBe(false);
+  // ...but a chunk sent after the resume that fails pauses the withdrawal.
+  states["compute-1"] = { status: "FAILED" };
+  await handler(event);
+  expect(await saved()).toMatchObject({ status: "paused", error: expect.stringContaining("Compute interrupted") });
+  expect(mocks.run).toHaveBeenCalledTimes(4);
+});
+
+it("starts no new paid POST once a tick has run past its fill deadline", async () => {
+  let now = 1_000_000;
+  const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+  await seed();
+  mocks.run.mockImplementation(async (input) => {
+    now += 25_000; // a slow submission
+    return { id: `compute-${input.attempt}` };
+  });
+  await handler(event);
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+  await handler(event);
+  expect(mocks.run.mock.calls.map((c) => c[0].attempt)).toEqual([0, 1]);
+  clock.mockRestore();
+});
+
 it("pauses an older searching job with no provider ID or request identity instead of sending new work", async () => {
   await seed({ status: "searching", attempt: 3 });
   expect(await handler(event)).toMatchObject({ done: true });

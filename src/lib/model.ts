@@ -13,6 +13,8 @@ export type SearchSlot = {
   submissionStartedAt: string;
   /** Set once SubmitJob returns. A slot without one has an unknown paid outcome. */
   runpodId?: string;
+  /** Stamped from an explicit resume: if this chunk is found stopped, repeat it once. */
+  retryOnStop?: true;
 };
 import type { SolverPin } from "./provenance";
 import { NETWORK_ID } from "./network";

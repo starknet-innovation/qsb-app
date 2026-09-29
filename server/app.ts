@@ -633,7 +633,10 @@ export function createApp(
         );
       const storedJob = existing.job as Job;
       if (storedJob.status === "queued") {
-        let runnable = Boolean(storedJob.runpodId); // Existing paid IDs still need polling.
+        // Existing paid IDs, single or per parallel chunk, still need polling.
+        let runnable =
+          Boolean(storedJob.runpodId) ||
+          Boolean(storedJob.parallelSlots?.some((s) => s.runpodId));
         if (!runnable && storedJob.solver) {
           try { deployedSolver(storedJob.solver.descriptor.id); runnable = true; } catch {}
         }
