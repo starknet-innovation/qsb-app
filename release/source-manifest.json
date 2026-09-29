@@ -51,7 +51,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "3834943b43d8d09c4bb916fcd117d43dcdbd89080b049cb25458aaf9a81e12d3",
+      "api": "6b3d05ab7f8dd939b2ea2b878d257d009a9ce13359e843fff9eccd76d3c9e444",
       "build-metadata": "2c4804c98f40b16adda8fde8e13f053d59cc53e26f951906064834edd469b1c6",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "458e1ea333fbbf2d2ed5fe3f50185cd035be5ee5b20071f422020854849cdb67",
@@ -118,7 +118,7 @@
       "server/consensus.ts": "2684a00a3a53a942d3cc0815b8f9aa5fd659439f6811ceac465d38cbd08377a8",
       "server/coordinator.ts": "6e3e3cd97b4f9ff2e4753272aa7da98b9a33c410896759fa7f12cf6a87d706f2",
       "server/exact-submit-permit.ts": "1c98f8a75da77cfbe501c86bcee1c6d1b44adf3d84bd2ab446562a2a6e1509cf",
-      "server/gpu-spend.json": "df8fba56d88c1f2c645e3babdcd59b28702938c300a8bef8734a760cfe79ecda",
+      "server/gpu-spend.json": "61cc20e599610346779638d0957b1054d6cee175890f4a0d4000f6a8fd7a15a8",
       "server/gpu-spend.ts": "34d431a9c0a04ddf807a6a13e65ac1bc9fa13aeb3cd860351e380f982f72c033",
       "server/job-spend-record.ts": "2d671feb6a54d02d1fc7130243ac05b5f5d9ec76ba2f7c901af7bb8342bed2a5",
       "server/lambda.ts": "abe72c18c555f2d699ec5cdb3c0a8edb0d6b4df77500f76b14ade0d388096c0c",
