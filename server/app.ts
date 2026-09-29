@@ -34,7 +34,12 @@ import {
   txid,
 } from "../src/lib/model";
 import { Conflict, store as defaultStore, type Store } from "./store";
-import { authorizeApiKey, bearerApiKey, installApiKeyRoutes } from "./scoped-keys";
+import {
+  apiKeysEnabled,
+  authorizeApiKey,
+  bearerApiKey,
+  installApiKeyRoutes,
+} from "./scoped-keys";
 import { slipstream, MinerAuthenticationError } from "./providers";
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { chain, ChainError, ChainNotFound, type Esplora } from "./chain";
@@ -74,6 +79,7 @@ export function createApp(
     miner?: typeof slipstream;
     enabled?: boolean;
     exactSubmit?: boolean;
+    apiKeys?: boolean;
     consensus?: ConsensusVerifier;
     mainnetUi?: MainnetUiOptions;
     // Trusted server wiring only; routes under /api/jobs inherit the auth middleware.
@@ -90,6 +96,7 @@ export function createApp(
   const ledger = dependencies.chain || chain,
     miner = dependencies.miner || slipstream;
   const enabled = dependencies.enabled ?? transactionsEnabled;
+  const apiKeys = dependencies.apiKeys ?? apiKeysEnabled();
   const mainnetUiOptions = { ...dependencies.mainnetUi };
   const mainnetUiRoutes = { creation: false, admission: false };
   async function startWorkflow(job: Job) {
@@ -168,6 +175,7 @@ export function createApp(
       operationsEnabled: enabled,
       solverReleaseId: deployedSolverId(),
       exactSubmitEnabled: dependencies.exactSubmit ?? exactSubmitEnabled(),
+      apiKeysEnabled: apiKeys,
       billing: "not_configured",
       awsRegion: process.env.AWS_REGION || "local",
       maxBtc: null,
@@ -254,7 +262,8 @@ export function createApp(
   async function auth(c: any, next: () => Promise<void>) {
     const bearer = c.req.header("Authorization") || "";
     const apiKey = bearerApiKey(bearer);
-    if (apiKey) return (await authorizeApiKey(c, store, apiKey)) ?? next();
+    if (apiKey)
+      return (await authorizeApiKey(c, store, apiKey, apiKeys)) ?? next();
     if (!/^Bearer [A-Za-z0-9_-]{43}$/.test(bearer))
       return c.json({ error: "Connect and sign in with Xverse." }, 401);
     const session = await store.get(`SESSION#${hash(bearer.slice(7))}`, "AUTH");
@@ -263,7 +272,7 @@ export function createApp(
     c.set("owner", session.owner);
     await next();
   }
-  installApiKeyRoutes(app, store);
+  installApiKeyRoutes(app, store, apiKeys);
   app.get("/api/vaults", async (c) => {
     const rows = await store.list(`OWNER#${c.get("owner")}`, "VAULT#");
     return c.json({

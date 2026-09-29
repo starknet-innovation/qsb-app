@@ -53,20 +53,41 @@ const bearerKey = /^Bearer (qsb_(mainnet|testnet4)_[A-Za-z0-9_-]{43})$/;
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 type OwnerEnv = { Variables: { owner: string } };
-const refuse = (c: Context, error: string, code: string, status: 401 | 403) =>
-  c.json({ error, code }, status);
+const refuse = (
+  c: Context,
+  error: string,
+  code: string,
+  status: 401 | 403 | 503,
+) => c.json({ error, code }, status);
+const disabled = (c: Context) =>
+  refuse(
+    c,
+    "API keys are switched off for this deployment.",
+    "api_keys_disabled",
+    503,
+  );
+
+/** Deploy-time switch, off by default. Turning it on needs the maintainer's explicit approval. */
+export function apiKeysEnabled() {
+  return process.env.QSB_API_KEYS_ENABLED === "true";
+}
 
 /** The API key in an Authorization header, or undefined for any other bearer. */
 export function bearerApiKey(header: string) {
   return bearerKey.exec(header)?.[1];
 }
 
-/** Resolves the key's owner and checks its scope for the matched route. Returns the refusal, if any. */
+/**
+ * Resolves the key's owner and checks the scope of every route the request
+ * matches. Returns the refusal, if any.
+ */
 export async function authorizeApiKey(
   c: Context<OwnerEnv>,
   store: Store,
   key: string,
+  enabled: boolean,
 ): Promise<Response | undefined> {
+  if (!enabled) return disabled(c);
   const wrongNetwork = () =>
     refuse(
       c,
@@ -86,22 +107,24 @@ export async function authorizeApiKey(
   if (row.network !== NETWORK_ID) return wrongNetwork();
   if (row.revoked === true)
     return refuse(c, "API key was revoked.", "api_key_revoked", 401);
-  const route = matchedRoutes(c).find((r) => r.method !== "ALL");
-  const pattern = route ? `${route.method} ${route.path}` : "";
-  const scope = Object.hasOwn(routeScopes, pattern)
-    ? routeScopes[pattern]
-    : null;
-  if (!scope)
+  // Every matched method route counts, not only the one that answers: a
+  // pass-through route registered earlier cannot lower the scope needed.
+  const scopes = matchedRoutes(c)
+    .filter((r) => r.method !== "ALL")
+    .map((r) => `${r.method} ${r.path}`)
+    .map((p) => (Object.hasOwn(routeScopes, p) ? routeScopes[p] : null));
+  if (!scopes.length || scopes.some((s) => !s))
     return refuse(
       c,
       "API keys cannot call this route. Use a wallet session.",
       "api_key_not_allowed",
       403,
     );
-  if (!(row.scopes as string[]).includes(scope))
+  const missing = scopes.find((s) => !(row.scopes as string[]).includes(s!));
+  if (missing)
     return refuse(
       c,
-      `API key lacks the ${scope} scope.`,
+      `API key lacks the ${missing} scope.`,
       "api_key_scope_denied",
       403,
     );
@@ -127,9 +150,17 @@ function metadata(row: Row, now: number) {
   };
 }
 
-/** Key management. The auth middleware admits wallet sessions only here (see routeScopes). */
-export function installApiKeyRoutes(app: Hono<OwnerEnv>, store: Store) {
+/**
+ * Key management. The auth middleware admits wallet sessions only here (see
+ * routeScopes). Listing and revocation stay available while keys are off.
+ */
+export function installApiKeyRoutes(
+  app: Hono<OwnerEnv>,
+  store: Store,
+  enabled: boolean,
+) {
   app.post("/api/api-keys", async (c) => {
+    if (!enabled) return disabled(c);
     const body = z
       .object({
         name: z.string().trim().min(1).max(64),

@@ -1,10 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { Hono } from "hono";
 import { createApp } from "../server/app";
 import {
   apiKeyScopes,
+  authorizeApiKey,
+  bearerApiKey,
   maxActiveApiKeys,
   routeScopes,
+  type ApiKeyScope,
 } from "../server/scoped-keys";
 import { MemoryStore, type Store } from "../server/store";
 import type { Esplora } from "../server/chain";
@@ -22,7 +26,7 @@ async function setup(
   store: Store = new MemoryStore(),
   extra: Parameters<typeof createApp>[1] = {},
 ) {
-  const app = createApp(store, { chain, miner, ...extra });
+  const app = createApp(store, { chain, miner, apiKeys: true, ...extra });
   const session = async (address = owner) => {
     const token = randomBytes(32).toString("base64url");
     await store.put({
@@ -353,6 +357,75 @@ describe("API key authorization", () => {
     });
   });
 
+  it("pins the scopes of the routes that move funds", () => {
+    expect(routeScopes["POST /api/jobs/:id/submit"]).toBe("submit");
+    for (const route of [
+      "POST /api/jobs",
+      "POST /api/jobs/:id/pause",
+      "POST /api/jobs/:id/resume",
+    ])
+      expect(routeScopes[route], route).toBe("withdrawals");
+    for (const route of [
+      "POST /api/vaults",
+      "POST /api/vaults/:id/fund",
+      "POST /api/vaults/:id/fund/submit",
+      "POST /api/vaults/:id/fund/resubmit",
+    ])
+      expect(routeScopes[route], route).toBe("vaults");
+    const mapped = (
+      test: (route: string, scope: ApiKeyScope | null) => boolean,
+    ) =>
+      Object.entries(routeScopes)
+        .filter(([route, scope]) => test(route, scope))
+        .map(([route]) => route)
+        .sort();
+    expect(mapped((_, scope) => scope === "submit")).toEqual([
+      "POST /api/jobs/:id/submit",
+    ]);
+    expect(
+      mapped((route, scope) => route.startsWith("POST ") && scope === "read"),
+    ).toEqual(["POST /api/payment-input"]);
+    expect(mapped((_, scope) => scope === null)).toEqual([
+      "GET /api/api-keys",
+      "POST /api/api-keys",
+      "POST /api/api-keys/:id/revoke",
+    ]);
+  });
+
+  it("requires the scope of every route a request matches", async () => {
+    const store = new MemoryStore();
+    const { session, mint } = await setup(store);
+    const token = await session();
+    const withdrawals = (await mint(token, { scopes: ["withdrawals"] })).body
+      .key;
+    const both = (await mint(token, { scopes: ["withdrawals", "submit"] })).body
+      .key;
+    // A pass-through wildcard registered before the submit handler.
+    const app = new Hono<{ Variables: { owner: string } }>();
+    app.use("/api/*", async (c, next) => {
+      const key = bearerApiKey(c.req.header("Authorization") ?? "")!;
+      return (await authorizeApiKey(c, store, key, true)) ?? next();
+    });
+    app.post("/api/jobs/*", (_c, next) => next());
+    app.post("/api/jobs/:id/submit", (c) => c.json({ owner: c.get("owner") }));
+    const submit = async (key: string) => {
+      const r = await app.request(`/api/jobs/${crypto.randomUUID()}/submit`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      return [r.status, (await r.json()).code ?? "ok"];
+    };
+    expect(await submit(both)).toEqual([403, "api_key_not_allowed"]);
+    const table = routeScopes as Record<string, ApiKeyScope | null>;
+    table["POST /api/jobs/*"] = "withdrawals";
+    try {
+      expect(await submit(withdrawals)).toEqual([403, "api_key_scope_denied"]);
+      expect(await submit(both)).toEqual([200, "ok"]);
+    } finally {
+      delete table["POST /api/jobs/*"];
+    }
+  });
+
   it("maps every authenticated route to a scope, and nothing else", async () => {
     const { app, call } = await setup();
     const guarded = new Set<string>();
@@ -391,5 +464,57 @@ describe("API key authorization", () => {
     expect(
       decideAppRoleAccess("dynamodb:GetItem", [`APIKEY#${"ab".repeat(32)}`]),
     ).toBe("allow");
+  });
+});
+
+describe("API key switch", () => {
+  it("is off unless QSB_API_KEYS_ENABLED is exactly true", async () => {
+    const enabled = async (value?: string) => {
+      vi.stubEnv("QSB_API_KEYS_ENABLED", value);
+      try {
+        const app = createApp(new MemoryStore(), { chain, miner });
+        return (await (await app.request("/api/config")).json()).apiKeysEnabled;
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    };
+    expect(await enabled(undefined)).toBe(false);
+    for (const value of ["", "false", "TRUE", "1", "true "])
+      expect(await enabled(value), value).toBe(false);
+    expect(await enabled("true")).toBe(true);
+  });
+
+  it("refuses minting and every key while off, and leaves sessions alone", async () => {
+    const store = new MemoryStore();
+    const on = await setup(store);
+    const token = await on.session();
+    const { key, apiKey } = (await on.mint(token)).body;
+    const off = await setup(store, { apiKeys: false });
+    const rows = store.rows.size;
+    const minted = await off.mint(token);
+    expect(minted.status).toBe(503);
+    expect(minted.body.code).toBe("api_keys_disabled");
+    expect(store.rows.size).toBe(rows);
+    const other = `qsb_testnet4_${randomBytes(32).toString("base64url")}`;
+    for (const bearer of [key, other]) {
+      const r = await off.call("GET", "/api/vaults", bearer);
+      expect(r.status).toBe(503);
+      expect((await r.json()).code).toBe("api_keys_disabled");
+    }
+    expect((await off.call("GET", "/api/vaults", token)).status).toBe(200);
+    const listed = await (await off.call("GET", "/api/api-keys", token)).json();
+    expect(listed.apiKeys).toHaveLength(1);
+    const revoked = await off.call(
+      "POST",
+      `/api/api-keys/${apiKey.id}/revoke`,
+      token,
+    );
+    expect(revoked.status).toBe(200);
+    expect(
+      (await (await off.app.request("/api/config")).json()).apiKeysEnabled,
+    ).toBe(false);
+    expect(
+      (await (await on.app.request("/api/config")).json()).apiKeysEnabled,
+    ).toBe(true);
   });
 });

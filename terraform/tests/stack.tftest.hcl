@@ -278,6 +278,25 @@ run "exact_submit_explicit_switch" {
     error_message = "A submit request cannot enable the effective submit output while mainnet is disabled."
   }
 }
+run "api_keys_default_off" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.QSB_API_KEYS_ENABLED == "false" && !contains(keys(aws_lambda_function.coordinator.environment[0].variables), "QSB_API_KEYS_ENABLED") && length(aws_lambda_function.reference.environment) == 0
+    error_message = "API keys must default off, on the API Lambda only."
+  }
+}
+run "api_keys_explicit_switch" {
+  command = plan
+  variables {
+    network          = "mainnet"
+    api_keys_enabled = true
+  }
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.QSB_API_KEYS_ENABLED == "true" && !contains(keys(aws_lambda_function.coordinator.environment[0].variables), "QSB_API_KEYS_ENABLED") && !output.transactions_enabled && !output.exact_submit_enabled && aws_lambda_function.api.environment[0].variables.QSB_MAINNET_ENABLED == "false" && aws_lambda_function.api.environment[0].variables.QSB_EXACT_SUBMIT_ENABLED == "false"
+    error_message = "The API key switch reaches only the API Lambda and changes no mainnet switch."
+  }
+}
 run "exact_submit_reject_testnet" {
   command = plan
   variables {

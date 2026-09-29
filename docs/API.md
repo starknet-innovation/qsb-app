@@ -15,6 +15,14 @@ for the same owner address:
   expiresAt, revokedAt and status (`active`, `expired` or `revoked`).
 - `POST /api/api-keys/:id/revoke` revokes the key at once.
 
+Keys are off unless the deployment sets `api_keys_enabled = true` (Terraform),
+which sets `QSB_API_KEYS_ENABLED=true` on the API Lambda only. Turning it on
+needs the maintainer's explicit approval of third-party access, like the mainnet
+switches. While it's off, minting and every well-formed key get 503
+`api_keys_disabled`; sessions can still list and revoke keys. `GET /api/config`
+reports `apiKeysEnabled`. Once the owner allowlist (#89) lands, it can also limit
+who uses keys.
+
 These three routes take a wallet session only. An API key cannot mint, list or
 revoke keys.
 
@@ -31,13 +39,14 @@ default, 90 at most. An owner can have at most 10 active keys.
 | `withdrawals` | `POST /api/jobs`, `POST /api/jobs/:id/pause`, `/resume` |
 | `submit` | `POST /api/jobs/:id/submit` |
 
-`routeScopes` in `server/scoped-keys.ts` is the single table. An authenticated
-route missing from it is refused for API keys, and a test fails until it is
-added.
+`routeScopes` in `server/scoped-keys.ts` is the single table. A request needs
+the scope of every route it matches. An authenticated route missing from the
+table is refused for API keys, and a test fails until it is added.
 
 ### Errors
 
 Refusals carry a `code`: `api_key_invalid` (unknown or expired),
 `api_key_revoked`, `network_mismatch` (all 401), `api_key_not_allowed`
 (session-only or unmapped route), `api_key_scope_denied` (both 403),
-`api_key_limit_reached` (409) and `api_key_not_found` (404, on revoke).
+`api_key_limit_reached` (409), `api_key_not_found` (404, on revoke) and
+`api_keys_disabled` (503, while keys are off).
