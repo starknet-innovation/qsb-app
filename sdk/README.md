@@ -14,7 +14,7 @@ Never leaves your machine, and is never in a request body, URL or header:
 
 Sent to the server:
 
-- a BIP-322 signature of the sign-in challenge. The SDK signs only the app's session-only message for your address; the session lasts an hour;
+- a BIP-322 signature of the sign-in challenge. The SDK signs only the app's session-only message for your address that names the expected app origin, so an endpoint can't relay another deployment's challenge; the session lasts an hour;
 - the public vault record (script, public state, commitment hashes), after checking it has no private field;
 - unsigned inputs to look up, the signed deposit transaction, the withdrawal intent (payout, fee, outpoints) and the signed withdrawal transaction.
 
@@ -53,7 +53,7 @@ const tx = await qsb.withdrawals.assemble(job.id, { backup: withdrawalBackup, pa
 await qsb.withdrawals.submit(tx, { approve: async (review) => (await askUser(review)) ? review.txid : false });
 ```
 
-`QsbClient` options: `baseUrl`, `signer`, and optionally `fetch`, `qsb` (the local runtime, default Pyodide in-process), `pendingDeposits` (where a signed deposit waits until MARA has it), `authorizations` (this device's one intent and one assembly per vault), `token` (a cached session) and `timeoutMs`. `pendingDeposits` and `authorizations` default to memory; the CLI keeps both under `~/.qsb`. `QSB_NETWORK` (`mainnet` or `testnet4`) must be set when the SDK is imported; it refuses a server on another network.
+`QsbClient` options: `baseUrl`, `signer`, and optionally `appOrigin` (the origin the server's challenge names, its `APP_ORIGIN`; default `baseUrl`'s origin), `fetch`, `qsb` (the local runtime, default Pyodide in-process), `pendingDeposits` (where a signed deposit waits until MARA has it), `authorizations` (this device's one intent and one assembly per vault), `token` (a cached session) and `timeoutMs`. `pendingDeposits` and `authorizations` default to memory; the CLI keeps both under `~/.qsb`. `QSB_NETWORK` (`mainnet` or `testnet4`) must be set when the SDK is imported; it refuses a server on another network.
 
 | Call | Route | Local work |
 | --- | --- | --- |
@@ -69,7 +69,7 @@ await qsb.withdrawals.submit(tx, { approve: async (review) => (await askUser(rev
 | `withdrawals.assemble` | `…/solved-result`, `…/funding`, `/payment-input` | assemble from the backup, seal the signing backup, sign the helper input |
 | `withdrawals.submit` | `POST /api/jobs/:id/submit` | re-check the bytes against the job, then `approve(review)` |
 
-Errors from the server are `ApiError`s with `status` and, when the server sends one, a machine-readable `code`.
+`publicApi({ baseUrl })` reads `config()` and `rates()` without a signer. Errors from the server are `ApiError`s with `status` and, when the server sends one, a machine-readable `code`.
 
 Rules that carry over from the webapp:
 
@@ -102,7 +102,9 @@ npm run qsb -- withdraw submit --signed signed.json   # shows the transaction; t
 
 The default signer is external: the CLI writes each request (the sign-in message to stderr and `--message-out`, PSBTs to files) and reads the signature back from stdin or `--signed-psbt`, so any wallet can sign. `withdraw submit` prints the destination, payout, fee, fee rate and transaction ID, then submits only when you type that transaction ID (or pass it as `--approve-txid` after reviewing it).
 
-`--signer test-key` uses a raw WIF key from `QSB_TEST_SIGNER_KEY`, for tests and local development against `npm run dev`. It refuses any API URL that isn't loopback (127.0.0.1, localhost or [::1]).
+`--signer test-key` uses a raw WIF key from `QSB_TEST_SIGNER_KEY`, for tests and local development against `npm run dev`. It refuses any API URL that isn't loopback (127.0.0.1, localhost or [::1]). With `npm run dev`, use `--api http://127.0.0.1:5173`: Vite proxies `/api`, and the challenge names that origin.
+
+`config` and `rates` need no wallet. Every other command needs `--address` and `--public-key`, or the test key.
 
 ## Limits
 
