@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Job } from "../src/lib/model";
 import { reconciliationEnvironmentError } from "../server/reconciliation-environment";
 
@@ -50,6 +50,7 @@ const required = {
   WORKFLOW_ARN: "dummy-workflow",
   QSB_NETWORK: "mainnet",
   QSB_MAINNET_ENABLED: "true",
+  QSB_OWNER_MAX_ACTIVE_JOBS: "off",
 };
 const args = [
   "owner",
@@ -77,6 +78,7 @@ it.each(
     AWS_BATCH_JOB_QUEUE: "BatchQueueRequired",
     WORKFLOW_ARN: "WorkflowArnRequired",
     QSB_NETWORK: "QsbNetworkRequired",
+    QSB_OWNER_MAX_ACTIVE_JOBS: "OwnerMaxActiveJobsRequired",
   }),
 )(
   "refuses missing %s through the real CLI before importing application configuration",
@@ -141,6 +143,7 @@ it("the library default also refuses disabled polling before any read", async ()
       lookup: { status: vi.fn(), health: vi.fn() },
       log: vi.fn(),
       resumePolling: vi.fn(),
+      maxActiveJobs: null,
     }),
   ).rejects.toThrow("PollingNotAllowed");
   expect(get).not.toHaveBeenCalled();
@@ -442,4 +445,86 @@ it("restarts a recorded paid job after its STANDARD execution closes under a new
   expect(await store.get(pk, reservation.sk)).toEqual(reservation);
   expect(prepare).not.toHaveBeenCalled();
   expect(cancel).not.toHaveBeenCalled();
+});
+
+describe("owner active-withdrawal limit", () => {
+  const owner = "limited-owner",
+    pk = `OWNER#${owner}`;
+  async function seed() {
+    (store as import("../server/store").MemoryStore).rows.clear();
+    await store.put({
+      pk,
+      sk: "JOB#paused-job",
+      version: 2,
+      job: {
+        id: "paused-job", owner, vaultId: "v", status: "paused", stage: "pinning", attempt: 0,
+        revision: 3, computeSeconds: 0, manifestHash: "a".repeat(64), manifest: {},
+        error: "Submission outcome unknown. Reconcile compute provider before resuming.",
+        batchSubmission: {
+          jobName: "qsb-test", inputSha256: "a".repeat(64), inputKey: "inputs/test.json",
+          queue: required.AWS_BATCH_JOB_QUEUE, definition: required.AWS_BATCH_JOB_DEFINITION,
+        },
+        submissionStartedAt: "2026-09-25T00:00:00.000Z",
+        createdAt: "2026-09-25T00:00:00.000Z", updatedAt: "2026-09-25T00:00:00.000Z",
+      } as Job,
+    });
+    await store.put({ pk, sk: "VAULT#v", version: 0, vault: { network: "mainnet" } });
+    await store.put({ pk, sk: "JOB#other", version: 0, job: { id: "other", status: "searching" } });
+    vi.spyOn(AwsBatch.prototype, "status").mockResolvedValue({ id: "provider-1", status: "IN_PROGRESS" });
+    mocks.workflow.mockReset().mockResolvedValue({ executionArn: "test-execution" });
+  }
+  const reconcile = async (limit: string) => {
+    for (const [key, value] of Object.entries({ ...required, QSB_OWNER_MAX_ACTIVE_JOBS: limit }))
+      vi.stubEnv(key, value);
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await reconcileSubmissionCli([owner, "paused-job", ...args.slice(2)]);
+    return stderr.mock.calls.map((call) => String(call[0])).join("");
+  };
+
+  it.each(["", " ", "0", "-1", "1.5", "1e3", "OFF", " off", "off ", "none", "9007199254740993"])(
+    "refuses a missing or malformed value %j before initialization",
+    (value) => {
+      expect(reconciliationEnvironmentError({ ...required, QSB_OWNER_MAX_ACTIVE_JOBS: value })).toBe(
+        value.trim() ? "OwnerMaxActiveJobsInvalid" : "OwnerMaxActiveJobsRequired",
+      );
+    },
+  );
+  it.each(["off", "1", "25"])("accepts %s", (value) => {
+    expect(reconciliationEnvironmentError({ ...required, QSB_OWNER_MAX_ACTIVE_JOBS: value })).toBeUndefined();
+  });
+
+  it("refuses at the limit without writing anything", async () => {
+    await seed();
+    const before = structuredClone([...(store as import("../server/store").MemoryStore).rows]);
+    expect(await reconcile("1")).toContain("OwnerActiveWithdrawalLimit");
+    expect(process.exitCode).toBe(1);
+    expect([...(store as import("../server/store").MemoryStore).rows]).toEqual(before);
+    expect(mocks.workflow).not.toHaveBeenCalled();
+  });
+
+  it("refuses off when the owner has a slot fence, since a limit has been in force", async () => {
+    await seed();
+    await store.put({ pk, sk: "LIMIT#ACTIVE_JOBS", version: 0, jobId: "other", jobVersion: 0 });
+    const before = structuredClone([...(store as import("../server/store").MemoryStore).rows]);
+    expect(await reconcile("off")).toContain("OwnerActiveJobLimitRecorded");
+    expect(process.exitCode).toBe(1);
+    expect([...(store as import("../server/store").MemoryStore).rows]).toEqual(before);
+  });
+
+  it("claims a slot with the attachment when there is room", async () => {
+    await seed();
+    await reconcile("2");
+    expect(process.exitCode).toBeUndefined();
+    expect((await store.get(pk, "JOB#paused-job"))!).toMatchObject({ version: 3, job: { status: "searching", runpodId: "provider-1" } });
+    expect(await store.get(pk, "LIMIT#ACTIVE_JOBS")).toMatchObject({ version: 0, jobId: "paused-job", jobVersion: 3 });
+  });
+
+  it("attaches with off when no limit has ever been in force", async () => {
+    await seed();
+    await reconcile("off");
+    expect(process.exitCode).toBeUndefined();
+    expect((await store.get(pk, "JOB#paused-job"))!.job).toMatchObject({ status: "searching" });
+    expect(await store.get(pk, "LIMIT#ACTIVE_JOBS")).toBeUndefined();
+  });
 });

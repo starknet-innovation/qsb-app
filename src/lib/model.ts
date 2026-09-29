@@ -130,6 +130,8 @@ export type Job = {
   gpuSubmissions?: number;
   /** Durable worst-case GPU seconds reserved before paid POSTs; never refunded. */
   gpuBudgetReservedSeconds?: number;
+  /** How much of gpuBudgetReservedSeconds the owner's GPU budget has been charged (QSB_OWNER_MAX_GPU_SECONDS). */
+  ownerGpuChargedSeconds?: number;
   /** Legacy storage field: interpreted only with computeProvider for AWS jobs. */
   runpodId?: string;
   computeProvider?: "aws-batch" | "runpod";

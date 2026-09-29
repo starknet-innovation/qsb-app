@@ -129,3 +129,37 @@ variable "mainnet_enabled" {
     error_message = "mainnet_enabled is only supported on mainnet."
   }
 }
+variable "owner_allowlist" {
+  description = "Partner-phase owner allowlist (QSB_OWNER_ALLOWLIST) for the API and coordinator. Empty allows every signed-in owner, as today. When set, only these Bitcoin addresses may register vaults, deposit, or create or resume withdrawals, and the coordinator pauses other owners' withdrawals. Lambda environments hold 4 KB in all, so keep it to a short partner list."
+  type        = set(string)
+  default     = []
+  nullable    = false
+  validation {
+    condition     = alltrue([for address in var.owner_allowlist : can(regex("^[A-Za-z0-9]{14,100}$", address))])
+    error_message = "List Bitcoin addresses exactly as the wallet signs in with them."
+  }
+  # Both Lambdas get the list; this leaves either one room for its other variables under the
+  # 4 KB environment limit, so an apply can't update one and fail the other.
+  validation {
+    condition     = length(join(",", var.owner_allowlist)) <= 2500
+    error_message = "The allowlist must stay within 2500 characters, joined with commas, to fit the 4 KB Lambda environment."
+  }
+}
+variable "owner_max_active_jobs" {
+  description = "Most withdrawals one owner may have queued or searching at once (QSB_OWNER_MAX_ACTIVE_JOBS); pausing frees a slot and resume claims one. Null: no limit. The reconcile CLI must be given the same value, or off."
+  type        = number
+  default     = null
+  validation {
+    condition     = var.owner_max_active_jobs == null ? true : var.owner_max_active_jobs >= 1 && var.owner_max_active_jobs <= 9007199254740991 && floor(var.owner_max_active_jobs) == var.owner_max_active_jobs
+    error_message = "Use a positive integer up to 9007199254740991, or null for no limit."
+  }
+}
+variable "owner_max_gpu_seconds" {
+  description = "GPU seconds one owner may reserve across all of its withdrawals, never refunded (QSB_OWNER_MAX_GPU_SECONDS). It only adds to the per-job cap in server/gpu-spend.json, and must cover at least one submission's reservation. Null: no owner budget."
+  type        = number
+  default     = null
+  validation {
+    condition     = var.owner_max_gpu_seconds == null ? true : var.owner_max_gpu_seconds >= ceil(local.gpu_spend.executionTimeoutMs / 1000) && var.owner_max_gpu_seconds <= 9007199254740991 && floor(var.owner_max_gpu_seconds) == var.owner_max_gpu_seconds
+    error_message = "Use an integer number of seconds of at least one submission's reservation (executionTimeoutMs in server/gpu-spend.json), or null for no owner budget."
+  }
+}

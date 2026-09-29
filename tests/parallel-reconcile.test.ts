@@ -35,7 +35,7 @@ const job = async () => (await store.get(pk, sk))!.job as Job;
 const run = (decision: ReconciliationDecision) =>
   reconcileUnknownSubmission({
     store, owner, jobId, decision, lookup, now,
-    log: () => {}, resumePolling, pollingAllowed: () => true,
+    log: () => {}, resumePolling, pollingAllowed: () => true, maxActiveJobs: null,
   });
 async function seed(slots: SearchSlot[], extra: Partial<Job> = {}) {
   await store.put({

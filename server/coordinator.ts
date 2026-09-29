@@ -18,6 +18,12 @@ import { candidateOutput, applyVerifiedHit } from "./candidate-output";
 import { parallelTick } from "./parallel-search";
 import { gpuSpendLimits, nextGpuReservation } from "./gpu-spend";
 import {
+  OWNER_GPU_BUDGET_REACHED,
+  OwnerGpuBudget,
+  ownerAllowed,
+  saveGpuReservation,
+} from "./owner-limits";
+import {
   HOST_HIT_CAPACITY,
   publishedHitRecords,
 } from "./runtime/coverage-ledger";
@@ -84,7 +90,11 @@ export async function handler(event: Event | { action: "providerHealth" }) {
     )
   )
     return { ...event, done: true };
-  if (!transactionsEnabled || !rehearsalAddressAllowed(event.owner)) {
+  if (
+    !transactionsEnabled ||
+    !rehearsalAddressAllowed(event.owner) ||
+    !ownerAllowed(event.owner)
+  ) {
     // Capture an uncertain POST before replacing the searching status marker.
     // Otherwise /resume could mistake this paused job for unsubmitted work.
     if (job.status === "searching" && !job.runpodId) {
@@ -183,6 +193,7 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       await save();
       return { ...event, done: true };
     }
+    const ownerBudget = await OwnerGpuBudget.open(store, event.owner);
     let reservedSeconds: number;
     try {
       reservedSeconds = nextGpuReservation(
@@ -193,6 +204,8 @@ export async function handler(event: Event | { action: "providerHealth" }) {
         throw new Error(
           "GPU-time budget reached. Further GPU work needs a reviewed budget change.",
         );
+      // An owner budget only adds a refusal; the per-job cap above still applies.
+      ownerBudget?.check(job, reservedSeconds);
     } catch (error) {
       job.status = "paused";
       job.error =
@@ -249,17 +262,35 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       return { ...event, done: true };
     }
     // This reservation and the never-resubmit marker share the same conditional
-    // write. No result status refunds time, including a lost POST response.
-    job.gpuBudgetReservedSeconds = reservedSeconds;
-    job.gpuSubmissions = (job.gpuSubmissions ?? 0) + 1;
-    job.status = "searching";
-    job.computeProvider = "aws-batch";
-    job.batchSubmission = submit.identity;
-    delete job.batchReplacementFor;
-    job.submissionStartedAt = new Date().toISOString();
-    delete job.retryRequested;
-    delete job.oneSubmissionAllowed;
-    await save();
+    // write, with the owner's GPU budget when one is set. No result status refunds
+    // time, including a lost POST response.
+    const submissionStartedAt = new Date().toISOString();
+    const reserved = await saveGpuReservation(
+      store,
+      row,
+      row.version,
+      job,
+      reservedSeconds,
+      ownerBudget,
+      (next) => {
+        next.gpuBudgetReservedSeconds = reservedSeconds;
+        next.gpuSubmissions = (next.gpuSubmissions ?? 0) + 1;
+        next.status = "searching";
+        next.computeProvider = "aws-batch";
+        next.batchSubmission = submit.identity;
+        delete next.batchReplacementFor;
+        next.submissionStartedAt = submissionStartedAt;
+        delete next.retryRequested;
+        delete next.oneSubmissionAllowed;
+      },
+    );
+    if (!reserved) {
+      // Another withdrawal of this owner used the budget after the check above.
+      job.status = "paused";
+      job.error = OWNER_GPU_BUDGET_REACHED;
+      await save();
+      return { ...event, done: true };
+    }
     const result = await submit();
     job.runpodId = result.id;
     await store.put({ ...row, version: row.version + 2, job }, row.version + 1);
