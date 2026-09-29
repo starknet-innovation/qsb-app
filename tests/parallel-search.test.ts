@@ -339,19 +339,45 @@ it("starts no new paid POST once a tick has run past its fill deadline", async (
   clock.mockRestore();
 });
 
-it("re-checks the deadline after a slow preparation, before reserving or sending anything", async () => {
+it("a slow preparation never stalls the first chunk, but stops further chunks that tick", async () => {
   let now = 1_000_000;
   const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
   await seed();
-  mocks.prepareRun.mockImplementationOnce(async (_image, input) => {
-    now += 25_000; // preparation alone overruns the deadline
-    return Object.assign(() => mocks.run(input), { identity: identity(1) });
+  let prepared = 0;
+  mocks.prepareRun.mockImplementation(async (_image, input) => {
+    prepared++;
+    now += 25_000; // every preparation alone overruns the deadline
+    return Object.assign(() => mocks.run(input), { identity: identity(prepared) });
   });
+  mocks.run.mockImplementation(async (input) => ({ id: `compute-${input.attempt}` }));
+  await handler(event);
+  let job = await saved();
+  // The first chunk is sent despite the slow preparation; nothing more starts this tick.
+  expect(mocks.run.mock.calls.map((c) => c[0].attempt)).toEqual([0]);
+  expect(job.parallelSlots!.map((s) => s.attempt)).toEqual([0]);
+  expect(job.gpuBudgetReservedSeconds).toBe(900);
+  // Each later tick still makes progress, one chunk at a time, while preparation stays slow.
+  await handler(event);
+  job = await saved();
+  expect(mocks.run.mock.calls.map((c) => c[0].attempt)).toEqual([0, 1]);
+  clock.mockRestore();
+});
+
+it("stops before a second chunk's intent when its preparation overran the deadline", async () => {
+  let now = 1_000_000;
+  const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+  await seed();
+  let prepared = 0;
+  mocks.prepareRun.mockImplementation(async (_image, input) => {
+    if (++prepared === 2) now += 25_000; // the first is fast, the second overruns
+    return Object.assign(() => mocks.run(input), { identity: identity(prepared) });
+  });
+  mocks.run.mockImplementation(async (input) => ({ id: `compute-${input.attempt}` }));
   await handler(event);
   const job = await saved();
-  expect(mocks.run).not.toHaveBeenCalled();
-  expect(job.parallelSlots).toEqual([]);
-  expect(job.gpuBudgetReservedSeconds).toBe(0);
+  expect(mocks.run.mock.calls.map((c) => c[0].attempt)).toEqual([0]);
+  expect(job.parallelSlots!.map((s) => s.attempt)).toEqual([0]);
+  expect(job.gpuBudgetReservedSeconds).toBe(900);
   clock.mockRestore();
 });
 

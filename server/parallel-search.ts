@@ -309,6 +309,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     );
     let attempt = job.attempt;
     let parameters: { parameterBase64: string; parameterSha256: string } | undefined;
+    let sent = 0;
     while (slots.length < gpuSpendLimits.workersMax) {
       if (Date.now() - tickStarted > FILL_DEADLINE_MS) break;
       while (assigned.has(attempt) || completed.has(attempt)) attempt++;
@@ -373,9 +374,11 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
           "Solver contract, compute provider configuration or public input upload unconfirmed; nothing was submitted. Resume after correcting preparation.";
         break;
       }
-      // Preparation can be slow: re-check the deadline before committing to a paid POST.
-      // Nothing is reserved or sent yet; the uploaded public input is simply unused.
-      if (Date.now() - tickStarted > FILL_DEADLINE_MS) break;
+      // Preparation can be slow: once this tick has sent a chunk, re-check the deadline
+      // before committing to another paid POST (nothing is reserved or sent yet; the
+      // uploaded public input is simply unused). The first chunk always goes ahead, as on
+      // the single-GPU path, so a slow preparation can't stall the search.
+      if (sent > 0 && Date.now() - tickStarted > FILL_DEADLINE_MS) break;
       // This slot, its reservation and the never-resubmit marker share one conditional
       // write before the paid POST. No result refunds time, including a lost response.
       const slot: SearchSlot = {
@@ -396,6 +399,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       const result = await submit();
       slot.runpodId = result.id;
       await persist();
+      sent++;
     }
   }
   job.updatedAt = new Date().toISOString();
