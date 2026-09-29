@@ -339,6 +339,22 @@ it("starts no new paid POST once a tick has run past its fill deadline", async (
   clock.mockRestore();
 });
 
+it("re-checks the deadline after a slow preparation, before reserving or sending anything", async () => {
+  let now = 1_000_000;
+  const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+  await seed();
+  mocks.prepareRun.mockImplementationOnce(async (_image, input) => {
+    now += 25_000; // preparation alone overruns the deadline
+    return Object.assign(() => mocks.run(input), { identity: identity(1) });
+  });
+  await handler(event);
+  const job = await saved();
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(job.parallelSlots).toEqual([]);
+  expect(job.gpuBudgetReservedSeconds).toBe(0);
+  clock.mockRestore();
+});
+
 it("pauses an older searching job with no provider ID or request identity instead of sending new work", async () => {
   await seed({ status: "searching", attempt: 3 });
   expect(await handler(event)).toMatchObject({ done: true });

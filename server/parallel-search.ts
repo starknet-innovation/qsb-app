@@ -373,6 +373,9 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
           "Solver contract, compute provider configuration or public input upload unconfirmed; nothing was submitted. Resume after correcting preparation.";
         break;
       }
+      // Preparation can be slow: re-check the deadline before committing to a paid POST.
+      // Nothing is reserved or sent yet; the uploaded public input is simply unused.
+      if (Date.now() - tickStarted > FILL_DEADLINE_MS) break;
       // This slot, its reservation and the never-resubmit marker share one conditional
       // write before the paid POST. No result refunds time, including a lost response.
       const slot: SearchSlot = {
