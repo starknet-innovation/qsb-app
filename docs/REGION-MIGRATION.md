@@ -53,6 +53,8 @@ Nothing live changes in this phase.
    - Create a permission set for the QSB operator (for example `QsbOperator`). Assign it to the QSB owner in the new
      account. It gets its inline policy in step 4. Keep its session duration at one hour; `qsb-operator` sessions
      are an hour at most anyway.
+   - Keep the access portal's session short too (for example one hour). It limits how long a stolen CLI sign-in
+     token stays usable.
    - **MFA.** The two access roles no longer check MFA themselves, because Identity Center enforces it for the
      whole instance, not per permission set. Confirm that Identity Center prompts for MFA at every sign-in
      ("always-on") and requires users to register an MFA device.
@@ -87,9 +89,10 @@ Nothing live changes in this phase.
    - The two access roles trust only the permission set's role. There's no IAM user.
    - Render `permission-set.json` with `python3 ops/github-aws/access.py INVENTORY OUTPUT_DIR` and attach it to the
      permission set as its inline policy. It allows assuming those two roles and nothing else.
-   - Then check with `verify_access.py --profile qsb-view --inventory INVENTORY --live`. That exercises the trust.
-     The permission set's inline policy lives in Identity Center, and no tool here reads it, so the AWS admin
-     confirms by hand that it equals `permission-set.json`.
+   - Then check with `verify_access.py --profile qsb-view --inventory INVENTORY --live`. It simulates the
+     installed roles, and the role Identity Center provisions in this account for the permission set, so it tests
+     the permission set's installed policy, not the rendered file. It fails until the permission set is assigned to
+     the account.
 5. **GPU stack** (operator, new account).
    - **Init** with the new state bucket: `-backend-config=region=eu-west-2 -backend-config=key=qsb/gpu/terraform.tfstate`.
    - **Tfvars:** the new `aws_account_id`, `region = "eu-west-2"`, the `gpu_ami` from step 2, `vpc_id`, `subnets`, the GPU
@@ -110,8 +113,11 @@ Nothing live changes in this phase.
 7. **Register the edge IDs** (temp admin).
    - Add the new CloudFront distribution, API, origin access control and response-headers IDs to the inventory.
    - Run `update_installed.py` as a plan, then with `--apply`. From then on `qsb-operator` manages the whole stack.
-     If it refuses because the number of operator policies changed, the AWS admin runs
-     `bootstrap_access.py --resume`, which adds only the missing policy, then re-runs the update.
+     The `UNREGISTERED` placeholder keeps the operator policy count the same, so this shouldn't happen. If it
+     refuses anyway because the count changed, stop. The AWS admin then creates the extra `qsb-operator-<n>`
+     managed policy under `/qsb/bootstrap/` with the document `access.py INVENTORY DIR` renders, attaches it to
+     `qsb-operator`, and re-runs the update. `bootstrap_access.py --resume` can't do this: it refuses policies that
+     differ from the render.
    - Then the AWS admin removes the temp admin role.
 8. **Client code** (AWS admin, with the key holder).
    - Create `qsb/slipstream` in the new account in eu-west-2 with `{"client_code": "…"}`, as in `terraform/README.md`

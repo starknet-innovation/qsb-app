@@ -5,14 +5,14 @@ Without --live, simulates the rendered documents. With --live, simulates the
 installed qsb-operator and qsb-viewonly roles (which also covers ViewOnlyAccess) and,
 with an IAM user, that user.
 
-In an Identity Center account the permission set's policy lives in Identity Center,
-which this account's roles can't read: the checks simulate the rendered
-permission-set.json. So --live then fails unless --permission-set-confirmed says the
-administrator has confirmed the installed inline policy equals it.
+In an Identity Center account, --live simulates the role Identity Center provisions
+in this account for the permission set (AWSReservedSSO_<name>_<suffix>, which carries
+the permission set's policies). It fails if there isn't exactly one such role.
 Read-only; works from the qsb-viewonly role. Prints case names and decisions only.
 """
 import argparse
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -22,9 +22,6 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--profile', required=True)
 p.add_argument('--inventory', type=Path, required=True)
 p.add_argument('--live', action='store_true')
-p.add_argument('--permission-set-confirmed', action='store_true',
-               help="with --live in an Identity Center account: the administrator confirmed the permission set's "
-                    'installed inline policy equals the rendered permission-set.json')
 a = p.parse_args()
 c = json.loads(a.inventory.read_text())
 out = access(c)
@@ -154,11 +151,19 @@ user_cases = [
 ]
 if out['user']:
     simulate('user', [human['inline']], iam('user/qsb/operators/' + c['operator_user']), user_cases)
+elif a.live:
+    # The installed permission set, as provisioned into this account: exactly one reserved role for it.
+    r = subprocess.run(['aws', '--profile', a.profile, '--region', region, '--output', 'json', 'iam', 'list-roles',
+                        '--path-prefix', '/aws-reserved/sso.amazonaws.com/'], capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit('permission set: listing the Identity Center roles failed')
+    name = re.compile(rf"AWSReservedSSO_{re.escape(human['name'])}_[0-9A-Za-z]{{16}}")
+    matches = [role['Arn'] for role in json.loads(r.stdout)['Roles'] if name.fullmatch(role['RoleName'])]
+    if len(matches) != 1:
+        raise SystemExit(f"permission set: expected one provisioned role for {human['name']}, found {len(matches)}; "
+                         'is it assigned to this account?')
+    simulate('permission set', [human['inline']], matches[0], user_cases)
 else:
     simulate('permission set (rendered)', [human['inline']], None, user_cases)
 total = len(operator_cases) + len(viewonly_cases) + len(gpu_cases) + len(user_cases)
 print(f'Passed {total} IAM simulations.', flush=True)
-if a.live and not out['user'] and not a.permission_set_confirmed:
-    raise SystemExit("Live check incomplete: the permission set's installed policy lives in Identity Center and "
-                     'was not read. Once the administrator confirms it equals permission-set.json, re-run with '
-                     '--permission-set-confirmed.')
