@@ -69,8 +69,8 @@ Nothing live changes in this phase.
    - **GPU capacity.** Check that `g5.xlarge` is offered in the subnets you'll use:
      `aws ec2 describe-instance-type-offerings --region eu-west-2 --location-type availability-zone --filters Name=instance-type,Values=g5.xlarge`.
      Then request the Service Quotas "Running On-Demand G and VT instances" quota, at least the compute
-     environment's maximum vCPUs. That's 32 today: `workersMax` 8 in `server/gpu-spend.json`, times 4 vCPUs per
-     `g5.xlarge`, the same as the approved eu-west-1 quota. A lower quota caps how many GPUs a withdrawal can use.
+     environment's maximum vCPUs. That's 64 today: `workersMax` 16 in `server/gpu-spend.json`, times 4 vCPUs per
+     `g5.xlarge`. A lower quota caps how many GPUs a withdrawal can use.
    - **GPU AMI.** Find the Ireland AMI's name with `aws ec2 describe-images --region eu-west-1 --image-ids ami-05db4db06e751ab89 --query 'Images[0].Name'`.
      Then find the image with the same name in eu-west-2:
      `aws ec2 describe-images --region eu-west-2 --owners amazon --filters Name=name,Values=<that name> --query 'Images[0].ImageId'`.
