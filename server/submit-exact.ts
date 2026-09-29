@@ -52,6 +52,13 @@ export async function submitExact(
       "qsb-supervised-service-v1"
   )
     throw new ChainError("Job is not a coordinator withdrawal.", "job_unsupported");
+  // A job without a solution can't be submitted yet. assertStoredJobSpend would refuse it
+  // too, as a spend mismatch, before any other read; this only says why.
+  if (!job.solution)
+    throw new ChainError(
+      "Withdrawal is not ready for authorization.",
+      "job_state_invalid",
+    );
   assertStoredJobSpend(job, raw);
   const txid = transactionId(raw);
   const rawHash = createHash("sha256").update(raw.toLowerCase()).digest("hex");

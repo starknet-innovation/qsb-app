@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
@@ -99,6 +100,7 @@ function signedWithdrawal(record: StoredSpendRecord): string {
   tx.updateInput(1, { finalScriptSig: Uint8Array.of(0x01) }, true);
   return hex.encode(tx.toBytes(true, true));
 }
+const tx = (raw: string) => btc.Transaction.fromRaw(hex.decode(raw), opts);
 /** An unsigned deposit paying `value` to the vault script at output 0. */
 function deposit(value = 50_000n) {
   const tx = new btc.Transaction({ ...opts, version: 2 });
@@ -148,7 +150,8 @@ async function setup() {
     method: "GET" | "POST",
     path: string,
     body?: unknown,
-    options: { auth?: string | null; app?: Partial<typeof deps>; raw?: string } = {},
+    // `raw` sends a body as is; `stream` sends it without a length, so bodyLimit counts it.
+    options: { auth?: string | null; app?: Partial<typeof deps>; raw?: string; stream?: string } = {},
   ) => {
     const auth = options.auth === undefined ? token : options.auth;
     return createApp(store, { ...deps, ...options.app }).request(
@@ -158,7 +161,11 @@ async function setup() {
           "content-type": "application/json",
           ...(auth ? { authorization: "Bearer " + auth } : {}),
         },
-        body: options.raw ?? (body === undefined ? undefined : JSON.stringify(body)),
+        body:
+          options.stream !== undefined
+            ? new Blob([options.stream]).stream()
+            : (options.raw ?? (body === undefined ? undefined : JSON.stringify(body))),
+        ...(options.stream !== undefined ? { duplex: "half" } : {}),
       }),
     );
   };
@@ -189,12 +196,36 @@ const previousTx = (f: Fixture) => {
   f.routes.set(`/tx/${previous.id}/hex`, () => new Response(hex.encode(previous.toBytes(true, true))));
   return previous.id;
 };
+/** Serve the previous transaction as confirmed, and its output 0 as spent or not. */
+const confirmedPrevious = (f: Fixture, spent: boolean) => {
+  const id = previousTx(f);
+  f.routes.set(`/tx/${id}/status`, () => Response.json({ confirmed: true, block_height: 10, block_hash: "ee".repeat(32) }));
+  f.routes.set("/block-height/10", () => new Response("ee".repeat(32)));
+  f.routes.set("/blocks/tip/height", () => new Response("12"));
+  f.routes.set(`/tx/${id}/outspend/0`, () => Response.json({ spent }));
+  return id;
+};
+/** A vault holding a submitted deposit whose stored bytes the server can resend. */
+const resendable = async (f: Fixture) => {
+  const raw = deposit();
+  await f.putVault({ status: "submitted", funding: { txid: tx(raw).id, vout: 0, value: "50000" } }, { fundingRawTxHex: raw });
+};
+/** A real Slipstream whose HTTP answers come from `answer`; the credential needs no secret. */
+const slipstreamWith = (answer: () => Response) => {
+  vi.stubGlobal("fetch", vi.fn(async () => answer()));
+  return new Slipstream("https://slipstream.mara.com", async () => undefined);
+};
 
 // Each case drives one error path. Together they cover every listed code.
 const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>][] = [
   ["invalid_request", 400, (f) => f.call("POST", "/auth/challenge", {})],
   ["request_too_large", 413, (f) => f.call("POST", "/auth/challenge", { address: "x".repeat(200_000) })],
-  ["internal_error", 500, (f) => f.call("POST", "/auth/challenge", undefined, { raw: "{" })],
+  ["invalid_request", 400, (f) => f.call("POST", "/auth/challenge", undefined, { raw: "{" })],
+  ["request_too_large", 413, (f) => f.call("POST", "/auth/challenge", undefined, { stream: JSON.stringify({ address: "x".repeat(200_000) }) })],
+  ["internal_error", 500, (f) => {
+    vi.spyOn(f.chain, "paymentUtxos").mockRejectedValue(new Error("unexpected"));
+    return f.call("GET", "/payment-utxos");
+  }],
   ["network_mismatch", 400, (f) => f.call("POST", "/auth/challenge", { address: "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx" })],
   ["challenge_expired", 401, (f) => f.call("POST", "/auth/verify", { id: other, signature: "aa" })],
   ["signature_invalid", 401, async (f) => {
@@ -248,7 +279,14 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
     genesis(f, "00".repeat(32));
     return f.call("GET", "/payment-utxos");
   }],
-  ["input_unavailable", 409, (f) => f.call("POST", "/payment-input", { txid: previousTx(f), vout: 0, value: "69999" })],
+  ["input_mismatch", 409, (f) => f.call("POST", "/payment-input", { txid: previousTx(f), vout: 0, value: "69999" })],
+  ["input_unconfirmed", 409, (f) => {
+    const id = previousTx(f);
+    f.routes.set(`/tx/${id}/status`, () => Response.json({ confirmed: false }));
+    f.routes.set(`/tx/${id}/outspend/0`, () => Response.json({ spent: false }));
+    return f.call("POST", "/payment-input", { txid: id, vout: 0, value: "70000" });
+  }],
+  ["input_spent", 409, (f) => f.call("POST", "/payment-input", { txid: confirmedPrevious(f, true), vout: 0, value: "70000" })],
   ["vault_not_confirmed", 409, async (f) => {
     await f.putVault({ status: "submitted", funding: manifest.funding });
     return f.call("POST", "/jobs", manifest);
@@ -325,7 +363,11 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
     return f.call("GET", `/transactions/${"cd".repeat(32)}/status`);
   }],
   ["exact_spend_mismatch", 409, async (f) => {
-    await f.putJob();
+    await f.putJob({ solution });
+    return f.call("POST", `/jobs/${jobId}/submit`, { rawTxHex: "00" });
+  }],
+  ["job_state_invalid", 409, async (f) => {
+    await f.putJob({ status: "searching", stage: "pinning" });
     return f.call("POST", `/jobs/${jobId}/submit`, { rawTxHex: "00" });
   }],
   ["consensus_rejected", 409, async (f) => {
@@ -339,6 +381,61 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
     return f.call("POST", `/jobs/${jobId}/submit`, body);
   }],
 ];
+
+const parse = (file: string) =>
+  ts.createSourceFile(file, readFileSync(new URL(`../${file}`, import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
+const text = (node: ts.Node | undefined) =>
+  node === undefined ? "-" : ts.isStringLiteral(node) ? node.text : node.getText().replace(/\s+/g, " ");
+/** The route (`POST /api/jobs`) or function a node sits in. */
+function where(node: ts.Node): string {
+  for (let at = node.parent; at; at = at.parent) {
+    if (ts.isCallExpression(at) && ts.isPropertyAccessExpression(at.expression) && at.expression.expression.getText() === "app") {
+      const [path] = at.arguments;
+      const method = at.expression.name.text;
+      return path && ts.isStringLiteral(path) ? `${method.toUpperCase()} ${path.text}` : method;
+    }
+    if ((ts.isFunctionDeclaration(at) || ts.isMethodDeclaration(at)) && at.name) return at.name.getText();
+    if (
+      ts.isVariableDeclaration(at) &&
+      ts.isIdentifier(at.name) &&
+      at.initializer &&
+      (ts.isArrowFunction(at.initializer) || ts.isFunctionExpression(at.initializer))
+    )
+      return at.name.text;
+    if (ts.isCallExpression(at) && ts.isIdentifier(at.expression) && at.expression.text !== "apiError") return at.expression.text;
+  }
+  return "module";
+}
+/**
+ * Every error site on the default routes, as "file | where | status | code | message":
+ * each apiError call in app.ts, each thrown ChainError (and subclass), and each code
+ * attached with withApiErrorCode in server/.
+ */
+function errorSites(): string[] {
+  const sites: string[] = [];
+  const chainErrors: Record<string, string> = { ChainError: "chain_error", ChainNotFound: "chain_transaction_not_found", WithdrawalConflict: "chain_error" };
+  const files = readdirSync(new URL("../server/", import.meta.url)).filter((name) => name.endsWith(".ts")).sort();
+  for (const name of files) {
+    const file = `server/${name}`;
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+        const [, status, code, message] = node.arguments;
+        if (node.expression.text === "apiError")
+          sites.push([name, where(node), text(status), text(code), text(message)].join(" | "));
+        if (node.expression.text === "withApiErrorCode")
+          sites.push([name, where(node), "attached", text(node.arguments[0]), "-"].join(" | "));
+      }
+      if (ts.isNewExpression(node) && node.expression.getText() in chainErrors) {
+        const [message, code] = node.arguments ?? [];
+        const className = node.expression.getText();
+        sites.push([name, where(node), className, code ? text(code) : chainErrors[className], text(message)].join(" | "));
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(parse(file));
+  }
+  return sites;
+}
 
 // Provider failures that aren't an HTTP answer keep the status and body they had before
 // the codes; only `code` says what failed.
@@ -372,13 +469,106 @@ const unchanged: [ApiErrorCode, number, string, (f: Fixture) => Response | Promi
     f.routes.set(`/tx/${"ab".repeat(32)}/hex`, () => new Response("zz"));
     return f.call("POST", `/vaults/${vaultId}/fund`, { txid: "ab".repeat(32), amount: "50000", costAccepted: true });
   }],
-  ["input_unavailable", 500, retry, (f) => f.call("POST", "/payment-input", { txid: previousTx(f), vout: 5, value: "70000" })],
+  ["input_not_found", 500, retry, (f) => f.call("POST", "/payment-input", { txid: previousTx(f), vout: 5, value: "70000" })],
+  ["miner_request_failed", 500, retry, async (f) => {
+    await resendable(f);
+    const miner = slipstreamWith(() => new Response("", { status: 503 }));
+    return f.call("POST", `/vaults/${vaultId}/fund/resubmit`, {}, { app: { miner } });
+  }],
+  ["miner_request_failed", 500, retry, async (f) => {
+    await resendable(f);
+    const miner = slipstreamWith(() => {
+      throw new TypeError("fetch failed");
+    });
+    return f.call("POST", `/vaults/${vaultId}/fund/resubmit`, {}, { app: { miner } });
+  }],
+  ["miner_request_failed", 400, "Invalid request", async (f) => {
+    await resendable(f);
+    const miner = slipstreamWith(() => Response.json({ transaction: {} }));
+    return f.call("POST", `/vaults/${vaultId}/fund/resubmit`, {}, { app: { miner } });
+  }],
+  ["miner_unavailable", 500, retry, async (f) => {
+    await f.putVault();
+    const miner = new Slipstream("https://slipstream.mara.com", async () => {
+      throw new Error("secret store down");
+    });
+    return f.call("POST", `/vaults/${vaultId}/fund/submit`, { rawTxHex: deposit(), amount: "50000", costAccepted: true }, { app: { miner } });
+  }],
 ];
+
+// Refusals whose status is new in this change. Each happens before any store write,
+// reservation, workflow start, chain read or miner call.
+describe("client refusals before any side effect", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  const watch = (f: Fixture) => {
+    const writes = [vi.spyOn(f.store, "put"), vi.spyOn(f.store, "atomicPut"), vi.spyOn(f.store, "delete")];
+    const reads = [vi.spyOn(f.chain, "raw"), vi.spyOn(f.chain, "unspent"), vi.spyOn(f.chain, "status")];
+    const miner = Object.values(f.miner);
+    return () => {
+      for (const spy of [...writes, ...reads, ...miner]) expect(spy).not.toHaveBeenCalled();
+    };
+  };
+  const expectRefusal = async (response: Response, status: number, code: ApiErrorCode, error: string) =>
+    expect({ status: response.status, ...(await response.json()) }).toMatchObject({ status, code, error });
+  it.each([
+    ["POST", "/auth/challenge"],
+    ["POST", "/auth/verify"],
+    ["POST", "/payment-input"],
+    ["POST", "/vaults"],
+    ["POST", `/vaults/${vaultId}/fund`],
+    ["POST", `/vaults/${vaultId}/fund/submit`],
+    ["POST", "/jobs"],
+    ["POST", `/jobs/${jobId}/submit`],
+  ] as const)("refuses malformed JSON on %s %s with 400 invalid_request", async (method, path) => {
+    const f = await setup();
+    await f.putVault(confirmedVault);
+    await f.putJob({ solution });
+    const untouched = watch(f);
+    await expectRefusal(await f.call(method, path, undefined, { raw: "{" }), 400, "invalid_request", "Invalid request");
+    untouched();
+  });
+  it("still answers a streamed body over the limit with 413", async () => {
+    const f = await setup();
+    const response = await f.call("POST", "/jobs", undefined, { stream: JSON.stringify({ ...manifest, destination: "x".repeat(200_000) }) });
+    await expectRefusal(response, 413, "request_too_large", "Request is too large");
+  });
+  it("refuses a vault whose public state fails validation with 400 vault_invalid", async () => {
+    const f = await setup();
+    const untouched = watch(f);
+    for (const publicStateJson of ["not json", JSON.stringify({ config: "A", secret: "x" }), JSON.stringify({ config: "B", full_script_hex: scriptHex })])
+      await expectRefusal(await f.call("POST", "/vaults", vault({ publicStateJson })), 400, "vault_invalid", "Vault public state or configuration is invalid.");
+    untouched();
+  });
+  it("refuses a withdrawal to an address that doesn't decode with 400 withdrawal_invalid", async () => {
+    const f = await setup();
+    await f.putVault(confirmedVault);
+    const untouched = watch(f);
+    const response = await f.call("POST", "/jobs", { ...manifest, destination: "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx" });
+    await expectRefusal(response, 400, "withdrawal_invalid", "Destination script mismatch.");
+    untouched();
+    expect(await f.store.list(pk, "JOB#")).toEqual([]);
+  });
+  it("codes an oversized deposit as funding_transaction_invalid, before any read, write or POST", async () => {
+    const f = await setup();
+    await f.putVault();
+    const untouched = watch(f);
+    const large = btc.Transaction.fromRaw(hex.decode(deposit()), opts);
+    large.addOutput({ amount: 1n, script: new Uint8Array(76_000) });
+    const rawTxHex = hex.encode(large.toBytes(true, false));
+    expect(rawTxHex.length).toBeGreaterThan(150_000);
+    const response = await f.call("POST", `/vaults/${vaultId}/fund/submit`, { rawTxHex, amount: "50000", costAccepted: true });
+    await expectRefusal(response, 409, "funding_transaction_invalid", "ExactSpendMismatch");
+    untouched();
+  });
+});
 
 describe("API error codes", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
   it.each(cases)("returns %s with HTTP %i", async (code, status, run) => {
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -419,7 +609,8 @@ describe("API error codes", () => {
   });
   it("drives every listed code, and the list has no duplicates", () => {
     expect(new Set(API_ERROR_CODES).size).toBe(API_ERROR_CODES.length);
-    expect([...new Set(cases.map(([code]) => code))].sort()).toEqual([...API_ERROR_CODES].sort());
+    const driven = [...cases.map(([code]) => code), ...unchanged.map(([code]) => code)];
+    expect([...new Set(driven)].sort()).toEqual([...API_ERROR_CODES].sort());
   });
   it("lists every code once in docs/API.md", () => {
     const doc = readFileSync(new URL("../docs/API.md", import.meta.url), "utf8");
@@ -428,8 +619,36 @@ describe("API error codes", () => {
     );
     expect(listed.sort()).toEqual([...API_ERROR_CODES].sort());
   });
-  it("leaves no error body without a code in the default routes", () => {
-    const source = readFileSync(new URL("../server/app.ts", import.meta.url), "utf8");
-    expect(source).not.toMatch(/c\.json\(\s*\{\s*error\s*:/);
+  it("sends every error body in the default routes through apiError", () => {
+    // Any c.json/c.text/c.body/c.html with an error status or an `error` field, a non-literal
+    // status, or a hand-built Response would bypass the codes.
+    const offenders: string[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isNewExpression(node) && node.expression.getText() === "Response")
+        offenders.push(node.getText());
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.expression.getText() === "c" &&
+        ["json", "text", "body", "html", "newResponse"].includes(node.expression.name.text)
+      ) {
+        const [body, status] = node.arguments;
+        const errorField =
+          body &&
+          ts.isObjectLiteralExpression(body) &&
+          body.properties.some((p) => p.name?.getText() === "error");
+        const errorStatus =
+          status && !(ts.isNumericLiteral(status) && Number(status.text) < 400);
+        if (errorField || errorStatus) offenders.push(node.getText());
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(parse("server/app.ts"));
+    expect(offenders).toEqual([]);
+  });
+  it("keeps each error site's status, code and message", async () => {
+    // A changed code or message at any site fails here. Review a deliberate change, then
+    // update the list with `npx vitest run tests/api-errors.test.ts -u`.
+    await expect(JSON.stringify(errorSites(), null, 2) + "\n").toMatchFileSnapshot("./api-error-sites.json");
   });
 });
