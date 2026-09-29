@@ -25,11 +25,13 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error(
-      r.ok
-        ? "The API returned an invalid response. Please try again."
-        : "The app API is unavailable. Please check that the local API server is running and try again.",
-    );
+    // A non-JSON failure (a gateway 502, a plain-text 404) still reports its status.
+    if (!r.ok)
+      throw new ApiRequestError(
+        "The app API is unavailable. Please check that the local API server is running and try again.",
+        r.status,
+      );
+    throw new Error("The API returned an invalid response. Please try again.");
   }
   if (!r.ok)
     throw new ApiRequestError(

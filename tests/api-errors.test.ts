@@ -3,10 +3,16 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
+import { z } from "zod";
 import { createApp } from "../server/app";
-import { API_ERROR_CODES, type ApiErrorCode } from "../server/api-errors";
+import {
+  API_ERROR_CODES,
+  attachedApiErrorCode,
+  withApiErrorCode,
+  type ApiErrorCode,
+} from "../server/api-errors";
 import { Conflict, MemoryStore } from "../server/store";
-import { Esplora } from "../server/chain";
+import { ChainError, Esplora } from "../server/chain";
 import { ConsensusError } from "../server/consensus";
 import {
   MinerAuthenticationError,
@@ -174,6 +180,15 @@ const readyToSubmit = async (f: Fixture, overrides: Partial<Job> = {}) => {
   return { rawTxHex: signedWithdrawal(buildStoredSpendRecord(stored)) };
 };
 const other = "33333333-3333-4333-8333-333333333333";
+/** A confirmed-looking previous transaction with one 70000 sat output to the owner, served by the chain. */
+const previousTx = (f: Fixture) => {
+  const previous = new btc.Transaction(opts);
+  previous.addInput({ txid: new Uint8Array(32).fill(5), index: 0 });
+  previous.addOutputAddress(owner, 70_000n, BITCOIN_NETWORK);
+  genesis(f);
+  f.routes.set(`/tx/${previous.id}/hex`, () => new Response(hex.encode(previous.toBytes(true, true))));
+  return previous.id;
+};
 
 // Each case drives one error path. Together they cover every listed code.
 const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>][] = [
@@ -233,14 +248,7 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
     genesis(f, "00".repeat(32));
     return f.call("GET", "/payment-utxos");
   }],
-  ["input_unavailable", 409, (f) => {
-    const previous = new btc.Transaction(opts);
-    previous.addInput({ txid: new Uint8Array(32).fill(5), index: 0 });
-    previous.addOutputAddress(owner, 70_000n, BITCOIN_NETWORK);
-    genesis(f);
-    f.routes.set(`/tx/${previous.id}/hex`, () => new Response(hex.encode(previous.toBytes(true, true))));
-    return f.call("POST", "/payment-input", { txid: previous.id, vout: 0, value: "69999" });
-  }],
+  ["input_unavailable", 409, (f) => f.call("POST", "/payment-input", { txid: previousTx(f), vout: 0, value: "69999" })],
   ["vault_not_confirmed", 409, async (f) => {
     await f.putVault({ status: "submitted", funding: manifest.funding });
     return f.call("POST", "/jobs", manifest);
@@ -332,6 +340,41 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
   }],
 ];
 
+// Provider failures that aren't an HTTP answer keep the status and body they had before
+// the codes; only `code` says what failed.
+const retry = "Unable to complete the request. Please retry.";
+const unchanged: [ApiErrorCode, number, string, (f: Fixture) => Response | Promise<Response>][] = [
+  ["chain_unavailable", 500, retry, (f) => {
+    f.routes.set("/block-height/0", () => {
+      throw new TypeError("fetch failed");
+    });
+    return f.call("GET", "/payment-utxos");
+  }],
+  ["chain_unavailable", 500, retry, (f) => {
+    const broken = new ReadableStream({ start: (c) => c.error(new TypeError("terminated")) });
+    f.routes.set("/block-height/0", () => new Response(broken));
+    return f.call("GET", "/payment-utxos");
+  }],
+  ["chain_error", 400, "Invalid request", async (f) => {
+    await f.putVault({ status: "submitted", funding: { txid: "ab".repeat(32), vout: 0, value: "50000" } });
+    genesis(f);
+    f.routes.set(`/tx/${"ab".repeat(32)}/status`, () => new Response("{}"));
+    return f.call("GET", `/vaults/${vaultId}/funding`);
+  }],
+  ["chain_error", 500, retry, (f) => {
+    genesis(f);
+    f.routes.set(`/address/${owner}/utxo`, () => new Response("not json"));
+    return f.call("GET", "/payment-utxos");
+  }],
+  ["chain_error", 500, retry, async (f) => {
+    await f.putVault();
+    genesis(f);
+    f.routes.set(`/tx/${"ab".repeat(32)}/hex`, () => new Response("zz"));
+    return f.call("POST", `/vaults/${vaultId}/fund`, { txid: "ab".repeat(32), amount: "50000", costAccepted: true });
+  }],
+  ["input_unavailable", 500, retry, (f) => f.call("POST", "/payment-input", { txid: previousTx(f), vout: 5, value: "70000" })],
+];
+
 describe("API error codes", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -346,6 +389,33 @@ describe("API error codes", () => {
     expect(body.error).toEqual(expect.any(String));
     if (code === "invalid_request") expect(body.issues).toEqual(expect.any(Array));
     if (code === "operations_disabled") expect(body.checks).toEqual(expect.any(Array));
+  });
+  it.each(unchanged)("returns %s with the unchanged HTTP %i and message %j", async (code, status, error, run) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await run(await setup());
+    const body = await response.json();
+    expect({ status: response.status, code: body.code, error: body.error }).toEqual({ status, code, error });
+    if (status === 400) expect(body.issues).toEqual(expect.any(Array));
+  });
+  it("attaches a code without changing the error callers catch", async () => {
+    const f = await setup();
+    f.routes.set("/block-height/0", () => {
+      throw new TypeError("fetch failed");
+    });
+    const transport = await f.chain.assertNetwork().catch((e: unknown) => e);
+    expect(transport).toBeInstanceOf(TypeError);
+    expect(transport).not.toBeInstanceOf(ChainError);
+    expect(attachedApiErrorCode(transport)).toBe("chain_unavailable");
+    genesis(f);
+    f.routes.set(`/tx/${"ab".repeat(32)}/status`, () => new Response("{}"));
+    const malformed = await f.chain.status("ab".repeat(32)).catch((e: unknown) => e);
+    expect(malformed).toBeInstanceOf(z.ZodError);
+    expect(attachedApiErrorCode(malformed)).toBe("chain_error");
+    const inner = new Error("inner");
+    expect(() => withApiErrorCode("chain_error", () => withApiErrorCode("chain_unavailable", () => {
+      throw inner;
+    }))).toThrow(inner);
+    expect(attachedApiErrorCode(inner)).toBe("chain_unavailable");
   });
   it("drives every listed code, and the list has no duplicates", () => {
     expect(new Set(API_ERROR_CODES).size).toBe(API_ERROR_CODES.length);
