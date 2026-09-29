@@ -43,6 +43,7 @@ import type { CoordinatorSignedResult } from "./mainnet/coordinatorResult";
 import {
   parseBtc,
   formatBtc,
+  canonicalManifest,
   withdrawalSchema,
   type PublicVault,
   type Recovery,
@@ -642,7 +643,7 @@ export default function TransactionDialog({
         const intent = unlocked.authorization;
         if (
           (await digest(intent.manifestJson)) !== intent.manifestHash ||
-          (await digest(JSON.stringify(job.manifest))) !==
+          (await digest(JSON.stringify(canonicalManifest(job.manifest)))) !==
             intent.manifestHash ||
           job.manifestHash !== intent.manifestHash
         )

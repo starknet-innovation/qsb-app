@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { hex } from "@scure/base";
 import { z } from "zod";
-import { withdrawalSchema, type Job } from "../lib/model";
+import { canonicalManifest, withdrawalSchema, type Job } from "../lib/model";
 import { NETWORK_ID } from "../lib/network";
 
 const subset = z
@@ -66,11 +66,12 @@ export function coordinatorPublicSolvedResult(
   if (job.status !== "awaiting_authorization" || job.stage !== "verification")
     throw new Error("Coordinator has not published a solved result.");
   if (!job.solution) throw new Error("Coordinator solved result is incomplete.");
-  const manifestHash = digest(JSON.stringify(job.manifest));
+  const manifest = canonicalManifest(job.manifest);
+  const manifestHash = digest(JSON.stringify(manifest));
   if (
     manifestHash !== job.manifestHash ||
-    job.id !== job.manifest.idempotencyKey ||
-    job.vaultId !== job.manifest.vaultId
+    job.id !== manifest.idempotencyKey ||
+    job.vaultId !== manifest.vaultId
   )
     throw new Error("Coordinator manifest binding differs.");
   return coordinatorSolvedResultSchema.parse({
@@ -79,7 +80,7 @@ export function coordinatorPublicSolvedResult(
     jobId: job.id,
     vaultId: job.vaultId,
     manifestHash,
-    manifest: job.manifest,
+    manifest,
     solution: {
       sequence: job.solution.sequence,
       locktime: job.solution.locktime,
