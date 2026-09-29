@@ -633,6 +633,29 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden: `owner_not_allowlisted`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "owner_not_allowlisted"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "404": {
             "description": "Not found: `vault_not_found`.",
             "content": {
@@ -712,6 +735,30 @@
               }
             }
           },
+          "429": {
+            "description": "Too many requests: `owner_active_withdrawal_limit`, `owner_gpu_budget_reached`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "owner_active_withdrawal_limit",
+                            "owner_gpu_budget_reached"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "500": {
             "description": "Internal error: `input_not_found`, `chain_unavailable`, `chain_error`, `internal_error`.",
             "content": {
@@ -739,7 +786,7 @@
             }
           },
           "503": {
-            "description": "Unavailable: `operations_disabled`, `solver_not_served`.",
+            "description": "Unavailable: `operations_disabled`, `owner_limits_invalid`, `solver_not_served`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -752,6 +799,7 @@
                         "code": {
                           "enum": [
                             "operations_disabled",
+                            "owner_limits_invalid",
                             "solver_not_served"
                           ]
                         }
@@ -972,6 +1020,29 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden: `owner_not_allowlisted`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "owner_not_allowlisted"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "404": {
             "description": "Not found: `job_not_found`.",
             "content": {
@@ -1046,6 +1117,29 @@
               }
             }
           },
+          "429": {
+            "description": "Too many requests: `owner_active_withdrawal_limit`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "owner_active_withdrawal_limit"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "500": {
             "description": "Internal error: `internal_error`.",
             "content": {
@@ -1070,7 +1164,7 @@
             }
           },
           "503": {
-            "description": "Unavailable: `operations_disabled`.",
+            "description": "Unavailable: `operations_disabled`, `owner_limits_invalid`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1082,7 +1176,8 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "operations_disabled"
+                            "operations_disabled",
+                            "owner_limits_invalid"
                           ]
                         }
                       }
@@ -2228,6 +2323,29 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden: `owner_not_allowlisted`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "owner_not_allowlisted"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "409": {
             "description": "Conflict: `state_conflict`.",
             "content": {
@@ -2288,6 +2406,29 @@
                         "code": {
                           "enum": [
                             "internal_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable: `owner_limits_invalid`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "owner_limits_invalid"
                           ]
                         }
                       }
@@ -2381,6 +2522,29 @@
                           "enum": [
                             "auth_required",
                             "session_expired"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden: `owner_not_allowlisted`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "owner_not_allowlisted"
                           ]
                         }
                       }
@@ -2491,7 +2655,7 @@
             }
           },
           "503": {
-            "description": "Unavailable: `operations_disabled`.",
+            "description": "Unavailable: `operations_disabled`, `owner_limits_invalid`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2503,7 +2667,8 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "operations_disabled"
+                            "operations_disabled",
+                            "owner_limits_invalid"
                           ]
                         }
                       }
@@ -2597,6 +2762,29 @@
                           "enum": [
                             "auth_required",
                             "session_expired"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden: `owner_not_allowlisted`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "owner_not_allowlisted"
                           ]
                         }
                       }
@@ -2705,7 +2893,7 @@
             }
           },
           "503": {
-            "description": "Unavailable: `operations_disabled`, `submit_disabled`, `miner_unavailable`.",
+            "description": "Unavailable: `operations_disabled`, `submit_disabled`, `owner_limits_invalid`, `miner_unavailable`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2719,6 +2907,7 @@
                           "enum": [
                             "operations_disabled",
                             "submit_disabled",
+                            "owner_limits_invalid",
                             "miner_unavailable"
                           ]
                         }
@@ -2779,6 +2968,29 @@
                           "enum": [
                             "auth_required",
                             "session_expired"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden: `owner_not_allowlisted`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "owner_not_allowlisted"
                           ]
                         }
                       }
@@ -2858,7 +3070,7 @@
             }
           },
           "503": {
-            "description": "Unavailable: `submit_disabled`.",
+            "description": "Unavailable: `submit_disabled`, `owner_limits_invalid`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2870,7 +3082,8 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "submit_disabled"
+                            "submit_disabled",
+                            "owner_limits_invalid"
                           ]
                         }
                       }
@@ -2973,6 +3186,29 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden: `owner_not_allowlisted`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "owner_not_allowlisted"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "409": {
             "description": "Conflict: `vault_not_found`, `funding_intent_exists`, `funding_transaction_invalid`, `state_conflict`.",
             "content": {
@@ -3048,7 +3284,7 @@
             }
           },
           "503": {
-            "description": "Unavailable: `operations_disabled`, `submit_disabled`, `miner_unavailable`.",
+            "description": "Unavailable: `operations_disabled`, `submit_disabled`, `owner_limits_invalid`, `miner_unavailable`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3062,6 +3298,7 @@
                           "enum": [
                             "operations_disabled",
                             "submit_disabled",
+                            "owner_limits_invalid",
                             "miner_unavailable"
                           ]
                         }
@@ -3382,6 +3619,29 @@
               }
             }
           },
+          "403": {
+            "description": "Forbidden: `owner_not_allowlisted`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "owner_not_allowlisted"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "409": {
             "description": "Conflict: `webhook_limit_reached`, `state_conflict`.",
             "content": {
@@ -3443,6 +3703,29 @@
                         "code": {
                           "enum": [
                             "internal_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable: `owner_limits_invalid`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "owner_limits_invalid"
                           ]
                         }
                       }
@@ -3665,6 +3948,10 @@
           "network_mismatch",
           "operations_disabled",
           "submit_disabled",
+          "owner_not_allowlisted",
+          "owner_active_withdrawal_limit",
+          "owner_gpu_budget_reached",
+          "owner_limits_invalid",
           "vault_invalid",
           "vault_not_found",
           "vault_not_funded",
@@ -3705,7 +3992,7 @@
           "state_conflict",
           "internal_error"
         ],
-        "description": "A stable, machine-readable error code. Branch on it; `error` is for people and can change. A code isn't tied to one HTTP status.\n\n- `invalid_request`: Validation failed, usually of the body or a path parameter. `issues` lists each problem.\n- `request_too_large`: The request body is over the size limit.\n- `auth_required`: No well-formed `Authorization: Bearer <token>` header was sent.\n- `session_expired`: The session is unknown, expired or for another network. Sign in again.\n- `challenge_expired`: The sign-in challenge is unknown, expired, already used or for another network.\n- `signature_invalid`: The BIP-322 signature doesn't verify for the challenge.\n- `network_mismatch`: The address or vault is for a different Bitcoin network than this deployment.\n- `operations_disabled`: Deposits and withdrawals are switched off for this deployment or address.\n- `submit_disabled`: Submission to the miner is switched off.\n- `vault_invalid`: The vault's ownership, funding state or script commitment is wrong.\n- `vault_not_found`: No vault with this id for the signed-in owner.\n- `vault_not_funded`: The vault has no deposit yet.\n- `vault_not_confirmed`: The vault's deposit isn't confirmed yet.\n- `funding_intent_exists`: The vault already has a different deposit. Reconcile it; a vault takes one deposit.\n- `funding_transaction_invalid`: The deposit doesn't parse, or doesn't pay this vault the stated amount at output 0.\n- `signed_deposit_not_found`: The vault has no stored signed deposit.\n- `job_not_found`: No withdrawal job with this id for the signed-in owner.\n- `job_unsupported`: The job isn't a coordinator withdrawal, so this route doesn't serve it.\n- `job_state_invalid`: The job's current status doesn't allow this action.\n- `idempotency_conflict`: The idempotency key already belongs to a different withdrawal.\n- `withdrawal_invalid`: The withdrawal doesn't match the vault's deposit, or its destination or amounts don't balance.\n- `solver_not_served`: The requested solver release isn't served by this deployment. Nothing was reserved.\n- `solved_result_unavailable`: No solved result is available for this job.\n- `reconcile_required`: An unknown compute submission must be reconciled before the job can resume.\n- `operator_review_required`: The job's failure needs operator review.\n- `coverage_stopped`: The job's stopped search coverage can't resume on this account.\n- `intent_not_found`: No recorded transaction intent with this id.\n- `intent_conflict`: A different transaction intent already exists for this job. Reconcile it.\n- `exact_spend_mismatch`: The signed transaction doesn't match the approved inputs, output, amount and fee.\n- `consensus_rejected`: The offline Bitcoin Core consensus check refused the transaction.\n- `inclusion_check_failed`: The inclusion evidence for this transaction was refused.\n- `input_not_found`: The input's transaction has no output at this index.\n- `input_mismatch`: The input's output doesn't have the stated amount or script.\n- `input_unconfirmed`: The input's transaction is unconfirmed or was reorganized out. Wait and retry.\n- `input_spent`: The input is already spent. Choose another.\n- `chain_transaction_not_found`: The chain provider doesn't know this transaction (yet).\n- `chain_unavailable`: A chain provider request failed. Retry later.\n- `chain_error`: The chain provider's answer was malformed, inconsistent, too large or for another network.\n- `miner_unavailable`: The miner credential or authorization is unavailable.\n- `miner_request_failed`: A miner request failed, or its answer was malformed. Retry later.\n- `miner_rate_unavailable`: The miner's live fee quote is unavailable. Retry later.\n- `webhook_url_invalid`: The webhook URL isn't a URL, isn't https on port 443, or has credentials in it.\n- `webhook_url_forbidden`: The webhook URL's host is a local name, or it is or resolves to a private or reserved address.\n- `webhook_url_unresolvable`: The webhook URL's host name doesn't resolve.\n- `webhook_limit_reached`: The account already has the most webhooks it can register.\n- `webhook_not_found`: No webhook with this id for the signed-in owner.\n- `state_conflict`: The record changed during the request. Refresh and retry.\n- `internal_error`: An unexpected server error. Retry."
+        "description": "A stable, machine-readable error code. Branch on it; `error` is for people and can change. A code isn't tied to one HTTP status.\n\n- `invalid_request`: Validation failed, usually of the body or a path parameter. `issues` lists each problem.\n- `request_too_large`: The request body is over the size limit.\n- `auth_required`: No well-formed `Authorization: Bearer <token>` header was sent.\n- `session_expired`: The session is unknown, expired or for another network. Sign in again.\n- `challenge_expired`: The sign-in challenge is unknown, expired, already used or for another network.\n- `signature_invalid`: The BIP-322 signature doesn't verify for the challenge.\n- `network_mismatch`: The address or vault is for a different Bitcoin network than this deployment.\n- `operations_disabled`: Deposits and withdrawals are switched off for this deployment or address.\n- `submit_disabled`: Submission to the miner is switched off.\n- `owner_not_allowlisted`: This deployment has an owner allowlist, and it doesn't list the signed-in address.\n- `owner_active_withdrawal_limit`: The owner already has the most queued or searching withdrawals this deployment allows.\n- `owner_gpu_budget_reached`: The owner's GPU-time budget can't cover another submission. Nothing was reserved.\n- `owner_limits_invalid`: The deployment's owner-limit settings are malformed, so this action is refused.\n- `vault_invalid`: The vault's ownership, funding state or script commitment is wrong.\n- `vault_not_found`: No vault with this id for the signed-in owner.\n- `vault_not_funded`: The vault has no deposit yet.\n- `vault_not_confirmed`: The vault's deposit isn't confirmed yet.\n- `funding_intent_exists`: The vault already has a different deposit. Reconcile it; a vault takes one deposit.\n- `funding_transaction_invalid`: The deposit doesn't parse, or doesn't pay this vault the stated amount at output 0.\n- `signed_deposit_not_found`: The vault has no stored signed deposit.\n- `job_not_found`: No withdrawal job with this id for the signed-in owner.\n- `job_unsupported`: The job isn't a coordinator withdrawal, so this route doesn't serve it.\n- `job_state_invalid`: The job's current status doesn't allow this action.\n- `idempotency_conflict`: The idempotency key already belongs to a different withdrawal.\n- `withdrawal_invalid`: The withdrawal doesn't match the vault's deposit, or its destination or amounts don't balance.\n- `solver_not_served`: The requested solver release isn't served by this deployment. Nothing was reserved.\n- `solved_result_unavailable`: No solved result is available for this job.\n- `reconcile_required`: An unknown compute submission must be reconciled before the job can resume.\n- `operator_review_required`: The job's failure needs operator review.\n- `coverage_stopped`: The job's stopped search coverage can't resume on this account.\n- `intent_not_found`: No recorded transaction intent with this id.\n- `intent_conflict`: A different transaction intent already exists for this job. Reconcile it.\n- `exact_spend_mismatch`: The signed transaction doesn't match the approved inputs, output, amount and fee.\n- `consensus_rejected`: The offline Bitcoin Core consensus check refused the transaction.\n- `inclusion_check_failed`: The inclusion evidence for this transaction was refused.\n- `input_not_found`: The input's transaction has no output at this index.\n- `input_mismatch`: The input's output doesn't have the stated amount or script.\n- `input_unconfirmed`: The input's transaction is unconfirmed or was reorganized out. Wait and retry.\n- `input_spent`: The input is already spent. Choose another.\n- `chain_transaction_not_found`: The chain provider doesn't know this transaction (yet).\n- `chain_unavailable`: A chain provider request failed. Retry later.\n- `chain_error`: The chain provider's answer was malformed, inconsistent, too large or for another network.\n- `miner_unavailable`: The miner credential or authorization is unavailable.\n- `miner_request_failed`: A miner request failed, or its answer was malformed. Retry later.\n- `miner_rate_unavailable`: The miner's live fee quote is unavailable. Retry later.\n- `webhook_url_invalid`: The webhook URL isn't a URL, isn't https on port 443, or has credentials in it.\n- `webhook_url_forbidden`: The webhook URL's host is a local name, or it is or resolves to a private or reserved address.\n- `webhook_url_unresolvable`: The webhook URL's host name doesn't resolve.\n- `webhook_limit_reached`: The account already has the most webhooks it can register.\n- `webhook_not_found`: No webhook with this id for the signed-in owner.\n- `state_conflict`: The record changed during the request. Refresh and retry.\n- `internal_error`: An unexpected server error. Retry."
       },
       "ChainStatus": {
         "type": "object",
@@ -4005,6 +4292,63 @@
           },
           "computeBudget": {
             "type": "null"
+          },
+          "ownerLimits": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "allowlist": {
+                    "type": "boolean",
+                    "description": "Whether an owner allowlist is set. The list itself is never returned."
+                  },
+                  "allowlisted": {
+                    "description": "Whether the signed-in caller is on the allowlist; null without a session or an allowlist.",
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "maxActiveJobs": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The most withdrawals one owner may have queued or searching, or null."
+                  },
+                  "maxGpuSeconds": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "GPU seconds one owner may reserve across its withdrawals, or null."
+                  }
+                },
+                "required": [
+                  "allowlist",
+                  "allowlisted",
+                  "maxActiveJobs",
+                  "maxGpuSeconds"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The per-owner limits in force, or null when a limit setting is malformed."
           }
         },
         "required": [
@@ -4023,7 +4367,8 @@
           "awsRegion",
           "maxBtc",
           "withdrawalDeadline",
-          "computeBudget"
+          "computeBudget",
+          "ownerLimits"
         ],
         "additionalProperties": false
       },

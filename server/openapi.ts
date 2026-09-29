@@ -342,6 +342,26 @@ const configResponse = z.object({
   maxBtc: z.null(),
   withdrawalDeadline: z.null(),
   computeBudget: z.null(),
+  ownerLimits: describe(
+    z
+      .object({
+        allowlist: describe(z.boolean(), "Whether an owner allowlist is set. The list itself is never returned."),
+        allowlisted: describe(
+          z.boolean().nullable(),
+          "Whether the signed-in caller is on the allowlist; null without a session or an allowlist.",
+        ),
+        maxActiveJobs: describe(
+          z.number().int().nullable(),
+          "The most withdrawals one owner may have queued or searching, or null.",
+        ),
+        maxGpuSeconds: describe(
+          z.number().int().nullable(),
+          "GPU seconds one owner may reserve across its withdrawals, or null.",
+        ),
+      })
+      .nullable(),
+    "The per-owner limits in force, or null when a limit setting is malformed.",
+  ),
 });
 const transactionStatusResponse = z.object({
   txid: z.string(),
@@ -444,7 +464,7 @@ type _CreatedWebhook = Assert<
 
 type Method = "get" | "post";
 type SuccessStatus = 200 | 201 | 202;
-type ErrorStatus = 400 | 401 | 404 | 409 | 413 | 500 | 503;
+type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 503;
 type Errors = Partial<Record<ErrorStatus, readonly ApiErrorCode[]>>;
 export type ApiRoute = {
   method: Method;
@@ -525,6 +545,8 @@ export const unreachedErrorSites: Record<string, string> = {
   "transaction-checks.ts | parse":
     "assertWithdrawalSpendAgainstJob rethrows it as exact_spend_mismatch; checkWithdrawal parses the same bytes only after that passed; checkFunding isn't called by a route.",
   "transaction-checks.ts | checkFunding": "No route calls it.",
+  "owner-limits.ts | save":
+    "Only the coordinator's paid-submission save calls OwnerGpuBudget.save; no route does.",
   "providers.ts | submit": unsentPermit,
   "runtime/miner-inclusion.ts | assertBroadcastPermit": unsentPermit,
   "runtime/miner-inclusion.ts | assertPermitMinerEndpoint": unsentPermit,
@@ -650,6 +672,13 @@ const exactSubmit = source(
   }),
 );
 
+// Reading the owner limits: a malformed QSB_OWNER_* value refuses the route.
+const ownerLimitsRead = source(
+  ["owner-limits.ts | positive", "owner-limits.ts | gpuSeconds"],
+  { 503: ["owner_limits_invalid"] },
+);
+// Routes that check the owner allowlist (QSB_OWNER_ALLOWLIST).
+const allowlisted = merge(ownerLimitsRead, { 403: ["owner_not_allowlisted"] });
 // The owner's single webhook row: a registration or deletion that keeps losing its version race.
 const webhookRow = source(["webhooks.ts | update"], { 409: ["state_conflict"] });
 
@@ -776,7 +805,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     responses: {
       201: { description: "The vault was registered.", schema: vaultResponse },
     },
-    errors: merge(writes, { 400: ["vault_invalid"] }),
+    errors: merge(writes, allowlisted, { 400: ["vault_invalid"] }),
   },
   {
     method: "get",
@@ -817,7 +846,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     responses: {
       201: { description: "The deposit was recorded.", schema: vaultResponse },
     },
-    errors: merge(chainLookup, writes, fundingMatch, {
+    errors: merge(chainLookup, writes, fundingMatch, allowlisted, {
       404: ["vault_not_found"],
       409: ["network_mismatch", "funding_intent_exists"],
       503: ["operations_disabled"],
@@ -839,7 +868,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: fundingSubmissionResponse,
       },
     },
-    errors: merge(deposit, { 503: ["operations_disabled", "submit_disabled"] }),
+    errors: merge(deposit, allowlisted, { 503: ["operations_disabled", "submit_disabled"] }),
   },
   {
     method: "get",
@@ -861,7 +890,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         }),
       },
     },
-    errors: merge(fundingExport, {
+    errors: merge(fundingExport, allowlisted, {
       404: ["signed_deposit_not_found"],
       503: ["submit_disabled"],
     }),
@@ -883,7 +912,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: fundingSubmissionResponse,
       },
     },
-    errors: merge(deposit, {
+    errors: merge(deposit, allowlisted, {
       404: ["vault_not_found"],
       409: ["signed_deposit_not_found"],
       503: ["operations_disabled", "submit_disabled"],
@@ -961,7 +990,8 @@ export const apiRoutes: readonly ApiRoute[] = [
       200: { description: "The existing job.", schema: jobResponse },
       201: { description: "The job was created.", schema: jobResponse },
     },
-    errors: merge(inputCheck, writes, reservations, {
+    errors: merge(inputCheck, writes, reservations, allowlisted, {
+      429: ["owner_active_withdrawal_limit", "owner_gpu_budget_reached"],
       400: ["withdrawal_invalid"],
       404: ["vault_not_found"],
       409: [
@@ -1034,7 +1064,8 @@ export const apiRoutes: readonly ApiRoute[] = [
     responses: {
       202: { description: "The job is queued again.", schema: jobResponse },
     },
-    errors: merge(writes, {
+    errors: merge(writes, allowlisted, {
+      429: ["owner_active_withdrawal_limit"],
       404: ["job_not_found"],
       409: [
         "job_unsupported",
@@ -1107,7 +1138,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: createdWebhook,
       },
     },
-    errors: merge(writes, webhookRow, {
+    errors: merge(writes, webhookRow, allowlisted, {
       400: ["webhook_url_invalid", "webhook_url_forbidden", "webhook_url_unresolvable"],
       409: ["webhook_limit_reached"],
     }),
@@ -1251,9 +1282,11 @@ function componentSchemas(): Record<string, JsonSchema> {
 const reasons: Record<ErrorStatus, string> = {
   400: "Bad request",
   401: "Unauthorized",
+  403: "Forbidden",
   404: "Not found",
   409: "Conflict",
   413: "Request too large",
+  429: "Too many requests",
   500: "Internal error",
   503: "Unavailable",
 };

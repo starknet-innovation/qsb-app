@@ -55,6 +55,15 @@ import { outputScript } from "../src/lib/transactions";
 import { hex } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
+import {
+  OwnerGpuBudget,
+  OwnerLimitsInvalid,
+  activeWithdrawalLimitMessage,
+  claimWithdrawalSlot,
+  ownerLimits,
+  type OwnerLimits,
+} from "./owner-limits";
+import { gpuSpendLimits, nextGpuReservation } from "./gpu-spend";
 import type { FundingLedger } from "./runtime/dispatcher";
 import { canonicalReservationWrites } from "./runtime/storage-authority";
 import {
@@ -135,6 +144,8 @@ export function createApp(
     webhooks?: Partial<Delivery>;
     /** Tests only: false builds an app that records no owner events, to compare against. */
     recordEvents?: false;
+    /** Trusted test configuration; the deployment reads QSB_OWNER_* from the environment. */
+    ownerLimits?: OwnerLimits;
   } = {},
 ) {
   // Routes write through `store`, so withdrawal and deposit status changes become owner
@@ -172,6 +183,9 @@ export function createApp(
   const enabled = dependencies.enabled ?? transactionsEnabled;
   const mainnetUiOptions = { ...dependencies.mainnetUi };
   const mainnetUiRoutes = { creation: false, admission: false };
+  const limits = () => dependencies.ownerLimits ?? ownerLimits();
+  // Cost- and funds-moving routes only; sign-in and reads stay open so the app can show this.
+  const allowlisted = (owner: string) => limits().allowlist?.has(owner) ?? true;
   async function startWorkflow(job: Job) {
     if (!process.env.WORKFLOW_ARN) return;
     try {
@@ -228,6 +242,13 @@ export function createApp(
     });
   });
   app.onError((e, c) => {
+    if (e instanceof OwnerLimitsInvalid)
+      return apiError(
+        c,
+        503,
+        "owner_limits_invalid",
+        "This deployment's owner limits are misconfigured. Nothing was changed.",
+      );
     // A code attached at a boundary (a chain or miner provider, a deposit's bytes) keeps
     // the status and body its error class gets here.
     const attached = attachedApiErrorCode(e);
@@ -269,6 +290,24 @@ export function createApp(
     );
   });
   app.get("/api/health", (c) => c.json({ ok: true, network: NETWORK_ID }));
+  /** The effective owner limits, never the allowlist itself. `allowlisted` is the signed-in caller's, else null.
+   * Null when a limit is malformed: config stays readable while the gated routes refuse. */
+  async function ownerLimitsConfig(authorization = "") {
+    let current: OwnerLimits;
+    try {
+      current = limits();
+    } catch (e) {
+      if (e instanceof OwnerLimitsInvalid) return null;
+      throw e;
+    }
+    const { allowlist, maxActiveJobs, maxGpuSeconds } = current;
+    let listed: boolean | null = null;
+    if (allowlist && /^Bearer [A-Za-z0-9_-]{43}$/.test(authorization)) {
+      const session = await store.get(`SESSION#${hash(authorization.slice(7))}`, "AUTH");
+      if (session?.network === NETWORK_ID) listed = allowlist.has(session.owner as string);
+    }
+    return { allowlist: allowlist !== null, allowlisted: listed, maxActiveJobs, maxGpuSeconds };
+  }
   app.get("/api/config", async (c) => {
     c.header("Cache-Control", "no-store");
     return c.json({
@@ -289,6 +328,7 @@ export function createApp(
       maxBtc: null,
       withdrawalDeadline: null,
       computeBudget: null,
+      ownerLimits: await ownerLimitsConfig(c.req.header("Authorization")),
     });
   });
   app.get("/api/rates", async (c) => {
@@ -415,6 +455,9 @@ export function createApp(
     return c.json({ webhooks: await listWebhooks(records, c.get("owner")) });
   });
   app.post("/api/webhooks", async (c) => {
+    // Outbound requests for an owner: only allowlisted owners, when there's a list. Reads and
+    // deletion stay open.
+    if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
     const body = webhookRequest.parse(await jsonBody(c));
     c.header("Cache-Control", "no-store");
     try {
@@ -491,6 +534,8 @@ export function createApp(
     );
   });
   app.post("/api/vaults", async (c) => {
+    // A vault only its owner's withdrawal can spend: refuse it before a deposit could strand funds.
+    if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
     const vault = publicVaultSchema.parse(await jsonBody(c));
     if (
       vault.network !== NETWORK_ID ||
@@ -548,6 +593,7 @@ export function createApp(
         `${NETWORK_ID} funding is disabled pending validation and operator configuration.`,
         { checks: release.checks },
       );
+    if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
     const body = fundRequest.parse(await jsonBody(c));
     const pk = `OWNER#${c.get("owner")}`,
       sk = `VAULT#${c.req.param("id")}`;
@@ -607,6 +653,7 @@ export function createApp(
         "submit_disabled",
         "Deposit submission to the miner is disabled.",
       );
+    if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
     const body = fundSubmitRequest.parse(await jsonBody(c));
     const result = await submitDeposit(
       c.get("owner"),
@@ -628,6 +675,7 @@ export function createApp(
         "submit_disabled",
         "Deposit submission is switched off.",
       );
+    if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
     const row = await exportFunding(store, c.get("owner"), c.req.param("id"));
     if (!row)
       return apiError(
@@ -661,6 +709,7 @@ export function createApp(
         "submit_disabled",
         "Deposit submission to the miner is disabled.",
       );
+    if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
     fundResubmitRequest.parse(await c.req.json().catch(() => ({})));
     const row = await store.get(`OWNER#${c.get("owner")}`, `VAULT#${c.req.param("id")}`);
     if (!row) return apiError(c, 404, "vault_not_found", "Vault not found");
@@ -871,6 +920,9 @@ export function createApp(
         "operations_disabled",
         `${NETWORK_ID} withdrawals are disabled pending validation and operator configuration.`,
       );
+    const { allowlist, maxActiveJobs, maxGpuSeconds } = limits();
+    // Before the idempotent replay too: a replay can restart the workflow.
+    if (allowlist?.has(c.get("owner")) === false) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
     const owner = c.get("owner"),
       pk = `OWNER#${owner}`,
       id = manifest.idempotencyKey,
@@ -985,8 +1037,26 @@ export function createApp(
       gpuBudgetReservedSeconds: 0,
       revision: 0,
     };
+    // Owner limits only add refusals, and a refusal writes and starts nothing.
+    const slot =
+      maxActiveJobs === null
+        ? undefined
+        : await claimWithdrawalSlot(store, owner, id, maxActiveJobs, 0);
+    if (maxActiveJobs !== null && !slot) return apiError(c, 429, "owner_active_withdrawal_limit", activeWithdrawalLimitMessage(maxActiveJobs));
+    // Its first paid submission would pause at once, with its inputs already reserved to it.
+    const budget = await OwnerGpuBudget.open(store, owner, maxGpuSeconds);
+    if (budget?.exceeds(job, nextGpuReservation(job, gpuSpendLimits.executionTimeoutMs)))
+      return apiError(
+        c,
+        429,
+        "owner_gpu_budget_reached",
+        "This wallet has used its GPU-time budget on this deployment. No withdrawal was reserved.",
+      );
     await store.atomicPut([
       { row: { pk, sk, version: 0, job } },
+      ...(slot ? [slot] : []),
+      // A charge by another withdrawal after the check above fails this creation instead.
+      ...(budget ? [budget.creationFence()] : []),
       ...(await canonicalReservationWrites(
         store,
         [manifest.funding, manifest.helper].map((point) => ({
@@ -1062,6 +1132,9 @@ export function createApp(
         "operations_disabled",
         `${NETWORK_ID} withdrawals are disabled.`,
       );
+    // No budget check: resume may only poll paid work. It does re-claim the slot pausing freed.
+    if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
+    const { maxActiveJobs } = limits();
     const pk = `OWNER#${c.get("owner")}`,
       sk = `JOB#${c.req.param("id")}`,
       row = await store.get(pk, sk);
@@ -1124,13 +1197,21 @@ export function createApp(
         "operator_review_required",
         "This failure needs operator review.",
       );
+    // In the same transaction as the resume write; a refusal writes and starts nothing.
+    const slot =
+      maxActiveJobs === null
+        ? undefined
+        : await claimWithdrawalSlot(store, c.get("owner"), job.id, maxActiveJobs, row.version + 1);
+    if (maxActiveJobs !== null && !slot) return apiError(c, 429, "owner_active_withdrawal_limit", activeWithdrawalLimitMessage(maxActiveJobs));
     job.status = "queued";
     job.retryRequested = true;
     job.revision++;
     job.updatedAt = new Date().toISOString();
     delete job.error;
     delete job.oneSubmissionAllowed;
-    await store.put({ ...row, job, version: row.version + 1 }, row.version);
+    const resumed = { ...row, job, version: row.version + 1 };
+    if (slot) await store.atomicPut([{ row: resumed, expected: row.version }, slot]);
+    else await store.put(resumed, row.version);
     await startWorkflow(job);
     return c.json({ job }, 202);
   });

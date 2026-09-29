@@ -22,6 +22,14 @@ export const apiErrorCodes = {
   operations_disabled:
     "Deposits and withdrawals are switched off for this deployment or address.",
   submit_disabled: "Submission to the miner is switched off.",
+  owner_not_allowlisted:
+    "This deployment has an owner allowlist, and it doesn't list the signed-in address.",
+  owner_active_withdrawal_limit:
+    "The owner already has the most queued or searching withdrawals this deployment allows.",
+  owner_gpu_budget_reached:
+    "The owner's GPU-time budget can't cover another submission. Nothing was reserved.",
+  owner_limits_invalid:
+    "The deployment's owner-limit settings are malformed, so this action is refused.",
   vault_invalid:
     "The vault's ownership, funding state or script commitment is wrong.",
   vault_not_found: "No vault with this id for the signed-in owner.",

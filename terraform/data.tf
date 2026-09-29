@@ -17,6 +17,12 @@ locals {
     GPU_EXECUTION_TIMEOUT_MS = tostring(local.gpu_spend.executionTimeoutMs)
     MAX_JOB_GPU_SECONDS      = tostring(local.gpu_spend.maxJobGpuSeconds)
   }
+  # Unset switches add no keys, so a default plan leaves both environments as they were.
+  owner_limit_env = merge(
+    length(var.owner_allowlist) > 0 ? { QSB_OWNER_ALLOWLIST = join(",", sort(var.owner_allowlist)) } : {},
+    var.owner_max_active_jobs == null ? {} : { QSB_OWNER_MAX_ACTIVE_JOBS = tostring(var.owner_max_active_jobs) },
+    var.owner_max_gpu_seconds == null ? {} : { QSB_OWNER_MAX_GPU_SECONDS = tostring(var.owner_max_gpu_seconds) },
+  )
   functions = toset(["api", "coordinator", "reference"])
   mime = {
     html = "text/html; charset=utf-8", js = "application/javascript", mjs = "application/javascript",

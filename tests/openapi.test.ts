@@ -195,6 +195,7 @@ describe("OpenAPI document", () => {
       ConsensusError: 409,
       SubmitDisabled: 503,
       MinerAuthenticationError: 503,
+      OwnerLimitsInvalid: 503,
     };
     const lines = JSON.parse(
       readFileSync(new URL("./api-error-sites.json", import.meta.url), "utf8"),

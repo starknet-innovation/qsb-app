@@ -693,6 +693,19 @@ describe("webhooks", () => {
       expect(publicAddress(address)).toBe(false);
   });
 
+  it("registers webhooks only for allowlisted owners when there's a list; reads and deletion stay open", async () => {
+    const f = await setup({ ownerLimits: { allowlist: new Set(["owner-a"]), maxActiveJobs: null, maxGpuSeconds: null } });
+    const a = await f.as("owner-a"),
+      b = await f.as("owner-b");
+    expect((await a.post("/api/webhooks", { url: "https://hooks.example.com/a" })).status).toBe(201);
+    const refused = await b.post("/api/webhooks", { url: "https://hooks.example.com/b" });
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ code: "owner_not_allowlisted" });
+    expect(f.hooks.resolve).toHaveBeenCalledOnce();
+    expect(await (await b.get("/api/webhooks")).json()).toEqual({ webhooks: [] });
+    expect((await b.post("/api/webhooks/wh_missing/delete")).status).toBe(404);
+  });
+
   it("delivers a signed, thin notification to the address it checked", async () => {
     const f = await setup();
     const a = await f.as("owner-a");
