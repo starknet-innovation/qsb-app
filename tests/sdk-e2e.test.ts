@@ -86,7 +86,7 @@ async function secrets(backups: string[], wif: string, privateKey: Uint8Array, s
 function assertNothingLeaks(requests: Recorded[], values: { never: string[]; revealed: string[] }) {
   expect(requests.length).toBeGreaterThan(10);
   for (const request of requests) {
-    const sent = `${request.method} ${request.url}\n${JSON.stringify(request.headers)}\n${request.body}`;
+    const sent = `${request.method} ${request.url}\n${decodeURIComponent(request.url)}\n${JSON.stringify(request.headers)}\n${request.body}`;
     const withdrawal = request.method === "POST" && /\/api\/jobs\/[0-9a-f-]{36}\/submit$/.test(new URL(request.url).pathname);
     for (const value of [...values.never, ...(withdrawal ? [] : values.revealed)])
       expect(sent.includes(value), `${request.method} ${request.url}`).toBe(false);
