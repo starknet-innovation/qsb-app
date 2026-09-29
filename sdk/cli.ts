@@ -3,7 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { formatBtc, parseBtc } from "../src/lib/model";
-import { ApiError, QsbClient, preparedDepositSchema, type WithdrawalReview } from "./client";
+import { ApiError, QsbClient, preparedDepositSchema, publicApi, type WithdrawalReview } from "./client";
 import {
   Prompter,
   SignatureNeeded,
@@ -49,6 +49,8 @@ Withdrawals
 
 Options
   --api <url>            API origin (or QSB_API_URL)
+  --app-origin <url>     Origin the server's sign-in challenge must name (or QSB_APP_ORIGIN;
+                         default: the --api origin). Nothing else is ever signed.
   --address <address>    Payment address (or QSB_ADDRESS)
   --public-key <hex>     Its compressed public key (or QSB_PUBLIC_KEY)
   --signer <kind>        external (default): write PSBTs and challenges, read signatures back.
@@ -63,6 +65,7 @@ Options
 
 const options = {
   api: { type: "string" },
+  "app-origin": { type: "string" },
   address: { type: "string" },
   "public-key": { type: "string" },
   signer: { type: "string" },
@@ -125,6 +128,10 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
       if (value === undefined) throw new UsageError(`--${String(key)} is required.`);
       return value as NonNullable<(typeof values)[K]>;
     };
+    /** The command's words plus its id, if it takes one. */
+    const arity = (count: number) => {
+      if (positionals.length !== count) throw new UsageError("Wrong number of arguments. See --help.");
+    };
     const home = path.resolve(io.cwd, values.home ?? io.env.QSB_HOME ?? path.join(homedir(), ".qsb"));
     if (group === "logout") {
       await clearSession(home);
@@ -133,6 +140,13 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
     }
     const api = values.api ?? io.env.QSB_API_URL;
     if (!api) throw new UsageError("Set the API origin with --api or QSB_API_URL.");
+    // Public routes: no wallet needed to look at a deployment first.
+    if (group === "config" || group === "rates") {
+      arity(1);
+      const open = publicApi({ baseUrl: api, fetch: io.fetch });
+      print(await (group === "config" ? open.config() : open.rates()));
+      return 0;
+    }
     const kind = values.signer ?? "external";
     if (kind !== "external" && kind !== "test-key") throw new UsageError("--signer is external or test-key.");
     if (kind === "test-key" && !io.env.QSB_TEST_SIGNER_KEY)
@@ -159,6 +173,7 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
     const token = cache ? await loadSession(home, api, signer.address) : undefined;
     const client = new QsbClient({
       baseUrl: api,
+      appOrigin: values["app-origin"] ?? io.env.QSB_APP_ORIGIN,
       signer,
       fetch: io.fetch,
       qsb,
@@ -187,10 +202,6 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
         );
       return true as const;
     };
-    /** The command's words plus its id, if it takes one. */
-    const arity = (count: number) => {
-      if (positionals.length !== count) throw new UsageError("Wrong number of arguments. See --help.");
-    };
     const id = (label: string) => {
       if (!target) throw new UsageError(`Give the ${label} id.`);
       return target;
@@ -202,14 +213,6 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
         await client.login();
         if (cache) await saveSession(home, api, signer.address, client.token!);
         say(cache ? `Signed in as ${signer.address}; the session is cached in ${home}.` : `Signed in as ${signer.address}.`);
-        return 0;
-      case "config":
-        arity(1);
-        print(await client.config());
-        return 0;
-      case "rates":
-        arity(1);
-        print(await client.rates());
         return 0;
       case "utxos":
         arity(1);

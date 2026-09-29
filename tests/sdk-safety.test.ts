@@ -144,6 +144,68 @@ describe("withdrawals.submit", () => {
   }, 120000);
 });
 
+describe("Codex review of #91", () => {
+  it("won't submit while operations are off, even with exact submission on", async () => {
+    let operationsOff = false;
+    const s = await solvedWithdrawal(passphrase, (next) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await next(input, init);
+      if (!operationsOff || !String(input).endsWith("/api/config")) return response;
+      return new Response(JSON.stringify({ ...(await response.json()), operationsEnabled: false, exactSubmitEnabled: true }));
+    }) as typeof fetch);
+    const signed = await s.client.withdrawals.assemble(s.job.id, { backup: s.backups[1], passphrase, saveBackup: s.keep });
+    operationsOff = true;
+    const approve = vi.fn((review: { txid: string }) => review.txid);
+    await expect(s.client.withdrawals.submit(signed, { approve })).rejects.toThrow("Transactions are disabled");
+    expect(approve).not.toHaveBeenCalled();
+    expect(posts(s.w, `/jobs/${s.job.id}/submit`)).toBe(0);
+  }, 120000);
+
+  it("keeps a pending deposit unless the answer is about this vault and these bytes", async () => {
+    const pending = new Map<string, PendingDeposit>();
+    let answer: unknown;
+    const v = await createdVault(passphrase, {
+      wrap: (next) => (async (input: RequestInfo | URL, init?: RequestInit) =>
+        answer !== undefined && String(input).endsWith("/fund/submit")
+          ? new Response(JSON.stringify(answer), { status: 201 })
+          : next(input, init)) as typeof fetch,
+      options: {
+        pendingDeposits: {
+          get: async (id) => pending.get(id),
+          set: async (id, deposit) => void pending.set(id, deposit),
+          delete: async (id) => void pending.delete(id),
+        },
+      },
+    });
+    const prepared = await v.client.deposits.prepare(v.vault.id, {
+      backup: v.backups[0], passphrase, amount: 200000n, feeRate: "2", utxos: [{ txid: v.owner.fundingTxid, vout: 0 }],
+    });
+    const signed = await v.signer.signPsbt(v.signer.address, prepared.psbt, prepared.signInputs);
+    const other = { ...v.vault, id: crypto.randomUUID() };
+    for (const body of [{}, { submission: "submitted" }, { vault: other, submission: "rejected" }, { vault: v.vault, submission: "submitted" }]) {
+      answer = body;
+      await expect(v.client.deposits.submit(prepared, signed, { costAccepted: true }), JSON.stringify(body)).rejects.toThrow("isn't confirmed");
+      expect(pending.get(v.vault.id)).toBeDefined();
+    }
+    answer = undefined;
+    expect((await v.client.deposits.resubmit(v.vault.id)).submission).toBe("submitted");
+    expect(pending.get(v.vault.id)).toBeUndefined();
+  }, 120000);
+
+  it("shows the public configuration and rates without a wallet", async () => {
+    const w = world();
+    for (const command of ["config", "rates"]) {
+      const stdout = new PassThrough();
+      let out = "";
+      stdout.on("data", (chunk) => (out += chunk));
+      const code = await runCli([command], {
+        env: { QSB_API_URL: API }, stdin: Readable.from([]), stdout, stderr: new PassThrough(), interactive: false, cwd: tmpdir(), fetch: w.fetch,
+      });
+      expect(code).toBe(0);
+      expect(JSON.parse(out)).toMatchObject(command === "config" ? { network: "mainnet" } : { submit_fee_rate: 1 });
+    }
+  });
+});
+
 describe("one intent and one assembly per vault on this device", () => {
   it("won't sign a second assembly from an older backup, in a later CLI process", async () => {
     const s = await solvedWithdrawal(passphrase);

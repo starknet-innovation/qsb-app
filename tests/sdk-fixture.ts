@@ -106,6 +106,9 @@ export function world() {
     },
   } as unknown as Slipstream;
   const consensus = { verified: [] as string[], async verify(raw: string) { this.verified.push(raw); } };
+  // The sign-in challenge names APP_ORIGIN, read once here; the SDK signs only its own origin's.
+  const previousOrigin = process.env.APP_ORIGIN;
+  process.env.APP_ORIGIN = API;
   const app = createApp(store, {
     chain: new Esplora("https://esplora.invalid", chain.fetch),
     miner,
@@ -113,6 +116,8 @@ export function world() {
     exactSubmit: true,
     consensus,
   });
+  if (previousOrigin === undefined) delete process.env.APP_ORIGIN;
+  else process.env.APP_ORIGIN = previousOrigin;
   const requests: Recorded[] = [];
   const transport = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);

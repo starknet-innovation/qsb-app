@@ -106,6 +106,12 @@ export type ApproveWithdrawal = (
 export type QsbClientOptions = {
   /** The app origin, e.g. https://app.example or http://127.0.0.1:8787. */
   baseUrl: string;
+  /**
+   * The origin the server names in its sign-in challenge (its APP_ORIGIN); defaults to
+   * `baseUrl`'s origin. A challenge naming any other origin is never signed, so an endpoint
+   * can't relay another deployment's challenge to obtain a session there.
+   */
+  appOrigin?: string;
   signer: Signer;
   /** Transport; defaults to the global fetch. */
   fetch?: typeof fetch;
@@ -146,6 +152,11 @@ export const preparedDepositSchema = z
     vsize: z.number().int().positive(),
   })
   .strict();
+const depositAnswerSchema = z.object({
+  vault: publicVaultSchema,
+  submission: z.enum(["submitted", "uncertain", "rejected"]),
+  reason: z.string().optional(),
+});
 /** An unsigned deposit PSBT and its quote. Public data: nothing in it is secret. */
 export type PreparedDeposit = z.infer<typeof preparedDepositSchema>;
 
@@ -174,11 +185,32 @@ function memoryPending(): PendingDeposits {
 function decodePsbt(psbt: string | Uint8Array): Uint8Array {
   return typeof psbt === "string" ? base64.decode(psbt.trim()) : psbt;
 }
-function signInMessage(address: string) {
-  const escaped = address.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function signInMessage(address: string, origin: string) {
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(
-    `^QSB Vault sign-in\\nOrigin: [^\\n]{1,200}\\nAddress: ${escaped}\\nNetwork: bitcoin-${NETWORK_ID}\\nNonce: [0-9a-f-]{36}\\nExpires: [^\\n]{1,40}\\nThis signature authorizes this session only\\. It does not authorize a Bitcoin transaction\\.$`,
+    `^QSB Vault sign-in\\nOrigin: ${escape(origin)}\\nAddress: ${escape(address)}\\nNetwork: bitcoin-${NETWORK_ID}\\nNonce: [0-9a-f-]{36}\\nExpires: [^\\n]{1,40}\\nThis signature authorizes this session only\\. It does not authorize a Bitcoin transaction\\.$`,
   );
+}
+
+/** The HTTP transport: one origin, no redirects, a timeout, and the webapp's session client. */
+function transport(options: Pick<QsbClientOptions, "baseUrl" | "fetch" | "timeoutMs">) {
+  const origin = apiBase(options.baseUrl).href.replace(/\/$/, "");
+  const send = options.fetch ?? fetch;
+  const timeout = options.timeoutMs ?? 60000;
+  return createSessionClient(((path: string, init?: RequestInit) =>
+    send(`${origin}${path}`, {
+      ...init,
+      redirect: "error",
+      signal: AbortSignal.timeout(timeout),
+    })) as typeof fetch);
+}
+/** The unauthenticated routes, for looking at a deployment before any wallet is set up. */
+export function publicApi(options: Pick<QsbClientOptions, "baseUrl" | "fetch" | "timeoutMs">) {
+  const session = transport(options);
+  return {
+    config: () => session.api<ApiConfig>("/config"),
+    rates: () => session.api<Rates>("/rates"),
+  };
 }
 
 /**
@@ -194,6 +226,7 @@ export class QsbClient {
   private readonly qsb: LocalQsb;
   private readonly pending: PendingDeposits;
   private readonly guard: ReturnType<typeof persistentGuard>;
+  private readonly appOrigin: string;
 
   constructor(options: QsbClientOptions) {
     const base = apiBase(options.baseUrl);
@@ -204,15 +237,8 @@ export class QsbClient {
     this.qsb = options.qsb ?? nodeQsb();
     this.pending = options.pendingDeposits ?? memoryPending();
     this.guard = persistentGuard(options.authorizations ?? memoryStorage());
-    const origin = base.href.replace(/\/$/, "");
-    const send = options.fetch ?? fetch;
-    const timeout = options.timeoutMs ?? 60000;
-    this.session = createSessionClient(((path: string, init?: RequestInit) =>
-      send(`${origin}${path}`, {
-        ...init,
-        redirect: "error",
-        signal: AbortSignal.timeout(timeout),
-      })) as typeof fetch);
+    this.session = transport(options);
+    this.appOrigin = new URL(options.appOrigin ?? base.origin).origin;
     if (options.token) this.session.restoreSession(options.token);
   }
 
@@ -223,10 +249,12 @@ export class QsbClient {
 
   /** BIP-322 sign-in. The challenge must be the app's session-only message for this address. */
   async login(): Promise<void> {
-    const expected = signInMessage(this.wallet.address);
+    const expected = signInMessage(this.wallet.address, this.appOrigin);
     await this.session.authenticate(this.wallet.address, (message) => {
       if (!expected.test(message))
-        throw new Error("The sign-in challenge is not the app's session-only message. Nothing was signed.");
+        throw new Error(
+          `The sign-in challenge is not the session-only message of ${this.appOrigin} for this address. Nothing was signed.`,
+        );
       return this.signer.signMessage(this.wallet.address, message);
     });
   }
@@ -547,19 +575,27 @@ export class QsbClient {
     return this.sendDeposit(prepared.vaultId, deposit);
   }
   private async sendDeposit(vaultId: string, deposit: PendingDeposit): Promise<DepositSubmission> {
-    let result: Omit<DepositSubmission, "txid">;
+    const unconfirmed = (detail: string) =>
+      new Error(
+        `The deposit ${deposit.txid} is signed, but its submission to MARA isn't confirmed. Don't deposit again; use deposits.resubmit.${detail}`,
+      );
+    let answer: unknown;
     try {
-      result = await this.session.api<Omit<DepositSubmission, "txid">>(`/vaults/${vaultId}/fund/submit`, {
+      answer = await this.session.api<unknown>(`/vaults/${vaultId}/fund/submit`, {
         rawTxHex: deposit.rawTxHex,
         amount: deposit.amount,
         costAccepted: true,
       });
     } catch (error) {
-      const detail = error instanceof Error ? ` ${error.message}` : "";
-      throw new Error(
-        `The deposit ${deposit.txid} is signed, but its submission to MARA isn't confirmed. Don't deposit again; use deposits.resubmit.${detail}`,
-      );
+      throw unconfirmed(error instanceof Error ? ` ${error.message}` : "");
     }
+    // Only an answer about this vault and these bytes ends the pending deposit.
+    const parsed = depositAnswerSchema.safeParse(answer);
+    if (!parsed.success || parsed.data.vault.id !== vaultId) throw unconfirmed(" The server's answer was not recognized.");
+    const result = parsed.data;
+    const recorded = result.vault.funding?.txid === deposit.txid;
+    if ((result.submission === "submitted" && !recorded) || (result.submission === "rejected" && result.vault.funding))
+      throw unconfirmed(" The server's answer doesn't match this deposit.");
     if (result.submission !== "uncertain") await this.pending.delete(vaultId);
     return { ...result, txid: deposit.txid };
   }
@@ -737,7 +773,7 @@ export class QsbClient {
       throw new Error("withdrawals.submit needs an approve callback. Nothing was submitted.");
     mainnetOnly();
     const signed = coordinatorSignedResultSchema.parse(input);
-    const config = await this.assertServerNetwork();
+    const config = await this.assertOperations();
     if (config.exactSubmitEnabled !== true)
       throw new Error("Submission is disabled. Keep the signed result; nothing was broadcast.");
     const { job } = await this.withdrawals.status(signed.jobId);

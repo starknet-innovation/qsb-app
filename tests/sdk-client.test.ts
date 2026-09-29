@@ -131,6 +131,21 @@ describe("client boundaries", () => {
     await expect(client.login()).rejects.toThrow("Nothing was signed");
     expect(signMessage).not.toHaveBeenCalled();
   });
+  it("signs a challenge only when it names the expected app origin", async () => {
+    const challenge = (origin: string) =>
+      `QSB Vault sign-in\nOrigin: ${origin}\nAddress: ${signer.address}\nNetwork: bitcoin-mainnet\nNonce: ${crypto.randomUUID()}\nExpires: ${new Date().toISOString()}\nThis signature authorizes this session only. It does not authorize a Bitcoin transaction.`;
+    const serving = (origin: string) =>
+      (async (url: string) =>
+        new Response(JSON.stringify(url.endsWith("/challenge") ? { id: crypto.randomUUID(), message: challenge(origin) } : { token: "T".repeat(43) }))) as never;
+    const signMessage = vi.spyOn(signer, "signMessage");
+    signMessage.mockClear();
+    // A relayed challenge from another deployment is refused.
+    await expect(new QsbClient({ baseUrl: API, signer, fetch: serving("https://qsb.example") }).login()).rejects.toThrow("Nothing was signed");
+    expect(signMessage).not.toHaveBeenCalled();
+    await new QsbClient({ baseUrl: API, signer, fetch: serving(API) }).login();
+    await new QsbClient({ baseUrl: API, appOrigin: "https://qsb.example/", signer, fetch: serving("https://qsb.example") }).login();
+    expect(signMessage).toHaveBeenCalledTimes(2);
+  });
   it("carries a machine-readable code when the server sends one", async () => {
     const coded = new QsbClient({ baseUrl: API, signer, fetch: respond({ error: "Vault not found", code: "vault_not_found" }, 404) as never });
     await expect(coded.vaults.list()).rejects.toMatchObject({ name: "ApiError", status: 404, code: "vault_not_found", message: "Vault not found" });
