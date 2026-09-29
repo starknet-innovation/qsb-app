@@ -9,6 +9,7 @@ import {
 } from "./consensus";
 import { exactSubmitEnabled } from "./exact-submit-permit";
 import { mainnetUiConfig, type MainnetUiOptions } from "./mainnetConfig";
+import { apiError, attachedApiErrorCode } from "./api-errors";
 import {
   assertVaultConfiguration,
   pinSolver,
@@ -60,6 +61,18 @@ import {
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
+// A thrown ZodError built by parse (unlike `new z.ZodError`) is an Error, which Hono's onError needs.
+const notJson = z.custom<never>(() => false, "Request body is not valid JSON.");
+/** The request's JSON body. Malformed JSON is a 400 invalid_request, like a schema failure. */
+async function jsonBody(c: { req: { json(): Promise<unknown> } }) {
+  try {
+    return await c.req.json();
+  } catch (error) {
+    // Only a syntax error: a body over the limit must still reach bodyLimit's 413.
+    if (!(error instanceof SyntaxError)) throw error;
+    return notJson.parse(undefined);
+  }
+}
 function supervisedServiceJob(job: unknown): boolean {
   if (!job || typeof job !== "object") return false;
   const execution = (job as { execution?: { kind?: string } }).execution;
@@ -133,31 +146,49 @@ export function createApp(
     "*",
     bodyLimit({
       maxSize: 160000,
-      onError: (c) => c.json({ error: "Request is too large" }, 413),
+      onError: (c) =>
+        apiError(c, 413, "request_too_large", "Request is too large"),
     }),
   );
   app.onError((e, c) => {
-    if (e instanceof SubmitDisabled) return c.json({ error: e.message }, 503);
-    if (e instanceof ConsensusError) return c.json({ error: e.message }, 409);
+    // A code attached at a boundary (a chain or miner provider, a deposit's bytes) keeps
+    // the status and body its error class gets here.
+    const attached = attachedApiErrorCode(e);
+    if (e instanceof SubmitDisabled)
+      return apiError(c, 503, "submit_disabled", e.message);
+    if (e instanceof ConsensusError)
+      return apiError(c, 409, "consensus_rejected", e.message);
     if (e instanceof MinerAuthenticationError)
-      return c.json({ error: e.message }, 503);
+      return apiError(c, 503, "miner_unavailable", e.message);
+    // Its message is already a code; only ExactSpendMismatch has its own.
     if (e instanceof MinerInclusionError)
-      return c.json({ error: e.message }, 409);
-    if (e instanceof ChainError) return c.json({ error: e.message }, 409);
-    if (e instanceof z.ZodError)
-      return c.json(
-        {
-          error: "Invalid request",
-          issues: e.issues.map((i) => ({ path: i.path, message: i.message })),
-        },
-        400,
+      return apiError(
+        c,
+        409,
+        attached ??
+          (e.message === "ExactSpendMismatch"
+            ? "exact_spend_mismatch"
+            : "inclusion_check_failed"),
+        e.message,
       );
+    if (e instanceof ChainError) return apiError(c, 409, e.code, e.message);
+    if (e instanceof z.ZodError)
+      return apiError(c, 400, attached ?? "invalid_request", "Invalid request", {
+        issues: e.issues.map((i) => ({ path: i.path, message: i.message })),
+      });
     if (e instanceof Conflict)
-      return c.json({ error: "State changed. Refresh and try again." }, 409);
+      return apiError(
+        c,
+        409,
+        "state_conflict",
+        "State changed. Refresh and try again.",
+      );
     console.error(JSON.stringify({ error: e.name, route: c.req.path }));
-    return c.json(
-      { error: "Unable to complete the request. Please retry." },
+    return apiError(
+      c,
       500,
+      attached ?? "internal_error",
+      "Unable to complete the request. Please retry.",
     );
   });
   app.get("/api/health", (c) => c.json({ ok: true, network: NETWORK_ID }));
@@ -187,9 +218,11 @@ export function createApp(
     try {
       return c.json(await miner.rates());
     } catch {
-      return c.json(
-        { error: "Live miner fee quote is temporarily unavailable." },
+      return apiError(
+        c,
         503,
+        "miner_rate_unavailable",
+        "Live miner fee quote is temporarily unavailable.",
       );
     }
   });
@@ -197,13 +230,15 @@ export function createApp(
     const { address } = z
       .object({ address: z.string().min(14).max(100) })
       .strict()
-      .parse(await c.req.json());
+      .parse(await jsonBody(c));
     try {
       outputScript(address);
     } catch {
-      return c.json(
-        { error: "Wallet address does not match this Bitcoin network." },
+      return apiError(
+        c,
         400,
+        "network_mismatch",
+        "Wallet address does not match this Bitcoin network.",
       );
     }
     const id = randomUUID(),
@@ -224,10 +259,15 @@ export function createApp(
     const { id, signature } = z
       .object({ id: z.string().uuid(), signature: z.string().max(4096) })
       .strict()
-      .parse(await c.req.json());
+      .parse(await jsonBody(c));
     const challenge = await store.get(`CHALLENGE#${id}`, "AUTH");
     if (!challenge || challenge.network !== NETWORK_ID)
-      return c.json({ error: "Sign-in request expired or already used." }, 401);
+      return apiError(
+        c,
+        401,
+        "challenge_expired",
+        "Sign-in request expired or already used.",
+      );
     let valid = false;
     try {
       valid = Verifier.verifySignature(
@@ -237,7 +277,13 @@ export function createApp(
         true,
       );
     } catch {}
-    if (!valid) return c.json({ error: "Wallet signature is not valid." }, 401);
+    if (!valid)
+      return apiError(
+        c,
+        401,
+        "signature_invalid",
+        "Wallet signature is not valid.",
+      );
     await store.delete(challenge.pk, challenge.sk, challenge.version);
     const token = randomBytes(32).toString("base64url");
     await store.put({
@@ -262,10 +308,20 @@ export function createApp(
   async function auth(c: any, next: () => Promise<void>) {
     const bearer = c.req.header("Authorization") || "";
     if (!/^Bearer [A-Za-z0-9_-]{43}$/.test(bearer))
-      return c.json({ error: "Connect and sign in with Xverse." }, 401);
+      return apiError(
+        c,
+        401,
+        "auth_required",
+        "Connect and sign in with Xverse.",
+      );
     const session = await store.get(`SESSION#${hash(bearer.slice(7))}`, "AUTH");
     if (!session || session.network !== NETWORK_ID)
-      return c.json({ error: "Session expired. Please reconnect." }, 401);
+      return apiError(
+        c,
+        401,
+        "session_expired",
+        "Session expired. Please reconnect.",
+      );
     c.set("owner", session.owner);
     await next();
   }
@@ -288,36 +344,51 @@ export function createApp(
     c.json({ utxos: await ledger.paymentUtxos(c.get("owner")) }),
   );
   app.post("/api/payment-input", async (c) => {
-    const point = outpoint.parse(await c.req.json());
+    const point = outpoint.parse(await jsonBody(c));
     return c.json(
       await ledger.unspent(point, hex.encode(outputScript(c.get("owner")))),
     );
   });
   app.post("/api/vaults", async (c) => {
-    const vault = publicVaultSchema.parse(await c.req.json());
+    const vault = publicVaultSchema.parse(await jsonBody(c));
     if (
       vault.network !== NETWORK_ID ||
       vault.paymentAddress !== c.get("owner") ||
       vault.funding ||
       vault.status !== "unfunded"
     )
-      return c.json(
-        { error: "Invalid vault ownership or funding state." },
+      return apiError(
+        c,
         400,
+        "vault_invalid",
+        "Invalid vault ownership or funding state.",
       );
-    validatePublicState(vault.publicStateJson);
-    assertVaultConfiguration(vault);
-    vault.configuration ??= vaultConfiguration(vault);
-    const publicState = JSON.parse(vault.publicStateJson);
+    // These check the request's own public state, before any write, so a refusal is a 400.
+    let publicState;
+    try {
+      validatePublicState(vault.publicStateJson);
+      assertVaultConfiguration(vault);
+      vault.configuration ??= vaultConfiguration(vault);
+      publicState = JSON.parse(vault.publicStateJson);
+    } catch {
+      return apiError(
+        c,
+        400,
+        "vault_invalid",
+        "Vault public state or configuration is invalid.",
+      );
+    }
     if (
       publicState.full_script_hex !== vault.scriptHex ||
       createHash("sha256")
         .update(Buffer.from(vault.scriptHex, "hex"))
         .digest("hex") !== vault.scriptHash
     )
-      return c.json(
-        { error: "Vault script does not match its commitment." },
+      return apiError(
+        c,
         400,
+        "vault_invalid",
+        "Vault script does not match its commitment.",
       );
     await store.put({
       pk: `OWNER#${c.get("owner")}`,
@@ -329,12 +400,12 @@ export function createApp(
   });
   app.post("/api/vaults/:id/fund", async (c) => {
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
-      return c.json(
-        {
-          error: `${NETWORK_ID} funding is disabled pending validation and operator configuration.`,
-          checks: release.checks,
-        },
+      return apiError(
+        c,
         503,
+        "operations_disabled",
+        `${NETWORK_ID} funding is disabled pending validation and operator configuration.`,
+        { checks: release.checks },
       );
     const body = z
       .object({
@@ -343,24 +414,25 @@ export function createApp(
         costAccepted: z.literal(true),
       })
       .strict()
-      .parse(await c.req.json());
+      .parse(await jsonBody(c));
     const pk = `OWNER#${c.get("owner")}`,
       sk = `VAULT#${c.req.param("id")}`;
     const row = await store.get(pk, sk);
-    if (!row) return c.json({ error: "Vault not found" }, 404);
+    if (!row) return apiError(c, 404, "vault_not_found", "Vault not found");
     const vault = row.vault as PublicVault;
     if (vault.network !== NETWORK_ID)
-      return c.json(
-        { error: "Vault belongs to a different Bitcoin network." },
+      return apiError(
+        c,
         409,
+        "network_mismatch",
+        "Vault belongs to a different Bitcoin network.",
       );
     if (vault.status !== "unfunded" || vault.funding)
-      return c.json(
-        {
-          error:
-            "Vault already has a funding intent. Reconcile that transaction first.",
-        },
+      return apiError(
+        c,
         409,
+        "funding_intent_exists",
+        "Vault already has a funding intent. Reconcile that transaction first.",
       );
     assertVaultConfiguration(vault);
     // Xverse already broadcast this deposit. Read it from the chain provider
@@ -388,12 +460,19 @@ export function createApp(
   // deposit is submitted to MARA Slipstream. The intent is recorded before the POST.
   app.post("/api/vaults/:id/fund/submit", async (c) => {
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
-      return c.json(
-        { error: `${NETWORK_ID} funding is disabled pending validation and operator configuration.` },
+      return apiError(
+        c,
         503,
+        "operations_disabled",
+        `${NETWORK_ID} funding is disabled pending validation and operator configuration.`,
       );
     if (!(dependencies.exactSubmit ?? exactSubmitEnabled()))
-      return c.json({ error: "Deposit submission to the miner is disabled." }, 503);
+      return apiError(
+        c,
+        503,
+        "submit_disabled",
+        "Deposit submission to the miner is disabled.",
+      );
     const body = z
       .object({
         rawTxHex: z.string().regex(/^(?:[0-9a-fA-F]{2})+$/).max(200000),
@@ -401,7 +480,7 @@ export function createApp(
         costAccepted: z.literal(true),
       })
       .strict()
-      .parse(await c.req.json());
+      .parse(await jsonBody(c));
     const result = await submitFunding(
       c.get("owner"),
       c.req.param("id"),
@@ -417,9 +496,20 @@ export function createApp(
   // so disabling submission during an incident also stops the manual path.
   app.get("/api/vaults/:id/fund/signed", async (c) => {
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")) || !(dependencies.exactSubmit ?? exactSubmitEnabled()))
-      return c.json({ error: "Deposit submission is switched off." }, 503);
+      return apiError(
+        c,
+        503,
+        "submit_disabled",
+        "Deposit submission is switched off.",
+      );
     const row = await exportFunding(store, c.get("owner"), c.req.param("id"));
-    if (!row) return c.json({ error: "This vault has no stored signed deposit." }, 404);
+    if (!row)
+      return apiError(
+        c,
+        404,
+        "signed_deposit_not_found",
+        "This vault has no stored signed deposit.",
+      );
     const vault = row.vault as PublicVault;
     return c.json({
       txid: vault.funding!.txid,
@@ -432,18 +522,30 @@ export function createApp(
   // outcome and a reload. It can only confirm once; a second deposit is never created.
   app.post("/api/vaults/:id/fund/resubmit", async (c) => {
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
-      return c.json(
-        { error: `${NETWORK_ID} funding is disabled pending validation and operator configuration.` },
+      return apiError(
+        c,
         503,
+        "operations_disabled",
+        `${NETWORK_ID} funding is disabled pending validation and operator configuration.`,
       );
     if (!(dependencies.exactSubmit ?? exactSubmitEnabled()))
-      return c.json({ error: "Deposit submission to the miner is disabled." }, 503);
+      return apiError(
+        c,
+        503,
+        "submit_disabled",
+        "Deposit submission to the miner is disabled.",
+      );
     z.object({}).strict().parse(await c.req.json().catch(() => ({})));
     const row = await store.get(`OWNER#${c.get("owner")}`, `VAULT#${c.req.param("id")}`);
-    if (!row) return c.json({ error: "Vault not found" }, 404);
+    if (!row) return apiError(c, 404, "vault_not_found", "Vault not found");
     const vault = row.vault as PublicVault;
     if (!vault.funding || typeof row.fundingRawTxHex !== "string" || !row.fundingRawTxHex)
-      return c.json({ error: "This vault has no stored Slipstream deposit to resend." }, 409);
+      return apiError(
+        c,
+        409,
+        "signed_deposit_not_found",
+        "This vault has no stored Slipstream deposit to resend.",
+      );
     const result = await submitFunding(
       c.get("owner"),
       c.req.param("id"),
@@ -462,7 +564,13 @@ export function createApp(
       .parse(c.req.param("id"));
     const pk = `OWNER#${c.get("owner")}`;
     const row = await store.get(pk, `TX#${id}`);
-    if (!row) return c.json({ error: "Transaction intent not found" }, 404);
+    if (!row)
+      return apiError(
+        c,
+        404,
+        "intent_not_found",
+        "Transaction intent not found",
+      );
     const observation = await observeWithdrawal(row, ledger, miner);
     const onChain = observation.chain;
     const inMiner = observation.miner;
@@ -541,14 +649,17 @@ export function createApp(
     const pk = `OWNER#${c.get("owner")}`,
       sk = `VAULT#${c.req.param("id")}`,
       row = await store.get(pk, sk);
-    if (!row) return c.json({ error: "Vault not found" }, 404);
+    if (!row) return apiError(c, 404, "vault_not_found", "Vault not found");
     const vault = row.vault as PublicVault;
     if (vault.network !== NETWORK_ID)
-      return c.json(
-        { error: "Vault belongs to a different Bitcoin network." },
+      return apiError(
+        c,
         409,
+        "network_mismatch",
+        "Vault belongs to a different Bitcoin network.",
       );
-    if (!vault.funding) return c.json({ error: "Vault is not funded" }, 409);
+    if (!vault.funding)
+      return apiError(c, 409, "vault_not_funded", "Vault is not funded");
     // A Slipstream deposit isn't visible to the public chain API until it is mined. The
     // stored signed bytes stand in until then; they never count as confirmation.
     const stored =
@@ -582,7 +693,7 @@ export function createApp(
         .catch(async (error) => {
           if (!unseen(error)) throw error;
           const exported = await exportFunding(store, c.get("owner"), vault.id, stored);
-          if (!exported) throw new ChainError("Funding intent changed during export. Refresh the vault.");
+          if (!exported) throw new ChainError("Funding intent changed during export. Refresh the vault.", "state_conflict");
           return { previousTxHex: exported.fundingRawTxHex as string };
         })),
     });
@@ -597,39 +708,46 @@ export function createApp(
   app.get("/api/jobs/:id/solved-result", async (c) => {
     c.header("Cache-Control", "no-store");
     if (NETWORK_ID !== "mainnet")
-      return c.json(
-        { error: "Solved results are delivered on Bitcoin mainnet." },
+      return apiError(
+        c,
         404,
+        "solved_result_unavailable",
+        "Solved results are delivered on Bitcoin mainnet.",
       );
     const row = await store.get(
       `OWNER#${c.get("owner")}`,
       `JOB#${c.req.param("id")}`,
     );
-    if (!row) return c.json({ error: "Job not found" }, 404);
+    if (!row) return apiError(c, 404, "job_not_found", "Job not found");
     const job = row.job as Job;
     if (job.owner !== c.get("owner"))
-      return c.json({ error: "Job not found" }, 404);
+      return apiError(c, 404, "job_not_found", "Job not found");
     if (supervisedServiceJob(job))
-      return c.json(
-        {
-          error: "Supervised jobs are not delivered by the coordinator result.",
-        },
+      return apiError(
+        c,
         409,
+        "job_unsupported",
+        "Supervised jobs are not delivered by the coordinator result.",
       );
     try {
       return c.json(coordinatorPublicSolvedResult(job));
     } catch {
-      return c.json({ error: "Solved result is not available." }, 404);
+      return apiError(
+        c,
+        404,
+        "solved_result_unavailable",
+        "Solved result is not available.",
+      );
     }
   });
   app.post("/api/jobs", async (c) => {
-    const manifest = withdrawalSchema.parse(await c.req.json());
+    const manifest = withdrawalSchema.parse(await jsonBody(c));
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
-      return c.json(
-        {
-          error: `${NETWORK_ID} withdrawals are disabled pending validation and operator configuration.`,
-        },
+      return apiError(
+        c,
         503,
+        "operations_disabled",
+        `${NETWORK_ID} withdrawals are disabled pending validation and operator configuration.`,
       );
     const owner = c.get("owner"),
       pk = `OWNER#${owner}`,
@@ -638,9 +756,11 @@ export function createApp(
     const existing = await store.get(pk, sk);
     if (existing) {
       if ((existing.job as Job).manifestHash !== hash(JSON.stringify(manifest)))
-        return c.json(
-          { error: "Idempotency key already belongs to another withdrawal." },
+        return apiError(
+          c,
           409,
+          "idempotency_conflict",
+          "Idempotency key already belongs to another withdrawal.",
         );
       const storedJob = existing.job as Job;
       if (storedJob.status === "queued") {
@@ -656,40 +776,73 @@ export function createApp(
       return c.json({ job: existing.job });
     }
     const vault = await store.get(pk, `VAULT#${manifest.vaultId}`);
-    if (!vault) return c.json({ error: "Vault not found" }, 404);
+    if (!vault) return apiError(c, 404, "vault_not_found", "Vault not found");
     const v = vault.vault as PublicVault;
     if (v.network !== NETWORK_ID)
-      return c.json(
-        { error: "Vault belongs to a different Bitcoin network." },
+      return apiError(
+        c,
         409,
+        "network_mismatch",
+        "Vault belongs to a different Bitcoin network.",
       );
     if (v.status !== "confirmed")
-      return c.json({ error: "Vault funding is not confirmed." }, 409);
+      return apiError(
+        c,
+        409,
+        "vault_not_confirmed",
+        "Vault funding is not confirmed.",
+      );
     if (
       !v.funding ||
       (["txid", "vout", "value"] as const).some(
         (field) => v.funding![field] !== manifest.funding[field],
       )
     )
-      return c.json(
-        { error: "Funding outpoint does not match this vault." },
+      return apiError(
+        c,
         409,
+        "withdrawal_invalid",
+        "Funding outpoint does not match this vault.",
       );
-    if (
-      hex.encode(outputScript(manifest.destination)) !== manifest.outputScript
-    )
-      return c.json({ error: "Destination script mismatch." }, 400);
+    // An address that doesn't decode for this network has no script: the same 400, before
+    // any reservation or chain read.
+    let destinationScript: string | undefined;
+    try {
+      destinationScript = hex.encode(outputScript(manifest.destination));
+    } catch {}
+    if (destinationScript !== manifest.outputScript)
+      return apiError(
+        c,
+        400,
+        "withdrawal_invalid",
+        "Destination script mismatch.",
+      );
     if (BigInt(manifest.outputValue) <= 0n || BigInt(manifest.fee) <= 0n)
-      return c.json({ error: "Output and fee must be positive." }, 400);
+      return apiError(
+        c,
+        400,
+        "withdrawal_invalid",
+        "Output and fee must be positive.",
+      );
     if (
       BigInt(manifest.funding.value) + BigInt(manifest.helper.value) !==
       BigInt(manifest.outputValue) + BigInt(manifest.fee)
     )
-      return c.json({ error: "Transaction amounts do not balance." }, 400);
+      return apiError(
+        c,
+        400,
+        "withdrawal_invalid",
+        "Transaction amounts do not balance.",
+      );
     let selectedSolver: ReturnType<typeof deployedSolver>;
     try { selectedSolver = deployedSolver(manifest.solverReleaseId); }
     catch {
-      return c.json({error:"The requested solver is not served by this deployment. No withdrawal was reserved."}, 503);
+      return apiError(
+        c,
+        503,
+        "solver_not_served",
+        "The requested solver is not served by this deployment. No withdrawal was reserved.",
+      );
     }
     await ledger.unspent(manifest.funding, v.scriptHex);
     await ledger.unspent(manifest.helper, hex.encode(outputScript(owner)));
@@ -727,11 +880,16 @@ export function createApp(
   });
   app.post("/api/jobs/:id/submit", async (c) => {
     if (!(dependencies.exactSubmit ?? exactSubmitEnabled()))
-      return c.json({ error: `${NETWORK_ID} withdrawals are disabled.` }, 503);
+      return apiError(
+        c,
+        503,
+        "submit_disabled",
+        `${NETWORK_ID} withdrawals are disabled.`,
+      );
     const body = z
       .object({ rawTxHex: z.string().max(150000) })
       .strict()
-      .parse(await c.req.json());
+      .parse(await jsonBody(c));
     const result = await submitExact(
       c.get("owner"),
       c.req.param("id"),
@@ -750,15 +908,22 @@ export function createApp(
     const pk = `OWNER#${c.get("owner")}`,
       sk = `JOB#${c.req.param("id")}`;
     const r = await store.get(pk, sk);
-    if (!r) return c.json({ error: "Job not found" }, 404);
+    if (!r) return apiError(c, 404, "job_not_found", "Job not found");
     const job = r.job as Job;
     if (supervisedServiceJob(job))
-      return c.json(
-        { error: "Supervised jobs are not controlled by this route." },
+      return apiError(
+        c,
         409,
+        "job_unsupported",
+        "Supervised jobs are not controlled by this route.",
       );
     if (!["searching", "queued"].includes(job.status))
-      return c.json({ error: "This job cannot be paused." }, 409);
+      return apiError(
+        c,
+        409,
+        "job_state_invalid",
+        "This job cannot be paused.",
+      );
     const unknownPost = job.parallelSlots
       ? job.parallelSlots.some((s) => !s.runpodId)
       : !job.runpodId;
@@ -772,19 +937,31 @@ export function createApp(
   });
   app.post("/api/jobs/:id/resume", async (c) => {
     if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
-      return c.json({ error: `${NETWORK_ID} withdrawals are disabled.` }, 503);
+      return apiError(
+        c,
+        503,
+        "operations_disabled",
+        `${NETWORK_ID} withdrawals are disabled.`,
+      );
     const pk = `OWNER#${c.get("owner")}`,
       sk = `JOB#${c.req.param("id")}`,
       row = await store.get(pk, sk);
-    if (!row) return c.json({ error: "Job not found" }, 404);
+    if (!row) return apiError(c, 404, "job_not_found", "Job not found");
     const job = row.job as Job;
     if (supervisedServiceJob(job))
-      return c.json(
-        { error: "Supervised jobs are not controlled by this route." },
+      return apiError(
+        c,
         409,
+        "job_unsupported",
+        "Supervised jobs are not controlled by this route.",
       );
     if (job.status !== "paused")
-      return c.json({ error: "Only a paused job can be resumed." }, 409);
+      return apiError(
+        c,
+        409,
+        "job_state_invalid",
+        "Only a paused job can be resumed.",
+      );
     const storedLedger = z
       .object({ coverageLedger: coverageLedgerSchema.optional() })
       .safeParse(row.validation);
@@ -798,9 +975,11 @@ export function createApp(
         solverPin,
       })
     )
-      return c.json(
-        { error: "Stopped coverage cannot be resumed on this account." },
+      return apiError(
+        c,
         409,
+        "coverage_stopped",
+        "Stopped coverage cannot be resumed on this account.",
       );
     if (
       job.error?.includes("Submission outcome unknown") &&
@@ -810,15 +989,22 @@ export function createApp(
         job.submissionReconciliation.revision === job.revision
       )
     )
-      return c.json(
-        { error: "Reconcile the unknown compute provider submission before retrying." },
+      return apiError(
+        c,
         409,
+        "reconcile_required",
+        "Reconcile the unknown compute provider submission before retrying.",
       );
     if (
       job.error?.includes("range exhausted") ||
       job.error?.includes("failed independent")
     )
-      return c.json({ error: "This failure needs operator review." }, 409);
+      return apiError(
+        c,
+        409,
+        "operator_review_required",
+        "This failure needs operator review.",
+      );
     job.status = "queued";
     job.retryRequested = true;
     job.revision++;
@@ -833,20 +1019,30 @@ export function createApp(
     const pk = `OWNER#${c.get("owner")}`,
       sk = `JOB#${c.req.param("id")}`,
       row = await store.get(pk, sk);
-    if (!row) return c.json({ error: "Job not found" }, 404);
+    if (!row) return apiError(c, 404, "job_not_found", "Job not found");
     const job = row.job as Job;
     if (supervisedServiceJob(job))
-      return c.json(
-        { error: "Supervised jobs are not controlled by this route." },
+      return apiError(
+        c,
         409,
+        "job_unsupported",
+        "Supervised jobs are not controlled by this route.",
       );
     if (!job.txid) return c.json({ job });
     const intent = await store.get(pk, `TX#${job.txid}`);
-    if (!intent) return c.json({ error: "Transaction intent not found" }, 404);
+    if (!intent)
+      return apiError(
+        c,
+        404,
+        "intent_not_found",
+        "Transaction intent not found",
+      );
     if (intent.kind === "exact-withdrawal" && intent.jobId !== job.id)
-      return c.json(
-        { error: "Transaction intent belongs to a different job" },
+      return apiError(
+        c,
         409,
+        "intent_conflict",
+        "Transaction intent belongs to a different job",
       );
     const observation =
       intent.kind === "exact-withdrawal"
@@ -901,7 +1097,8 @@ export function createApp(
         : job.txid
       : undefined;
     const vaultRow = await store.get(pk, `VAULT#${job.vaultId}`);
-    if (!vaultRow) return c.json({ error: "Vault not found" }, 404);
+    if (!vaultRow)
+      return apiError(c, 404, "vault_not_found", "Vault not found");
     const vault = vaultRow.vault as PublicVault;
     job.status = status.confirmed ? "confirmed" : "submitted";
     vault.status = status.confirmed ? "spent" : "confirmed";

@@ -151,7 +151,7 @@ describe("Idempotency-Key", () => {
     const f = await fixture();
     const vault = vaultFor(owner);
     expect((await f.call("/vaults", vault)).status).toBe(201);
-    expect(await json(await f.call("/vaults", vault))).toEqual({ status: 409, body: { error: "State changed. Refresh and try again." } });
+    expect(await json(await f.call("/vaults", vault))).toEqual({ status: 409, body: { error: "State changed. Refresh and try again.", code: "state_conflict" } });
     // A header-less retry of a deposit resends the same bytes, as it did before.
     expect((await json(await f.fund())).body).toMatchObject({ submission: "submitted" });
     expect((await json(await f.fund())).body).toMatchObject({ submission: "submitted" });
@@ -322,6 +322,27 @@ describe("Idempotency-Key", () => {
       expect(response.headers.get("idempotency-replayed")).toBeNull();
     }
     expect((await json(await f.call("/vaults", vaultFor(owner), { key }))).body.code).toBe("idempotency_conflict");
+  });
+
+  it("hashes a malformed JSON body like any other: the handler's 400 isn't stored, and the key stays bound", async () => {
+    const f = await fixture();
+    const raw = (key?: string) =>
+      f.app.request("/api/vaults", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${tokens[owner]}`, ...(key ? { "idempotency-key": key } : {}) },
+        body: "{",
+      });
+    const plain = await json(await raw());
+    expect(plain).toMatchObject({ status: 400, body: { code: "invalid_request" } });
+    for (let i = 0; i < 2; i++) {
+      const response = await raw(key);
+      expect(response.headers.get("idempotency-replayed")).toBeNull();
+      expect(await json(response)).toEqual(plain);
+    }
+    const [row] = await f.keys();
+    expect(row.response).toBeUndefined();
+    expect((await json(await f.call("/vaults", vaultFor(owner), { key }))).body.code).toBe("idempotency_conflict");
+    expect((await f.call("/vaults", vaultFor(owner), { key: `${key}-2` })).status).toBe(201);
   });
 
   it("forgets a key after 24 hours", async () => {

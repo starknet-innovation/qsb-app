@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { Conflict, type Row, type Store } from "./store";
+import { apiError } from "./api-errors";
 
 /**
  * POSTs that accept an optional Idempotency-Key header, under /api and /v1. POST /jobs keeps the
@@ -54,26 +55,20 @@ export function idempotency(
     const key = c.req.header("Idempotency-Key");
     if (key === undefined) return next();
     if (!keyPattern.test(key))
-      return c.json(
-        {
-          error: "Invalid request",
-          code: "invalid_request",
-          issues: [{ path: ["Idempotency-Key"], message: "Use 8 to 128 letters, digits, '-' or '_'." }],
-        },
-        400,
-      );
+      return apiError(c, 400, "invalid_request", "Invalid request", {
+        issues: [{ path: ["Idempotency-Key"], message: "Use 8 to 128 letters, digits, '-' or '_'." }],
+      });
     const pk = `OWNER#${c.get("owner")}`,
       sk = `IDEMPOTENCY#${route}#${key}`;
     // c.req.path is the /api form of a /v1 request, so both prefixes share a key.
     const fingerprint = sha256(JSON.stringify([c.req.path, await c.req.text()]));
     const inProgress = (retryAfter: number) => {
       c.header("Retry-After", String(Math.max(1, retryAfter)));
-      return c.json(
-        {
-          error: "A request with this Idempotency-Key is still in progress.",
-          code: "idempotency_in_progress",
-        },
+      return apiError(
+        c,
         409,
+        "idempotency_in_progress",
+        "A request with this Idempotency-Key is still in progress.",
       );
     };
     let lease: Row | undefined;
@@ -83,12 +78,11 @@ export function idempotency(
       const live = row && typeof row.expiresAt === "number" && row.expiresAt > now;
       if (live) {
         if (row.fingerprint !== fingerprint)
-          return c.json(
-            {
-              error: "This Idempotency-Key was already used for a different request.",
-              code: "idempotency_conflict",
-            },
+          return apiError(
+            c,
             409,
+            "idempotency_conflict",
+            "This Idempotency-Key was already used for a different request.",
           );
         const response = row.response as { status: number; body: string } | undefined;
         if (response)

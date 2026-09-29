@@ -30,6 +30,7 @@ it("rejects a challenge, session, and vault that omit network", async () => {
   expect(verify.status).toBe(401);
   expect(await verify.json()).toEqual({
     error: "Sign-in request expired or already used.",
+    code: "challenge_expired",
   });
   await store.put({
     pk: sessionPk,
