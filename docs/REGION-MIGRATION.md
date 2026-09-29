@@ -211,7 +211,10 @@ after the new stack has run a full deposit and withdrawal.
      Treat it as retained until it expires, so the old account holds QSB data until then. After 35 days, confirm it has expired: `aws dynamodb list-backups --region eu-west-1 --backup-type SYSTEM`
      should list nothing for the old table;
    - the `qsb-solver` repository;
-   - the job and frontend buckets. The frontend bucket is versioned, so empty it first: delete every object
+   - the job bucket. Empty it first: it still holds the withdrawals' job inputs and outputs until they expire after
+     30 days, and a bucket with objects can't be deleted. Confirm `aws s3 ls s3://<name> --recursive` lists nothing,
+     then delete it;
+   - the frontend bucket. It's versioned, so empty it first: delete every object
      version and delete marker (for example with the S3 console's "Empty bucket"), confirm
      `aws s3api list-object-versions --bucket <name>` lists nothing, then delete the bucket;
    - the old `qsb/slipstream` secret;

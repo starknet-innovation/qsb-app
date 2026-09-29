@@ -95,7 +95,8 @@ class SandboxRunner(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             evidence = Path(tmp) / 'evidence.json'
-            argv = ['run.py', '--profile', 'public-test', '--evidence', str(evidence)] + (['--keep'] if keep else [])
+            argv = ['run.py', '--profile', 'public-test', '--region', 'eu-west-2', '--evidence', str(evidence)] + \
+                (['--keep'] if keep else [])
             stdout = io.StringIO()
             try:
                 with patch.object(sys, 'argv', argv), patch('subprocess.check_output', side_effect=git), \

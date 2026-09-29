@@ -36,7 +36,8 @@ EXPECTED_CHECKS = 10  # a pass needs every documented check, so an aborted run c
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--profile', required=True, help='the qsb-operator profile (or an exported session: use "")')
-p.add_argument('--region', default='eu-west-2')
+p.add_argument('--region', required=True,
+               help="the live stack's region: eu-west-1 until the eu-west-2 cutover (docs/REGION-MIGRATION.md)")
 p.add_argument('--evidence', type=Path, required=True, help='evidence JSON path, outside the repository')
 p.add_argument('--keep', action='store_true', help='keep the sandbox resources for inspection')
 
