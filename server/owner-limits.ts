@@ -8,7 +8,7 @@ import { Conflict, type AtomicWrite, type Row, type Store } from "./store";
  * add refusals: the per-job GPU cap and every other check still apply.
  */
 export type OwnerLimits = {
-  /** QSB_OWNER_ALLOWLIST: when set, only these owners may register vaults, deposit, or create or resume withdrawals. */
+  /** QSB_OWNER_ALLOWLIST: when set, only these owners may register vaults, deposit, create or resume withdrawals, or register webhooks. */
   allowlist: ReadonlySet<string> | null;
   /** QSB_OWNER_MAX_ACTIVE_JOBS: withdrawals one owner may have queued or searching at once. */
   maxActiveJobs: number | null;

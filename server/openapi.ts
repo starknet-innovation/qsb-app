@@ -9,12 +9,16 @@ import {
   CHALLENGE_SECONDS,
   SESSION_SECONDS,
   challengeRequest,
+  eventType,
+  eventsCursorParam,
+  eventsLimitParam,
   fundRequest,
   fundResubmitRequest,
   fundSubmitRequest,
   submitRequest,
   transactionIdParam,
   verifyRequest,
+  webhookRequest,
 } from "./api-schemas";
 import {
   outpoint,
@@ -44,6 +48,21 @@ import type { mainnetUiConfig } from "./mainnetConfig";
 import type { EsploraInclusionReport } from "./runtime/miner-inclusion";
 import type { submitExact } from "./submit-exact";
 import type { FundingSubmission, submitFunding } from "./submit-funding";
+import {
+  EVENT_RETENTION_SECONDS,
+  EVENT_SETTLE_MS,
+  type OwnerEvent,
+  type listOwnerEvents,
+} from "./owner-events";
+import {
+  FAILING_AFTER,
+  MAX_ATTEMPTS,
+  REQUEST_TIMEOUT_MS,
+  RETRY_DELAYS_MS,
+  WEBHOOK_LIMIT,
+  type listWebhooks,
+  type registerWebhook,
+} from "./webhooks";
 
 // The OpenAPI 3.1 document for createApp's routes. `npm run openapi` writes it
 // to docs/api/openapi.json; tests/openapi.test.ts checks it against the served
@@ -420,6 +439,66 @@ const jobStatusResponse = z.object({
   retrySafe: z.literal(false).optional(),
 });
 
+const ownerEvent = component(
+  "OwnerEvent",
+  z.object({
+    id: describe(z.string(), "The event id. The same state change always has the same id: drop duplicates by it."),
+    type: eventType,
+    subjectId: describe(z.string(), "The job id for `withdrawal.*`, the vault id for `deposit.*`."),
+    status: describe(z.string(), "The job or vault status it moved to, or `dropped`."),
+    stage: describe(z.string().optional(), "Withdrawal events only: the search stage."),
+    at: describe(z.string(), "When the status changed, ISO 8601."),
+  }),
+  "A withdrawal or deposit status change. Identifiers and statuses only: no transaction bytes, scripts or secrets.",
+);
+type _OwnerEvent = Assert<Same<z.infer<typeof ownerEvent>, OwnerEvent>>;
+const eventsResponse = z.object({
+  events: z.array(ownerEvent),
+  next: describe(
+    z.string().nullable(),
+    "Pass as `after` on the next call. Null when there are no events yet and no `after` was given.",
+  ),
+  hasMore: describe(z.boolean(), "Whether more events follow this page now."),
+});
+type _Events = Assert<
+  Fits<Awaited<ReturnType<typeof listOwnerEvents>>, z.infer<typeof eventsResponse>>
+>;
+const webhookView = component(
+  "Webhook",
+  z.object({
+    id: z.string(),
+    url: z.string(),
+    events: describe(z.array(eventType).nullable(), "The subscribed types; null for all."),
+    status: describe(
+      z.enum(["active", "failing"]),
+      `\`failing\` after ${FAILING_AFTER} failed rounds in a row: it gets no more deliveries. Delete it and register it again.`,
+    ),
+    createdAt: z.string(),
+    failures: describe(z.number().int(), "Failed rounds in a row."),
+    pending: describe(z.number().int(), "Deliveries waiting to be sent."),
+    lastDeliveryAt: z.string().optional(),
+    lastFailureAt: z.string().optional(),
+    lastError: describe(
+      z.string().optional(),
+      "Why the last round failed: `timeout`, `network`, `http_<status>`, `url_forbidden`, `url_unresolvable` or `url_invalid`.",
+    ),
+  }),
+  "A registered webhook, without its signing secret.",
+);
+type _Webhooks = Assert<
+  Fits<Awaited<ReturnType<typeof listWebhooks>>, z.infer<typeof webhookView>[]>
+>;
+const createdWebhook = z.object({
+  webhook: webhookView,
+  secret: describe(
+    z.string(),
+    "The HMAC-SHA256 signing secret. Shown only in this response; keep it.",
+  ),
+});
+type _CreatedWebhook = Assert<
+  Fits<Awaited<ReturnType<typeof registerWebhook>>, z.infer<typeof createdWebhook>>
+>;
+
 // The routes.
 
 type Method = "get" | "post";
@@ -439,6 +518,8 @@ export type ApiRoute = {
    */
   auth: boolean;
   params?: Record<string, z.ZodType>;
+  /** Optional query parameters, as the handler reads them. */
+  query?: Record<string, z.ZodType>;
   body?: z.ZodType;
   /** The handler accepts a missing body. */
   bodyOptional?: true;
@@ -679,6 +760,8 @@ const ownerLimitsRead = source(
 );
 // Routes that check the owner allowlist (QSB_OWNER_ALLOWLIST).
 const allowlisted = merge(ownerLimitsRead, { 403: ["owner_not_allowlisted"] });
+// The owner's single webhook row: a registration or deletion that keeps losing its version race.
+const webhookRow = source(["webhooks.ts | update"], { 409: ["state_conflict"] });
 
 const vaultId = describe(z.string(), "The vault id.");
 const jobId = describe(
@@ -1144,6 +1227,70 @@ export const apiRoutes: readonly ApiRoute[] = [
     },
     errors: merge(writes, apiKeyRevoke),
   },
+  {
+    method: "get",
+    path: "/api/events",
+    operationId: "listEvents",
+    summary: "The owner's event log, oldest first",
+    description: `The record of withdrawal and deposit status changes; webhooks only notify. Keep \`next\` and pass it as \`after\`. Events are kept ${EVENT_RETENTION_SECONDS / 86400} days and listed once they are ${EVENT_SETTLE_MS / 1000} seconds old.`,
+    auth: true,
+    query: {
+      after: describe(eventsCursorParam, "A `next` cursor from a previous page."),
+      limit: describe(eventsLimitParam, "Events per page, 1 to 100. Default 50."),
+    },
+    responses: {
+      200: { description: "A page of events.", schema: eventsResponse },
+    },
+    errors: { 400: ["invalid_request"] },
+  },
+  {
+    method: "get",
+    path: "/api/webhooks",
+    operationId: "listWebhooks",
+    summary: "The owner's webhooks, without their secrets",
+    auth: true,
+    responses: {
+      200: {
+        description: "The webhooks.",
+        schema: z.object({ webhooks: z.array(webhookView) }),
+      },
+    },
+    errors: {},
+  },
+  {
+    method: "post",
+    path: "/api/webhooks",
+    operationId: "createWebhook",
+    summary: "Register a webhook",
+    description: `At most ${WEBHOOK_LIMIT} per owner. The URL must be https on port 443, without credentials, on a public host name or address; the host is resolved and every address checked, now and at each delivery. Omit \`events\` to receive all types.`,
+    auth: true,
+    body: webhookRequest,
+    responses: {
+      201: {
+        description: "The webhook, and its signing secret, shown only here.",
+        schema: createdWebhook,
+      },
+    },
+    errors: merge(writes, webhookRow, allowlisted, {
+      400: ["webhook_url_invalid", "webhook_url_forbidden", "webhook_url_unresolvable"],
+      409: ["webhook_limit_reached"],
+    }),
+  },
+  {
+    method: "post",
+    path: "/api/webhooks/:id/delete",
+    operationId: "deleteWebhook",
+    summary: "Delete a webhook and its queued deliveries",
+    auth: true,
+    params: { id: describe(z.string(), "The webhook id.") },
+    responses: {
+      200: {
+        description: "Deleted.",
+        schema: z.object({ deleted: z.literal(true) }),
+      },
+    },
+    errors: merge(writes, webhookRow, { 404: ["webhook_not_found"] }),
+  },
 ];
 
 /**
@@ -1317,7 +1464,7 @@ export const openApiPath = (path: string) =>
   path.replace(/^\/api(?=\/)/, "").replace(/:(\w+)/g, "{$1}");
 const parameter = (
   name: string,
-  where: "path" | "header",
+  where: "path" | "query" | "header",
   required: boolean,
   schema: z.ZodType,
 ) => {
@@ -1361,6 +1508,9 @@ function operation(route: ApiRoute) {
   const parameters = [
     ...Object.entries(route.params ?? {}).map(([name, schema]) =>
       parameter(name, "path", true, schema),
+    ),
+    ...Object.entries(route.query ?? {}).map(([name, schema]) =>
+      parameter(name, "query", false, schema),
     ),
     ...(keyed ? [parameter("Idempotency-Key", "header", false, idempotencyKey)] : []),
   ];
@@ -1440,6 +1590,44 @@ export function openApiDocument() {
       { url: "/api", description: "webapp alias" },
     ],
     paths,
+    webhooks: {
+      ownerEvent: {
+        post: {
+          operationId: "ownerEventWebhook",
+          summary: "An owner event, POSTed to each registered webhook that subscribes to its type",
+          description: [
+            "A notification, not the record: read `GET /api/events` for the log. At least once, best effort; deliveries can arrive out of order or more than once, so drop duplicates by `QSB-Event-Id`.",
+            "",
+            "Verify the raw body before parsing it: `QSB-Signature` is `t=<unix seconds>,v1=<hex>`, where `v1` is HMAC-SHA256 with the webhook's secret over `<t>.<raw body>`. Refuse a stale `t`.",
+            "",
+            `Answer any 2xx within ${REQUEST_TIMEOUT_MS / 1000} seconds; the body is ignored and redirects aren't followed. After a failed round the webhook waits ${RETRY_DELAYS_MS.map((ms) => (ms < 3600e3 ? `${ms / 60e3} min` : `${ms / 3600e3} h`)).join(", ")} between tries. An event is dropped after ${MAX_ATTEMPTS} failed attempts, and a webhook that fails ${FAILING_AFTER} rounds in a row is marked \`failing\`.`,
+          ].join("\n"),
+          parameters: [
+            {
+              name: "QSB-Signature",
+              in: "header",
+              required: true,
+              description: "`t=<unix seconds>,v1=<hex HMAC-SHA256(secret, \"<t>.<raw body>\")>`.",
+              schema: { type: "string", pattern: "^t=\\d+,v1=[a-f0-9]{64}$" },
+            },
+            {
+              name: "QSB-Event-Id",
+              in: "header",
+              required: true,
+              description: "The event's `id`. Drop duplicates by it.",
+              schema: { type: "string" },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: { "application/json": { schema: ref("OwnerEvent") } },
+          },
+          responses: {
+            "2XX": { description: "Received. The body is ignored." },
+          },
+        },
+      },
+    },
     components: {
       schemas: componentSchemas(),
       securitySchemes: {

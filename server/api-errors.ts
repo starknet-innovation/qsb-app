@@ -86,6 +86,13 @@ export const apiErrorCodes = {
   miner_request_failed:
     "A miner request failed, or its answer was malformed. Retry later.",
   miner_rate_unavailable: "The miner's live fee quote is unavailable. Retry later.",
+  webhook_url_invalid:
+    "The webhook URL isn't a URL, isn't https on port 443, or has credentials in it.",
+  webhook_url_forbidden:
+    "The webhook URL's host is a local name, or it is or resolves to a private or reserved address.",
+  webhook_url_unresolvable: "The webhook URL's host name doesn't resolve.",
+  webhook_limit_reached: "The account already has the most webhooks it can register.",
+  webhook_not_found: "No webhook with this id for the signed-in owner.",
   state_conflict: "The record changed during the request. Refresh and retry.",
   internal_error: "An unexpected server error. Retry.",
 } as const;

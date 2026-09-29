@@ -52,6 +52,12 @@ export const routeScopes: Readonly<Record<string, ApiKeyScope | null>> = {
   "POST /api/jobs/:id/pause": "withdrawals",
   "POST /api/jobs/:id/resume": "withdrawals",
   "POST /api/jobs/:id/submit": "submit",
+  // The owner's event log and webhooks. A webhook's registration returns its signing secret
+  // and decides where the owner's notifications go, so it and deletion need a wallet session.
+  "GET /api/events": "read",
+  "GET /api/webhooks": "read",
+  "POST /api/webhooks": null,
+  "POST /api/webhooks/:id/delete": null,
   "GET /api/api-keys": null,
   "POST /api/api-keys": null,
   "POST /api/api-keys/:id/revoke": null,

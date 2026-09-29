@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Conflict, MemoryStore, type AtomicWrite, type Row, type Store } from "../store";
 import { assertNoCredentialMaterial } from "./host-requirements";
+import { withoutWebhookSecrets } from "../webhooks";
 import {
   AUTHORITY_PK,
   AUTHORITY_SK,
@@ -396,6 +397,8 @@ function primaryKind(row: Row): InventoryKind {
     row.sk === "AUTH" ||
     row.sk.startsWith("VAULT#") ||
     row.sk.startsWith("TX#") ||
+    row.sk.startsWith("EVENT#") ||
+    row.sk === "WEBHOOKS" ||
     row.sk.startsWith("APIKEY") ||
     row.sk.startsWith("IDEMPOTENCY#") ||
     row.sk.startsWith("LIMIT#") ||
@@ -511,9 +514,11 @@ function providerNotes(row: Row): string[] {
 }
 
 export function inventoryRows(
-  rows: Row[],
+  supplied: Row[],
   options: { callerClaimsCompleteExport?: boolean } = {},
 ) {
+  // Webhook signing secrets are left out of the inventory, not a reason to refuse it.
+  const rows = withoutWebhookSecrets(supplied);
   assertNoCredentialMaterial(rows);
   const counts: Record<InventoryKind, number> = {
     reservation: 0,

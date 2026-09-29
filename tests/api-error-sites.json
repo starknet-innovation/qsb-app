@@ -15,6 +15,13 @@
   "app.ts | POST /api/auth/verify | 401 | signature_invalid | Wallet signature is not valid.",
   "app.ts | auth | 401 | auth_required | Connect and sign in with Xverse.",
   "app.ts | auth | 401 | session_expired | Session expired. Please reconnect.",
+  "app.ts | GET /api/events | 400 | invalid_request | Use a cursor from a previous page and a limit from 1 to 100.",
+  "app.ts | POST /api/webhooks | 403 | owner_not_allowlisted | This wallet is not on this deployment's allowlist.",
+  "app.ts | POST /api/webhooks | 400 | webhook_url_forbidden | e.message",
+  "app.ts | POST /api/webhooks | 400 | webhook_url_unresolvable | e.message",
+  "app.ts | POST /api/webhooks | 400 | webhook_url_invalid | e.message",
+  "app.ts | POST /api/webhooks | 409 | webhook_limit_reached | e.message",
+  "app.ts | POST /api/webhooks/:id/delete | 404 | webhook_not_found | Webhook not found.",
   "app.ts | POST /api/vaults | 403 | owner_not_allowlisted | This wallet is not on this deployment's allowlist.",
   "app.ts | POST /api/vaults | 400 | vault_invalid | Invalid vault ownership or funding state.",
   "app.ts | POST /api/vaults | 400 | vault_invalid | Vault public state or configuration is invalid.",
@@ -232,5 +239,6 @@
   "transaction-checks.ts | checkFunding | ChainError | chain_error | Wallet signature missing.",
   "transaction-checks.ts | checkFunding | ChainError | chain_error | Previous output value missing.",
   "transaction-checks.ts | checkFunding | ChainError | chain_error | Funding fee or change mismatch.",
-  "transaction-checks.ts | checkWithdrawal | ChainError | job_state_invalid | Withdrawal is not ready for authorization."
+  "transaction-checks.ts | checkWithdrawal | ChainError | job_state_invalid | Withdrawal is not ready for authorization.",
+  "webhooks.ts | update | Conflict | state_conflict | Webhook settings kept changing"
 ]

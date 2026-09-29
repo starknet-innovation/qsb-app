@@ -29,7 +29,8 @@ export type Row = {
 };
 export interface Store {
   get(pk: string, sk: string): Promise<Row | undefined>;
-  put(row: Row, expected?: number): Promise<void>;
+  /** `signal` cancels the request; a write it cancels may or may not have been applied. */
+  put(row: Row, expected?: number, options?: { signal?: AbortSignal }): Promise<void>;
   delete(pk: string, sk: string, expected: number): Promise<void>;
   list(pk: string, prefix: string): Promise<Row[]>;
   reservationRows(): Promise<Row[]>;
@@ -197,7 +198,7 @@ export class MemoryStore implements Store {
     if (r?.expiresAt && r.expiresAt < Date.now() / 1000) return;
     return r ? structuredClone(r) : undefined;
   }
-  async put(row: Row, expected?: number) {
+  async put(row: Row, expected?: number, _options?: { signal?: AbortSignal }) {
     if (isReservationRow(row) || isAuthorityRow(row))
       rejectGuarded(this.authority(), [{ row, expected }]);
     const k = `${row.pk}|${row.sk}`,
@@ -307,7 +308,7 @@ export class DynamoStore implements Store {
     if (item?.expiresAt && item.expiresAt < Date.now() / 1000) return;
     return item;
   }
-  async put(row: Row, expected?: number) {
+  async put(row: Row, expected?: number, options: { signal?: AbortSignal } = {}) {
     if (isReservationRow(row)) {
       await this.atomicPut([{ row, expected }]);
       return;
@@ -330,6 +331,7 @@ export class DynamoStore implements Store {
                 ExpressionAttributeValues: { ":v": expected },
               }),
         }),
+        options.signal ? { abortSignal: options.signal } : {},
       );
     } catch (e) {
       if ((e as Error).name === "ConditionalCheckFailedException")

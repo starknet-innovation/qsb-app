@@ -875,6 +875,176 @@
         }
       }
     },
+    "/events": {
+      "get": {
+        "operationId": "listEvents",
+        "summary": "The owner's event log, oldest first",
+        "description": "The record of withdrawal and deposit status changes; webhooks only notify. Keep `next` and pass it as `after`. Events are kept 30 days and listed once they are 10 seconds old.",
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "A `next` cursor from a previous page.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,120}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Events per page, 1 to 100. Default 50.",
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:[1-9]\\d?|100)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListEventsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request: `invalid_request`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "invalid_request"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized: `auth_required`, `session_expired`, `api_key_invalid`, `api_key_revoked`, `network_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "auth_required",
+                            "session_expired",
+                            "api_key_invalid",
+                            "api_key_revoked",
+                            "network_mismatch"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden: `api_key_scope_denied`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "api_key_scope_denied"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error: `internal_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "internal_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable: `api_keys_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "api_keys_disabled"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "operationId": "getHealth",
@@ -4693,6 +4863,577 @@
           }
         }
       }
+    },
+    "/webhooks": {
+      "get": {
+        "operationId": "listWebhooks",
+        "summary": "The owner's webhooks, without their secrets",
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The webhooks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListWebhooksResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized: `auth_required`, `session_expired`, `api_key_invalid`, `api_key_revoked`, `network_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "auth_required",
+                            "session_expired",
+                            "api_key_invalid",
+                            "api_key_revoked",
+                            "network_mismatch"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden: `api_key_scope_denied`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "api_key_scope_denied"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error: `internal_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "internal_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable: `api_keys_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "api_keys_disabled"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createWebhook",
+        "summary": "Register a webhook",
+        "description": "At most 5 per owner. The URL must be https on port 443, without credentials, on a public host name or address; the host is resolved and every address checked, now and at each delivery. Omit `events` to receive all types.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebhookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The webhook, and its signing secret, shown only here.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateWebhookResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request: `invalid_request`, `webhook_url_invalid`, `webhook_url_forbidden`, `webhook_url_unresolvable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "invalid_request",
+                            "webhook_url_invalid",
+                            "webhook_url_forbidden",
+                            "webhook_url_unresolvable"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized: `auth_required`, `session_expired`, `api_key_invalid`, `api_key_revoked`, `network_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "auth_required",
+                            "session_expired",
+                            "api_key_invalid",
+                            "api_key_revoked",
+                            "network_mismatch"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden: `api_key_not_allowed`, `owner_not_allowlisted`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "api_key_not_allowed",
+                            "owner_not_allowlisted"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict: `webhook_limit_reached`, `state_conflict`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "webhook_limit_reached",
+                            "state_conflict"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request too large: `request_too_large`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "request_too_large"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error: `internal_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "internal_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable: `api_keys_disabled`, `owner_limits_invalid`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "api_keys_disabled",
+                            "owner_limits_invalid"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/delete": {
+      "post": {
+        "operationId": "deleteWebhook",
+        "summary": "Delete a webhook and its queued deliveries",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The webhook id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteWebhookResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized: `auth_required`, `session_expired`, `api_key_invalid`, `api_key_revoked`, `network_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "auth_required",
+                            "session_expired",
+                            "api_key_invalid",
+                            "api_key_revoked",
+                            "network_mismatch"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden: `api_key_not_allowed`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "api_key_not_allowed"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found: `webhook_not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "webhook_not_found"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict: `state_conflict`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "state_conflict"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request too large: `request_too_large`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "request_too_large"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error: `internal_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "internal_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable: `api_keys_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "api_keys_disabled"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "ownerEvent": {
+      "post": {
+        "operationId": "ownerEventWebhook",
+        "summary": "An owner event, POSTed to each registered webhook that subscribes to its type",
+        "description": "A notification, not the record: read `GET /api/events` for the log. At least once, best effort; deliveries can arrive out of order or more than once, so drop duplicates by `QSB-Event-Id`.\n\nVerify the raw body before parsing it: `QSB-Signature` is `t=<unix seconds>,v1=<hex>`, where `v1` is HMAC-SHA256 with the webhook's secret over `<t>.<raw body>`. Refuse a stale `t`.\n\nAnswer any 2xx within 3 seconds; the body is ignored and redirects aren't followed. After a failed round the webhook waits 0.5 min, 2 min, 10 min, 30 min, 1 h, 2 h, 4 h between tries. An event is dropped after 8 failed attempts, and a webhook that fails 8 rounds in a row is marked `failing`.",
+        "parameters": [
+          {
+            "name": "QSB-Signature",
+            "in": "header",
+            "required": true,
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256(secret, \"<t>.<raw body>\")>`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^t=\\d+,v1=[a-f0-9]{64}$"
+            }
+          },
+          {
+            "name": "QSB-Event-Id",
+            "in": "header",
+            "required": true,
+            "description": "The event's `id`. Drop duplicates by it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnerEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Received. The body is ignored."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4753,10 +5494,15 @@
           "miner_unavailable",
           "miner_request_failed",
           "miner_rate_unavailable",
+          "webhook_url_invalid",
+          "webhook_url_forbidden",
+          "webhook_url_unresolvable",
+          "webhook_limit_reached",
+          "webhook_not_found",
           "state_conflict",
           "internal_error"
         ],
-        "description": "A stable, machine-readable error code. Branch on it; `error` is for people and can change. A code isn't tied to one HTTP status.\n\n- `invalid_request`: Validation failed, usually of the body or a path parameter. `issues` lists each problem.\n- `request_too_large`: The request body is over the size limit.\n- `auth_required`: No well-formed `Authorization: Bearer <token>` header was sent.\n- `session_expired`: The session is unknown, expired or for another network. Sign in again.\n- `challenge_expired`: The sign-in challenge is unknown, expired, already used or for another network.\n- `signature_invalid`: The BIP-322 signature doesn't verify for the challenge.\n- `api_key_invalid`: The API key is unknown or expired.\n- `api_key_revoked`: The API key was revoked.\n- `api_key_not_allowed`: API keys can't call this route: it takes a wallet session, or has no scope mapping.\n- `api_key_scope_denied`: The API key lacks a scope this route needs.\n- `api_key_limit_reached`: The owner already has the maximum number of active API keys. Revoke one first.\n- `api_key_not_found`: No unexpired API key with this id for the signed-in owner.\n- `api_keys_disabled`: API keys are switched off for this deployment.\n- `network_mismatch`: The address, vault or API key is for a different Bitcoin network than this deployment.\n- `operations_disabled`: Deposits and withdrawals are switched off for this deployment or address.\n- `submit_disabled`: Submission to the miner is switched off.\n- `owner_not_allowlisted`: This deployment has an owner allowlist, and it doesn't list the signed-in address.\n- `owner_active_withdrawal_limit`: The owner already has the most queued or searching withdrawals this deployment allows.\n- `owner_gpu_budget_reached`: The owner's GPU-time budget can't cover another submission. Nothing was reserved.\n- `owner_limits_invalid`: The deployment's owner-limit settings are malformed, so this action is refused.\n- `vault_invalid`: The vault's ownership, funding state or script commitment is wrong.\n- `vault_not_found`: No vault with this id for the signed-in owner.\n- `vault_not_funded`: The vault has no deposit yet.\n- `vault_not_confirmed`: The vault's deposit isn't confirmed yet.\n- `funding_intent_exists`: The vault already has a different deposit. Reconcile it; a vault takes one deposit.\n- `funding_transaction_invalid`: The deposit doesn't parse, or doesn't pay this vault the stated amount at output 0.\n- `signed_deposit_not_found`: The vault has no stored signed deposit.\n- `job_not_found`: No withdrawal job with this id for the signed-in owner.\n- `job_unsupported`: The job isn't a coordinator withdrawal, so this route doesn't serve it.\n- `job_state_invalid`: The job's current status doesn't allow this action.\n- `idempotency_conflict`: The idempotency key already belongs to a different request: the manifest's key to another withdrawal, or the Idempotency-Key header to another path or body.\n- `idempotency_in_progress`: A request with this Idempotency-Key is still running. Retry after `Retry-After` seconds.\n- `withdrawal_invalid`: The withdrawal doesn't match the vault's deposit, or its destination or amounts don't balance.\n- `solver_not_served`: The requested solver release isn't served by this deployment. Nothing was reserved.\n- `solved_result_unavailable`: No solved result is available for this job.\n- `reconcile_required`: An unknown compute submission must be reconciled before the job can resume.\n- `operator_review_required`: The job's failure needs operator review.\n- `coverage_stopped`: The job's stopped search coverage can't resume on this account.\n- `intent_not_found`: No recorded transaction intent with this id.\n- `intent_conflict`: A different transaction intent already exists for this job. Reconcile it.\n- `exact_spend_mismatch`: The signed transaction doesn't match the approved inputs, output, amount and fee.\n- `consensus_rejected`: The offline Bitcoin Core consensus check refused the transaction.\n- `inclusion_check_failed`: The inclusion evidence for this transaction was refused.\n- `input_not_found`: The input's transaction has no output at this index.\n- `input_mismatch`: The input's output doesn't have the stated amount or script.\n- `input_unconfirmed`: The input's transaction is unconfirmed or was reorganized out. Wait and retry.\n- `input_spent`: The input is already spent. Choose another.\n- `chain_transaction_not_found`: The chain provider doesn't know this transaction (yet).\n- `chain_unavailable`: A chain provider request failed. Retry later.\n- `chain_error`: The chain provider's answer was malformed, inconsistent, too large or for another network.\n- `miner_unavailable`: The miner credential or authorization is unavailable.\n- `miner_request_failed`: A miner request failed, or its answer was malformed. Retry later.\n- `miner_rate_unavailable`: The miner's live fee quote is unavailable. Retry later.\n- `state_conflict`: The record changed during the request. Refresh and retry.\n- `internal_error`: An unexpected server error. Retry."
+        "description": "A stable, machine-readable error code. Branch on it; `error` is for people and can change. A code isn't tied to one HTTP status.\n\n- `invalid_request`: Validation failed, usually of the body or a path parameter. `issues` lists each problem.\n- `request_too_large`: The request body is over the size limit.\n- `auth_required`: No well-formed `Authorization: Bearer <token>` header was sent.\n- `session_expired`: The session is unknown, expired or for another network. Sign in again.\n- `challenge_expired`: The sign-in challenge is unknown, expired, already used or for another network.\n- `signature_invalid`: The BIP-322 signature doesn't verify for the challenge.\n- `api_key_invalid`: The API key is unknown or expired.\n- `api_key_revoked`: The API key was revoked.\n- `api_key_not_allowed`: API keys can't call this route: it takes a wallet session, or has no scope mapping.\n- `api_key_scope_denied`: The API key lacks a scope this route needs.\n- `api_key_limit_reached`: The owner already has the maximum number of active API keys. Revoke one first.\n- `api_key_not_found`: No unexpired API key with this id for the signed-in owner.\n- `api_keys_disabled`: API keys are switched off for this deployment.\n- `network_mismatch`: The address, vault or API key is for a different Bitcoin network than this deployment.\n- `operations_disabled`: Deposits and withdrawals are switched off for this deployment or address.\n- `submit_disabled`: Submission to the miner is switched off.\n- `owner_not_allowlisted`: This deployment has an owner allowlist, and it doesn't list the signed-in address.\n- `owner_active_withdrawal_limit`: The owner already has the most queued or searching withdrawals this deployment allows.\n- `owner_gpu_budget_reached`: The owner's GPU-time budget can't cover another submission. Nothing was reserved.\n- `owner_limits_invalid`: The deployment's owner-limit settings are malformed, so this action is refused.\n- `vault_invalid`: The vault's ownership, funding state or script commitment is wrong.\n- `vault_not_found`: No vault with this id for the signed-in owner.\n- `vault_not_funded`: The vault has no deposit yet.\n- `vault_not_confirmed`: The vault's deposit isn't confirmed yet.\n- `funding_intent_exists`: The vault already has a different deposit. Reconcile it; a vault takes one deposit.\n- `funding_transaction_invalid`: The deposit doesn't parse, or doesn't pay this vault the stated amount at output 0.\n- `signed_deposit_not_found`: The vault has no stored signed deposit.\n- `job_not_found`: No withdrawal job with this id for the signed-in owner.\n- `job_unsupported`: The job isn't a coordinator withdrawal, so this route doesn't serve it.\n- `job_state_invalid`: The job's current status doesn't allow this action.\n- `idempotency_conflict`: The idempotency key already belongs to a different request: the manifest's key to another withdrawal, or the Idempotency-Key header to another path or body.\n- `idempotency_in_progress`: A request with this Idempotency-Key is still running. Retry after `Retry-After` seconds.\n- `withdrawal_invalid`: The withdrawal doesn't match the vault's deposit, or its destination or amounts don't balance.\n- `solver_not_served`: The requested solver release isn't served by this deployment. Nothing was reserved.\n- `solved_result_unavailable`: No solved result is available for this job.\n- `reconcile_required`: An unknown compute submission must be reconciled before the job can resume.\n- `operator_review_required`: The job's failure needs operator review.\n- `coverage_stopped`: The job's stopped search coverage can't resume on this account.\n- `intent_not_found`: No recorded transaction intent with this id.\n- `intent_conflict`: A different transaction intent already exists for this job. Reconcile it.\n- `exact_spend_mismatch`: The signed transaction doesn't match the approved inputs, output, amount and fee.\n- `consensus_rejected`: The offline Bitcoin Core consensus check refused the transaction.\n- `inclusion_check_failed`: The inclusion evidence for this transaction was refused.\n- `input_not_found`: The input's transaction has no output at this index.\n- `input_mismatch`: The input's output doesn't have the stated amount or script.\n- `input_unconfirmed`: The input's transaction is unconfirmed or was reorganized out. Wait and retry.\n- `input_spent`: The input is already spent. Choose another.\n- `chain_transaction_not_found`: The chain provider doesn't know this transaction (yet).\n- `chain_unavailable`: A chain provider request failed. Retry later.\n- `chain_error`: The chain provider's answer was malformed, inconsistent, too large or for another network.\n- `miner_unavailable`: The miner credential or authorization is unavailable.\n- `miner_request_failed`: A miner request failed, or its answer was malformed. Retry later.\n- `miner_rate_unavailable`: The miner's live fee quote is unavailable. Retry later.\n- `webhook_url_invalid`: The webhook URL isn't a URL, isn't https on port 443, or has credentials in it.\n- `webhook_url_forbidden`: The webhook URL's host is a local name, or it is or resolves to a private or reserved address.\n- `webhook_url_unresolvable`: The webhook URL's host name doesn't resolve.\n- `webhook_limit_reached`: The account already has the most webhooks it can register.\n- `webhook_not_found`: No webhook with this id for the signed-in owner.\n- `state_conflict`: The record changed during the request. Refresh and retry.\n- `internal_error`: An unexpected server error. Retry."
       },
       "ApiKeyMetadata": {
         "type": "object",
@@ -4951,6 +5697,70 @@
         "required": [
           "id",
           "message"
+        ],
+        "additionalProperties": false
+      },
+      "CreateWebhookRequest": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "events": {
+            "minItems": 1,
+            "maxItems": 11,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "withdrawal.queued",
+                "withdrawal.searching",
+                "withdrawal.paused",
+                "withdrawal.failed",
+                "withdrawal.awaiting_authorization",
+                "withdrawal.submitted",
+                "withdrawal.confirmed",
+                "deposit.submitted",
+                "deposit.confirmed",
+                "deposit.spent",
+                "deposit.dropped"
+              ]
+            }
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "CreateWebhookResponse": {
+        "type": "object",
+        "properties": {
+          "webhook": {
+            "$ref": "#/components/schemas/Webhook"
+          },
+          "secret": {
+            "type": "string",
+            "description": "The HMAC-SHA256 signing secret. Shown only in this response; keep it."
+          }
+        },
+        "required": [
+          "webhook",
+          "secret"
+        ],
+        "additionalProperties": false
+      },
+      "DeleteWebhookResponse": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "deleted"
         ],
         "additionalProperties": false
       },
@@ -5593,6 +6403,34 @@
         ],
         "additionalProperties": false
       },
+      "ListEventsResponse": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OwnerEvent"
+            }
+          },
+          "next": {
+            "description": "Pass as `after` on the next call. Null when there are no events yet and no `after` was given.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "Whether more events follow this page now."
+          }
+        },
+        "required": [
+          "events",
+          "next",
+          "hasMore"
+        ],
+        "additionalProperties": false
+      },
       "ListJobsResponse": {
         "type": "object",
         "properties": {
@@ -5643,6 +6481,21 @@
         "required": [
           "vaults",
           "resendable"
+        ],
+        "additionalProperties": false
+      },
+      "ListWebhooksResponse": {
+        "type": "object",
+        "properties": {
+          "webhooks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Webhook"
+            }
+          }
+        },
+        "required": [
+          "webhooks"
         ],
         "additionalProperties": false
       },
@@ -5713,6 +6566,56 @@
         ],
         "additionalProperties": false,
         "description": "A transaction output: its txid, output index and value."
+      },
+      "OwnerEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The event id. The same state change always has the same id: drop duplicates by it."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "withdrawal.queued",
+              "withdrawal.searching",
+              "withdrawal.paused",
+              "withdrawal.failed",
+              "withdrawal.awaiting_authorization",
+              "withdrawal.submitted",
+              "withdrawal.confirmed",
+              "deposit.submitted",
+              "deposit.confirmed",
+              "deposit.spent",
+              "deposit.dropped"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "description": "The job id for `withdrawal.*`, the vault id for `deposit.*`."
+          },
+          "status": {
+            "type": "string",
+            "description": "The job or vault status it moved to, or `dropped`."
+          },
+          "stage": {
+            "description": "Withdrawal events only: the search stage.",
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "description": "When the status changed, ISO 8601."
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "subjectId",
+          "status",
+          "at"
+        ],
+        "additionalProperties": false,
+        "description": "A withdrawal or deposit status change. Identifiers and statuses only: no transaction bytes, scripts or secrets."
       },
       "PublicVault": {
         "type": "object",
@@ -6088,6 +6991,88 @@
           "token"
         ],
         "additionalProperties": false
+      },
+      "Webhook": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "events": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "withdrawal.queued",
+                    "withdrawal.searching",
+                    "withdrawal.paused",
+                    "withdrawal.failed",
+                    "withdrawal.awaiting_authorization",
+                    "withdrawal.submitted",
+                    "withdrawal.confirmed",
+                    "deposit.submitted",
+                    "deposit.confirmed",
+                    "deposit.spent",
+                    "deposit.dropped"
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The subscribed types; null for all."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "failing"
+            ],
+            "description": "`failing` after 8 failed rounds in a row: it gets no more deliveries. Delete it and register it again."
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "failures": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Failed rounds in a row."
+          },
+          "pending": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Deliveries waiting to be sent."
+          },
+          "lastDeliveryAt": {
+            "type": "string"
+          },
+          "lastFailureAt": {
+            "type": "string"
+          },
+          "lastError": {
+            "description": "Why the last round failed: `timeout`, `network`, `http_<status>`, `url_forbidden`, `url_unresolvable` or `url_invalid`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "events",
+          "status",
+          "createdAt",
+          "failures",
+          "pending"
+        ],
+        "additionalProperties": false,
+        "description": "A registered webhook, without its signing secret."
       },
       "Withdrawal": {
         "type": "object",

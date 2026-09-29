@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { Conflict, DynamoStore } from "../server/store";
+import { recordOwnerEvents } from "../server/owner-events";
 
 const writes = [{ row: { pk: "OWNER#test", sk: "JOB#test", version: 0 } }];
 afterEach(() => vi.restoreAllMocks());
@@ -16,6 +17,29 @@ function fail(
   return error;
 }
 describe("DynamoDB cancellation classification", () => {
+  it.each([
+    [["ConditionalCheckFailed", "None"]],
+    [["ConditionalCheckFailed", "ConditionalCheckFailed"]],
+    [["None", "TransactionConflict"]],
+  ])("maps a refused transaction that carries an event row to Conflict: %j", async (codes) => {
+    const failure = Object.assign(new Error("original service failure"), {
+      name: "TransactionCanceledException",
+      CancellationReasons: codes.map((Code) => ({ Code })),
+    });
+    const send = vi.spyOn(DynamoDBDocumentClient.prototype, "send").mockRejectedValue(failure);
+    const store = recordOwnerEvents(new DynamoStore("test"));
+    const job = { pk: "OWNER#test", sk: "JOB#test", version: 1, job: { id: "test", status: "queued", stage: "pinning" } };
+    await expect(store.atomicPut([{ row: job, expected: 0 }])).rejects.toBeInstanceOf(Conflict);
+    const items = (send.mock.calls[0][0] as { input: { TransactItems: { Put?: { Item: { sk: string } } }[] } }).input.TransactItems;
+    expect(items.map((item) => item.Put?.Item.sk.split("#")[0])).toEqual(["JOB", "EVENT"]);
+  });
+  it("passes a put's cancel signal to the request", async () => {
+    const send = vi.spyOn(DynamoDBDocumentClient.prototype, "send").mockResolvedValue({} as never);
+    const signal = new AbortController().signal;
+    await new DynamoStore("test").put({ pk: "OWNER#test", sk: "EVENT#x", version: 0 }, undefined, { signal });
+    expect(send.mock.calls[0][1]).toEqual({ abortSignal: signal });
+  });
+
   it.each([
     ["ConditionalCheckFailed"],
     ["TransactionConflict"],

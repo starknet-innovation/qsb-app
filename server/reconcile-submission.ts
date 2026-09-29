@@ -14,6 +14,7 @@ import { rehearsalAddressAllowed, transactionsEnabled } from "./network";
 import { configuredCompute } from "./compute-provider";
 import { searchVersion, workRange } from "./search-ranges";
 import { store as defaultStore, type AtomicWrite, type Store } from "./store";
+import { recordOwnerEvents } from "./owner-events";
 import { ACTIVE_JOBS_SK, claimWithdrawalSlot } from "./owner-limits";
 import { reconcileActiveJobLimit } from "./reconciliation-environment";
 
@@ -432,8 +433,10 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
     const maxActiveJobs = reconcileActiveJobLimit(process.env);
     if (maxActiveJobs === undefined) throw new ReconciliationError("OwnerMaxActiveJobsRequired");
     const endpoint = await configuredCompute();
+    // Records the owner event and queues its webhooks; the API or coordinator delivers them.
+    const store = recordOwnerEvents(defaultStore);
     const result = await reconcileUnknownSubmission({
-      store: defaultStore,
+      store,
       owner,
       jobId,
       decision,
@@ -445,7 +448,7 @@ export async function reconcileSubmissionCli(args: string[]): Promise<void> {
       },
       log: (entry) => process.stderr.write(`${JSON.stringify(entry)}\n`),
       resumePolling: startPolling,
-    });
+    }).finally(() => store.settle());
     process.stdout.write(`${JSON.stringify(result)}\n`);
     if (result.outcome === "provider-id" && !result.pollingStarted)
       process.exitCode = 1;

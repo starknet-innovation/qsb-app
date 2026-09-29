@@ -392,7 +392,29 @@ describe("API key authorization", () => {
       "GET /api/api-keys",
       "POST /api/api-keys",
       "POST /api/api-keys/:id/revoke",
+      "POST /api/webhooks",
+      "POST /api/webhooks/:id/delete",
     ]);
+  });
+
+  it("lets a read key see the event log and webhooks, but only a session register or delete one", async () => {
+    // A webhook registration returns its signing secret and decides where notifications go.
+    const resolve = async () => [{ address: "93.184.215.14", family: 4 }];
+    const { session, mint, call } = await setup(new MemoryStore(), {
+      webhooks: { resolve, transport: async () => ({ status: 204 }) },
+    });
+    const token = await session();
+    const reader = (await mint(token, { scopes: ["read"] })).body.key;
+    expect((await call("GET", "/api/events", reader)).status).toBe(200);
+    expect((await call("GET", "/api/webhooks", reader)).status).toBe(200);
+    for (const path of ["/api/webhooks", "/api/webhooks/wh_x/delete"]) {
+      const refused = await call("POST", path, reader, { url: "https://hooks.example.com/" });
+      expect(refused.status, path).toBe(403);
+      expect(await refused.json()).toMatchObject({ code: "api_key_not_allowed" });
+    }
+    const all = (await mint(token)).body.key;
+    expect((await call("POST", "/api/webhooks", all, { url: "https://hooks.example.com/" })).status).toBe(403);
+    expect((await call("POST", "/api/webhooks", token, { url: "https://hooks.example.com/" })).status).toBe(201);
   });
 
   it("requires the scope of every route a request matches", async () => {

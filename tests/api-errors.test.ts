@@ -143,12 +143,18 @@ async function setup() {
     seen: vi.fn(async () => false),
   };
   const consensus = { verify: vi.fn(async () => {}) };
+  // Webhook DNS and HTTP stay in the process: a public documentation-free address, no sends.
+  const webhooks = {
+    resolve: vi.fn(async (_host: string, _timeoutMs: number) => [{ address: "93.184.215.14", family: 4 }]),
+    transport: vi.fn(async () => ({ status: 204 })),
+  };
   const deps = {
     chain,
     miner: miner as unknown as Slipstream,
     consensus,
     enabled: true,
     exactSubmit: true,
+    webhooks,
     apiKeys: false,
     ownerLimits: undefined as OwnerLimits | undefined,
   };
@@ -182,7 +188,7 @@ async function setup() {
     store.put({ pk, sk: `VAULT#${vaultId}`, version: 0, vault: vault(overrides), ...extra });
   const putJob = (overrides: Partial<Job> & Record<string, unknown> = {}, extra = {}) =>
     store.put({ pk, sk: `JOB#${jobId}`, version: 0, job: job(overrides), ...extra });
-  return { store, routes, chain, miner, consensus, calls, call, putVault, putJob };
+  return { store, routes, chain, miner, consensus, webhooks, calls, call, putVault, putJob };
 }
 type Fixture = Awaited<ReturnType<typeof setup>>;
 const genesis = (f: Fixture, hash = NETWORK_CONFIG.genesisHash) =>
@@ -460,6 +466,17 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
     f.miner.credential.mockRejectedValue(new MinerAuthenticationError("Miner API credential is unavailable. Contact the service operator."));
     return f.call("POST", `/jobs/${jobId}/submit`, body);
   }],
+  ["webhook_url_invalid", 400, (f) => f.call("POST", "/webhooks", { url: "http://hooks.example.com/" })],
+  ["webhook_url_forbidden", 400, (f) => f.call("POST", "/webhooks", { url: "https://169.254.169.254/" })],
+  ["webhook_url_unresolvable", 400, (f) => {
+    f.webhooks.resolve.mockResolvedValue([]);
+    return f.call("POST", "/webhooks", { url: "https://gone.example.com/" });
+  }],
+  ["webhook_limit_reached", 409, async (f) => {
+    for (let i = 0; i < 5; i++) await f.call("POST", "/webhooks", { url: `https://hooks.example.com/${i}` });
+    return f.call("POST", "/webhooks", { url: "https://hooks.example.com/6" });
+  }],
+  ["webhook_not_found", 404, (f) => f.call("POST", "/webhooks/wh_missing/delete")],
 ];
 
 const parse = (file: string) =>

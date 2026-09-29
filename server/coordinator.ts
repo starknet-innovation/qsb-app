@@ -7,7 +7,9 @@ import {
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
 import { chain } from "./chain";
-import { store } from "./store";
+import { store as records, type Store } from "./store";
+import { recordOwnerEvents } from "./owner-events";
+import { httpsTransport, systemResolver } from "./webhook-transport";
 import { validationTick } from "./validation-search";
 import { configuredCompute, computeConfigured } from "./compute-provider";
 import { release, type Job, type PublicVault } from "../src/lib/model";
@@ -40,8 +42,22 @@ async function cpu(payload: unknown) {
     throw new Error("ReferenceVerificationFailed");
   return JSON.parse(Buffer.from(response.Payload).toString());
 }
+/**
+ * Webhook work after a tick stays short, since ticks share a small reserved concurrency:
+ * deliveries only with ample Lambda time left, within a small budget.
+ */
+const TICK_DELIVERY_BUDGET_MS = 2000;
+const TICK_REQUEST_TIMEOUT_MS = 1000;
+const TICK_DELIVERY_NEEDS_MS = 30_000;
+/** Writing this tick's event rows and queuing their webhooks: bounded, and done this long
+ * before the Lambda timeout, so it can't turn a tick into a timeout. */
+const TICK_SETTLE_LIMIT_MS = 3000;
+const TIMEOUT_MARGIN_MS = 5000;
 // Only identifiers enter workflow history. Recovery secrets never enter AWS.
-export async function handler(event: Event | { action: "providerHealth" }) {
+export async function handler(
+  event: Event | { action: "providerHealth" },
+  context?: { getRemainingTimeInMillis?: () => number },
+) {
   // IAM-only Lambda diagnostic; no HTTP route exposes it. This reads provider
   // health only and cannot start compute or bypass the transaction release gate.
   if ("action" in event) {
@@ -55,6 +71,23 @@ export async function handler(event: Event | { action: "providerHealth" }) {
       health: await provider.health(),
     };
   }
+  // Status changes become owner events. Their rows and webhooks are written after the tick's
+  // work and POSTs, bounded, and can't change its result or error.
+  const store = recordOwnerEvents(records);
+  try {
+    return await coordinate(event, store);
+  } finally {
+    const remaining = context?.getRemainingTimeInMillis?.() ?? Infinity;
+    await store.settle({
+      delivery: { transport: httpsTransport, resolve: systemResolver },
+      owners: [event.owner],
+      limitMs: Math.min(TICK_SETTLE_LIMIT_MS, remaining - TIMEOUT_MARGIN_MS),
+      deliveryMs: remaining >= TICK_DELIVERY_NEEDS_MS ? TICK_DELIVERY_BUDGET_MS : 0,
+      requestTimeoutMs: TICK_REQUEST_TIMEOUT_MS,
+    });
+  }
+}
+async function coordinate(event: Event, store: Store) {
   const pk = `OWNER#${event.owner}`,
     sk = `JOB#${event.jobId}`,
     row = await store.get(pk, sk);

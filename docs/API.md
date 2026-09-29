@@ -1,6 +1,6 @@
 # API
 
-The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side. This page covers its prefixes, OpenAPI document, errors, per-owner limits, idempotency and API keys.
+The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side. This page covers its prefixes, OpenAPI document, errors, per-owner limits, idempotency, API keys, and its event log and webhooks.
 
 ## Prefixes
 
@@ -51,6 +51,7 @@ Errors produced in front of the app have no `code`. That includes errors from th
 | Withdrawal submission | `intent_not_found`, `intent_conflict`, `exact_spend_mismatch`, `consensus_rejected`, `inclusion_check_failed` |
 | Inputs | `input_not_found`, `input_mismatch`, `input_unconfirmed`, `input_spent` |
 | Chain and miner | `chain_transaction_not_found`, `chain_unavailable`, `chain_error`, `miner_unavailable`, `miner_request_failed`, `miner_rate_unavailable` |
+| Webhooks | `webhook_url_invalid`, `webhook_url_forbidden`, `webhook_url_unresolvable`, `webhook_limit_reached`, `webhook_not_found` |
 | General | `state_conflict`, `internal_error` |
 
 In the browser client and the SDK ([`sdk/`](../sdk/README.md)), a failed request throws `ApiRequestError` ([`src/lib/session.ts`](../src/lib/session.ts)). It carries the `status`, and the `code` when the body has one. A failure whose body isn't a JSON object has no code.
@@ -59,7 +60,7 @@ In the browser client and the SDK ([`sdk/`](../sdk/README.md)), a failed request
 
 Three deployment switches limit what one owner, the signed-in wallet address, can do. Each is off when unset or empty, which keeps the default behaviour. They only add refusals, and a refusal writes nothing and starts nothing. [`server/owner-limits.ts`](../server/owner-limits.ts) implements them; the [runbook](OPERATIONAL-RUNBOOK.md#per-owner-limits) covers operating them.
 
-- **`QSB_OWNER_ALLOWLIST`** (Terraform `owner_allowlist`): only listed owners may register a vault, deposit (`/fund`, `/fund/submit`, `/fund/signed`, `/fund/resubmit`), or create or resume a withdrawal; others get 403 `owner_not_allowlisted`. The coordinator pauses other owners' withdrawals.
+- **`QSB_OWNER_ALLOWLIST`** (Terraform `owner_allowlist`): only listed owners may register a vault, deposit (`/fund`, `/fund/submit`, `/fund/signed`, `/fund/resubmit`), create or resume a withdrawal, or register a webhook; others get 403 `owner_not_allowlisted`. The coordinator pauses other owners' withdrawals.
 - **`QSB_OWNER_MAX_ACTIVE_JOBS`** (Terraform `owner_max_active_jobs`): the most withdrawals one owner may have queued or searching. Pausing frees a slot, and resume claims one again. Over the limit, `POST /api/jobs` and `POST /api/jobs/:id/resume` return 429 `owner_active_withdrawal_limit`.
 - **`QSB_OWNER_MAX_GPU_SECONDS`** (Terraform `owner_max_gpu_seconds`): GPU seconds reserved across all of one owner's withdrawals. Once it can't cover another submission, `POST /api/jobs` returns 429 `owner_gpu_budget_reached`, and the coordinator pauses the withdrawal.
 
@@ -68,6 +69,77 @@ A malformed value, including a GPU budget smaller than one submission's reservat
 Sign-in, reads and pause stay open, and so does `POST /api/jobs/:id/submit`: it sends the owner's own solved withdrawal and uses no GPU. Replaying an `idempotencyKey` returns the existing job and takes no slot.
 
 `GET /api/config` reports `ownerLimits`: `allowlist` (whether one is set), `allowlisted` (the caller's standing, from its session or API key, or `null` without either or without an allowlist), `maxActiveJobs` and `maxGpuSeconds`. It never returns the list.
+
+## Events and webhooks
+
+Withdrawals take hours. Instead of polling each job, read your account's event log, and optionally register webhooks that tell you when to read it. `GET /events` and `GET /webhooks` take a wallet session or an API key with the `read` scope. Registering and deleting a webhook take a wallet session only: registration returns the signing secret and decides where your notifications go.
+
+### Event types
+
+| Type | When |
+|---|---|
+| `withdrawal.queued` | A withdrawal is created, resumed, or moves to its next search stage. |
+| `withdrawal.searching` | GPU search starts for a stage. |
+| `withdrawal.paused` | The search stops: paused by you, by the deployment, or waiting on an operator. |
+| `withdrawal.failed` | The withdrawal can't continue. |
+| `withdrawal.awaiting_authorization` | The solution is verified; assemble and approve the withdrawal. |
+| `withdrawal.submitted` | The signed withdrawal is recorded for the miner. |
+| `withdrawal.confirmed` | The withdrawal is confirmed on chain. |
+| `deposit.submitted` | A deposit is recorded as sent, and not yet confirmed. |
+| `deposit.confirmed` | The deposit is confirmed. |
+| `deposit.spent` | The vault's deposit was spent by its withdrawal. |
+| `deposit.dropped` | The miner doesn't have the deposit. Either it refused a new deposit (the vault is unfunded again), or a resend found it no longer had a submitted deposit and the resend wasn't accepted (the vault stays submitted; resend or contact the operator). |
+
+An event is thin: identifiers and statuses, never transaction bytes, scripts or anything secret.
+
+```json
+{ "id": "evt_…", "type": "withdrawal.awaiting_authorization", "subjectId": "<job id>", "status": "awaiting_authorization", "stage": "verification", "at": "2026-09-29T12:00:00.000Z" }
+```
+
+`subjectId` is the job id for `withdrawal.*` and the vault id for `deposit.*`. `stage` is on withdrawal events only. Read details from `GET /api/jobs/:id/status` or `GET /api/vaults`.
+
+### Pull: `GET /api/events?after=<cursor>&limit=<1-100>`
+
+Returns `{ events, next, hasMore }`, oldest first. Keep `next` and pass it as `after` on the next call; without `after` you get everything retained. Events are kept for 30 days, and are listed once they are 10 seconds old, so in normal operation a write still in flight can't land behind your cursor. The log is the record: a webhook only tells you to read it.
+
+### Webhooks
+
+- `POST /api/webhooks` with `{ "url": "https://…", "events": ["withdrawal.awaiting_authorization"] }` (omit `events` for all types) returns `{ webhook, secret }`. **The secret is shown only in this response.** At most 5 per account. The service keeps the secret to sign deliveries, and it stays in the service's database backups for up to 35 days after you delete the webhook. To rotate it, delete the webhook and register it again.
+- `GET /api/webhooks` lists them, with `status` (`active` or `failing`), `failures`, `pending`, and the last delivery and failure. Never the secret.
+- `POST /api/webhooks/:id/delete` removes one and its queued deliveries.
+
+URLs must be `https` on port 443, without credentials, on a public host name or address. Private, loopback, link-local, CGNAT, unique-local, multicast and reserved addresses are refused, at registration and again at every delivery: the host is resolved, every address is checked, and the connection goes to the checked address. Redirects are not followed.
+
+Each delivery is a `POST` of one event as JSON (described under `webhooks` in [`openapi.json`](api/openapi.json)), with:
+
+- `QSB-Event-Id`: the event id. Use it to drop duplicates.
+- `QSB-Signature: t=<unix seconds>,v1=<hex>`: HMAC-SHA256 with your secret over `<t>.<raw body>`.
+
+Verify the raw body before parsing it:
+
+```ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+export function verify(secret: string, header: string, rawBody: string, toleranceSeconds = 300) {
+  const match = /^t=(\d+),v1=([a-f0-9]{64})$/.exec(header);
+  if (!match) return false;
+  const [, t, v1] = match;
+  if (Math.abs(Date.now() / 1000 - Number(t)) > toleranceSeconds) return false;
+  const expected = createHmac("sha256", secret).update(`${t}.${rawBody}`).digest();
+  return timingSafeEqual(expected, Buffer.from(v1, "hex"));
+}
+```
+
+Answer with any 2xx within 1 second; slower answers can time out, and the response body is ignored.
+
+### Delivery and retries
+
+At least once, best effort; **the pull endpoint is authoritative**.
+
+- Deliveries are sent right after the change that caused them, from the request or coordinator step that made it, within a budget of a few seconds (API) or two seconds (coordinator). When a step has no time left to send, its deliveries are still queued. An API request that has already taken about 28 seconds skips this work, so its response still beats API Gateway's 30-second timeout. A change it made outside a transaction can then be missing from the event log; the job and vault endpoints still show it. Retries and queued deliveries go out on later coordinator steps and later API calls for your account, so an idle account's deliveries wait for its next activity.
+- After a failed attempt the webhook waits 30 s, 2 min, 10 min, 30 min, 1 h, 2 h, then 4 h between tries. An event is dropped after 8 failed attempts, and a webhook that fails 8 times in a row is marked `failing` and gets no more deliveries: delete it and register it again.
+- Up to 100 deliveries wait per account; past that the oldest are dropped.
+- Deliveries can arrive out of order or more than once. Use `at`, `QSB-Event-Id` and the pull endpoint to reconcile.
 
 ## Idempotency-Key
 
@@ -81,7 +153,7 @@ These POSTs accept an optional `Idempotency-Key` header, 8 to 128 characters fro
 - `/jobs/:id/pause`
 - `/jobs/:id/resume`
 
-`POST /jobs` keeps the manifest's `idempotencyKey`, and its reuse for a different withdrawal is also `idempotency_conflict`. Other routes ignore the header.
+`POST /jobs` keeps the manifest's `idempotencyKey`, and its reuse for a different withdrawal is also `idempotency_conflict`. Other routes ignore the header. That includes `POST /webhooks`: its response carries the webhook's signing secret, which is never stored for a replay, so a retried registration registers a second webhook. List and delete the extra one.
 
 A key names one attempt. It belongs to one owner and one route, and for 24 hours it is bound to its first request's path and body. A retry with the same key gets:
 
