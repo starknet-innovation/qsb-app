@@ -9,6 +9,7 @@ import { operationsAllowed } from "../src/lib/readiness";
 import { assertVaultConfiguration, vaultConfiguration } from "../src/lib/provenance";
 import {
   canonicalManifest,
+  outpoint,
   publicVaultSchema,
   sats,
   txid,
@@ -50,6 +51,8 @@ import {
   type CoordinatorSignedResult,
 } from "../src/mainnet/coordinatorResult";
 import { persistentGuard } from "../src/mainnet/guard";
+// The request bodies the server's handlers parse, so a request can't drift from the API.
+import { fundResubmitRequest, fundSubmitRequest, submitRequest } from "../server/api-schemas";
 import type { Wallet } from "../src/lib/wallet";
 import { nodeQsb, type LocalQsb } from "./runtime";
 import { apiBase, isLoopback, signerWallet, type Signer } from "./signer";
@@ -389,11 +392,10 @@ export class QsbClient {
     return recovery;
   }
   private async fundingInput(point: Point): Promise<FundingInput> {
-    const { previousTxHex } = await this.session.api<{ previousTxHex: string }>("/payment-input", {
-      txid: point.txid,
-      vout: point.vout,
-      value: point.value,
-    });
+    const { previousTxHex } = await this.session.api<{ previousTxHex: string }>(
+      "/payment-input",
+      outpoint.parse({ txid: point.txid, vout: point.vout, value: point.value }),
+    );
     return {
       txid: point.txid,
       vout: point.vout,
@@ -587,11 +589,10 @@ export class QsbClient {
       );
     let answer: unknown;
     try {
-      answer = await this.session.api<unknown>(`/vaults/${vaultId}/fund/submit`, {
-        rawTxHex: deposit.rawTxHex,
-        amount: deposit.amount,
-        costAccepted: true,
-      });
+      answer = await this.session.api<unknown>(
+        `/vaults/${vaultId}/fund/submit`,
+        fundSubmitRequest.parse({ rawTxHex: deposit.rawTxHex, amount: deposit.amount, costAccepted: true }),
+      );
     } catch (error) {
       throw unconfirmed(error instanceof Error ? ` ${error.message}` : "");
     }
@@ -609,7 +610,7 @@ export class QsbClient {
     id(vaultId, "vault");
     const waiting = await this.pending.get(vaultId);
     if (waiting) return this.sendDeposit(vaultId, waiting);
-    return this.session.api<Omit<DepositSubmission, "txid">>(`/vaults/${vaultId}/fund/resubmit`, {});
+    return this.session.api<Omit<DepositSubmission, "txid">>(`/vaults/${vaultId}/fund/resubmit`, fundResubmitRequest.parse({}));
   }
   private async depositStatus(vaultId: string) {
     const status = await this.session.api<{
@@ -842,9 +843,10 @@ export class QsbClient {
       throw new Error("The withdrawal was not approved. Nothing was submitted.");
     let response: { txid: string; status: string };
     try {
-      response = await this.session.api<{ txid: string; status: string }>(`/jobs/${job.id}/submit`, {
-        rawTxHex: signed.rawTxHex,
-      });
+      response = await this.session.api<{ txid: string; status: string }>(
+        `/jobs/${job.id}/submit`,
+        submitRequest.parse({ rawTxHex: signed.rawTxHex }),
+      );
     } catch (error) {
       if (submitDisabled(error))
         throw new Error("Submission is disabled. Keep the signed result; no submission was accepted.");

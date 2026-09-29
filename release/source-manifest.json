@@ -51,10 +51,10 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "441b4a9bbdde3844497fa7b6a3ccfb7402108f70c55dde2a8756399989bc8594",
+      "api": "49735990ecd69b70085ba767dc3aa2bc10bef9e96577f433048706b80b955650",
       "build-metadata": "473856897f432e05aba905984679781b962bd278f9b285dfa96e43cb5f4b0735",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
-      "dispatcher": "9c461328ee99edb20ffab39ddeffe9575dc3eb329406cc6eb9b46f78daa77ac3",
+      "dispatcher": "ad51d6965cf6ed24aa469603369fe6e5441ac1efc0886421b58a031b54d59a3c",
       "evidence-reader": "768e7c8098ff9d9b473f5c7a0a77ff272d679b1e9cab801dfd0145832ce88c58",
       "fresh-proof": "7c322f9603a117ad2ad0dd88dc102ec63e57d04082643f24530e9bd9aef115af",
       "runtime": "abf6187a18afa8eda9db85cca21a4149696c27315e65ee3fc25c35901837d60c"
@@ -110,7 +110,8 @@
       "scripts/package-release.ts": "5b1d0d9e5169c8e83a1b9259033c710011a3d8cf46b02824a1c73708de4d2031",
       "scripts/storage-inventory.ts": "c8ecc1d3ed239f444efd50ab8bb704be13408f609aba1e80d16a5325d5e4603e",
       "server/api-errors.ts": "6c647d28422d4d659cef1c17f297258b584d5a63e8fd99ed48090a71b085f354",
-      "server/app.ts": "0bf214aa683d2244b9583f165014f98b9997ac58412fec4eefecf31103b0578d",
+      "server/api-schemas.ts": "639d2cb7cedd97ba431c94d88e1e7e4ed9b2b62f489a1b0a9f8a9fb90db5fee9",
+      "server/app.ts": "788eb04cecd258d2504408b4ea11e37282574e2a85a078789ad365c23f711245",
       "server/aws-batch-command.json": "5a4544d33c5744dbc438c0d515a84e3bb2c8e80d8662020c4a7c765ed5267881",
       "server/aws-batch.ts": "a0db53599bf9ae3cb2fb24355f4309631b86d0646472cd477f2eb9ca76817fa7",
       "server/candidate-output.ts": "d21c9cf57d3f0604c7a501a88b9a9925a035ec878ec568e56d3e7f99bc3d004a",
@@ -131,7 +132,7 @@
       "server/providers.ts": "cf30bb87e8df4d7d6d75c1467ac93a20d3eaabb0f4e44f7ead6f76efbd566a4b",
       "server/runtime/activation.ts": "5d615a42fbb8dc3402aee7382c0edd72787f05277b2c000763229a51a947a011",
       "server/runtime/capability.ts": "5695dc01ce72e1243022204014b7de5a8c662ac337aa73c52124628c8de2a797",
-      "server/runtime/closure.ts": "23a2dcdad039cc2057c6817fbe494ff60aa44283cbeee7ea979fdd93504db5ba",
+      "server/runtime/closure.ts": "0ac317b7516b3905ae28db23226c2faf144f6afd7d8d0eee8ad1ef9a576d0427",
       "server/runtime/core-binary.json": "e801c46615cd3b9ad84af8736cfddd7707787a1e8f29ed8afb2f07fddb4b6b96",
       "server/runtime/coverage-ledger.ts": "7c02a3c5f1dbd8681f4f1a5c552661b63c7da57d892ce3ab5356d52829774c83",
       "server/runtime/cpu-verifier.ts": "a7c3e834696bc2ec2cab21c738ed740edd2dfe5c78666e044337b27fcd9405ee",

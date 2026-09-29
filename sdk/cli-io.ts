@@ -6,6 +6,7 @@ import { Writable } from "node:stream";
 import { createHash } from "node:crypto";
 import { base64 } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
+import { SESSION_SECONDS } from "../server/api-schemas";
 import type { PendingDeposit, PendingDeposits } from "./client";
 import type { Signer } from "./signer";
 
@@ -273,7 +274,7 @@ function writePrivateAtomically(file: string, text: string) {
     closeSync(directory);
   }
 }
-/** Sessions last an hour on the server; the cache gives up five minutes early. */
+/** The cache gives up five minutes before the server's session expires. */
 export async function saveSession(home: string, api: string, address: string, token: string) {
   const cached: CachedSession = {
     format: "qsb-cli-session-v1",
@@ -281,7 +282,7 @@ export async function saveSession(home: string, api: string, address: string, to
     network: NETWORK_ID,
     address,
     token,
-    expiresAt: Math.floor(Date.now() / 1000) + 3300,
+    expiresAt: Math.floor(Date.now() / 1000) + SESSION_SECONDS - 300,
   };
   await writePrivateAtomically(sessionPath(home), JSON.stringify(cached));
 }

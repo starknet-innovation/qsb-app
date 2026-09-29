@@ -15,6 +15,7 @@
     "package:release": "tsx scripts/package-release.ts",
     "inventory:storage": "tsx scripts/storage-inventory.ts",
     "qsb": "QSB_NETWORK=\"${QSB_NETWORK:?Set QSB_NETWORK to mainnet or testnet4}\" tsx sdk/cli.ts",
+    "openapi": "QSB_NETWORK=mainnet tsx scripts/openapi.ts",
     "harness:core": "bash scripts/test-core.sh",
     "prebuild": "node scripts/generate-solver-registry.mjs",
     "pretest": "node scripts/generate-solver-registry.mjs",
