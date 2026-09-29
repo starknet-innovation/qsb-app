@@ -5,6 +5,7 @@ import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { createApp } from "../server/app";
 import { API_ERROR_CODES, type ApiErrorCode } from "../server/api-errors";
+import { apiRoutes, routeErrors } from "../server/openapi";
 import { Conflict, MemoryStore } from "../server/store";
 import { Esplora } from "../server/chain";
 import { ConsensusError } from "../server/consensus";
@@ -138,12 +139,14 @@ async function setup() {
     enabled: true,
     exactSubmit: true,
   };
+  const calls: { method: string; path: string }[] = [];
   const call = (
     method: "GET" | "POST",
     path: string,
     body?: unknown,
     options: { auth?: string | null; app?: Partial<typeof deps>; raw?: string } = {},
   ) => {
+    calls.push({ method: method.toLowerCase(), path: "/api" + path });
     const auth = options.auth === undefined ? token : options.auth;
     return createApp(store, { ...deps, ...options.app }).request(
       new Request("http://localhost/api" + path, {
@@ -160,7 +163,7 @@ async function setup() {
     store.put({ pk, sk: `VAULT#${vaultId}`, version: 0, vault: vault(overrides), ...extra });
   const putJob = (overrides: Partial<Job> & Record<string, unknown> = {}, extra = {}) =>
     store.put({ pk, sk: `JOB#${jobId}`, version: 0, job: job(overrides), ...extra });
-  return { store, routes, chain, miner, consensus, call, putVault, putJob };
+  return { store, routes, chain, miner, consensus, calls, call, putVault, putJob };
 }
 type Fixture = Awaited<ReturnType<typeof setup>>;
 const genesis = (f: Fixture, hash = NETWORK_CONFIG.genesisHash) =>
@@ -346,6 +349,14 @@ describe("API error codes", () => {
     expect(body.error).toEqual(expect.any(String));
     if (code === "invalid_request") expect(body.issues).toEqual(expect.any(Array));
     if (code === "operations_disabled") expect(body.checks).toEqual(expect.any(Array));
+    // The OpenAPI document lists this status and code for the route that returned them.
+    const last = f.calls[f.calls.length - 1];
+    const route = apiRoutes.find(
+      (r) =>
+        r.method === last.method &&
+        new RegExp(`^${r.path.replace(/:\w+/g, "[^/]+")}$`).test(last.path),
+    );
+    expect(route && (routeErrors(route) as Record<number, readonly string[]>)[status]).toContain(code);
   });
   it("drives every listed code, and the list has no duplicates", () => {
     expect(new Set(API_ERROR_CODES).size).toBe(API_ERROR_CODES.length);

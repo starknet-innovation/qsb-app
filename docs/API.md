@@ -1,6 +1,18 @@
 # API
 
-The server is a JSON HTTP API under `/api`: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). This page covers its errors. An OpenAPI spec is planned under #85.
+The server is a JSON HTTP API under `/api`: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). This page covers its errors.
+
+## OpenAPI
+
+[`docs/api/openapi.json`](api/openapi.json) is the OpenAPI 3.1 document for the mainnet API: every route, its sign-in requirement, request and response schemas, and the error codes each route can return, by status.
+
+It's generated; don't edit it by hand. After changing a route, a request schema or a code, regenerate it and commit the result:
+
+```sh
+npm run openapi
+```
+
+[`server/openapi.ts`](../server/openapi.ts) holds the route registry. Request schemas are the zod objects the handlers parse ([`server/api-schemas.ts`](../server/api-schemas.ts) and [`src/lib/model.ts`](../src/lib/model.ts)). [`tests/openapi.test.ts`](../tests/openapi.test.ts) fails when the committed file is stale, when `createApp` serves a route the document lacks (or the reverse), or when a route's sign-in requirement differs from the server's. [`tests/api-errors.test.ts`](../tests/api-errors.test.ts) also checks that the document lists each status and code it drives.
 
 ## Errors
 
