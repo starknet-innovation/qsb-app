@@ -63,6 +63,12 @@ Rollback cannot revive legacy writers, release consumed commitments, or duplicat
 
 Treat `unknown`, `timeout`, and `http-ambiguous` as unpaid-or-paid until a provider or invoice record says which. The only action is reconcile. `reconcilePaidOutcome` returns `retry: false`. Requesting retry throws `BlindRetryRefused`. A known success is recorded once and is not submitted again.
 
+## Withdrawal workflow failures
+
+The withdrawal state machine's `CoordinateSearch` task invokes the coordinator Lambda (`terraform/workflow.tf`). When Lambda throttles that invoke with `Lambda.TooManyRequestsException`, for example because more withdrawals tick at once than the coordinator's reserved concurrency allows, Step Functions retries it up to 6 times with jittered exponential backoff (at most about 3 minutes in all). Lambda refuses a throttled invoke before the coordinator runs, so this retry can't repeat paid work. It is the only automatic retry.
+
+Every other error ends the execution in `NeedsOperatorAttention` (error `WorkflowInterrupted`) and raises the workflow-failures alarm. That includes a task timeout, a Lambda service or client error, a coordinator error, and throttling that outlasts the retries. The coordinator may have run, so don't restart the execution by hand. Reconcile durable intents and provider IDs first, as in [Reconcile an unknown AWS Batch submission](#reconcile-an-unknown-aws-batch-submission).
+
 ## Reconcile an unknown AWS Batch submission
 
 Run this as `qsb-operator` against the deployed AWS Batch coordinator; see

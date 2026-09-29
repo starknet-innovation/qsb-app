@@ -65,8 +65,21 @@ run "baseline" {
     error_message = "Workflow timeout must cover the coordinator preflight and paid submission budget."
   }
   assert {
-    condition     = !can(jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Retry)
-    error_message = "Do not add generic automatic retries around billable coordination."
+    # A throttled invoke never ran the coordinator, so it is the only error retried; the retrier is bounded.
+    condition = try(
+      length(jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Retry) == 1 &&
+      jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Retry[0].ErrorEquals == ["Lambda.TooManyRequestsException"] &&
+      jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Retry[0].MaxAttempts >= 1 &&
+      jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Retry[0].MaxAttempts <= 10,
+      false
+    )
+    error_message = "CoordinateSearch must retry only Lambda.TooManyRequestsException, a bounded number of times. Do not add generic automatic retries around billable coordination."
+  }
+  assert {
+    condition = jsonencode(jsondecode(aws_sfn_state_machine.withdrawal.definition).States.CoordinateSearch.Catch) == jsonencode([
+      { ErrorEquals = ["States.ALL"], ResultPath = "$.failure", Next = "NeedsOperatorAttention" }
+    ]) && jsondecode(aws_sfn_state_machine.withdrawal.definition).States.NeedsOperatorAttention.Type == "Fail"
+    error_message = "Every other CoordinateSearch error, including an exhausted throttling retry, must end in NeedsOperatorAttention."
   }
   assert {
     condition     = aws_lambda_function.coordinator.environment[0].variables.GPU_WORKERS_MAX == tostring(local.gpu_spend.workersMax) && local.gpu_spend.workersMax >= 1 && local.gpu_spend.workersMax <= 16 && aws_lambda_function.coordinator.environment[0].variables.GPU_WORKERS_MIN == "0" && aws_lambda_function.coordinator.environment[0].variables.GPU_EXECUTION_TIMEOUT_MS == tostring(local.gpu_spend.executionTimeoutMs) && aws_lambda_function.coordinator.environment[0].variables.MAX_JOB_GPU_SECONDS == (tostring(local.gpu_spend.maxJobGpuSeconds)) && output.gpu_limits.workersMax == local.gpu_spend.workersMax && output.gpu_limits.workersMin == 0 && output.gpu_limits.executionTimeoutMs == local.gpu_spend.executionTimeoutMs
