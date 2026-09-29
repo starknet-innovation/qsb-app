@@ -39,7 +39,7 @@ export async function exportFunding(store: Store, owner: string, vaultId: string
     if (!row || !vault?.funding || typeof row.fundingRawTxHex !== "string" || !row.fundingRawTxHex)
       return undefined;
     if (boundRaw !== undefined && row.fundingRawTxHex !== boundRaw)
-      throw new ChainError("Funding intent changed during export. Refresh the vault.");
+      throw new ChainError("Funding intent changed during export. Refresh the vault.", "state_conflict");
     boundRaw = row.fundingRawTxHex;
     const next = { ...row, version: row.version + 1, fundingExportedAt: new Date().toISOString() };
     try {
@@ -81,16 +81,16 @@ export async function submitFunding(
   try {
     tx = btc.Transaction.fromRaw(hex.decode(raw), opts);
   } catch {
-    throw new ChainError("Invalid funding transaction.");
+    throw new ChainError("Invalid funding transaction.", "funding_transaction_invalid");
   }
   const txid = transactionId(raw);
   const pk = `OWNER#${owner}`,
     sk = `VAULT#${vaultId}`;
   const row = await store.get(pk, sk);
-  if (!row) throw new ChainError("Vault not found.");
+  if (!row) throw new ChainError("Vault not found.", "vault_not_found");
   const vault = row.vault as PublicVault;
   if (vault.network !== "mainnet" || vault.id !== vaultId)
-    throw new ChainError("Mainnet vault not found.");
+    throw new ChainError("Mainnet vault not found.", "vault_not_found");
   assertVaultConfiguration(vault);
   const payment = matchVaultFunding(tx, vault.scriptHex, amount);
 
@@ -101,6 +101,7 @@ export async function submitFunding(
     if (vault.funding.txid !== txid || row.fundingRawTxHex !== raw)
       throw new ChainError(
         "Vault already has a different funding intent. Reconcile it before depositing again.",
+        "funding_intent_exists",
       );
     if (vault.status !== "submitted") return { vault, submission: "submitted" };
     fresh = false;
@@ -111,7 +112,7 @@ export async function submitFunding(
     current = await touch(store, row);
   } else {
     if (vault.status !== "unfunded")
-      throw new ChainError("Vault already has a funding intent. Reconcile that transaction first.");
+      throw new ChainError("Vault already has a funding intent. Reconcile that transaction first.", "funding_intent_exists");
     // Read the miner credential before recording the intent: a failure here has sent nothing and
     // leaves the vault unfunded, so the user can simply try again.
     credential = await miner.credential();
@@ -166,7 +167,7 @@ async function touch(store: Store, row: Row): Promise<Row> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const latest = (await store.get(row.pk, row.sk)) ?? row;
     if ((latest.vault as PublicVault).funding?.txid !== (row.vault as PublicVault).funding?.txid)
-      throw new ChainError("Funding intent changed during submission. Refresh the vault.");
+      throw new ChainError("Funding intent changed during submission. Refresh the vault.", "state_conflict");
     const next = { ...latest, version: latest.version + 1, fundingResubmittedAt: new Date().toISOString() };
     try {
       await store.put(next, latest.version);
@@ -175,7 +176,7 @@ async function touch(store: Store, row: Row): Promise<Row> {
       if (!(error instanceof Conflict)) throw error;
     }
   }
-  throw new ChainError("The vault kept changing during a resubmission. Try again.");
+  throw new ChainError("The vault kept changing during a resubmission. Try again.", "state_conflict");
 }
 
 async function record(store: Store, row: Row, outcome: "submitted" | "uncertain") {
@@ -183,7 +184,7 @@ async function record(store: Store, row: Row, outcome: "submitted" | "uncertain"
     const latest = (await store.get(row.pk, row.sk)) ?? row;
     const vault = latest.vault as PublicVault;
     if (vault.funding?.txid !== (row.vault as PublicVault).funding?.txid)
-      throw new ChainError("Funding intent changed during submission. Refresh the vault.");
+      throw new ChainError("Funding intent changed during submission. Refresh the vault.", "state_conflict");
     const submission =
       latest.fundingSubmission === "submitted" || outcome === "submitted" ? "submitted" : "uncertain";
     try {

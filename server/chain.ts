@@ -11,15 +11,25 @@ import {
 
 import { NETWORK_ID, NETWORK_CONFIG } from "../src/lib/network";
 import { chainBase, testnet4Genesis } from "./network";
+import type { ApiErrorCode } from "./api-errors";
 
 const statusSchema = z.object({
   confirmed: z.boolean(),
   block_height: z.number().int().nonnegative().optional(),
   block_hash: txid.optional(),
 });
-export class ChainError extends Error {}
+/** `code` is the API error code app.onError returns with the message. */
+export class ChainError extends Error {
+  constructor(message?: string, readonly code: ApiErrorCode = "chain_error") {
+    super(message);
+  }
+}
 /** A 404 from the transaction lookup itself: the chain API doesn't know this transaction (yet). */
-export class ChainNotFound extends ChainError {}
+export class ChainNotFound extends ChainError {
+  constructor(message?: string) {
+    super(message, "chain_transaction_not_found");
+  }
+}
 // Only these lookups can mean "unknown transaction". A 404 from the network check, a block
 // height or anything else is a provider failure, not evidence about the transaction.
 const transactionLookup = /^\/tx\/[0-9a-f]{64}\/(?:hex|status)$/;
@@ -32,10 +42,12 @@ export class Esplora {
     const r = await this.request(`${this.base}${path}`, {
       signal: AbortSignal.timeout(15000),
     });
-    if (!r.ok)
-      throw new (r.status === 404 && transactionLookup.test(path) ? ChainNotFound : ChainError)(
-        `Chain lookup failed (${r.status}). Retry before signing.`,
-      );
+    if (!r.ok) {
+      const message = `Chain lookup failed (${r.status}). Retry before signing.`;
+      throw r.status === 404 && transactionLookup.test(path)
+        ? new ChainNotFound(message)
+        : new ChainError(message, "chain_unavailable");
+    }
     const text = await r.text();
     if (text.length > 8000000)
       throw new ChainError("Chain response exceeds limit.");
@@ -172,7 +184,10 @@ export class Esplora {
       !output.script ||
       hex.encode(output.script) !== script.toLowerCase()
     )
-      throw new ChainError("Previous output amount or script mismatch.");
+      throw new ChainError(
+        "Previous output amount or script mismatch.",
+        "input_unavailable",
+      );
     const [s, spent] = await Promise.all([
       this.status(point.txid),
       this.read(`/tx/${point.txid}/outspend/${point.vout}`),
@@ -180,9 +195,10 @@ export class Esplora {
     if (!s.confirmed)
       throw new ChainError(
         "Input is unconfirmed or was reorganized out of the chain.",
+        "input_unavailable",
       );
     if (z.object({ spent: z.boolean() }).parse(JSON.parse(spent)).spent)
-      throw new ChainError("Input has already been spent.");
+      throw new ChainError("Input has already been spent.", "input_unavailable");
     return { previousTxHex: raw, confirmations: s.confirmations };
   }
   async paymentUtxos(address: string) {
