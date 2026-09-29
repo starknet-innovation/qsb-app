@@ -353,6 +353,59 @@ run "mainnet_reject_testnet" {
   expect_failures = [var.mainnet_enabled, terraform_data.release]
 }
 
+run "owner_limits_default_off" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition     = length([for key in concat(keys(aws_lambda_function.api.environment[0].variables), keys(aws_lambda_function.coordinator.environment[0].variables)) : key if startswith(key, "QSB_OWNER_")]) == 0
+    error_message = "Unset owner limits must add nothing to either Lambda environment."
+  }
+}
+run "owner_limits_api_and_coordinator_only" {
+  command = plan
+  variables {
+    network               = "mainnet"
+    owner_allowlist       = ["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "bc1qexamplepartner0000000000"]
+    owner_max_active_jobs = 2
+    owner_max_gpu_seconds = 1474560
+  }
+  assert {
+    condition = alltrue([
+      for env in [aws_lambda_function.api.environment[0].variables, aws_lambda_function.coordinator.environment[0].variables] :
+      env.QSB_OWNER_ALLOWLIST == "bc1qexamplepartner0000000000,bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4" && env.QSB_OWNER_MAX_ACTIVE_JOBS == "2" && env.QSB_OWNER_MAX_GPU_SECONDS == "1474560"
+    ]) && length(aws_lambda_function.reference.environment) == 0 && !output.transactions_enabled && !output.exact_submit_enabled
+    error_message = "Owner limits reach the API and coordinator only, and setting them activates nothing."
+  }
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[0].Action == ["dynamodb:GetItem"] && jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement[1].Action == ["dynamodb:PutItem"] && length(jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement) == 2
+    error_message = "Owner limits need no new coordinator grant: its budget row is an OWNER# PutItem."
+  }
+}
+run "reject_owner_allowlist_separator" {
+  command = plan
+  variables {
+    network         = "mainnet"
+    owner_allowlist = ["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4,bc1qexamplepartner0000000000"]
+  }
+  expect_failures = [var.owner_allowlist]
+}
+run "reject_owner_active_jobs_fraction" {
+  command = plan
+  variables {
+    network               = "mainnet"
+    owner_max_active_jobs = 1.5
+  }
+  expect_failures = [var.owner_max_active_jobs]
+}
+run "reject_owner_gpu_seconds_zero" {
+  command = plan
+  variables {
+    network               = "mainnet"
+    owner_max_gpu_seconds = 0
+  }
+  expect_failures = [var.owner_max_gpu_seconds]
+}
+
 run "reject_provider_queue_wildcard" {
   command = plan
   variables {
@@ -382,7 +435,7 @@ run "reject_changed_solver_selection_including_omission" {
 run "reject_reference_identity_mismatch" {
   command = plan
   variables {
-    network = "mainnet"
+    network             = "mainnet"
     build_manifest_path = ".build/test-bad-reference.json"
   }
   expect_failures = [terraform_data.release]
@@ -391,7 +444,7 @@ run "reject_reference_identity_mismatch" {
 run "reject_manifest_solver_override" {
   command = plan
   variables {
-    network = "mainnet"
+    network             = "mainnet"
     build_manifest_path = ".build/test-bad-solver.json"
   }
   expect_failures = [terraform_data.release]

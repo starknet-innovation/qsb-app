@@ -129,3 +129,31 @@ variable "mainnet_enabled" {
     error_message = "mainnet_enabled is only supported on mainnet."
   }
 }
+variable "owner_allowlist" {
+  description = "Partner-phase owner allowlist (QSB_OWNER_ALLOWLIST) for the API and coordinator. Empty allows every signed-in owner, as today. When set, only these Bitcoin addresses may register vaults, deposit, or create or resume withdrawals, and the coordinator pauses other owners' withdrawals. Lambda environments hold 4 KB in all, so keep it to a short partner list."
+  type        = set(string)
+  default     = []
+  nullable    = false
+  validation {
+    condition     = alltrue([for address in var.owner_allowlist : can(regex("^[A-Za-z0-9]{14,100}$", address))])
+    error_message = "List Bitcoin addresses exactly as the wallet signs in with them."
+  }
+}
+variable "owner_max_active_jobs" {
+  description = "Most withdrawals one owner may have queued, searching or paused at once (QSB_OWNER_MAX_ACTIVE_JOBS). Null: no limit."
+  type        = number
+  default     = null
+  validation {
+    condition     = var.owner_max_active_jobs == null ? true : var.owner_max_active_jobs >= 1 && floor(var.owner_max_active_jobs) == var.owner_max_active_jobs
+    error_message = "Use a positive integer, or null for no limit."
+  }
+}
+variable "owner_max_gpu_seconds" {
+  description = "GPU seconds one owner may reserve across all of its withdrawals, never refunded (QSB_OWNER_MAX_GPU_SECONDS). It only adds to the per-job cap in server/gpu-spend.json. Null: no owner budget."
+  type        = number
+  default     = null
+  validation {
+    condition     = var.owner_max_gpu_seconds == null ? true : var.owner_max_gpu_seconds >= 1 && var.owner_max_gpu_seconds <= 9007199254740991 && floor(var.owner_max_gpu_seconds) == var.owner_max_gpu_seconds
+    error_message = "Use a positive integer number of seconds, or null for no owner budget."
+  }
+}
