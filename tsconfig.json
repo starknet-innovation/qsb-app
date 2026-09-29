@@ -15,6 +15,7 @@
   "include": [
     "src",
     "server",
+    "sdk",
     "infra",
     "tests",
     "vite.config.ts",

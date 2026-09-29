@@ -1,15 +1,26 @@
-/** A non-OK API response. `code` is the API's machine-readable error code, when it sent one. */
+/**
+ * A non-OK API response, for the webapp and the SDK. `code` is the API's machine-readable
+ * error code, when it sent one.
+ */
 export class ApiRequestError extends Error {
   constructor(message: string, readonly status: number, readonly code?: string) {
     super(message);
+    this.name = "ApiRequestError";
   }
 }
+const sessionToken = /^[A-Za-z0-9_-]{43}$/;
 export function createSessionClient(fetcher: typeof fetch = fetch) {
 let token: string | undefined;
 let epoch = 0;
 function clearSession() {
   epoch++;
   token = undefined;
+}
+/** Reuse a token from an earlier sign-in by the same owner, e.g. a CLI's session cache. */
+function restoreSession(value: string) {
+  if (!sessionToken.test(value)) throw new Error("Invalid session token.");
+  epoch++;
+  token = value;
 }
 async function api<T>(path: string, body?: unknown): Promise<T> {
   const r = await fetcher(`/api${path}`, {
@@ -61,9 +72,9 @@ async function authenticate(
     signature,
   });
   current();
-  if (typeof result.token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(result.token)) throw new Error("Invalid authentication response.");
+  if (typeof result.token !== 'string' || !sessionToken.test(result.token)) throw new Error("Invalid authentication response.");
   token = result.token;
 }
 
-return { api, authenticate, clearSession, currentToken: () => token, currentEpoch: () => epoch };
+return { api, authenticate, clearSession, restoreSession, currentToken: () => token, currentEpoch: () => epoch };
 }

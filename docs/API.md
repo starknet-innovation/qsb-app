@@ -54,7 +54,7 @@ Errors produced in front of the app have no `code`. That includes errors from th
 | Webhooks | `webhook_url_invalid`, `webhook_url_forbidden`, `webhook_url_unresolvable`, `webhook_limit_reached`, `webhook_not_found` |
 | General | `state_conflict`, `internal_error` |
 
-In the browser client, a failed request throws `ApiRequestError` ([`src/lib/session.ts`](../src/lib/session.ts)). It carries the `status`, and the `code` when the body has one. A failure whose body isn't a JSON object has no code.
+In the browser client and the SDK ([`sdk/`](../sdk/README.md)), a failed request throws `ApiRequestError` ([`src/lib/session.ts`](../src/lib/session.ts)). It carries the `status`, and the `code` when the body has one. A failure whose body isn't a JSON object has no code.
 
 ## Per-owner limits
 
