@@ -483,7 +483,7 @@ an already running Lambda or prove the miner never received the POST. Treat it a
 an uncertain withdrawal and follow the TX# observation procedure above. Do not
 retry the POST or reset its durable intent.
 
-### Webhook signing secrets
+## Webhook signing secrets
 
 Each owner's `OWNER#<address>` / `WEBHOOKS` row holds the signing secret of each
 registered webhook in plaintext, because HMAC signing needs it (see

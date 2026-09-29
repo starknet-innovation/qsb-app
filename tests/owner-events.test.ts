@@ -591,7 +591,7 @@ describe("operator notes", () => {
     for (const passage of passages)
       for (const kind of [...touched].filter((k) => k !== "JOB" && k !== "TX"))
         expect(passage).toContain(kind === "EVENT" ? "`EVENT#`" : `\`${kind}\``);
-    const section = runbook.slice(runbook.indexOf("### Webhook signing secrets"));
+    const section = runbook.slice(runbook.indexOf("## Webhook signing secrets"));
     expect(section).toContain("coordinator role");
     expect(readFileSync(path.join(process.cwd(), "terraform/data.tf"), "utf8")).toMatch(/point_in_time_recovery \{ enabled = true \}/);
     expect(section).toContain("point-in-time recovery");
