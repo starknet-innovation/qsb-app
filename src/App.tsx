@@ -10,7 +10,6 @@ import {
   Check,
   CheckCheck,
   ChevronRight,
-  Copy,
   Download,
   ExternalLink,
   FileKey2,

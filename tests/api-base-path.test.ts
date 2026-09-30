@@ -37,7 +37,7 @@ it("the webapp calls the API under /v1", async () => {
 // A quoted string that starts with the whole /api or /v1 segment: `"/api-keys"` is a route, not a prefix.
 const prefixLiteral = /["'`]\/(api|v1)(?=[/"'`?$])/;
 it("flags a hard-coded prefix, not a route that starts with the same letters", () => {
-  for (const flagged of [`"/api/jobs"`, `'/api'+path`, "`/api${path}`", `"/v1"`, `"/api?x=1"`])
+  for (const flagged of [`"/api/jobs"`, `'/api'+path`, "`/api${route}`", `"/v1"`, `"/api?x=1"`])
     expect(prefixLiteral.test(flagged), flagged).toBe(true);
   for (const allowed of [`api("/api-keys")`, `api("/v10")`, `"/apis"`, "see /api/rates"])
     expect(prefixLiteral.test(allowed), allowed).toBe(false);

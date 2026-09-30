@@ -35,7 +35,8 @@ def validate_state(state):
 def generate():
     with contextlib.redirect_stdout(io.StringIO()):
         pipeline.cmd_setup(SimpleNamespace(config='A', seed=None))
-    state = json.load(open('qsb_state.json'))
+    with open('qsb_state.json') as f:
+        state = json.load(f)
     script = validate_state(state)
     public = {k: state[k] for k in PUBLIC_FIELDS}
     public['round_sigs'] = [{k: r[k] for k in ('r', 's', 'sig')} for r in state['round_sigs']]
@@ -58,11 +59,11 @@ def assemble(state_json, manifest_json, solution_json):
     original = pipeline.p2pkh_script
     pipeline.p2pkh_script = lambda _: bytes.fromhex(m['outputScript'])
     try:
-        open('qsb_state.json','w').write(state_json)
+        with open('qsb_state.json','w') as f: f.write(state_json)
         if os.path.exists('qsb_raw_tx.hex'): os.unlink('qsb_raw_tx.hex')
         with contextlib.redirect_stdout(io.StringIO()): pipeline.cmd_assemble(args)
         if not os.path.exists('qsb_raw_tx.hex'): raise ValueError('QSB solution failed local assembly')
-        return open('qsb_raw_tx.hex').read()
+        with open('qsb_raw_tx.hex') as f: return f.read()
     finally:
         pipeline.p2pkh_script = original
         for filename in ('qsb_state.json','qsb_solution.json','qsb_raw_tx.hex'):

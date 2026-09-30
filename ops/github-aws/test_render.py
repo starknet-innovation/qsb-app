@@ -9,7 +9,6 @@ import sys
 import tempfile
 import unittest
 import fnmatch
-import re
 from pathlib import Path
 
 from render import registered, render
