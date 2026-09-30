@@ -310,11 +310,14 @@ export function createApp(
         "State changed. Refresh and try again.",
       );
     console.error(JSON.stringify({ error: e.name, route: c.req.path }));
+    // A missing input is the caller's outpoint, so a retry can't help: only its message differs.
     return apiError(
       c,
       coded ?? 500,
       attached ?? "internal_error",
-      "Unable to complete the request. Please retry.",
+      attached === "input_not_found"
+        ? "The input's output index doesn't exist in its transaction."
+        : "Unable to complete the request. Please retry.",
     );
   });
   app.get("/api/health", (c) => c.json({ ok: true, network: NETWORK_ID }));
