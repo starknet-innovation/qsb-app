@@ -130,7 +130,7 @@
     <h1>QSB vault: who holds which secret</h1>
     <p class="sub">How keys, passphrases and credentials move through vault creation, deposit and withdrawal. Wallet keys, passphrases and unrevealed HORS secrets stay on the user's side. Sign-in proofs, bearer credentials and signed transactions cross the boundary; withdrawals disclose selected HORS preimages.</p>
   </div>
-  <div class="keymsg">Spending takes all three: the <b>backup file</b>, its <b>passphrase</b> and the <b>wallet</b>. Only the user holds them. The service holds no key that can move funds.</div>
+  <div class="keymsg">The <b>supported service flow</b> requires the backup, passphrase and original wallet. That wallet is not bound into the vault script: decrypted recovery state can enable a spend with another controlled helper outside the service. The service holds no spending key.</div>
 </header>
 
 <div class="legend">
@@ -177,7 +177,7 @@
   <!-- BROWSER LANE -->
   <div class="lane-label browser">
     <h2>User's browser <span style="font-weight:500;color:var(--muted)">or SDK / CLI</span></h2>
-    <p>Local QSB worker (Pyodide) running pinned, hash-checked sources. Secrets exist in memory only while the vault is unlocked.</p>
+    <p>Pinned, hash-checked Pyodide sources. Browser: separate QSB worker. SDK/CLI: calling Node process, without worker isolation. Decrypted state stays in local memory while unlocked.</p>
     <div class="holds">
       <span class="chip secret">HORS one-time secrets</span>
       <span class="chip secret">passphrase</span>
@@ -194,7 +194,7 @@
     <div class="step">Builds a deposit paying the vault script. Each vault takes exactly one deposit.</div>
   </div>
   <div class="cell browser">
-    <div class="step">Unlocks the backup; you choose the destination, amount and fee.</div>
+    <div class="step">Unlocks the backup; you choose a destination, helper output and fee rate. Payout = full funding value + helper value − fee; no independent amount choice.</div>
     <div class="step">Saves a <b>-withdrawal</b> backup that binds that backup copy to this intent. The localStorage reminder is device-local; earlier unbound backups remain unbound and must not be reused for a different withdrawal, especially on another device.<br><span class="chip enc">-withdrawal backup</span></div>
   </div>
   <div class="cell browser lane-end">
@@ -268,7 +268,7 @@
     <table>
       <tr><th>Item</th><th>Created by</th><th>Held by</th><th>What the service stores</th></tr>
       <tr><td><span class="chip secret">Wallet private key</span></td><td>User's wallet</td><td>The wallet only</td><td>Nothing; the public key and address only</td></tr>
-      <tr><td><span class="chip secret">HORS one-time secrets</span><br>2 rounds × 150</td><td>Browser QSB worker</td><td>Browser memory while unlocked; encrypted backups at rest</td><td>Before withdrawal: hash commitments only. At submission: also the 15 disclosed preimages within the stored signed transaction (input 1 scriptSig); these become public by design</td></tr>
+      <tr><td><span class="chip secret">HORS one-time secrets</span><br>2 rounds × 150</td><td>Local QSB runtime</td><td>Browser/worker memory or SDK/CLI Node-process memory while unlocked; encrypted backups at rest</td><td>Before withdrawal: hash commitments only. At submission: also the 15 disclosed preimages within the stored signed transaction (input 1 scriptSig); these become public by design</td></tr>
       <tr><td><span class="chip secret">Recovery passphrase</span></td><td>User</td><td>User</td><td>Nothing</td></tr>
       <tr><td><span class="chip enc">Backup files</span><br>vault, -withdrawal, -signing</td><td>Browser</td><td>User's own storage</td><td>Nothing</td></tr>
       <tr><td><span class="chip cred">Session token / API key</span><br>1 h / scoped, up to 90 days</td><td>API, after a BIP-322 sign-in</td><td>Browser, or the SDK caller</td><td>SHA-256 hash at rest; receives bearer credentials on authenticated requests</td></tr>
@@ -279,7 +279,7 @@
   <div class="panel">
     <h3>Who can do what</h3>
     <div class="who">
-      <div><b>User</b><span>The only party that can spend: backup file, passphrase and wallet together.</span></div>
+      <div><b>User</b><span>Supported service flow: backup, passphrase and original wallet. The script does not bind that wallet; decrypted recovery state can enable an outside-service spend with another controlled helper.</span></div>
       <div><b>QSB service</b><span>Can refuse or delay a withdrawal, but not redirect it: the destination is fixed by signatures made on the user's machine.</span></div>
       <div><b>GPU solver</b><span>Untrusted compute on public data. A wrong hit is caught by the CPU re-check.</span></div>
       <div><b>Operator</b><span>MFA-backed role that reconciles records after an unknown outcome. It can't sign, and the tool never resubmits.</span></div>
