@@ -389,7 +389,11 @@ export default function App() {
           // A failed try still counts, so a vault that keeps failing waits its hour like the rest.
           for (const vault of settled)
             if (!disposed)
-              await checkDeposit(vault, stale).catch(() => rememberCheck(vault.id, new Date().toISOString()));
+              await checkDeposit(vault, stale).catch(() => {
+                const at = new Date().toISOString();
+                rememberCheck(vault.id, at);
+                if (!disposed) setCheckFailed((f) => ({ ...f, [vault.id]: at }));
+              });
           for (const job of j.jobs)
             if (!disposed && job.txid && job.status === "submitted") {
               const observation = await checkWithdrawal(job, stale).catch(failed(job.id));
@@ -877,9 +881,7 @@ export default function App() {
                                   ? `Deposit sent${failedLast(v.id) ? ` · last check failed ${clock(checkFailed[v.id])}` : checkedAt[v.id] ? ` · last checked ${clock(checkedAt[v.id])}` : ""}`
                                   : v.status === "unfunded"
                                     ? `Created ${new Date(v.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`
-                                    : v.status === "spent"
-                                      ? "Withdrawal confirmed"
-                                      : "Deposit confirmed"}
+                                    : `${v.status === "spent" ? "Withdrawal confirmed" : "Deposit confirmed"}${failedLast(v.id) ? ` · last check failed ${clock(checkFailed[v.id])}` : ""}`}
                               </p>
                               <p className="vault-meta">
                                 {v.configuration?.protocol ?? "Unknown version"}
@@ -906,16 +908,21 @@ export default function App() {
                                   onClick={() =>
                                     rowAction(key, "Checking the deposit", async () => {
                                       const checked = await checkDeposit(v);
+                                      // Branch on what the chain says now: a funded deposit can lose
+                                      // its confirmation (a reorg), and the row turns pending again.
+                                      const lost = !checked.status.confirmed && v.status !== "submitted";
                                       say(
                                         key,
-                                        "notice",
-                                        v.status === "submitted"
-                                          ? checked.status.confirmed
-                                            ? "Deposit confirmed."
-                                            : "Still waiting for confirmation. Nothing was resent."
-                                          : checked.strayPayments
-                                            ? "Checked. The payments outside the deposit are shown above."
-                                            : "Checked. Nothing else has reached this vault.",
+                                        lost ? "error" : "notice",
+                                        lost
+                                          ? "The deposit is no longer confirmed on the chain. Wait for it to confirm again, and don't deposit again."
+                                          : v.status === "submitted"
+                                            ? checked.status.confirmed
+                                              ? "Deposit confirmed."
+                                              : "Still waiting for confirmation. Nothing was resent."
+                                            : checked.strayPayments
+                                              ? "Checked. The payments outside the deposit are shown above."
+                                              : "Checked. Nothing else has reached this vault.",
                                       );
                                     })
                                   }

@@ -212,7 +212,7 @@ describe("transactionVsize", () => {
 });
 
 describe("suggested fee rates", () => {
-  it("round up to a millisatoshi and read back through parseFeeRate unchanged", () => {
+  it("rounds up to a millisatoshi and reads back through parseFeeRate unchanged", () => {
     expect(ceilMilliSatPerVb(1.5)).toBe(1_500n);
     expect(ceilMilliSatPerVb(1.5 * 1.5)).toBe(2_250n);
     expect(ceilMilliSatPerVb(4.03)).toBe(4_030n);

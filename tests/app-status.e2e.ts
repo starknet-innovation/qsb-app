@@ -36,6 +36,8 @@ export async function api(path){
   const m = /^\\/vaults\\/([^/]+)\\/funding$/.exec(path);
   if (m) {
     const v=f.vaults.find(x=>x.id===m[1]);
+    if (f.failFunding) throw Error('CHAIN_UNAVAILABLE');
+    if (f.reorg && v.status==='confirmed') return {vault:{...v, status:'submitted'}, status:{confirmed:false}, strayPayments:null};
     const stray = v.status==='confirmed' ? {vaultId:v.id, count:1, sats:'546', outputs:[{txid:'5e'.repeat(32), vout:1, value:'546'}]} : null;
     return {vault:v, status:{confirmed:v.status==='confirmed'}, strayPayments:stray};
   }
@@ -172,4 +174,21 @@ test("a deposit made again after a refusal waits the full time before it's check
   expect(await pendingChecks()).toBe(2);
   await page.clock.fastForward("04:05");
   await expect.poll(pendingChecks).toBe(3);
+});
+
+test("a funded vault shows a failed check, and a check that finds its confirmation lost says so", async ({ page }) => {
+  await mount(page, { operationsEnabled: true, exactSubmitEnabled: true });
+  await page.addInitScript(() => { (window as any).appFixture.failFunding = true; });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connect Xverse", exact: true }).click();
+  const savings = page.locator(".vault-row", { hasText: "Savings" });
+  await expect(savings).toContainText("Deposit confirmed · last check failed");
+  await page.evaluate(() => {
+    const f = (window as any).appFixture;
+    f.failFunding = false;
+    f.reorg = true;
+  });
+  await savings.getByRole("button", { name: "Check now" }).click();
+  await expect(savings.getByRole("alert")).toContainText("no longer confirmed on the chain");
+  await expect(savings).toContainText("Deposit pending");
 });
