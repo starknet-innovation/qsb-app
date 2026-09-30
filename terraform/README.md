@@ -125,7 +125,13 @@ aws cloudfront create-invalidation \
   --paths '/*'
 ```
 
-Static assets use content hashes; other files use revalidation headers. CloudFront's managed static policy has its own minimum TTL, so explicit invalidation avoids stale entrypoint/runtime files. API requests are uncached and preserve authorization/cookies/query parameters. No global SPA error rewrite is configured, so API errors are never rewritten into a misleading HTML success.
+Static assets use content hashes; other files use revalidation headers. CloudFront's managed static policy has its own minimum TTL, so explicit invalidation avoids stale entrypoint/runtime files.
+
+**Upload order.** `index.html` is the only file that names the content-hashed `assets/*`. The apply uploads it last, as `aws_s3_object.index`, after every other built file (`aws_s3_object.frontend`). Those use `create_before_destroy`, so a file dropped from the build, such as the previous bundle's hashed assets, is deleted after the new `index.html` is uploaded rather than at the start of the apply. The bucket therefore never serves an `index.html` that names a missing or not-yet-uploaded asset. `check-single-pipeline.py` refuses source that loses this order. Two gaps remain:
+- An edge may keep serving the previous `index.html` for up to the cache policy's 1-second minimum TTL after the upload, while its assets are already gone.
+- A tab opened before the deploy asks for the old solver-worker file when it starts the worker, and that file is gone.
+
+Terraform takes a removed file's `create_before_destroy` from state. So the first apply of this order still deletes the files it drops first, as before, and the order holds from the next apply on. On that first plan, check that `index.html` shows as moved to `aws_s3_object.index`, not destroyed. API requests are uncached and preserve authorization/cookies/query parameters. No global SPA error rewrite is configured, so API errors are never rewritten into a misleading HTML success.
 
 For rollback, rebuild an approved prior clean pushed commit and review its plan against the current state. Do not roll back reservation semantics, restore conflicting legacy writers or replay old workflows without a migration/reconciliation decision. Bucket/table protection intentionally makes `terraform destroy` insufficient to discard durable data; removal is a separate explicit operator action. Logs have a 30-day retention policy. Alarm notifications require existing SNS topic ARNs in `alarm_actions`; empty means alarms exist without notifications.
 

@@ -370,6 +370,23 @@ class SourceRules(unittest.TestCase):
                      'one statement on the API role')
         self.refused(('compute.tf', 'Resource = var.slipstream_secret_arn', 'Resource = "*"'), 'one statement on the API role')
 
+    def test_index_html_stays_out_of_the_other_frontend_objects(self):
+        self.refused(('data.tf', 'setsubtract(fileset("${local.artifacts}/frontend", "**"), ["index.html"])',
+                      'fileset("${local.artifacts}/frontend", "**")'), 'must leave index.html to aws_s3_object.index')
+
+    def test_removed_frontend_files_are_deleted_after_the_new_index(self):
+        self.refused(('data.tf', 'lifecycle { create_before_destroy = true }', ''), 'needs create_before_destroy')
+        self.refused(('data.tf', 'lifecycle { create_before_destroy = true }', 'lifecycle { create_before_destroy = false }'),
+                     'needs create_before_destroy')
+
+    def test_index_html_is_uploaded_after_the_other_frontend_objects(self):
+        self.refused(('data.tf', 'aws_s3_bucket_public_access_block.frontend, aws_s3_object.frontend]',
+                      'aws_s3_bucket_public_access_block.frontend]'), 'must upload index.html after')
+
+    def test_frontend_objects_stay_in_the_two_reviewed_resources(self):
+        self.refused(('data.tf', None, '\nresource "aws_s3_object" "extra" {\n  bucket = aws_s3_bucket.frontend.id\n}\n'),
+                     'aws_s3_object.frontend and aws_s3_object.index only')
+
     def test_only_the_api_receives_the_secret_reference(self):
         self.refused(('compute.tf', 'REFERENCE_FUNCTION = aws_lambda_function.reference.function_name',
                       'REFERENCE_FUNCTION = aws_lambda_function.reference.function_name, SLIPSTREAM_SECRET_ARN = var.slipstream_secret_arn'),

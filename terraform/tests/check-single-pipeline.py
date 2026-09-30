@@ -4,6 +4,7 @@
 No argument checks declarations; a JSON plan from `terraform show -json` checks
 expanded planned resources, including nested modules. Terraform test -json -verbose
 JSONL checks the baseline and configured-provider mock plans. Bootstrap is separate.
+Every mode first checks the source rules: secret access and the frontend upload order.
 
 For a real deployment plan add --deploy: every role must sit under /qsb/runtime/ with the
 administrator-owned qsb-runtime-boundary, the stack name must be qsb-* (not qsb-gpu*), and
@@ -162,6 +163,26 @@ def static_secret_rules(root):
             require('NotAction' not in statement, f'policies/{path.name}: NotAction is not allowed')
             require(not any(reads_secrets(a) for a in as_list(statement.get('Action'))),
                     f'policies/{path.name}: Secrets Manager access is not allowed')
+
+
+def frontend_order_rules(root):
+    """The upload order that keeps the served index.html naming only objects that exist (see terraform/data.tf).
+
+    index.html alone names the hashed assets, so aws_s3_object.index waits for every other frontend object, and
+    those use create_before_destroy, so a file dropped from the build is deleted only after the new index.html is
+    uploaded. Plans show neither lifecycle nor depends_on, so this reads the source."""
+    blocks = {}
+    for path in sorted(root.glob('*.tf')):
+        text = path.read_text()
+        blocks.update({name: text[start:end] for kind, name, start, end in resource_blocks(text) if kind == 'aws_s3_object'})
+    require(set(blocks) == {'frontend', 'index'}, 'the frontend is uploaded as aws_s3_object.frontend and aws_s3_object.index only')
+    require(re.search(r'\bfor_each\s*=\s*setsubtract\([^\n]*,\s*\[\s*"index\.html"\s*\]\s*\)', blocks['frontend']),
+            'aws_s3_object.frontend must leave index.html to aws_s3_object.index')
+    require(re.search(r'\blifecycle\s*\{[^}]*\bcreate_before_destroy\s*=\s*true\b', blocks['frontend']),
+            'aws_s3_object.frontend needs create_before_destroy, so removed files are deleted after the new index.html')
+    require(re.search(r'\bkey\s*=\s*"index\.html"', blocks['index'])
+            and re.search(r'\bdepends_on\s*=\s*\[[^\]]*\baws_s3_object\.frontend\b', blocks['index']),
+            'aws_s3_object.index must upload index.html after every aws_s3_object.frontend object')
 
 
 def secret_grants(rows):
@@ -326,6 +347,7 @@ def module_resources(module):
 def main():
     root = Path(__file__).resolve().parents[1]
     static_secret_rules(root)
+    frontend_order_rules(root)
     if len(sys.argv) == 1:
         rows = [{'type': kind, 'name': name}
                 for file in root.glob('*.tf')
