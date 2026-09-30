@@ -183,7 +183,8 @@ function memoryStorage(): Pick<Storage, "getItem" | "setItem"> {
 }
 /**
  * The server's own refusal of a disabled submission: a 503 with code `submit_disabled`. Any
- * other failure, including an uncoded 503 from a gateway or an older server, is uncertain.
+ * other failure, including an uncoded 503 from a gateway or an older server, or the API's 502
+ * or 503 for a failed chain or miner request, is uncertain.
  */
 function submitDisabled(error: unknown): boolean {
   return error instanceof ApiRequestError && error.status === 503 && error.code === "submit_disabled";

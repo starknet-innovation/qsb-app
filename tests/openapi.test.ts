@@ -3,7 +3,12 @@ import { inspectRoutes } from "hono/dev";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../server/app";
 import { deployedApiApp } from "../server/lambda";
-import { API_ERROR_CODES, apiErrorCodes } from "../server/api-errors";
+import {
+  API_ERROR_CODES,
+  apiErrorCodes,
+  chainErrorStatus,
+  type ApiErrorCode,
+} from "../server/api-errors";
 import { MemoryStore } from "../server/store";
 import { routeScopes } from "../server/scoped-keys";
 import type { Esplora } from "../server/chain";
@@ -284,10 +289,8 @@ describe("OpenAPI document", () => {
   });
 
   it("lists every error site in tests/api-error-sites.json", () => {
+    const chainClasses = ["ChainError", "ChainNotFound", "WithdrawalConflict"];
     const classStatus: Record<string, number> = {
-      ChainError: 409,
-      ChainNotFound: 409,
-      WithdrawalConflict: 409,
       MinerInclusionError: 409,
       Conflict: 409,
       ConsensusError: 409,
@@ -300,8 +303,13 @@ describe("OpenAPI document", () => {
     ) as string[];
     const sites = lines.map((line) => {
       const [file, where, kind, code] = line.split(" | ");
-      // An HTTP status, or the status app.onError gives the thrown class.
-      const status = /^\d{3}$/.test(kind) ? Number(kind) : classStatus[kind];
+      // An HTTP status (an apiError call, or the one an attached code sets), or the status
+      // app.onError gives the thrown class; a ChainError's depends on its code.
+      const status = /^\d{3}(?: attached)?$/.test(kind)
+        ? Number(kind.slice(0, 3))
+        : chainClasses.includes(kind)
+          ? chainErrorStatus(code as ApiErrorCode)
+          : classStatus[kind];
       return {
         line,
         key: `${file} | ${where}`,

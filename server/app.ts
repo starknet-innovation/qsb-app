@@ -9,7 +9,12 @@ import {
 } from "./consensus";
 import { exactSubmitEnabled } from "./exact-submit-permit";
 import { mainnetUiConfig, type MainnetUiOptions } from "./mainnetConfig";
-import { apiError, attachedApiErrorCode } from "./api-errors";
+import {
+  apiError,
+  attachedApiErrorCode,
+  attachedCodeStatusOf,
+  chainErrorStatus,
+} from "./api-errors";
 import {
   CHALLENGE_SECONDS,
   SESSION_SECONDS,
@@ -268,7 +273,8 @@ export function createApp(
         "This deployment's owner limits are misconfigured. Nothing was changed.",
       );
     // A code attached at a boundary (a chain or miner provider, a deposit's bytes) keeps
-    // the status and body its error class gets here.
+    // the status and body its error class gets here, except for the codes that set their
+    // own status (attachedCodeStatus): provider failures and a missing input.
     const attached = attachedApiErrorCode(e);
     if (e instanceof SubmitDisabled)
       return apiError(c, 503, "submit_disabled", e.message);
@@ -287,8 +293,12 @@ export function createApp(
             : "inclusion_check_failed"),
         e.message,
       );
-    if (e instanceof ChainError) return apiError(c, 409, e.code, e.message);
-    if (e instanceof z.ZodError)
+    if (e instanceof ChainError)
+      return apiError(c, chainErrorStatus(e.code), e.code, e.message);
+    // A provider's answer that fails its zod parse isn't the caller's invalid request: it gets
+    // its code's status below, without the provider's issues.
+    const coded = attachedCodeStatusOf(attached);
+    if (e instanceof z.ZodError && coded === undefined)
       return apiError(c, 400, attached ?? "invalid_request", "Invalid request", {
         issues: e.issues.map((i) => ({ path: i.path, message: i.message })),
       });
@@ -302,7 +312,7 @@ export function createApp(
     console.error(JSON.stringify({ error: e.name, route: c.req.path }));
     return apiError(
       c,
-      500,
+      coded ?? 500,
       attached ?? "internal_error",
       "Unable to complete the request. Please retry.",
     );

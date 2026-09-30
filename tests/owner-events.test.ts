@@ -545,14 +545,15 @@ describe("error codes", () => {
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(miner, "credential").mockResolvedValue({} as never);
-    // A miner error coded where it's thrown keeps its code through the resend path's watcher.
+    // A miner error coded where it's thrown keeps its code, and the status that code sets,
+    // through the resend path's watcher.
     const resend = vault("submitted");
     await f.store.put(resend);
     vi.spyOn(miner, "seen").mockImplementation(() =>
       withApiErrorCode("miner_request_failed", () => Promise.reject(new Error("upstream"))),
     );
     const refused = await a.post(`/api/vaults/${(resend.vault as PublicVault).id}/fund/resubmit`);
-    expect({ status: refused.status, code: (await refused.json()).code }).toEqual({ status: 500, code: "miner_request_failed" });
+    expect({ status: refused.status, code: (await refused.json()).code }).toEqual({ status: 502, code: "miner_request_failed" });
     // So does a store error through the event recorder.
     const fresh = vault("unfunded");
     await f.store.put(fresh);
@@ -561,7 +562,7 @@ describe("error codes", () => {
       row.sk === fresh.sk ? withApiErrorCode("chain_unavailable", () => Promise.reject(new Error("table"))) : put(row, expected, options),
     );
     const failed = await a.post(`/api/vaults/${(fresh.vault as PublicVault).id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
-    expect({ status: failed.status, code: (await failed.json()).code }).toEqual({ status: 500, code: "chain_unavailable" });
+    expect({ status: failed.status, code: (await failed.json()).code }).toEqual({ status: 503, code: "chain_unavailable" });
   });
 });
 

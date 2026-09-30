@@ -1255,7 +1255,7 @@
             }
           },
           "400": {
-            "description": "Bad request: `invalid_request`, `withdrawal_invalid`, `chain_error`.",
+            "description": "Bad request: `invalid_request`, `withdrawal_invalid`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1268,8 +1268,7 @@
                         "code": {
                           "enum": [
                             "invalid_request",
-                            "withdrawal_invalid",
-                            "chain_error"
+                            "withdrawal_invalid"
                           ]
                         }
                       }
@@ -1354,7 +1353,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `network_mismatch`, `vault_not_confirmed`, `idempotency_conflict`, `withdrawal_invalid`, `input_mismatch`, `input_unconfirmed`, `input_spent`, `chain_transaction_not_found`, `chain_unavailable`, `chain_error`, `state_conflict`.",
+            "description": "Conflict: `network_mismatch`, `vault_not_confirmed`, `idempotency_conflict`, `withdrawal_invalid`, `input_not_found`, `input_mismatch`, `input_unconfirmed`, `input_spent`, `chain_transaction_not_found`, `chain_error`, `state_conflict`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1370,11 +1369,11 @@
                             "vault_not_confirmed",
                             "idempotency_conflict",
                             "withdrawal_invalid",
+                            "input_not_found",
                             "input_mismatch",
                             "input_unconfirmed",
                             "input_spent",
                             "chain_transaction_not_found",
-                            "chain_unavailable",
                             "chain_error",
                             "state_conflict"
                           ]
@@ -1434,7 +1433,7 @@
             }
           },
           "500": {
-            "description": "Internal error: `input_not_found`, `chain_unavailable`, `chain_error`, `internal_error`.",
+            "description": "Internal error: `internal_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1446,9 +1445,6 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "input_not_found",
-                            "chain_unavailable",
-                            "chain_error",
                             "internal_error"
                           ]
                         }
@@ -1459,8 +1455,31 @@
               }
             }
           },
+          "502": {
+            "description": "Bad gateway: `chain_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "chain_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "503": {
-            "description": "Unavailable: `api_keys_disabled`, `operations_disabled`, `owner_limits_invalid`, `solver_not_served`.",
+            "description": "Unavailable: `api_keys_disabled`, `operations_disabled`, `owner_limits_invalid`, `solver_not_served`, `chain_unavailable`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1475,7 +1494,8 @@
                             "api_keys_disabled",
                             "operations_disabled",
                             "owner_limits_invalid",
-                            "solver_not_served"
+                            "solver_not_served",
+                            "chain_unavailable"
                           ]
                         }
                       }
@@ -2237,29 +2257,6 @@
               }
             }
           },
-          "400": {
-            "description": "Bad request: `chain_error`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ErrorResponse"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "enum": [
-                            "chain_error"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
           "401": {
             "description": "Unauthorized: `auth_required`, `session_expired`, `api_key_invalid`, `api_key_revoked`, `network_mismatch`.",
             "content": {
@@ -2336,7 +2333,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `job_unsupported`, `intent_conflict`, `chain_transaction_not_found`, `chain_unavailable`, `chain_error`, `state_conflict`.",
+            "description": "Conflict: `job_unsupported`, `intent_conflict`, `chain_transaction_not_found`, `chain_error`, `state_conflict`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2351,7 +2348,6 @@
                             "job_unsupported",
                             "intent_conflict",
                             "chain_transaction_not_found",
-                            "chain_unavailable",
                             "chain_error",
                             "state_conflict"
                           ]
@@ -2364,7 +2360,7 @@
             }
           },
           "500": {
-            "description": "Internal error: `chain_unavailable`, `chain_error`, `internal_error`.",
+            "description": "Internal error: `internal_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2376,8 +2372,6 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "chain_unavailable",
-                            "chain_error",
                             "internal_error"
                           ]
                         }
@@ -2388,8 +2382,8 @@
               }
             }
           },
-          "503": {
-            "description": "Unavailable: `api_keys_disabled`.",
+          "502": {
+            "description": "Bad gateway: `chain_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2401,7 +2395,31 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "api_keys_disabled"
+                            "chain_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable: `api_keys_disabled`, `chain_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "api_keys_disabled",
+                            "chain_unavailable"
                           ]
                         }
                       }
@@ -2481,7 +2499,7 @@
             }
           },
           "400": {
-            "description": "Bad request: `invalid_request`, `chain_error`.",
+            "description": "Bad request: `invalid_request`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2493,8 +2511,7 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "invalid_request",
-                            "chain_error"
+                            "invalid_request"
                           ]
                         }
                       }
@@ -2555,7 +2572,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `vault_not_found`, `job_not_found`, `job_unsupported`, `job_state_invalid`, `idempotency_conflict`, `idempotency_in_progress`, `intent_conflict`, `exact_spend_mismatch`, `consensus_rejected`, `input_mismatch`, `input_unconfirmed`, `input_spent`, `chain_transaction_not_found`, `chain_unavailable`, `chain_error`, `state_conflict`.",
+            "description": "Conflict: `vault_not_found`, `job_not_found`, `job_unsupported`, `job_state_invalid`, `idempotency_conflict`, `idempotency_in_progress`, `intent_conflict`, `exact_spend_mismatch`, `consensus_rejected`, `input_not_found`, `input_mismatch`, `input_unconfirmed`, `input_spent`, `chain_transaction_not_found`, `chain_error`, `state_conflict`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2576,11 +2593,11 @@
                             "intent_conflict",
                             "exact_spend_mismatch",
                             "consensus_rejected",
+                            "input_not_found",
                             "input_mismatch",
                             "input_unconfirmed",
                             "input_spent",
                             "chain_transaction_not_found",
-                            "chain_unavailable",
                             "chain_error",
                             "state_conflict"
                           ]
@@ -2616,7 +2633,7 @@
             }
           },
           "500": {
-            "description": "Internal error: `input_not_found`, `chain_unavailable`, `chain_error`, `miner_unavailable`, `internal_error`.",
+            "description": "Internal error: `internal_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2628,10 +2645,6 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "input_not_found",
-                            "chain_unavailable",
-                            "chain_error",
-                            "miner_unavailable",
                             "internal_error"
                           ]
                         }
@@ -2642,8 +2655,31 @@
               }
             }
           },
+          "502": {
+            "description": "Bad gateway: `chain_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "chain_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "503": {
-            "description": "Unavailable: `api_keys_disabled`, `submit_disabled`, `miner_unavailable`.",
+            "description": "Unavailable: `api_keys_disabled`, `submit_disabled`, `chain_unavailable`, `miner_unavailable`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2657,6 +2693,7 @@
                           "enum": [
                             "api_keys_disabled",
                             "submit_disabled",
+                            "chain_unavailable",
                             "miner_unavailable"
                           ]
                         }
@@ -2706,7 +2743,7 @@
             }
           },
           "400": {
-            "description": "Bad request: `invalid_request`, `chain_error`.",
+            "description": "Bad request: `invalid_request`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2718,8 +2755,7 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "invalid_request",
-                            "chain_error"
+                            "invalid_request"
                           ]
                         }
                       }
@@ -2780,7 +2816,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `input_mismatch`, `input_unconfirmed`, `input_spent`, `chain_transaction_not_found`, `chain_unavailable`, `chain_error`.",
+            "description": "Conflict: `input_not_found`, `input_mismatch`, `input_unconfirmed`, `input_spent`, `chain_transaction_not_found`, `chain_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2792,11 +2828,11 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "input_not_found",
                             "input_mismatch",
                             "input_unconfirmed",
                             "input_spent",
                             "chain_transaction_not_found",
-                            "chain_unavailable",
                             "chain_error"
                           ]
                         }
@@ -2831,7 +2867,7 @@
             }
           },
           "500": {
-            "description": "Internal error: `input_not_found`, `chain_unavailable`, `chain_error`, `internal_error`.",
+            "description": "Internal error: `internal_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2843,9 +2879,6 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "input_not_found",
-                            "chain_unavailable",
-                            "chain_error",
                             "internal_error"
                           ]
                         }
@@ -2856,8 +2889,8 @@
               }
             }
           },
-          "503": {
-            "description": "Unavailable: `api_keys_disabled`.",
+          "502": {
+            "description": "Bad gateway: `chain_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2869,7 +2902,31 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "api_keys_disabled"
+                            "chain_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable: `api_keys_disabled`, `chain_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "api_keys_disabled",
+                            "chain_unavailable"
                           ]
                         }
                       }
@@ -2907,29 +2964,6 @@
               }
             }
           },
-          "400": {
-            "description": "Bad request: `chain_error`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ErrorResponse"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "enum": [
-                            "chain_error"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
           "401": {
             "description": "Unauthorized: `auth_required`, `session_expired`, `api_key_invalid`, `api_key_revoked`, `network_mismatch`.",
             "content": {
@@ -2981,7 +3015,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `chain_unavailable`, `chain_error`.",
+            "description": "Conflict: `chain_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2993,7 +3027,6 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "chain_unavailable",
                             "chain_error"
                           ]
                         }
@@ -3005,7 +3038,7 @@
             }
           },
           "500": {
-            "description": "Internal error: `chain_unavailable`, `chain_error`, `internal_error`.",
+            "description": "Internal error: `internal_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3017,8 +3050,6 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "chain_unavailable",
-                            "chain_error",
                             "internal_error"
                           ]
                         }
@@ -3029,8 +3060,8 @@
               }
             }
           },
-          "503": {
-            "description": "Unavailable: `api_keys_disabled`.",
+          "502": {
+            "description": "Bad gateway: `chain_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3042,7 +3073,31 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "api_keys_disabled"
+                            "chain_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable: `api_keys_disabled`, `chain_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "api_keys_disabled",
+                            "chain_unavailable"
                           ]
                         }
                       }
@@ -3745,7 +3800,7 @@
             }
           },
           "400": {
-            "description": "Bad request: `invalid_request`, `chain_error`.",
+            "description": "Bad request: `invalid_request`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3757,8 +3812,7 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "invalid_request",
-                            "chain_error"
+                            "invalid_request"
                           ]
                         }
                       }
@@ -3843,7 +3897,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `network_mismatch`, `funding_intent_exists`, `funding_transaction_invalid`, `idempotency_conflict`, `idempotency_in_progress`, `chain_transaction_not_found`, `chain_unavailable`, `chain_error`, `state_conflict`.",
+            "description": "Conflict: `network_mismatch`, `funding_intent_exists`, `funding_transaction_invalid`, `idempotency_conflict`, `idempotency_in_progress`, `chain_transaction_not_found`, `chain_error`, `state_conflict`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3861,7 +3915,6 @@
                             "idempotency_conflict",
                             "idempotency_in_progress",
                             "chain_transaction_not_found",
-                            "chain_unavailable",
                             "chain_error",
                             "state_conflict"
                           ]
@@ -3897,7 +3950,7 @@
             }
           },
           "500": {
-            "description": "Internal error: `chain_unavailable`, `chain_error`, `internal_error`.",
+            "description": "Internal error: `internal_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3909,8 +3962,6 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "chain_unavailable",
-                            "chain_error",
                             "internal_error"
                           ]
                         }
@@ -3921,8 +3972,31 @@
               }
             }
           },
+          "502": {
+            "description": "Bad gateway: `chain_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "chain_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "503": {
-            "description": "Unavailable: `api_keys_disabled`, `operations_disabled`, `owner_limits_invalid`.",
+            "description": "Unavailable: `api_keys_disabled`, `operations_disabled`, `owner_limits_invalid`, `chain_unavailable`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3936,7 +4010,8 @@
                           "enum": [
                             "api_keys_disabled",
                             "operations_disabled",
-                            "owner_limits_invalid"
+                            "owner_limits_invalid",
+                            "chain_unavailable"
                           ]
                         }
                       }
@@ -4016,7 +4091,7 @@
             }
           },
           "400": {
-            "description": "Bad request: `invalid_request`, `miner_request_failed`.",
+            "description": "Bad request: `invalid_request`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4028,8 +4103,7 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "invalid_request",
-                            "miner_request_failed"
+                            "invalid_request"
                           ]
                         }
                       }
@@ -4166,7 +4240,7 @@
             }
           },
           "500": {
-            "description": "Internal error: `miner_unavailable`, `miner_request_failed`, `internal_error`.",
+            "description": "Internal error: `internal_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4178,9 +4252,30 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "miner_unavailable",
-                            "miner_request_failed",
                             "internal_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad gateway: `miner_request_failed`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "miner_request_failed"
                           ]
                         }
                       }
@@ -4472,7 +4567,7 @@
             }
           },
           "400": {
-            "description": "Bad request: `invalid_request`, `miner_request_failed`.",
+            "description": "Bad request: `invalid_request`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4484,8 +4579,7 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "invalid_request",
-                            "miner_request_failed"
+                            "invalid_request"
                           ]
                         }
                       }
@@ -4598,7 +4692,7 @@
             }
           },
           "500": {
-            "description": "Internal error: `miner_unavailable`, `miner_request_failed`, `internal_error`.",
+            "description": "Internal error: `internal_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4610,9 +4704,30 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "miner_unavailable",
-                            "miner_request_failed",
                             "internal_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad gateway: `miner_request_failed`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "miner_request_failed"
                           ]
                         }
                       }
@@ -4685,29 +4800,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GetVaultFundingResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request: `chain_error`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ErrorResponse"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "enum": [
-                            "chain_error"
-                          ]
-                        }
-                      }
-                    }
-                  ]
                 }
               }
             }
@@ -4786,7 +4878,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `network_mismatch`, `vault_not_funded`, `chain_transaction_not_found`, `chain_unavailable`, `chain_error`, `state_conflict`.",
+            "description": "Conflict: `network_mismatch`, `vault_not_funded`, `chain_transaction_not_found`, `chain_error`, `state_conflict`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4801,7 +4893,6 @@
                             "network_mismatch",
                             "vault_not_funded",
                             "chain_transaction_not_found",
-                            "chain_unavailable",
                             "chain_error",
                             "state_conflict"
                           ]
@@ -4814,7 +4905,7 @@
             }
           },
           "500": {
-            "description": "Internal error: `chain_unavailable`, `chain_error`, `internal_error`.",
+            "description": "Internal error: `internal_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4826,8 +4917,6 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "chain_unavailable",
-                            "chain_error",
                             "internal_error"
                           ]
                         }
@@ -4838,8 +4927,8 @@
               }
             }
           },
-          "503": {
-            "description": "Unavailable: `api_keys_disabled`.",
+          "502": {
+            "description": "Bad gateway: `chain_error`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4851,7 +4940,31 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "api_keys_disabled"
+                            "chain_error"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable: `api_keys_disabled`, `chain_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "api_keys_disabled",
+                            "chain_unavailable"
                           ]
                         }
                       }
