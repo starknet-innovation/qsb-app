@@ -581,9 +581,10 @@ function errorSites(): string[] {
 }
 
 // Failures that no error class identifies: an upstream provider's, or a missing input. Each
-// gets its code's status (attachedCodeStatus) and the generic retry message, never the
-// provider's zod issues.
+// gets its code's status (attachedCodeStatus), never the provider's zod issues. A provider
+// failure gets the generic retry message; a missing input gets its own, since a retry can't help.
 const retry = "Unable to complete the request. Please retry.";
+const missingInput = "The input's output index doesn't exist in its transaction.";
 const timeout = () => new DOMException("The operation was aborted due to timeout", "TimeoutError");
 const providerFailures: [ApiErrorCode, number, string, (f: Fixture) => Response | Promise<Response>][] = [
   ["chain_unavailable", 503, retry, (f) => {
@@ -620,7 +621,7 @@ const providerFailures: [ApiErrorCode, number, string, (f: Fixture) => Response 
     f.routes.set(`/tx/${"ab".repeat(32)}/hex`, () => new Response("zz"));
     return f.call("POST", `/vaults/${vaultId}/fund`, { txid: "ab".repeat(32), amount: "50000", costAccepted: true });
   }],
-  ["input_not_found", 409, retry, (f) => f.call("POST", "/payment-input", { txid: previousTx(f), vout: 5, value: "70000" })],
+  ["input_not_found", 409, missingInput, (f) => f.call("POST", "/payment-input", { txid: previousTx(f), vout: 5, value: "70000" })],
   ["miner_request_failed", 502, retry, async (f) => {
     await resendable(f);
     const miner = slipstreamWith(() => new Response("", { status: 503 }));
