@@ -5974,25 +5974,6 @@
               "$ref": "#/components/schemas/ReleaseCheck"
             }
           },
-          "supervisedSearch": {
-            "type": "object",
-            "properties": {
-              "enabled": {
-                "type": "boolean"
-              },
-              "releaseId": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "enabled",
-              "releaseId"
-            ],
-            "additionalProperties": false
-          },
-          "mainnetRecoveryEnabled": {
-            "type": "boolean"
-          },
           "network": {
             "type": "string",
             "const": "mainnet"
@@ -6098,8 +6079,6 @@
           "qsbCommit",
           "kernelCommit",
           "checks",
-          "supervisedSearch",
-          "mainnetRecoveryEnabled",
           "network",
           "mainnetEnabled",
           "operationsEnabled",

@@ -17,7 +17,6 @@ async function load(network: "mainnet" | "testnet4") {
   return {
     network: await import("../src/lib/network"),
     session: await import("../src/lib/session"),
-    admission: await import("../src/mainnet/admissionClient"),
   };
 }
 
@@ -36,12 +35,7 @@ it.each([
     return new Response(JSON.stringify({ network }));
   }) as unknown as typeof fetch;
   await m.session.createSessionClient(fetcher).api("/config");
-  const jobId = crypto.randomUUID(), requestId = crypto.randomUUID();
-  // The reply isn't an admission; only the URL matters here.
-  await expect(
-    m.admission.currentAdmissionClient(jobId, requestId, () => "T".repeat(43), fetcher)(requestId),
-  ).rejects.toThrow("Invalid admission response");
-  expect(urls).toEqual([`${base}/config`, `${base}/jobs/${jobId}/mainnet-solved-state`]);
+  expect(urls).toEqual([`${base}/config`]);
 });
 
 // A quoted string that starts with the whole /api or /v1 segment: `"/api-keys"` is a route, not a prefix.

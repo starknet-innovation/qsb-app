@@ -399,8 +399,9 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
   ["job_not_found", 404, (f) => f.call("GET", `/jobs/${jobId}/status`)],
   ["job_not_found", 409, (f) => f.call("POST", `/jobs/${jobId}/submit`, { rawTxHex: "00" })],
   ["job_unsupported", 409, async (f) => {
-    await f.putJob({ status: "queued", execution: { kind: "qsb-supervised-service-v1" } });
-    return f.call("POST", `/jobs/${jobId}/pause`);
+    // A stored job naming another owner isn't this owner's coordinator withdrawal.
+    await f.putJob({ owner: "someone-else" });
+    return f.call("POST", `/jobs/${jobId}/submit`, { rawTxHex: "00" });
   }],
   ["job_state_invalid", 409, async (f) => {
     await f.putJob({ status: "confirmed" });

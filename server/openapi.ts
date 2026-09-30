@@ -44,7 +44,6 @@ import {
 } from "./scoped-keys";
 import { idempotencyKey, idempotentPosts } from "./idempotency";
 import type { Esplora } from "./chain";
-import type { mainnetUiConfig } from "./mainnetConfig";
 import type { EsploraInclusionReport } from "./miner-inclusion";
 import type { submitExact } from "./submit-exact";
 import type { FundingSubmission, submitFunding } from "./submit-funding";
@@ -342,22 +341,11 @@ type _ApiKeyMetadata = Assert<
   Fits<ApiKeyMetadata, z.infer<typeof apiKeyMetadata>>
 >;
 const apiKeyResponse = z.object({ apiKey: apiKeyMetadata });
-const uiConfig = {
-  supervisedSearch: z.object({ enabled: z.boolean(), releaseId: z.string() }),
-  mainnetRecoveryEnabled: z.boolean(),
-};
-type _UiConfig = Assert<
-  Fits<
-    Awaited<ReturnType<typeof mainnetUiConfig>>,
-    z.infer<z.ZodObject<typeof uiConfig>>
-  >
->;
 const configResponse = z.object({
   protocol: z.string(),
   qsbCommit: z.string(),
   kernelCommit: z.string(),
   checks: z.array(releaseCheck),
-  ...uiConfig,
   network: z.literal(NETWORK_ID),
   mainnetEnabled: z.boolean(),
   operationsEnabled: describe(
