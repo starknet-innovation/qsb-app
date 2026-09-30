@@ -215,6 +215,14 @@ class SinglePipelinePolicies(unittest.TestCase):
             self.assertIn(action, discovery['Action'])
         self.assertEqual(discovery['Resource'], ['*'])
 
+    def test_deployer_can_validate_a_changed_state_machine_definition(self):
+        # The AWS provider validates a changed definition at plan time (terraform/workflow.tf); without this
+        # grant every plan that changes the workflow fails with AccessDenied.
+        discovery = self.statement('deploy', 'RegionalDiscovery')
+        self.assertIn('states:ValidateStateMachineDefinition', discovery['Action'])
+        self.assertEqual(discovery['Resource'], ['*'])
+        self.assertEqual(discovery['Condition'], {'StringEquals': {'aws:RequestedRegion': 'eu-west-2'}})
+
     def test_retained_pipeline_and_boundary_grants(self):
         for service in ('Lambda', 'Dynamodb', 'States', 'Cloudwatch'):
             self.assertEqual(self.statement('deploy', service + 'Qsb')['Effect'], 'Allow')
