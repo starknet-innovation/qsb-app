@@ -10,13 +10,7 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import { minerBase } from "./network";
 import { withApiErrorCode } from "./api-errors";
-import {
-  transactionId,
-  assertBroadcastPermit,
-  assertMainnetTransportClosed,
-  assertPermitMinerEndpoint,
-  MinerInclusionError,
-} from "./runtime/miner-inclusion";
+import { transactionId } from "./miner-inclusion";
 
 const minerSecrets = new SecretsManagerClient({
   region: process.env.AWS_REGION,
@@ -282,19 +276,10 @@ export class Slipstream {
       body: JSON.stringify({ tx_hexes: [hex] }),
     });
   }
+  /** Submit a signed withdrawal. Without a live exact permit nothing reaches the network. */
   async submit(hex: string, permit: unknown, credential?: MinerCredential) {
-    if (isExactSubmitPermit(permit)) return this.postExact(hex, permit, credential);
-
-    // Exact spend authorization is required before any miner HTTP, including
-    // the chain probe. A missing permit must not reach the network. The
-    // instance base must be the miner origin bound into the permit. A mainnet
-    // permit or the mainnet miner host stays refused in this checkout.
-    const granted = assertBroadcastPermit(permit, hex);
-    assertPermitMinerEndpoint(granted, this.base);
-    assertMainnetTransportClosed(granted, this.base);
-    // A permit whose origin matches this base is still not a live submit.
-    // This checkout does not probe or POST to the miner.
-    throw new MinerInclusionError("LiveMinerTransportRefused");
+    if (!isExactSubmitPermit(permit)) throw new Error("ExactSubmitPermitRequired");
+    return this.postExact(hex, permit, credential);
   }
 }
 export const slipstream = new Slipstream();

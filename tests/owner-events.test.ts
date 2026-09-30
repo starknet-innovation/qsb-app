@@ -18,9 +18,7 @@ import {
   recordOwnerEvents,
   type OwnerEvent,
 } from "../server/owner-events";
-import { inventoryRows } from "../server/runtime/storage-authority";
 import { withApiErrorCode } from "../server/api-errors";
-import { inventorySnapshot } from "../scripts/storage-inventory";
 import {
   FAILING_AFTER,
   LEASE_MS,
@@ -32,7 +30,7 @@ import {
   type WebhookRequest,
 } from "../server/webhooks";
 import { Slipstream, MinerRejection } from "../server/providers";
-import { transactionId } from "../server/runtime/miner-inclusion";
+import { transactionId } from "../server/miner-inclusion";
 import { BITCOIN_NETWORK } from "../src/lib/network";
 import { fixtureVault, servedFixture } from "./solver-fixture";
 import type { Job, PublicVault } from "../src/lib/model";
@@ -597,22 +595,6 @@ describe("operator notes", () => {
     expect(readFileSync(path.join(process.cwd(), "terraform/data.tf"), "utf8")).toMatch(/point_in_time_recovery \{ enabled = true \}/);
     expect(section).toContain("point-in-time recovery");
     expect(section).toContain("doesn't purge");
-  });
-
-  it("inventories event and webhook rows, leaving the signing secret out rather than refusing", async () => {
-    const store = new MemoryStore();
-    const { secret } = await registerWebhook(store, "owner-a", { url: "https://hooks.example.com/" }, receiver().resolve);
-    const recorder = recordOwnerEvents(store);
-    await recorder.put({ pk: "OWNER#owner-a", sk: "JOB#j", version: 0, job: { id: "j", status: "queued", stage: "pinning" } });
-    await recorder.settle();
-    const rows = [...store.rows.values()];
-    const report = inventoryRows(rows);
-    expect(report.counts).toMatchObject({ operational: 2, job: 1, unclassified: 0 });
-    expect(report.unclassifiedKeys).toEqual([]);
-    expect(JSON.stringify(inventorySnapshot({ rows }))).not.toContain(secret);
-    expect(JSON.stringify(rows)).toContain(secret);
-    // Only that field is dropped: anything else credential-shaped still refuses.
-    expect(() => inventoryRows([...rows, { pk: "WEBHOOK#owner-a", sk: "WEBHOOKS", version: 1, hooks: [], apiKey: "x" }])).toThrow(/CredentialMaterialRejected/);
   });
 });
 

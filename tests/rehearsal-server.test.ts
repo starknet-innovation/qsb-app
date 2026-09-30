@@ -301,7 +301,7 @@ it("blocks Teststream preflight when the miner reports a different chain and doe
   ).toBe(true);
   request.mockClear();
   await expect(miner.submit("00", undefined)).rejects.toThrow(
-    "SpendAuthorizationRequired",
+    "ExactSubmitPermitRequired",
   );
   expect(request).not.toHaveBeenCalled();
 });

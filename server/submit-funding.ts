@@ -5,7 +5,7 @@ import { assertVaultConfiguration } from "../src/lib/provenance";
 import { Conflict, type Row, type Store } from "./store";
 import { ChainError } from "./chain";
 import { matchVaultFunding } from "./transaction-checks";
-import { transactionId } from "./runtime/miner-inclusion";
+import { transactionId } from "./miner-inclusion";
 import {
   exactSubmitEnabled,
   issueExactSubmitPermit,

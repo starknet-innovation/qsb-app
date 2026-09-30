@@ -15,8 +15,8 @@ import {
   type CoverageScope,
   type RangeOutcome,
   type SearchStage,
-} from "../server/runtime/coverage-ledger";
-import { readHoldSolverBinding } from "../server/runtime/solver-review";
+} from "../server/coverage-ledger";
+import { readHoldSolverBinding } from "../server/solver-review";
 
 const holdSolver = readHoldSolverBinding();
 const pinA = "2147483648:500000000";

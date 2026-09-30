@@ -491,7 +491,6 @@ describe("webhook dispatcher", () => {
     });
     const local = Object.keys(result.metafile.inputs).filter((input) => !input.includes("node_modules/")).sort();
     expect(local).toEqual([
-      "server/runtime/reservation-guard.ts",
       "server/store.ts",
       "server/webhook-dispatcher.ts",
       "server/webhook-transport.ts",

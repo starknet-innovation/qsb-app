@@ -1,7 +1,7 @@
 import { hex } from "@scure/base";
 import { withdrawalSchema, type Job } from "../src/lib/model";
 import { outputScript } from "../src/lib/transactions";
-import { MinerInclusionError } from "./runtime/miner-inclusion";
+import { MinerInclusionError } from "./miner-inclusion";
 import { assertWithdrawalSpendAgainstJob } from "./transaction-checks";
 
 const MIN_SEQUENCE = 0x80000000;

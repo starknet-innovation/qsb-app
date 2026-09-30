@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   coordinatorPathWrites,
   decideAppRoleAccess,
-} from "../server/runtime/app-role-records";
+} from "./app-role-records";
 
 describe("app role record access", () => {
   it("lists coordinator-path writes and keeps system rows off that list", () => {
@@ -110,16 +110,14 @@ it("restricts coordinator writes including mixed and empty keys", () => {
     ).toBe("deny");
 });
 
-// Only the active app roles are deployed; the other model entries are parked.
-import { permissionModel } from "../server/runtime/storage-authority";
 import apiPolicy from "../terraform/policies/app-records.json";
 import operatorPolicy from "../terraform/policies/operator-reconcile-records.json";
 import coordinatorPolicy from "../terraform/policies/coordinator-records.json";
 it("documents the exact active role allow actions from Terraform", () => {
-  for (const [role, policy] of [
-    ["api", apiPolicy],
-    ["coordinator", coordinatorPolicy],
-    ["operator-reconcile", operatorPolicy],
+  for (const [policy, expected] of [
+    [apiPolicy, ["ConditionCheckItem", "DeleteItem", "GetItem", "PutItem", "Query"]],
+    [coordinatorPolicy, ["GetItem", "PutItem"]],
+    [operatorPolicy, ["GetItem", "PutItem"]],
   ] as const) {
     const actions = [
       ...new Set(
@@ -128,10 +126,7 @@ it("documents the exact active role allow actions from Terraform", () => {
     ]
       .map((s) => s.replace("dynamodb:", ""))
       .sort();
-    expect([...permissionModel.roles[role].data].sort()).toEqual(actions);
-  }
-  for (const role of Object.values(permissionModel.roles)) {
-    expect(role.data).not.toContain("TransactWriteItems");
+    expect(actions).toEqual(expected);
   }
 });
 

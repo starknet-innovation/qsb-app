@@ -13,7 +13,7 @@ import {
 import { MemoryStore, type Store } from "../server/store";
 import type { Esplora } from "../server/chain";
 import type { slipstream } from "../server/providers";
-import { decideAppRoleAccess } from "../server/runtime/app-role-records";
+import { decideAppRoleAccess } from "./app-role-records";
 
 const owner = "bc1qowner",
   other = "bc1qother";

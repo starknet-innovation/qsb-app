@@ -534,9 +534,8 @@ rows, so a role can be granted webhook rows alone. Handle it as a credential:
   backups until they age out of the recovery window (35 days unless the table is
   configured shorter; check the table's setting). Deleting a webhook doesn't purge
   backups. Treat a restore or backup export as containing live secrets.
-- Exports: `npm run inventory:storage` drops `hooks[].secret` before it checks a
-  snapshot for credentials. Any other export or copy of the table must drop that
-  field too. Never paste a `WEBHOOKS` row into an issue or log.
+- Exports: any export or copy of the table must drop `hooks[].secret`. Never paste
+  a `WEBHOOKS` row into an issue or log.
 - Rotation: the owner deletes the webhook and registers it again.
 - Follow-up, not built: envelope encryption with KMS or a Secrets Manager key
   would keep plaintext secrets out of the table and its backups. It needs new IAM

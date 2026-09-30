@@ -4,9 +4,8 @@ import { fileURLToPath } from "node:url";
 
 /**
  * Partition-key prefixes written on the coordinator path.
- * Condition checks are not writes: the API condition-checks
- * SYSTEM#RESERVATION_AUTHORITY and does not put them.
- * No operator role is granted here, so those system rows stay unwritable by these roles.
+ * Condition checks are not writes. No operator role is granted here, so SYSTEM#
+ * rows stay unwritable by these roles.
  */
 export const coordinatorPathWrites = {
   api: [
@@ -43,7 +42,7 @@ export function appRoleRecordStatements(
     role === "api" ? "app-records.json" : "coordinator-records.json";
   const policyPath = path.join(
     path.dirname(fileURLToPath(import.meta.url)),
-    "../../terraform/policies",
+    "../terraform/policies",
     filename,
   );
   return JSON.parse(readFileSync(policyPath, "utf8")) as PolicyStatement[];

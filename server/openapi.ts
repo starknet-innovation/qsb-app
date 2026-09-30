@@ -45,7 +45,7 @@ import {
 import { idempotencyKey, idempotentPosts } from "./idempotency";
 import type { Esplora } from "./chain";
 import type { mainnetUiConfig } from "./mainnetConfig";
-import type { EsploraInclusionReport } from "./runtime/miner-inclusion";
+import type { EsploraInclusionReport } from "./miner-inclusion";
 import type { submitExact } from "./submit-exact";
 import type { FundingSubmission, submitFunding } from "./submit-funding";
 import {
@@ -552,26 +552,6 @@ const source = (sites: readonly string[], errors: Errors) => {
 /** The error sources, with the snapshot sites each covers. */
 export const errorSources = () =>
   [...sources].map(([errors, sites]) => ({ sites, errors }));
-// Activation, external-miner and broadcast-permit checks: no route calls them.
-const offRoute = [
-  "agreeExternalMinerChain",
-  "assertCandidateNotRegtest",
-  "assertLocalMinerTransport",
-  "assertReleaseClosed",
-  "assertReusableFixture",
-  "assertSpendMatchesTransaction",
-  "assessWalletFundingRequest",
-  "callMinerSubmit",
-  "describeExternalInclusion",
-  "grantExactSpendPermit",
-  "inputOutpoints",
-  "localTransportInvocations",
-  "parseExactSpend",
-  "parseParties",
-  "parseSpentRefs",
-];
-const unsentPermit =
-  "Only miner.submit's non-exact path calls it. submitExact passes an exact permit and catches every miner.submit error.";
 /**
  * Sites (`file | function`, or `file | function | class`) whose error never
  * reaches a response, and why.
@@ -590,16 +570,6 @@ export const unreachedErrorSites: Record<string, string> = {
   "transaction-checks.ts | checkFunding": "No route calls it.",
   "owner-limits.ts | save":
     "Only the coordinator's paid-submission save calls OwnerGpuBudget.save; no route does.",
-  "providers.ts | submit": unsentPermit,
-  "runtime/miner-inclusion.ts | assertBroadcastPermit": unsentPermit,
-  "runtime/miner-inclusion.ts | assertPermitMinerEndpoint": unsentPermit,
-  "runtime/miner-inclusion.ts | assertMainnetTransportClosed": unsentPermit,
-  ...Object.fromEntries(
-    offRoute.map((name) => [
-      `runtime/miner-inclusion.ts | ${name}`,
-      "An activation or external-miner check. No route calls it.",
-    ]),
-  ),
 };
 
 // A store write that loses a version race.
@@ -608,12 +578,11 @@ const writes = source(
     "store.ts | put",
     "store.ts | atomicPut",
     "store.ts | delete",
-    "store.ts | rejectGuarded",
   ],
   { 409: ["state_conflict"] },
 );
 const reservations = source(
-  ["runtime/storage-authority.ts | canonicalReservationWrites"],
+  ["store.ts | canonicalReservationWrites"],
   { 409: ["state_conflict"] },
 );
 // Any chain read checks the provider's network first. A request that fails
@@ -658,7 +627,7 @@ const minerLookup = source(
   },
 );
 const inclusionJudgment = source(
-  ["runtime/miner-inclusion.ts | judgeInclusionEvidence"],
+  ["miner-inclusion.ts | judgeInclusionEvidence"],
   { 409: ["inclusion_check_failed"] },
 );
 const consensusCheck = source(
@@ -698,7 +667,7 @@ const exactSubmit = source(
     "job-spend-record.ts | mismatch",
     "transaction-checks.ts | assertWithdrawalSpendAgainstJob",
     "transaction-checks.ts | checkWithdrawal",
-    "runtime/miner-inclusion.ts | readTransaction",
+    "miner-inclusion.ts | readTransaction",
   ],
   merge(inputCheck, writes, minerCredential, consensusCheck, {
     409: [

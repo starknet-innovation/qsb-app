@@ -9,7 +9,7 @@ import {
   assertStoredJobSpend,
   buildStoredSpendRecord,
 } from "./job-spend-record";
-import { transactionId } from "./runtime/miner-inclusion";
+import { transactionId } from "./miner-inclusion";
 import { observeWithdrawal } from "./withdrawal-status";
 
 const text = z

@@ -70,8 +70,8 @@ def render(c):
     statements.append(dict(Sid='NeverRemoveRuntimeBoundary',Effect='Deny',Action=['iam:DeleteRolePermissionsBoundary'],Resource=[runtime_roles]))
     # Runtime identities may access QSB application data, not IAM/control planes.
     runtime = []
-    # Must cover every DynamoDB action the runtime role policies (terraform/policies/*.json) allow; reservations
-    # add a SYSTEM# ConditionCheck, so ConditionCheckItem is required or every reservation is refused.
+    # Must cover every DynamoDB action the runtime role policies (terraform/policies/*.json) allow. Transactions
+    # condition-check rows they don't write (the vault row at submit), so ConditionCheckItem is required.
     allow('Records',['dynamodb:GetItem','dynamodb:PutItem','dynamodb:UpdateItem','dynamodb:DeleteItem','dynamodb:ConditionCheckItem','dynamodb:BatchGetItem','dynamodb:BatchWriteItem','dynamodb:Query','dynamodb:Scan','dynamodb:DescribeTable'],[arn('dynamodb','table/qsb-*')],target=runtime)
     allow('Functions',['lambda:InvokeFunction'],[arn('lambda','function:qsb-*')],target=runtime)
     allow('Workflow',['states:StartExecution','states:DescribeExecution'],[arn('states','stateMachine:qsb-*'),arn('states','execution:qsb-*:*')],target=runtime)

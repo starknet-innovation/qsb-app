@@ -10,7 +10,6 @@
     "test:e2e": "QSB_NETWORK=mainnet VITE_QSB_NETWORK=mainnet playwright test",
     "typecheck": "tsc --noEmit",
     "vendor": "python3 scripts/vendor.py",
-    "inventory:storage": "tsx scripts/storage-inventory.ts",
     "qsb": "QSB_NETWORK=\"${QSB_NETWORK:?Set QSB_NETWORK to mainnet or testnet4}\" tsx sdk/cli.ts",
     "openapi": "QSB_NETWORK=mainnet tsx scripts/openapi.ts",
     "prebuild": "node scripts/generate-solver-registry.mjs",

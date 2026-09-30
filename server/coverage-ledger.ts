@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { workRange } from "../search-ranges";
+import { workRange } from "./search-ranges";
 
 /** Retained hit records the host is willing to publish. Not an unlimited buffer. */
 export const HOST_HIT_CAPACITY = 64;
