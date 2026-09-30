@@ -57,6 +57,8 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
       }),
     );
     await page.goto("/");
+    // A fractional minimum is suggested as is, not rounded up to a whole sat/vB.
+    if (scenario === "success") await page.evaluate(() => { (window as any).minerRates = { submit_fee_rate: 1.5 }; });
     const data = await page.evaluate(async () => {
       const p = "/tests/funding-dialog-harness.tsx";
       return (await import(p)).mount();
@@ -72,6 +74,7 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
     await dialog.getByLabel("Backup passphrase").fill(data.password);
     await dialog.getByRole("button", { name: "Verify backup locally" }).click();
     await expect(dialog).toContainText("Recovery backup verified");
+    if (scenario === "success") await expect(dialog.getByLabel("Miner fee rate (sat/vB)")).toHaveValue("1.5");
     await dialog.locator("fieldset").getByRole("checkbox").check();
     await dialog.getByLabel("Deposit amount (BTC)").fill("0.0005");
     await dialog.getByLabel("Miner fee rate (sat/vB)").fill("2");

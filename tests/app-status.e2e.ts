@@ -94,3 +94,20 @@ for (const [switches, label] of [
     await expect(page.getByRole("dialog")).toContainText(`${label}.`);
     await expect(page.getByRole("dialog")).not.toContainText("Deposits and withdrawals on");
   });
+
+test("two tabs share one chain check a minute and its result", async ({ page }) => {
+  const second = await page.context().newPage();
+  for (const tab of [page, second]) await mount(tab, { operationsEnabled: true, exactSubmitEnabled: true });
+  const fundingCalls = async () =>
+    (await Promise.all([page, second].map((tab) => tab.evaluate(() => (window as any).apiCalls as string[]))))
+      .flat()
+      .filter((path) => path.endsWith("/funding")).length;
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connect Xverse", exact: true }).click();
+  await expect(page.locator(".vault-row", { hasText: "Travel fund" })).toContainText("last checked");
+  await second.goto("/");
+  await second.getByRole("button", { name: "Connect Xverse", exact: true }).click();
+  // The second tab shows the first tab's check instead of making its own.
+  await expect(second.locator(".vault-row", { hasText: "Travel fund" })).toContainText("last checked");
+  expect(await fundingCalls()).toBe(1);
+});

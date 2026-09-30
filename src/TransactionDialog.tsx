@@ -266,9 +266,13 @@ export default function TransactionDialog({
     };
   }, [fundingKey]);
   // Start from a rate MARA accepts: its current minimum for a deposit, and half as much again
-  // for a withdrawal, whose search can take hours. Typing a rate replaces it.
-  const suggestedRate =
-    typeof minerFloor === "number" ? Math.max(1, Math.ceil(minerFloor * (deposit ? 1 : 1.5))) : undefined;
+  // for a withdrawal, whose search can take hours. Typing a rate replaces it. The rate keeps
+  // parseFeeRate's milli-sat precision, rounded up the way belowMinerFloor rounds the floor.
+  const suggestedRate = (() => {
+    if (typeof minerFloor !== "number") return undefined;
+    const milli = Math.ceil(Math.round(minerFloor * (deposit ? 1 : 1.5) * 1e6) / 1e3);
+    return milli > 0 ? String(milli / 1000) : undefined;
+  })();
   useEffect(() => {
     if (!job && !feeTouched.current && suggestedRate !== undefined) setFeeRate(String(suggestedRate));
   }, [suggestedRate]);
@@ -815,7 +819,9 @@ export default function TransactionDialog({
   );
   // Why "Review" is disabled, shown next to it.
   const detailsBlocker = deposit
-    ? typeof depositQuote === "object"
+    ? selection.length > 8
+      ? "Choose at most eight payment outputs."
+      : typeof depositQuote === "object"
       ? ""
       : depositQuote ?? "Select payment outputs, then enter an amount and a fee rate."
     : solverId === null

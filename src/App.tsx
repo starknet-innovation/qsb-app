@@ -92,6 +92,32 @@ const vaultLabel = (v: PublicVault, job?: Job) =>
         ? "Withdrawal ready"
         : "Withdrawing"
       : ({ unfunded: "Not funded", submitted: "Deposit pending", confirmed: "Funded" } as Record<string, string>)[v.status];
+// One tab at a time checks the chain for a wallet, at most once a minute across tabs. Each
+// check costs provider requests, and the status routes write a versioned record that two tabs
+// checking at once would conflict on. Tabs share when each item was last checked.
+const chainTurnKey = (address: string) => `qsb-chain-check:${address}`;
+const chainSeenKey = (address: string) => `qsb-chain-checked:${address}`;
+function readChainSeen(address: string): Record<string, string> {
+  try {
+    const seen = JSON.parse(localStorage.getItem(chainSeenKey(address)) ?? "{}");
+    return seen && typeof seen === "object"
+      ? Object.fromEntries(Object.entries(seen).filter((e): e is [string, string] => typeof e[1] === "string"))
+      : {};
+  } catch {
+    return {};
+  }
+}
+async function chainTurn(address: string, check: () => Promise<void>) {
+  const key = chainTurnKey(address);
+  const run = async () => {
+    if (Date.now() - Number(localStorage.getItem(key) ?? 0) < 60000) return;
+    localStorage.setItem(key, String(Date.now()));
+    await check();
+  };
+  // Web Locks make the turn exclusive; without them the shared timestamp still spaces checks.
+  if (navigator.locks) await navigator.locks.request(key, { ifAvailable: true }, (lock) => (lock ? run() : undefined));
+  else await run();
+}
 const conflictText = (alert?: string) =>
   `${alert ?? "Funding outpoint was spent by a different transaction."} Contact the operator; do not resubmit or spend the helper output.`;
 type Status = "checking" | "unknown" | ReturnType<typeof serviceStatus>;
@@ -172,8 +198,7 @@ export default function App() {
   }, [conflictingCreation]);
   const dialog = useRef<HTMLDialogElement>(null),
     walletMenuRef = useRef<HTMLDivElement>(null),
-    generation = useRef(0),
-    lastChainCheck = useRef(0);
+    generation = useRef(0);
   useEffect(() => {
     api("/config")
       .then((value) => {
@@ -244,6 +269,15 @@ export default function App() {
       say(key, "error", e instanceof Error ? e.message : "Resend failed. Don't make another deposit.");
     }
   }
+  function markChecked(id: string) {
+    const at = new Date().toISOString();
+    setCheckedAt((c) => ({ ...c, [id]: at }));
+    if (wallet)
+      localStorage.setItem(
+        chainSeenKey(wallet.address),
+        JSON.stringify({ ...readChainSeen(wallet.address), [id]: at }),
+      );
+  }
   async function checkDeposit(v: PublicVault, stale = () => false) {
     const updated = await api<{
       vault: PublicVault;
@@ -253,7 +287,7 @@ export default function App() {
     setVaults((items) =>
       items.map((item) => (item.id === v.id ? updated.vault : item)),
     );
-    setCheckedAt((c) => ({ ...c, [v.id]: new Date().toISOString() }));
+    markChecked(v.id);
     return updated.status.confirmed;
   }
   async function checkWithdrawal(j: Job, stale = () => false) {
@@ -261,7 +295,7 @@ export default function App() {
       `/transactions/${j.txid}/status`,
     );
     if (stale()) return observation;
-    setCheckedAt((c) => ({ ...c, [j.id]: new Date().toISOString() }));
+    markChecked(j.id);
     if (observation.status !== "confirmed") return observation;
     const updated = await api<{ job: Job }>(`/jobs/${j.id}/status`);
     if (stale()) return observation;
@@ -288,19 +322,20 @@ export default function App() {
         setVaults(v.vaults);
         setResendable(new Set(v.resendable ?? []));
         setJobs(j.jobs);
-        // Each chain check costs provider requests, so pending transactions are checked at
-        // most once a minute, and only while the page is on screen.
-        if (document.visibilityState !== "visible" || Date.now() - lastChainCheck.current < 60000) return;
-        lastChainCheck.current = Date.now();
-        for (const vault of v.vaults)
-          if (vault.status === "submitted" && vault.funding)
-            await checkDeposit(vault, stale).catch(() => {});
-        for (const job of j.jobs)
-          if (job.txid && job.status === "submitted") {
-            const observation = await checkWithdrawal(job, stale).catch(() => undefined);
-            if (observation?.status === "conflict" && !disposed)
-              say(`job:${job.id}`, "error", conflictText(observation.alert));
-          }
+        setCheckedAt((c) => ({ ...c, ...readChainSeen(wallet.address) }));
+        // Pending transactions are checked only while the page is on screen, by one tab.
+        if (document.visibilityState !== "visible") return;
+        await chainTurn(wallet.address, async () => {
+          for (const vault of v.vaults)
+            if (!disposed && vault.status === "submitted" && vault.funding)
+              await checkDeposit(vault, stale).catch(() => {});
+          for (const job of j.jobs)
+            if (!disposed && job.txid && job.status === "submitted") {
+              const observation = await checkWithdrawal(job, stale).catch(() => undefined);
+              if (observation?.status === "conflict" && !disposed)
+                say(`job:${job.id}`, "error", conflictText(observation.alert));
+            }
+        });
       } catch {}
     };
     void refresh();
@@ -354,7 +389,6 @@ export default function App() {
   }
   function disconnect() {
     generation.current++;
-    lastChainCheck.current = 0;
     setWalletMenu(false);
     setManualDeposit(undefined);
     setResendable(new Set());
@@ -593,6 +627,7 @@ export default function App() {
             className={`service-status ${status}`}
             onClick={() => setModal("readiness")}
             aria-haspopup="dialog"
+            aria-label={statusLabel[status]}
           >
             <span className="status-dot" />
             <span className="status-text">{statusLabel[status]}</span>
