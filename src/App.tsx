@@ -93,9 +93,10 @@ const vaultLabel = (v: PublicVault, job?: Job) =>
     : job && v.status === "confirmed"
       ? ({ awaiting_authorization: "Withdrawal ready", failed: "Withdrawal failed", paused: "Withdrawal paused" } as Record<string, string>)[job.status] ?? "Withdrawing"
       : ({ unfunded: "Not funded", submitted: "Deposit pending", confirmed: "Funded" } as Record<string, string>)[v.status];
-// One tab at a time checks the chain for a wallet, at most once a minute across tabs. Each
-// check costs provider requests, and the status routes write a versioned record that two tabs
-// checking at once would conflict on. Tabs share when each item was last checked.
+// One tab at a time checks the chain for a wallet, at most once a minute across tabs, and none
+// while a transaction dialog is open. Each check costs provider requests, and the status routes
+// write versioned records that two checks at once would conflict on. Tabs share when each item
+// was last checked (for a settled vault, last tried).
 const chainTurnKey = (address: string) => `qsb-chain-check:${address}`;
 const chainSeenKey = (address: string) => `qsb-chain-checked:${address}`;
 function readChainSeen(address: string): Record<string, string> {
@@ -115,20 +116,20 @@ const SETTLED_CHECK_MS = 60 * 60 * 1000;
 const SETTLED_PER_TURN = 3;
 // For a deposit that isn't mined yet, the funding route exports its signed bytes, a versioned
 // write that stops a first submission still in flight from clearing a refused intent. So a
-// pending deposit is checked automatically only once this tab has seen it pending for well
-// over the longest a submission can run: the API Lambda's 120-second timeout
+// pending deposit is checked automatically only once this tab has seen that deposit (its txid)
+// pending for well over the longest a submission can run: the API Lambda's 120-second timeout
 // (terraform/compute.tf), not API Gateway's 30 seconds, which only ends the client's wait.
 const PENDING_SETTLE_MS = 5 * 60 * 1000;
+const pendingKey = (vault: PublicVault) => `${vault.id}:${vault.funding?.txid}`;
+// Automatic checks need Web Locks to be exclusive; without them only "Check now" runs.
 async function chainTurn(address: string, check: () => Promise<void>) {
   const key = chainTurnKey(address);
-  const run = async () => {
-    if (Date.now() - Number(localStorage.getItem(key) ?? 0) < 60000) return;
+  if (!navigator.locks) return;
+  await navigator.locks.request(key, { ifAvailable: true }, async (lock) => {
+    if (!lock || Date.now() - Number(localStorage.getItem(key) ?? 0) < 60000) return;
     localStorage.setItem(key, String(Date.now()));
     await check();
-  };
-  // Web Locks make the turn exclusive; without them the shared timestamp still spaces checks.
-  if (navigator.locks) await navigator.locks.request(key, { ifAvailable: true }, (lock) => (lock ? run() : undefined));
-  else await run();
+  });
 }
 const conflictText = (alert?: string) =>
   `${alert ?? "Funding outpoint was spent by a different transaction."} Contact the operator; do not resubmit or spend the helper output.`;
@@ -288,15 +289,18 @@ export default function App() {
       say(key, "error", e instanceof Error ? e.message : "Resend failed. Don't make another deposit.");
     }
   }
-  function markChecked(id: string) {
-    const at = new Date().toISOString();
-    setCheckedAt((c) => ({ ...c, [id]: at }));
-    setCheckFailed(({ [id]: _, ...rest }) => rest);
+  function rememberCheck(id: string, at: string) {
     if (wallet)
       localStorage.setItem(
         chainSeenKey(wallet.address),
         JSON.stringify({ ...readChainSeen(wallet.address), [id]: at }),
       );
+  }
+  function markChecked(id: string) {
+    const at = new Date().toISOString();
+    setCheckedAt((c) => ({ ...c, [id]: at }));
+    setCheckFailed(({ [id]: _, ...rest }) => rest);
+    rememberCheck(id, at);
   }
   async function checkDeposit(v: PublicVault, stale = () => false) {
     const updated = await api<{
@@ -356,17 +360,18 @@ export default function App() {
         ]);
         if (disposed) return;
         setVaults(v.vaults);
-        // A refused first deposit returns a vault to unfunded, and its next deposit starts the
-        // wait again.
-        for (const vault of v.vaults)
-          if (vault.status === "submitted") pendingSince.current[vault.id] ??= Date.now();
-          else delete pendingSince.current[vault.id];
+        // Each deposit waits from when this tab first saw it pending. A deposit made again after
+        // a refusal has a new txid, so it waits again even if no refresh saw the refusal.
+        const pending = new Set(v.vaults.filter((vault) => vault.status === "submitted").map(pendingKey));
+        for (const key of Object.keys(pendingSince.current))
+          if (!pending.has(key)) delete pendingSince.current[key];
+        for (const key of pending) pendingSince.current[key] ??= Date.now();
         setResendable(new Set(v.resendable ?? []));
         setStray(v.strayPayments ?? []);
         setJobs(j.jobs);
         setCheckedAt((c) => ({ ...c, ...readChainSeen(wallet.address) }));
         // Transactions are checked only while the page is on screen, by one tab, and never
-        // while a transaction dialog is open (see the lock below).
+        // while a transaction dialog is open (see the lock above).
         if (document.visibilityState !== "visible" || dialogOpen.current) return;
         await chainTurn(wallet.address, async () => {
           const seen = readChainSeen(wallet.address);
@@ -374,14 +379,17 @@ export default function App() {
             if (!disposed) setCheckFailed((f) => ({ ...f, [id]: new Date().toISOString() }));
           };
           for (const vault of v.vaults)
-            if (!disposed && vault.status === "submitted" && vault.funding && Date.now() - pendingSince.current[vault.id] >= PENDING_SETTLE_MS)
+            if (!disposed && vault.status === "submitted" && vault.funding && Date.now() - pendingSince.current[pendingKey(vault)] >= PENDING_SETTLE_MS)
               await checkDeposit(vault, stale).catch(failed(vault.id));
           const settled = v.vaults
             .filter((vault) => vault.funding && vault.status !== "submitted")
             .filter((vault) => !seen[vault.id] || Date.now() - Date.parse(seen[vault.id]) >= SETTLED_CHECK_MS)
             .sort((a, b) => (seen[a.id] ?? "").localeCompare(seen[b.id] ?? ""))
             .slice(0, SETTLED_PER_TURN);
-          for (const vault of settled) if (!disposed) await checkDeposit(vault, stale).catch(() => {});
+          // A failed try still counts, so a vault that keeps failing waits its hour like the rest.
+          for (const vault of settled)
+            if (!disposed)
+              await checkDeposit(vault, stale).catch(() => rememberCheck(vault.id, new Date().toISOString()));
           for (const job of j.jobs)
             if (!disposed && job.txid && job.status === "submitted") {
               const observation = await checkWithdrawal(job, stale).catch(failed(job.id));

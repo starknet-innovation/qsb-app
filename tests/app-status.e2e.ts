@@ -158,4 +158,15 @@ test("a deposit made again after a refusal waits the full time before it's check
   expect(await pendingChecks()).toBe(1);
   await page.clock.fastForward("04:05");
   await expect.poll(pendingChecks).toBe(2);
+  // A new deposit this tab never saw refused (the tab was asleep, say) has a new txid, so it
+  // waits the full time too.
+  await page.evaluate(() => {
+    const vault = (window as any).appFixture.vaults[1];
+    vault.funding = { ...vault.funding, txid: "9f".repeat(32) };
+  });
+  await page.clock.fastForward("00:16");
+  await page.clock.fastForward("01:05");
+  expect(await pendingChecks()).toBe(2);
+  await page.clock.fastForward("04:05");
+  await expect.poll(pendingChecks).toBe(3);
 });
