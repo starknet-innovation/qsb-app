@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { base64 } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
 import { SESSION_SECONDS } from "../server/api-schemas";
-import type { PendingDeposit, PendingDeposits } from "./client";
+import type { AuthorizationStore, PendingDeposit, PendingDeposits } from "./client";
 import type { Signer } from "./signer";
 
 export type CliIo = {
@@ -323,7 +323,7 @@ export function filePendingDeposits(home: string): PendingDeposits {
  * This device's one-time withdrawal authorizations, one owner-only file per key, under the
  * webapp's keys: qsb-intent:<scriptHash> and qsb-assembly:<scriptHash>.
  */
-export function fileAuthorizations(home: string): Pick<Storage, "getItem" | "setItem"> {
+export function fileAuthorizations(home: string): AuthorizationStore {
   const file = (key: string) => {
     const match = /^(qsb-intent|qsb-assembly):([0-9a-f]{64})$/.exec(key);
     if (!match) throw new Error("Unexpected authorization key.");

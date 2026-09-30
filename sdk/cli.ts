@@ -27,7 +27,7 @@ import { loopbackTestSigner } from "./test-signer";
 
 const usage = `qsb: non-custodial QSB client. Keys, recovery state and passphrases stay on this machine.
 
-Usage: npm run qsb -- <command> [options]      (QSB_NETWORK must be mainnet)
+Usage: qsb <command> [options]      (QSB_NETWORK must be mainnet)
 
 Account
   login                         BIP-322 sign-in; caches the 1-hour session token (owner-only file)

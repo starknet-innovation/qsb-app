@@ -65,7 +65,7 @@ try {
 
   // 5. The qsb bin runs, and refuses to guess a network.
   const help = run(path.join(consumer, "node_modules", ".bin", "qsb"), ["--help"], { cwd: consumer, env });
-  if (!help.includes("Usage")) fail("qsb --help printed no usage");
+  if (!help.includes("Usage: qsb ")) fail("qsb --help doesn't describe the installed qsb command");
   const { QSB_NETWORK: _omit, ...noNetwork } = process.env;
   try {
     run(path.join(consumer, "node_modules", ".bin", "qsb"), ["--help"], { cwd: consumer, env: noNetwork, stdio: "pipe" });
@@ -74,21 +74,34 @@ try {
     if (error.status === 0) throw error;
   }
 
-  // 6. The declarations resolve for a TypeScript consumer.
+  // 6. The declarations type-check for TypeScript consumers: a bundler, and a strict Node ESM project
+  // (NodeNext, declaration files checked, Node's types only, no DOM).
   writeFileSync(path.join(consumer, "use.ts"), `
-    import { QsbClient, nodeQsb, type Signer } from "${name}";
+    import { QsbClient, nodeQsb, type AuthorizationStore, type Signer } from "${name}";
     declare const signer: Signer;
-    const client: QsbClient = new QsbClient({ baseUrl: "https://app.example", signer });
+    const authorizations: AuthorizationStore = { getItem: () => null, setItem: () => {} };
+    const client: QsbClient = new QsbClient({ baseUrl: "https://app.example", signer, authorizations });
     void client; void nodeQsb;`);
-  writeFileSync(path.join(consumer, "tsconfig.json"), JSON.stringify({
-    compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true,
-      skipLibCheck: true, types: [], typeRoots: [path.join(root, "node_modules", "@types")] },
-    files: ["use.ts"],
-  }));
-  run(path.join(root, "node_modules", ".bin", "tsc"), ["-p", consumer], { cwd: consumer, stdio: "pipe" });
+  const consumers = {
+    bundler: { module: "ESNext", moduleResolution: "Bundler", skipLibCheck: true },
+    nodenext: { module: "NodeNext", moduleResolution: "NodeNext", skipLibCheck: false },
+  };
+  for (const [label, options] of Object.entries(consumers)) {
+    writeFileSync(path.join(consumer, `tsconfig.${label}.json`), JSON.stringify({
+      compilerOptions: { target: "ES2022", lib: ["ES2022"], strict: true, noEmit: true, ...options,
+        types: ["node"], typeRoots: [path.join(root, "node_modules", "@types")] },
+      files: ["use.ts"],
+    }));
+    try {
+      run(path.join(root, "node_modules", ".bin", "tsc"), ["-p", `tsconfig.${label}.json`], { cwd: consumer, stdio: "pipe" });
+    } catch (error) {
+      fail(`a ${label} TypeScript consumer doesn't type-check:\n${String(error.stdout || error.message).slice(0, 2000)}`);
+    }
+  }
 
   console.log(`SDK package check passed: ${files.length} files, ${(packed.size / 1024).toFixed(0)} KiB packed. ` +
-    "Installed outside the repository, it generated and validated a vault in Pyodide, ran qsb, and type-checked.");
+    "Installed outside the repository, it generated and validated a vault in Pyodide, ran qsb, and type-checked for " +
+    "bundler and NodeNext consumers.");
 } finally {
   rmSync(work, { recursive: true, force: true });
 }

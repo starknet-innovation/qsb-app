@@ -4,6 +4,7 @@ export {
   preparedDepositSchema,
   type ApiConfig,
   type ApproveWithdrawal,
+  type AuthorizationStore,
   type DepositSubmission,
   type PendingDeposit,
   type PendingDeposits,
