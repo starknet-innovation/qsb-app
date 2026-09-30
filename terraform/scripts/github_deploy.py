@@ -4,8 +4,10 @@
 Plans, applies and AWS CLI output carry account IDs, ARNs and resource IDs. Nothing from them reaches the log except
 through redact(): the raw output goes to a private log file, which the workflow keeps in the state bucket.
 
+  credentials SESSION              assume the deploy role through GitHub's OIDC token, masking everything it returns
   run LOG [--ok CODES] -- CMD...   run CMD with its output in LOG; on failure print only its redacted errors
   masks TFVARS                     print ::add-mask:: for the tfvars' identifying values, and record them for redact()
+  masks --outputs OUTPUTS_JSON     the same for every value `terraform output -json` returns, except source_commit
   summary PLAN_JSON                a redacted Markdown summary of a saved plan's changes, for the step summary
   redact                           redact stdin to stdout
   require-approver                 fail unless the qsb-deploy environment requires a reviewer
@@ -13,10 +15,14 @@ through redact(): the raw output goes to a private log file, which the workflow 
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
 
@@ -30,6 +36,10 @@ PATTERNS = [
     (re.compile(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'), '<uuid>'),
     (re.compile(r'/apis/[a-z0-9]+'), '/apis/<id>'),
     (re.compile(r'\[id=[^\]]*\]'), '[id=<redacted>]'),
+    (re.compile(r'\bARO[A-Z0-9]{17,}\b'), '<role-id>'),
+    # Provider errors name the resource in parentheses: "reading API Gateway v2 API (a1b2c3d4e5)".
+    (re.compile(r'(\b(?:reading|creating|updating|deleting|waiting for|describing|listing|tagging|modifying|putting|'
+                r'setting)\b[^()\n]{0,80}?)\([^)\s]{6,}\)', re.I), r'\1(<id>)'),
     (re.compile(r's3://[^\s/"\']+'), 's3://<bucket>'),
 ]
 # Values of these variables are shown in the summary; they're public (the app's /api/config serves them).
@@ -37,6 +47,7 @@ SWITCHES = ['network', 'solver_release_id', 'mainnet_enabled', 'exact_submit_ena
             'webhook_dispatcher_enabled']
 MAX_ERROR_LINES = 60
 ENVIRONMENT = 'qsb-deploy'
+STS = {'sts': 'https://sts.amazonaws.com/doc/2011-06-15/'}
 
 
 def literals():
@@ -70,13 +81,23 @@ def strings(value):
         yield value
 
 
-def masks(tfvars_path):
-    values = sorted({v for v in strings(json.loads(Path(tfvars_path).read_text())) if identifying(v)})
+def record(values):
     path = os.environ.get('QSB_REDACT_FILE')
     if path:
         with open(path, 'a') as f:
             f.writelines(v + '\n' for v in values)
     return [f'::add-mask::{v}' for v in values]
+
+
+def masks(tfvars_path):
+    return record(sorted({v for v in strings(json.loads(Path(tfvars_path).read_text())) if identifying(v)}))
+
+
+def output_masks(outputs_path):
+    """Every string output: IDs such as the API's don't look identifying, so none are left to chance."""
+    outputs = json.loads(Path(outputs_path).read_text())
+    return record(sorted({v for name, o in outputs.items() if name != 'source_commit'
+                          for v in strings(o.get('value')) if len(v) >= 6}))
 
 
 def error_excerpt(output):
@@ -93,7 +114,15 @@ def run(log, ok, cmd):
         out.write(f'$ {" ".join(cmd)}\n')
         out.flush()
         start = out.tell()
-        code = subprocess.run(cmd, stdout=out, stderr=subprocess.STDOUT).returncode
+        child = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT)
+        # A cancelled job interrupts the whole process group. Terraform then stops cleanly and saves its state;
+        # this wrapper keeps waiting rather than killing it, as subprocess.run would.
+        previous = {sig: signal.signal(sig, lambda *_: None) for sig in (signal.SIGINT, signal.SIGTERM)}
+        try:
+            code = child.wait()
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
     if code not in ok:
         print(f'{Path(cmd[0]).name} failed with exit code {code}; redacted errors follow. '
               f'The full log is kept privately with the deploy record.')
@@ -101,6 +130,60 @@ def run(log, ok, cmd):
             f.seek(start)
             print(error_excerpt(f.read()))
     return code
+
+
+def request(req, attempts=3):
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                return response.read()
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or attempt == attempts - 1:
+                raise
+        except urllib.error.URLError:
+            if attempt == attempts - 1:
+                raise
+        time.sleep(2 ** attempt)
+
+
+def sts_credentials(body):
+    """The credentials and identity in an AssumeRoleWithWebIdentity response."""
+    result = ET.fromstring(body).find('sts:AssumeRoleWithWebIdentityResult', STS)
+    field = lambda parent, name: result.find(f'sts:{parent}/sts:{name}', STS).text
+    return {name: field('Credentials', name) for name in ('AccessKeyId', 'SecretAccessKey', 'SessionToken')} | {
+        name: field('AssumedRoleUser', name) for name in ('Arn', 'AssumedRoleId')}
+
+
+def credentials(session):
+    """Assume the deploy role as aws-actions/configure-aws-credentials does, without logging the role's identity.
+
+    Reads ROLE_ARN, ACCOUNT_ID and REGION; writes the credentials to GITHUB_ENV for the job's later steps."""
+    role, account, region = os.environ['ROLE_ARN'], os.environ['ACCOUNT_ID'], os.environ['REGION']
+    token = json.loads(request(urllib.request.Request(
+        os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=sts.amazonaws.com',
+        headers={'Authorization': f'Bearer {os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]}'})))['value']
+    print(f'::add-mask::{token}')
+    body = urllib.parse.urlencode({'Action': 'AssumeRoleWithWebIdentity', 'Version': '2011-06-15', 'RoleArn': role,
+                                   'RoleSessionName': session, 'WebIdentityToken': token,
+                                   'DurationSeconds': '3600'}).encode()
+    try:
+        c = sts_credentials(request(urllib.request.Request(
+            f'https://sts.{region}.amazonaws.com/', data=body,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'})))
+    except urllib.error.HTTPError as e:
+        print(f'AssumeRoleWithWebIdentity failed with HTTP {e.code}: '
+              f'{redact(e.read().decode(errors="replace"), [role, account])[:2000]}')
+        return 1
+    for value in c.values():
+        print(f'::add-mask::{value}')
+    if c['Arn'].split(':')[4] != account:
+        print('The role is not in the account QSB_AWS_ACCOUNT_ID names.')
+        return 1
+    with open(os.environ['GITHUB_ENV'], 'a') as env:
+        env.write(f'AWS_ACCESS_KEY_ID={c["AccessKeyId"]}\nAWS_SECRET_ACCESS_KEY={c["SecretAccessKey"]}\n'
+                  f'AWS_SESSION_TOKEN={c["SessionToken"]}\nAWS_REGION={region}\nAWS_DEFAULT_REGION={region}\n')
+    print('Assumed the deploy role for one hour.')
+    return 0
 
 
 def changed_paths(before, after, path=''):
@@ -204,6 +287,11 @@ def main(argv):
     if argv[:1] == ['masks'] and len(argv) == 2:
         print('\n'.join(masks(argv[1])))
         return 0
+    if argv[:2] == ['masks', '--outputs'] and len(argv) == 3:
+        print('\n'.join(output_masks(argv[2])))
+        return 0
+    if argv[:1] == ['credentials'] and len(argv) == 2:
+        return credentials(argv[1])
     if argv[:1] == ['summary'] and len(argv) == 2:
         sys.stdout.write(summary(json.loads(Path(argv[1]).read_text()), os.environ.get('GITHUB_SHA', ''),
                                  os.environ.get('QSB_PLAN_DIGEST', '')))

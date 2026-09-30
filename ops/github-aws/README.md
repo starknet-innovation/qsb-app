@@ -74,17 +74,27 @@ A migration/import plan is required before Terraform takes ownership.
 
 ## GitHub usage
 
+Repository secrets. They're secrets because GitHub prints each step's inputs and
+environment in the public log, and masks only secrets:
+
+- `QSB_AWS_ROLE_ARN` (the `qsb-github-deploy` role), `QSB_AWS_ACCOUNT_ID`,
+  `QSB_TERRAFORM_STATE_BUCKET`
+
 Repository variables:
 
-- `QSB_AWS_ROLE_ARN`, `QSB_AWS_ACCOUNT_ID`, `QSB_AWS_REGION`
-- `QSB_TERRAFORM_STATE_BUCKET`
+- `QSB_AWS_REGION`
 - `QSB_SOLVER_RELEASE_ID`: the enrolled solver release the app is built with
 - `QSB_AWS_DEPLOY_ENABLED`: `deploy.yml` does nothing unless it's `true`
-- `QSB_IAM_RUNTIME_BOUNDARY_ARN` isn't used: the private tfvars set the boundary, and
-  `check-single-pipeline.py --deploy` refuses a plan with any other
+
+`QSB_IAM_RUNTIME_BOUNDARY_ARN` and the older `QSB_AWS_ROLE_ARN`,
+`QSB_AWS_ACCOUNT_ID` and `QSB_TERRAFORM_STATE_BUCKET` variables aren't used; delete
+them. The private tfvars set the boundary, and `check-single-pipeline.py --deploy`
+refuses a plan with any other.
 
 `aws-auth.yml` is a manual authentication-only check, runnable on `main` after
-review/merge. It cannot deploy or resume the app.
+review/merge. It cannot deploy or resume the app. Like `deploy.yml`, it assumes the
+role with `terraform/scripts/github_deploy.py credentials`, which masks everything
+STS returns, and prints only whether the session is the deploy role's.
 
 `deploy.yml` is the reviewed Terraform workflow for the app stack: it plans each
 push to `main`, and applies that plan once a reviewer approves the `qsb-deploy`

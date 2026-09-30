@@ -1,7 +1,8 @@
 name: Deploy the app stack
 # Plans every push to main, then applies that exact plan once a reviewer approves the qsb-deploy environment.
 # See "Deploy from GitHub" in terraform/README.md. The repository is public, so its logs and step summaries are
-# too: raw Terraform and AWS CLI output never reaches them (terraform/scripts/github_deploy.py).
+# too: raw Terraform and AWS output never reaches them (terraform/scripts/github_deploy.py). The account, role
+# and state bucket are secrets, so step headers show them masked; repository variables would show in plain text.
 on:
   push:
     branches:
@@ -12,9 +13,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-# One deploy at a time. A newer push waits, and replaces any older run still waiting to start.
+# One deploy at a time. A newer push waits, and replaces any older run still waiting to start. Runs from other
+# branches do nothing, so they get a group of their own rather than displacing a waiting main run.
 concurrency:
-  group: qsb-app-deploy
+  group: ${{ github.ref == 'refs/heads/main' && 'qsb-app-deploy' || format('qsb-app-deploy-{0}', github.run_id) }}
   cancel-in-progress: false
 env:
   TF_IN_AUTOMATION: "1"
@@ -61,6 +63,7 @@ jobs:
           path: ${{ runner.temp }}/build.tar
           if-no-files-found: error
           retention-days: 30
+          overwrite: true
 
   plan:
     needs: build
@@ -72,8 +75,9 @@ jobs:
     outputs:
       changes: ${{ steps.plan.outputs.changes }}
       plan_digest: ${{ steps.plan.outputs.plan_digest }}
+      record: ${{ steps.plan.outputs.record }}
     env:
-      STATE_BUCKET: ${{ vars.QSB_TERRAFORM_STATE_BUCKET }}
+      STATE_BUCKET: ${{ secrets.QSB_TERRAFORM_STATE_BUCKET }}
       # Where this run keeps what's private: the saved plan and the raw logs, readable only through the state bucket.
       RECORD: qsb/github-deploy/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
@@ -97,30 +101,29 @@ jobs:
         with:
           terraform_version: 1.15.5
           terraform_wrapper: false
-      - name: Mask the state bucket
+      - name: Assume the deploy role
+        env:
+          ROLE_ARN: ${{ secrets.QSB_AWS_ROLE_ARN }}
+          ACCOUNT_ID: ${{ secrets.QSB_AWS_ACCOUNT_ID }}
+          REGION: ${{ vars.QSB_AWS_REGION }}
         run: |
-          test -n "$STATE_BUCKET" || { echo "Set the QSB_TERRAFORM_STATE_BUCKET repository variable"; exit 1; }
-          echo "::add-mask::$STATE_BUCKET"
-          echo "$STATE_BUCKET" > "$QSB_REDACT_FILE"
-      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
-        with:
-          role-to-assume: ${{ vars.QSB_AWS_ROLE_ARN }}
-          aws-region: ${{ vars.QSB_AWS_REGION }}
-          allowed-account-ids: ${{ vars.QSB_AWS_ACCOUNT_ID }}
-          mask-aws-account-id: true
-          role-duration-seconds: 3600
-          role-session-name: qsb-plan-${{ github.run_id }}
-      - name: Fetch the private tfvars
-        run: |
-          python3 terraform/scripts/github_deploy.py run "$LOGS/fetch.log" -- \
-            aws s3 cp --only-show-errors "s3://$STATE_BUCKET/qsb/main/app.tfvars.json" "$RUNNER_TEMP/app.tfvars.json"
-          python3 terraform/scripts/github_deploy.py masks "$RUNNER_TEMP/app.tfvars.json"
+          for v in STATE_BUCKET ROLE_ARN ACCOUNT_ID REGION; do
+            test -n "${!v}" || { echo "$v is empty: set its repository secret or variable (see terraform/README.md)"; exit 1; }
+          done
+          printf '%s\n' "$STATE_BUCKET" "$ROLE_ARN" "$ACCOUNT_ID" > "$QSB_REDACT_FILE"
+          python3 terraform/scripts/github_deploy.py credentials "qsb-plan-$GITHUB_RUN_ID"
       - name: Plan
         id: plan
         run: |
           d=terraform/scripts/github_deploy.py
+          python3 $d run "$LOGS/fetch.log" -- \
+            aws s3 cp --only-show-errors "s3://$STATE_BUCKET/qsb/main/app.tfvars.json" "$RUNNER_TEMP/app.tfvars.json"
+          python3 $d masks "$RUNNER_TEMP/app.tfvars.json"
           python3 $d run "$LOGS/init.log" -- terraform -chdir=terraform init -no-color -input=false -lockfile=readonly \
             -backend-config="bucket=$STATE_BUCKET" -backend-config="region=$AWS_REGION"
+          terraform -chdir=terraform output -no-color -json > "$RUNNER_TEMP/outputs.json" 2>> "$LOGS/init.log" \
+            || { python3 $d redact < "$LOGS/init.log" | tail -20; exit 1; }
+          python3 $d masks --outputs "$RUNNER_TEMP/outputs.json"
           set +e
           python3 $d run "$LOGS/plan.log" --ok 0,2 -- terraform -chdir=terraform plan -no-color -input=false \
             -lock-timeout=5m -detailed-exitcode -var-file="$RUNNER_TEMP/app.tfvars.json" \
@@ -137,16 +140,16 @@ jobs:
           digest="$(sha256sum "$RUNNER_TEMP/app.tfplan" | cut -d' ' -f1)"
           QSB_PLAN_DIGEST="$digest" python3 $d summary "$RUNNER_TEMP/app.plan.json" >> "$GITHUB_STEP_SUMMARY"
           python3 $d run "$LOGS/check.log" -- python3 terraform/tests/check-single-pipeline.py "$RUNNER_TEMP/app.plan.json" --deploy
-          echo "plan_digest=$digest" >> "$GITHUB_OUTPUT"
           python3 $d run "$LOGS/store.log" -- \
             aws s3 cp --only-show-errors "$RUNNER_TEMP/app.tfplan" "s3://$STATE_BUCKET/$RECORD/app.tfplan"
+          echo "plan_digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "record=$RECORD" >> "$GITHUB_OUTPUT"
       - name: Keep the raw logs privately
         if: always()
         run: |
-          test -d "$LOGS" || exit 0
-          if [ -f terraform/errored.tfstate ]; then cp terraform/errored.tfstate "$LOGS/"; fi
-          aws s3 cp --only-show-errors --recursive "$LOGS" "s3://$STATE_BUCKET/$RECORD/${GITHUB_JOB}/" >/dev/null 2>&1 \
-            && echo "Raw logs kept privately in the state bucket under $RECORD/${GITHUB_JOB}/" \
+          test -n "${LOGS:-}" && test -d "$LOGS" || exit 0
+          aws s3 cp --only-show-errors --recursive "$LOGS" "s3://$STATE_BUCKET/$RECORD/plan/" >/dev/null 2>&1 \
+            && echo "Raw logs kept privately in the state bucket under $RECORD/plan/" \
             || echo "Could not keep the raw logs"
 
   approve:
@@ -163,6 +166,7 @@ jobs:
         run: echo "Approved the plan with sha256 $DIGEST for $GITHUB_SHA."
 
   apply:
+    # Re-running this job alone reuses the approval above, which is tied to the same plan digest.
     needs: [build, plan, approve]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
@@ -171,8 +175,9 @@ jobs:
       actions: read
       id-token: write
     env:
-      STATE_BUCKET: ${{ vars.QSB_TERRAFORM_STATE_BUCKET }}
-      RECORD: qsb/github-deploy/${{ github.run_id }}-${{ github.run_attempt }}
+      STATE_BUCKET: ${{ secrets.QSB_TERRAFORM_STATE_BUCKET }}
+      # The plan job's record, even when only this job is re-run.
+      RECORD: ${{ needs.plan.outputs.record }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -198,18 +203,14 @@ jobs:
         with:
           terraform_version: 1.15.5
           terraform_wrapper: false
-      - name: Mask the state bucket
+      - name: Assume the deploy role
+        env:
+          ROLE_ARN: ${{ secrets.QSB_AWS_ROLE_ARN }}
+          ACCOUNT_ID: ${{ secrets.QSB_AWS_ACCOUNT_ID }}
+          REGION: ${{ vars.QSB_AWS_REGION }}
         run: |
-          echo "::add-mask::$STATE_BUCKET"
-          echo "$STATE_BUCKET" > "$QSB_REDACT_FILE"
-      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
-        with:
-          role-to-assume: ${{ vars.QSB_AWS_ROLE_ARN }}
-          aws-region: ${{ vars.QSB_AWS_REGION }}
-          allowed-account-ids: ${{ vars.QSB_AWS_ACCOUNT_ID }}
-          mask-aws-account-id: true
-          role-duration-seconds: 3600
-          role-session-name: qsb-apply-${{ github.run_id }}
+          printf '%s\n' "$STATE_BUCKET" "$ROLE_ARN" "$ACCOUNT_ID" > "$QSB_REDACT_FILE"
+          python3 terraform/scripts/github_deploy.py credentials "qsb-apply-$GITHUB_RUN_ID"
       - name: Apply the approved plan
         env:
           DIGEST: ${{ needs.plan.outputs.plan_digest }}
@@ -223,15 +224,29 @@ jobs:
           echo "$DIGEST  $RUNNER_TEMP/app.tfplan" | sha256sum --check --quiet
           python3 $d run "$LOGS/init.log" -- terraform -chdir=terraform init -no-color -input=false -lockfile=readonly \
             -backend-config="bucket=$STATE_BUCKET" -backend-config="region=$AWS_REGION"
+          terraform -chdir=terraform output -no-color -json > "$RUNNER_TEMP/outputs.json" 2>> "$LOGS/init.log" \
+            || { python3 $d redact < "$LOGS/init.log" | tail -20; exit 1; }
+          python3 $d masks --outputs "$RUNNER_TEMP/outputs.json"
           # Terraform refuses a saved plan whose state has changed since, so an approval can't apply a stale plan.
           python3 $d run "$LOGS/apply.log" -- terraform -chdir=terraform apply -no-color -input=false -lock-timeout=10m \
             "$RUNNER_TEMP/app.tfplan"
           grep -E '^Apply complete!' "$LOGS/apply.log" | python3 $d redact | tee -a "$GITHUB_STEP_SUMMARY"
+      # A long apply can outlast the first session, and a failed one may leave errored.tfstate to push by hand.
+      - name: Assume the deploy role again to keep the logs
+        if: always()
+        env:
+          ROLE_ARN: ${{ secrets.QSB_AWS_ROLE_ARN }}
+          ACCOUNT_ID: ${{ secrets.QSB_AWS_ACCOUNT_ID }}
+          REGION: ${{ vars.QSB_AWS_REGION }}
+        run: |
+          test -n "${LOGS:-}" && test -d "$LOGS" || exit 0
+          python3 terraform/scripts/github_deploy.py credentials "qsb-logs-$GITHUB_RUN_ID"
       - name: Keep the raw logs privately
         if: always()
         run: |
-          test -d "$LOGS" || exit 0
+          test -n "${LOGS:-}" && test -d "$LOGS" || exit 0
           if [ -f terraform/errored.tfstate ]; then cp terraform/errored.tfstate "$LOGS/"; fi
-          aws s3 cp --only-show-errors --recursive "$LOGS" "s3://$STATE_BUCKET/$RECORD/${GITHUB_JOB}/" >/dev/null 2>&1 \
-            && echo "Raw logs kept privately in the state bucket under $RECORD/${GITHUB_JOB}/" \
+          aws s3 cp --only-show-errors --recursive "$LOGS" "s3://$STATE_BUCKET/$RECORD/apply-$GITHUB_RUN_ATTEMPT/" \
+            >/dev/null 2>&1 \
+            && echo "Raw logs kept privately in the state bucket under $RECORD/apply-$GITHUB_RUN_ATTEMPT/" \
             || echo "Could not keep the raw logs"
