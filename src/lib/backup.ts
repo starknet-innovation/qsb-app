@@ -66,12 +66,14 @@ export async function assertRecoveryAuthorization(
       "This backup already authorizes another withdrawal. Resume the original intent; do not reuse its one-time keys.",
     );
 }
+/** The shortest recovery passphrase accepted. A length floor, not a strength measure. */
+export const MIN_PASSPHRASE_LENGTH = 14;
 export async function encryptRecovery(
   recovery: Recovery,
   password: string,
 ): Promise<string> {
-  if (password.length < 14)
-    throw new Error("Use a recovery passphrase of at least 14 characters.");
+  if (password.length < MIN_PASSPHRASE_LENGTH)
+    throw new Error(`Use a recovery passphrase of at least ${MIN_PASSPHRASE_LENGTH} characters.`);
   recoverySchema.parse(recovery);
   await assertRecoveryAuthorization(recovery);
   const salt = crypto.getRandomValues(new Uint8Array(16)),

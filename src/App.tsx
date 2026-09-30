@@ -1,7 +1,7 @@
 import { legacySearchControls } from "./lib/jobControls";
 import { withVaultConfiguration } from "./lib/provenance";
 import { NETWORK_ID, NETWORK_CONFIG } from "./lib/network";
-import { operationsAllowed } from "./lib/readiness";
+import { operationsAllowed, serviceStatus } from "./lib/readiness";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowDownLeft,
@@ -9,6 +9,7 @@ import {
   ArrowRight,
   Check,
   CheckCheck,
+  ChevronDown,
   ChevronRight,
   Copy,
   Download,
@@ -19,6 +20,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   Plus,
+  Receipt,
   ShieldCheck,
   Wallet as WalletIcon,
   X,
@@ -31,10 +33,16 @@ import {
 import { api, authenticate, clearSession } from "./lib/api";
 import TransactionDialog from "./TransactionDialog";
 import WalletCheck from "./WalletCheck";
-import Costs, { CostDisclosure } from "./Costs";
+import Costs from "./Costs";
 import { connectWallet, signMessage, type Wallet } from "./lib/wallet";
 import { generateQsb, validateRecovery, lockQsb } from "./lib/qsb";
-import { encryptRecovery, decryptRecovery, downloadBackup } from "./lib/backup";
+import {
+  encryptRecovery,
+  decryptRecovery,
+  downloadBackup,
+  recoveryBackupFilename,
+  MIN_PASSPHRASE_LENGTH,
+} from "./lib/backup";
 import {
   formatBtc,
   release,
@@ -44,18 +52,108 @@ import {
   type StrayPayments,
 } from "./lib/model";
 import { downloadVaultExport } from "./lib/vault-export";
-type Page = "vaults" | "activity" | "recovery" | "protocol" | "costs";
+const pages = ["vaults", "activity", "costs", "recovery", "protocol"] as const;
+type Page = (typeof pages)[number];
+// The page lives in the URL, so Back, refresh and opening a page in a new tab all work.
+const pageFromHash = (): Page => {
+  const id = location.hash.replace(/^#\/?/, "");
+  return (pages as readonly string[]).includes(id) ? (id as Page) : "vaults";
+};
 const short = (s: string) => `${s.slice(0, 7)}…${s.slice(-6)}`;
+const clock = (iso: string) =>
+  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const gpuTime = (seconds: number) => {
+  const minutes = Math.round(seconds / 60);
+  return minutes < 60
+    ? `${minutes} min`
+    : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+};
 const nav = [
   { id: "vaults", label: "My vaults", icon: Layers3 },
   { id: "activity", label: "Activity", icon: Activity },
-  { id: "costs", label: "Costs & billing", icon: BookOpen },
+  { id: "costs", label: "Costs", icon: Receipt },
   { id: "recovery", label: "Recovery", icon: KeyRound },
   { id: "protocol", label: "How QSB works", icon: BookOpen },
 ] as const;
+const stageStep = { pinning: 1, round1: 2, round2: 3, verification: 4 };
+const jobLabel = (j: Job) =>
+  j.status === "searching"
+    ? `Searching · step ${stageStep[j.stage] ?? 1} of 4`
+    : ({
+        queued: "Waiting to start",
+        paused: "Paused",
+        failed: "Failed",
+        awaiting_authorization: "Ready to authorize",
+        submitted: "Sent · waiting for confirmation",
+        confirmed: "Confirmed",
+      } as Record<string, string>)[j.status] ?? j.status.replaceAll("_", " ");
+const vaultLabel = (v: PublicVault, job?: Job) =>
+  v.status === "spent"
+    ? "Withdrawn"
+    : job && v.status === "confirmed"
+      ? ({ awaiting_authorization: "Withdrawal ready", failed: "Withdrawal failed", paused: "Withdrawal paused" } as Record<string, string>)[job.status] ?? "Withdrawing"
+      : ({ unfunded: "Not funded", submitted: "Deposit pending", confirmed: "Funded" } as Record<string, string>)[v.status];
+// One tab at a time checks the chain for a wallet, at most once a minute across tabs, and none
+// while a transaction dialog is open. Each check costs provider requests, and the status routes
+// write versioned records that two checks at once would conflict on. Tabs share when each item
+// was last checked (for a settled vault, last tried).
+const chainTurnKey = (address: string) => `qsb-chain-check:${address}`;
+const chainSeenKey = (address: string) => `qsb-chain-checked:${address}`;
+function readChainSeen(address: string): Record<string, string> {
+  try {
+    const seen = JSON.parse(localStorage.getItem(chainSeenKey(address)) ?? "{}");
+    return seen && typeof seen === "object"
+      ? Object.fromEntries(Object.entries(seen).filter((e): e is [string, string] => typeof e[1] === "string"))
+      : {};
+  } catch {
+    return {};
+  }
+}
+// A settled vault is still checked now and then: the funding route is where the server flags a
+// payment that reached the vault's script outside its one deposit. At most a few a turn, so a
+// wallet with many vaults doesn't send a burst of provider requests.
+const SETTLED_CHECK_MS = 60 * 60 * 1000;
+const SETTLED_PER_TURN = 3;
+// For a deposit that isn't mined yet, the funding route exports its signed bytes, a versioned
+// write that stops a first submission still in flight from clearing a refused intent. So a
+// pending deposit is checked automatically only once this tab has seen that deposit (its txid)
+// pending for well over the longest a submission can run: the API Lambda's 120-second timeout
+// (terraform/compute.tf), not API Gateway's 30 seconds, which only ends the client's wait.
+const PENDING_SETTLE_MS = 5 * 60 * 1000;
+const pendingKey = (vault: PublicVault) => `${vault.id}:${vault.funding?.txid}`;
+// Automatic checks need Web Locks to be exclusive; without them only "Check now" runs.
+async function chainTurn(address: string, check: () => Promise<void>) {
+  const key = chainTurnKey(address);
+  if (!navigator.locks) return;
+  await navigator.locks.request(key, { ifAvailable: true }, async (lock) => {
+    if (!lock || Date.now() - Number(localStorage.getItem(key) ?? 0) < 60000) return;
+    localStorage.setItem(key, String(Date.now()));
+    await check();
+  });
+}
+const conflictText = (alert?: string) =>
+  `${alert ?? "Funding outpoint was spent by a different transaction."} Contact the operator; do not resubmit or spend the helper output.`;
+type Status = "checking" | "unknown" | ReturnType<typeof serviceStatus>;
+const statusLabel: Record<Status, string> = {
+  checking: "Checking service status",
+  unknown: "Service status unavailable",
+  on: "Deposits and withdrawals on",
+  "search-only": "Submission to MARA off",
+  off: "Deposits and withdrawals off",
+};
+const statusDetail: Record<Status, string> = {
+  checking: "Checking this server's settings.",
+  unknown:
+    "The app couldn't read this server's settings, so transactions stay off. Creating a vault and saving its backup still work.",
+  on: "Deposits are sent to MARA Slipstream, and withdrawal searches run on AWS GPUs. Creating a vault and saving its backup happen on this device.",
+  "search-only":
+    "Withdrawal searches can start, but submission to MARA is off: deposits can't be sent and a signed withdrawal can't be submitted. Creating a vault and saving its backup still work.",
+  off: "This server has deposits and withdrawals switched off. Creating a vault and saving its backup still work, on this device.",
+};
 export default function App() {
-  const [page, setPage] = useState<Page>("vaults"),
+  const [page, setPage] = useState<Page>(pageFromHash),
     [wallet, setWallet] = useState<Wallet>(),
+    [walletMenu, setWalletMenu] = useState(false),
     [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
     [vaults, setVaults] = useState<PublicVault[]>([]),
@@ -65,6 +163,12 @@ export default function App() {
     [stray, setStray] = useState<StrayPayments[]>([]),
     [manualDeposit, setManualDeposit] = useState<{ vaultId: string; txid: string; rawTxHex: string }>(),
     [jobs, setJobs] = useState<Job[]>([]),
+    // Feedback shown next to the row that asked for it, keyed "vault:<id>" or "job:<id>".
+    [inline, setInline] = useState<Record<string, { kind: "error" | "notice"; text: string }>>({}),
+    // When the chain was last checked for a pending deposit or withdrawal, by vault or job id.
+    [checkedAt, setCheckedAt] = useState<Record<string, string>>({}),
+    // When an automatic check last failed, by vault or job id; cleared by the next success.
+    [checkFailed, setCheckFailed] = useState<Record<string, string>>({}),
     [modal, setModal] = useState<"create" | "readiness" | null>(null),
     [step, setStep] = useState(1),
     [name, setName] = useState("My first vault"),
@@ -73,75 +177,215 @@ export default function App() {
     [recovery, setRecovery] = useState<Recovery>(),
     [encrypted, setEncrypted] = useState(""),
     [verified, setVerified] = useState(false),
+    [created, setCreated] = useState<PublicVault>(),
     [restoreFile, setRestoreFile] = useState(""),
     [restored, setRestored] =
       useState<Pick<Recovery, "vault" | "authorization">>(),
     [config, setConfig] = useState<any>(release),
+    [configState, setConfigState] = useState<"loading" | "ready" | "failed">("loading"),
     [notice, setNotice] = useState("");
   // Deposit submission to MARA, and so every manual Slipstream path, needs both switches on.
-  const submissionOn = operationsAllowed(config) && config?.exactSubmitEnabled === true;
+  const submissionOn = serviceStatus(config) === "on";
+  const status: Status =
+    configState === "loading" ? "checking" : configState === "failed" ? "unknown" : serviceStatus(config);
   const [transaction, setTransaction] = useState<{
     vault: PublicVault;
     job?: Job;
     solvedResult?: unknown;
   }>();
+  function go(next: Page) {
+    location.hash = `/${next}`;
+  }
+  useEffect(() => {
+    const onHash = () => {
+      setPage(pageFromHash());
+      setError("");
+      setWalletMenu(false);
+      scrollTo(0, 0);
+    };
+    addEventListener("hashchange", onHash);
+    return () => removeEventListener("hashchange", onHash);
+  }, []);
   const conflictingCreation = !!transaction && !transaction.job && jobs.some((job) => job.vaultId === transaction.vault.id);
   useEffect(() => {
     if (!conflictingCreation) return;
     setTransaction(undefined);
-    setPage("activity");
+    go("activity");
     setNotice("This vault already has a withdrawal request. Review it in Activity.");
   }, [conflictingCreation]);
   const dialog = useRef<HTMLDialogElement>(null),
-    generation = useRef(0);
+    walletMenuRef = useRef<HTMLDivElement>(null),
+    generation = useRef(0),
+    dialogOpen = useRef(false),
+    // When this tab first saw each vault's deposit pending.
+    pendingSince = useRef<Record<string, number>>({});
   useEffect(() => {
     api("/config")
       .then((value) => {
         setConfig(value);
+        setConfigState("ready");
         if ((value as { network?: string }).network !== NETWORK_ID)
           setError(
             "Server network does not match this app. Transactions are disabled.",
           );
       })
-      .catch(() => {});
+      .catch(() => setConfigState("failed"));
   }, []);
+  useEffect(() => {
+    if (!walletMenu) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !walletMenuRef.current?.contains(e.target as Node))
+        setWalletMenu(false);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [walletMenu]);
+  const say = (key: string, kind: "error" | "notice", text: string) =>
+    setInline((m) => ({ ...m, [key]: { kind, text } }));
+  const unsay = (key: string) =>
+    setInline(({ [key]: _, ...rest }) => rest);
   // An unconfirmed Slipstream deposit whose MARA answer was lost stays "submitted"; this resends
   // the server's stored signed bytes. It never creates another deposit.
   // If the API route fails, the same signed deposit can be pasted into slipstream.mara.com.
   async function showManualDeposit(v: PublicVault) {
-    setError("");
+    const key = `vault:${v.id}`;
+    unsay(key);
     const active = generation.current;
     try {
       // The stored bytes, without any chain lookup; the server refuses while deposits are off.
       const f = await api<{ rawTxHex?: string; txid?: string; status?: string }>(`/vaults/${v.id}/fund/signed`);
       if (active !== generation.current) return;
       if (f.status !== "submitted") {
-        setNotice("This deposit is no longer waiting for submission. Nothing to do.");
+        say(key, "notice", "This deposit is no longer waiting for submission. Nothing to do.");
         return;
       }
       if (!f.rawTxHex || !f.txid) throw Error("The signed deposit isn't available.");
       setManualDeposit({ vaultId: v.id, txid: f.txid, rawTxHex: f.rawTxHex });
     } catch (e) {
       if (active === generation.current)
-        setError(e instanceof Error ? e.message : "The signed deposit isn't available.");
+        say(key, "error", e instanceof Error ? e.message : "The signed deposit isn't available.");
     }
   }
   async function resendDeposit(v: PublicVault) {
-    setError("");
-    setNotice("");
+    const key = `vault:${v.id}`;
+    unsay(key);
     try {
       const r = await api<{ submission: "submitted" | "uncertain" | "rejected"; reason?: string }>(
         `/vaults/${v.id}/fund/resubmit`,
         {},
       );
-      setNotice(
+      say(
+        key,
+        "notice",
         r.submission === "submitted"
           ? "MARA has the deposit. Wait for confirmation before withdrawing; don't deposit again."
           : `MARA's answer is still unclear${r.reason ? ` (${r.reason})` : ""}. The same deposit can be resent again; don't make another deposit.`,
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Resend failed. Don't make another deposit.");
+      say(key, "error", e instanceof Error ? e.message : "Resend failed. Don't make another deposit.");
     }
+  }
+  function rememberCheck(id: string, at: string) {
+    if (wallet)
+      localStorage.setItem(
+        chainSeenKey(wallet.address),
+        JSON.stringify({ ...readChainSeen(wallet.address), [id]: at }),
+      );
+  }
+  function markChecked(id: string) {
+    const at = new Date().toISOString();
+    setCheckedAt((c) => ({ ...c, [id]: at }));
+    setCheckFailed(({ [id]: _, ...rest }) => rest);
+    rememberCheck(id, at);
+  }
+  async function checkDeposit(v: PublicVault, stale = () => false) {
+    const updated = await api<{
+      vault: PublicVault;
+      status: { confirmed: boolean };
+      strayPayments?: StrayPayments | null;
+    }>(`/vaults/${v.id}/funding`);
+    if (stale()) return updated;
+    setVaults((items) =>
+      items.map((item) => (item.id === v.id ? updated.vault : item)),
+    );
+    setStray((items) => [
+      ...items.filter((p) => p.vaultId !== v.id),
+      ...(updated.strayPayments ? [updated.strayPayments] : []),
+    ]);
+    markChecked(v.id);
+    return updated;
+  }
+  async function checkWithdrawal(j: Job, stale = () => false) {
+    const observation = await api<{ status: string; alert?: string }>(
+      `/transactions/${j.txid}/status`,
+    );
+    if (stale()) return observation;
+    markChecked(j.id);
+    if (observation.status !== "confirmed") return observation;
+    const updated = await api<{ job: Job }>(`/jobs/${j.id}/status`);
+    if (stale()) return observation;
+    setJobs((js) => js.map((x) => (x.id === j.id ? updated.job : x)));
+    const latest = await api<{ vaults: PublicVault[] }>("/vaults");
+    if (!stale()) setVaults(latest.vaults);
+    return observation;
+  }
+  dialogOpen.current = !!transaction;
+  // While a transaction dialog is open it holds the chain-check turn, so no tab checks the
+  // chain for this wallet: a check of a pending deposit bumps the vault record (exportFunding),
+  // which would fence a deposit submission in flight. The dialog opens only once it holds the
+  // turn, so it never overlaps a check. If the turn isn't free within a few seconds (a slow
+  // check, or a transaction open in another tab), the dialog stays closed and says why.
+  const heldTurn = useRef<{ release: () => void; abort: AbortController } | undefined>(undefined);
+  function releaseTurn() {
+    heldTurn.current?.release();
+    heldTurn.current?.abort.abort();
+    heldTurn.current = undefined;
+  }
+  async function openTransaction(next: { vault: PublicVault; job?: Job; solvedResult?: unknown }) {
+    releaseTurn();
+    const active = generation.current;
+    if (wallet && navigator.locks) {
+      const abort = new AbortController();
+      let release = () => {};
+      const granted = new Promise<void>((resolve) => {
+        navigator.locks
+          .request(chainTurnKey(wallet.address), { signal: abort.signal }, () =>
+            new Promise<void>((done) => {
+              release = done;
+              resolve();
+            }),
+          )
+          .catch(() => {}); // Aborted before it was granted.
+      });
+      heldTurn.current = { release: () => release(), abort };
+      const held = await Promise.race([
+        granted.then(() => true),
+        new Promise<boolean>((wait) => setTimeout(() => wait(false), 10000)),
+      ]);
+      if (!held) {
+        releaseTurn();
+        throw Error("A chain check is still running, or a transaction is open in another tab. Close it or try again in a moment.");
+      }
+    }
+    if (active !== generation.current) return releaseTurn();
+    setTransaction(next);
+  }
+  useEffect(() => {
+    if (!transaction) releaseTurn();
+  }, [transaction]);
+  useEffect(() => releaseTurn, []);
+  // A manual check takes the same turn, so it never runs beside another tab's check or open
+  // transaction dialog. Without Web Locks it runs directly.
+  async function withChainTurn<T>(check: () => Promise<T>): Promise<T> {
+    if (!wallet || !navigator.locks) return check();
+    return navigator.locks.request(chainTurnKey(wallet.address), { ifAvailable: true }, async (lock) => {
+      if (!lock) throw Error("Another tab is checking the chain or has a transaction open. Try again in a moment.");
+      return check();
+    });
   }
   useEffect(() => {
     if (modal) dialog.current?.showModal();
@@ -150,18 +394,56 @@ export default function App() {
   useEffect(() => {
     if (!wallet) return;
     let disposed = false;
+    const stale = () => disposed;
     const refresh = async () => {
       try {
         const [v, j] = await Promise.all([
           api<{ vaults: PublicVault[]; resendable?: string[]; strayPayments?: StrayPayments[] }>("/vaults"),
           api<{ jobs: Job[] }>("/jobs"),
         ]);
-        if (!disposed) {
-          setVaults(v.vaults);
-          setResendable(new Set(v.resendable ?? []));
-          setStray(v.strayPayments ?? []);
-          setJobs(j.jobs);
-        }
+        if (disposed) return;
+        setVaults(v.vaults);
+        // Each deposit waits from when this tab first saw it pending. A deposit made again after
+        // a refusal has a new txid, so it waits again even if no refresh saw the refusal.
+        const pending = new Set(v.vaults.filter((vault) => vault.status === "submitted").map(pendingKey));
+        for (const key of Object.keys(pendingSince.current))
+          if (!pending.has(key)) delete pendingSince.current[key];
+        for (const key of pending) pendingSince.current[key] ??= Date.now();
+        setResendable(new Set(v.resendable ?? []));
+        setStray(v.strayPayments ?? []);
+        setJobs(j.jobs);
+        setCheckedAt((c) => ({ ...c, ...readChainSeen(wallet.address) }));
+        // Transactions are checked only while the page is on screen, by one tab, and never
+        // while a transaction dialog is open (see the lock above).
+        if (document.visibilityState !== "visible" || dialogOpen.current) return;
+        await chainTurn(wallet.address, async () => {
+          const seen = readChainSeen(wallet.address);
+          const failed = (id: string) => () => {
+            if (!disposed) setCheckFailed((f) => ({ ...f, [id]: new Date().toISOString() }));
+          };
+          for (const vault of v.vaults)
+            if (!disposed && vault.status === "submitted" && vault.funding && Date.now() - pendingSince.current[pendingKey(vault)] >= PENDING_SETTLE_MS)
+              await checkDeposit(vault, stale).catch(failed(vault.id));
+          const settled = v.vaults
+            .filter((vault) => vault.funding && vault.status !== "submitted")
+            .filter((vault) => !seen[vault.id] || Date.now() - Date.parse(seen[vault.id]) >= SETTLED_CHECK_MS)
+            .sort((a, b) => (seen[a.id] ?? "").localeCompare(seen[b.id] ?? ""))
+            .slice(0, SETTLED_PER_TURN);
+          // A failed try still counts, so a vault that keeps failing waits its hour like the rest.
+          for (const vault of settled)
+            if (!disposed)
+              await checkDeposit(vault, stale).catch(() => {
+                const at = new Date().toISOString();
+                rememberCheck(vault.id, at);
+                if (!disposed) setCheckFailed((f) => ({ ...f, [vault.id]: at }));
+              });
+          for (const job of j.jobs)
+            if (!disposed && job.txid && job.status === "submitted") {
+              const observation = await checkWithdrawal(job, stale).catch(failed(job.id));
+              if (observation?.status === "conflict" && !disposed)
+                say(`job:${job.id}`, "error", conflictText(observation.alert));
+            }
+        });
       } catch {}
     };
     void refresh();
@@ -180,6 +462,18 @@ export default function App() {
       if (isCurrent()) setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
       if (isCurrent()) setBusy("");
+    }
+  }
+  // Like action, but the outcome is shown in the row the button belongs to.
+  async function rowAction(key: string, label: string, fn: () => Promise<void>) {
+    unsay(key);
+    setBusy(label);
+    try {
+      await fn();
+    } catch (e) {
+      say(key, "error", e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setBusy("");
     }
   }
   async function connect() {
@@ -203,9 +497,14 @@ export default function App() {
   }
   function disconnect() {
     generation.current++;
+    setWalletMenu(false);
     setManualDeposit(undefined);
     setResendable(new Set());
     setStray([]);
+    setInline({});
+    setCheckedAt({});
+    setCheckFailed({});
+    pendingSince.current = {};
     setBusy("");
     setWallet(undefined);
     setVaults([]);
@@ -220,14 +519,24 @@ export default function App() {
     lockQsb();
     setNotice("Wallet disconnected and local keys locked.");
   }
+  function copyAddress() {
+    setWalletMenu(false);
+    if (!wallet) return;
+    navigator.clipboard?.writeText(wallet.address).then(
+      () => setNotice("Address copied."),
+      () => setError("Couldn't copy. Copy the address from Xverse instead."),
+    );
+  }
   function newVault() {
     setError("");
     setStep(1);
+    setName(vaults.length === 0 ? "My first vault" : `Vault ${vaults.length + 1}`);
     setPass("");
     setConfirmPass("");
     setRecovery(undefined);
     setEncrypted("");
     setVerified(false);
+    setCreated(undefined);
     setModal("create");
   }
   function closeModal() {
@@ -239,14 +548,47 @@ export default function App() {
     setEncrypted("");
     lockQsb();
   }
+  function startTransaction(v: PublicVault) {
+    // Status alone never releases this vault's one-time commitments.
+    // Paused/failed and stale submitted/confirmed rows still need review.
+    // The server reservation checks remain authoritative for stale clients.
+    if (jobs.some((job) => job.vaultId === v.id)) {
+      go("activity");
+      setNotice("This vault already has a withdrawal request. Review it in Activity.");
+      return;
+    }
+    // A new deposit is submitted to MARA, so it needs submission on as well as operations.
+    if (v.status === "unfunded" ? submissionOn : operationsAllowed(config))
+      void action("Waiting for the chain check to finish", () => openTransaction({ vault: v }));
+    else setModal("readiness");
+  }
+  function depositNow() {
+    const vault = created;
+    closeModal();
+    if (vault) startTransaction(vault);
+  }
+  function openAuthorization(j: Job) {
+    const vault = vaults.find((v) => v.id === j.vaultId);
+    if (!vault) {
+      setModal("readiness");
+      return;
+    }
+    void action("Loading the solved result", async () => {
+      const solvedResult = await api(`/jobs/${j.id}/solved-result`);
+      await openTransaction({ vault, job: j, solvedResult });
+    });
+  }
+  const passLongEnough = pass.length >= MIN_PASSPHRASE_LENGTH,
+    passMatch = confirmPass !== "" && pass === confirmPass,
+    formReady = passLongEnough && passMatch && !!name.trim();
   async function generate() {
     await action("Generating your keys locally", async () => {
       if (!wallet) throw new Error("Connect Xverse before creating a vault.");
       if (pass !== confirmPass)
         throw new Error("The passphrases do not match.");
-      if (pass.length < 14)
+      if (pass.length < MIN_PASSPHRASE_LENGTH)
         throw new Error(
-          "Use at least 14 characters for your recovery passphrase.",
+          `Use at least ${MIN_PASSPHRASE_LENGTH} characters for your recovery passphrase.`,
         );
       if (!name.trim()) throw new Error("Give your vault a name.");
       const gen = generation.current;
@@ -294,6 +636,7 @@ export default function App() {
       if (!recovery || !verified) throw new Error("Verify your backup first.");
       await api("/vaults", recovery.vault);
       setVaults((v) => [...v, recovery.vault]);
+      setCreated(recovery.vault);
       setStep(3);
       setPass("");
       setConfirmPass("");
@@ -314,52 +657,74 @@ export default function App() {
       );
     });
   }
-  const balance = vaults
-    .filter((v) => v.status === "confirmed")
-    .reduce((n, v) => n + BigInt(v.funding?.value || "0"), 0n);
+  const funded = vaults.filter((v) => v.status === "confirmed");
+  const balance = funded.reduce((n, v) => n + BigInt(v.funding?.value || "0"), 0n);
+  const ready = jobs.filter((j) => legacySearchControls(j).authorize);
+  const vaultName = (id: string) => vaults.find((v) => v.id === id)?.name;
+  // A failure shows until a check succeeds, in this tab or another.
+  const failedLast = (id: string) => !!checkFailed[id] && !(checkedAt[id] > checkFailed[id]);
+  const checks: { id: string; label: string; passed: boolean }[] = config.checks ?? [];
+  const subtitle: Record<Page, string> = {
+    vaults:
+      status === "on" || status === "checking"
+        ? "Create a vault, save its backup, then deposit from Xverse."
+        : status === "search-only"
+          ? "Deposits can't be sent right now: submission to MARA is off. You can still create a vault and save its backup."
+          : status === "unknown"
+            ? "The app couldn't check whether deposits are on. You can still create a vault and save its backup."
+            : "Deposits and withdrawals are off right now. You can still create a vault and save its backup.",
+    activity: "Your withdrawals and how far each one has got.",
+    costs: "What a deposit and a withdrawal cost today, and what isn't billed yet.",
+    recovery:
+      "Restore a QSB recovery file on this device. Your Xverse seed phrase is separate.",
+    protocol: "What changes when Bitcoin moves into a QSB vault.",
+  };
+  const rowMessage = (k: string) =>
+    inline[k] ? (
+      <div
+        className={`row-message ${inline[k].kind}`}
+        role={inline[k].kind === "error" ? "alert" : "status"}
+      >
+        {inline[k].kind === "error" ? <AlertCircle size={16} /> : <Check size={16} />}
+        <span>{inline[k].text}</span>
+        <button aria-label="Dismiss" onClick={() => unsay(k)}>
+          <X size={14} />
+        </button>
+      </div>
+    ) : null;
   return (
     <div className="shell">
       <aside className="sidebar">
-        <a
-          className="brand"
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            setPage("vaults");
-          }}
-          aria-label="QSB home"
-        >
+        <a className="brand" href="#/vaults" aria-label="QSB home">
           <span className="brand-mark">
             <Layers3 size={25} />
           </span>
           qsb<span className="brand-dot">.</span>
         </a>
-        <div className="side-label">YOUR BITCOIN. YOUR KEYS.</div>
         <nav aria-label="Main navigation">
           {nav.map((n) => (
-            <button
+            <a
               key={n.id}
               className={page === n.id ? "nav active" : "nav"}
-              onClick={() => {
-                setPage(n.id);
-                setError("");
-              }}
+              href={`#/${n.id}`}
+              aria-current={page === n.id ? "page" : undefined}
             >
               <n.icon size={19} />
               {n.label}
+              {n.id === "activity" && ready.length > 0 && (
+                <span className="nav-badge">
+                  <span aria-hidden="true">{ready.length}</span>
+                  <span className="sr-only">{ready.length} ready to authorize</span>
+                </span>
+              )}
               {page === n.id && <ChevronRight size={16} />}
-            </button>
+            </a>
           ))}
         </nav>
         <div className="side-bottom">
-          <div className="private-note">
-            <Fingerprint size={27} />
-            <strong>Ownership stays with you.</strong>
-            <p>Recovery keys are generated and used on your device.</p>
-          </div>
           <div className="network">
             <span />
-            {NETWORK_CONFIG.label} <span className="poc">POC</span>
+            {NETWORK_CONFIG.label}
           </div>
           <a
             href="https://github.com/avihu28/Quantum-Safe-Bitcoin-Transactions"
@@ -372,57 +737,52 @@ export default function App() {
       </aside>
       <div className="workspace">
         <header>
-          <div className="breadcrumb">
-            Workspace <ChevronRight size={14} />{" "}
-            <span>{nav.find((n) => n.id === page)?.label}</span>
-          </div>
           <button
-            className={wallet ? "wallet connected" : "wallet"}
-            onClick={wallet ? disconnect : connect}
-            disabled={!!busy}
+            className={`service-status ${status}`}
+            onClick={() => setModal("readiness")}
+            aria-haspopup="dialog"
+            aria-label={statusLabel[status]}
           >
-            {wallet ? (
-              <>
+            <span className="status-dot" />
+            <span className="status-text">{statusLabel[status]}</span>
+          </button>
+          {wallet ? (
+            <div className="wallet-menu" ref={walletMenuRef}>
+              <button
+                className="wallet connected"
+                aria-haspopup="menu"
+                aria-expanded={walletMenu}
+                onClick={() => setWalletMenu((open) => !open)}
+                disabled={!!busy}
+              >
                 <span className="wallet-dot" />
                 {short(wallet.address)}
-                <LogOut size={15} />
-              </>
-            ) : (
-              <>
-                <WalletIcon size={17} />
-                Connect Xverse
-              </>
-            )}
-          </button>
+                <ChevronDown size={15} />
+              </button>
+              {walletMenu && (
+                <div className="menu" role="menu">
+                  <button role="menuitem" onClick={copyAddress}>
+                    <Copy size={15} />
+                    Copy address
+                  </button>
+                  <button role="menuitem" onClick={disconnect}>
+                    <LogOut size={15} />
+                    Disconnect
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button className="wallet" onClick={connect} disabled={!!busy}>
+              <WalletIcon size={17} />
+              Connect Xverse
+            </button>
+          )}
         </header>
         <main>
           <div className="page-top">
-            <div>
-              <div className="eyebrow">BITCOIN, HELD FOR THE FUTURE</div>
-              <h1>
-                {page === "vaults"
-                  ? "Your Bitcoin. A new layer of protection."
-                  : page === "activity"
-                    ? "Every step, accounted for."
-                    : page === "recovery"
-                      ? "Your backup. Your way back."
-                      : page === "costs"
-                        ? "Every cost, explained."
-                        : "Built on Bitcoin. Secured by hashes."}
-              </h1>
-              <p className="subtitle">
-                {page === "vaults"
-                  ? "Create and test an unfunded QSB vault. Mainnet funding is currently disabled."
-                  : page === "activity"
-                    ? "Follow transactions and the computation behind your withdrawals."
-                    : page === "recovery"
-                      ? "Restore your QSB recovery file on this device. Your Xverse seed is separate."
-                      : page === "costs"
-                        ? "See what is known, what is estimated and what is not connected yet."
-                        : "Understand what changes when Bitcoin moves into a QSB vault."}
-              </p>
-            </div>
-            <span className="experiment">EXPERIMENTAL</span>
+            <h1>{nav.find((n) => n.id === page)?.label}</h1>
+            <p className="subtitle">{subtitle[page]}</p>
           </div>
           {error && (
             <div className="message error" role="alert">
@@ -448,18 +808,41 @@ export default function App() {
           {page === "costs" && <Costs />}
           {page === "vaults" && (
             <>
-              <div className="overview">
-                <div className="balance-card">
-                  <div className="card-label">
-                    BTC IN CONFIRMED VAULTS <ShieldCheck size={18} />
+              {ready.length > 0 && (
+                <div className="callout">
+                  <AlertCircle size={20} />
+                  <div>
+                    <strong>
+                      {ready.length === 1
+                        ? `${vaultName(ready[0].vaultId) ?? "A vault"}: your withdrawal is ready to authorize.`
+                        : `${ready.length} withdrawals are ready to authorize.`}
+                    </strong>
+                    <p>The search has finished. Review the payout, then sign it in Xverse.</p>
                   </div>
-                  <div className="balance">
-                    {formatBtc(balance)} <span>BTC</span>
+                  <button
+                    className="primary"
+                    disabled={!!busy}
+                    onClick={() =>
+                      ready.length === 1 ? openAuthorization(ready[0]) : go("activity")
+                    }
+                  >
+                    Review and authorize <ArrowRight size={16} />
+                  </button>
+                </div>
+              )}
+              {funded.length > 0 && (
+                <div className="balance-card">
+                  <div>
+                    <div className="card-label">
+                      BTC IN FUNDED VAULTS <ShieldCheck size={16} />
+                    </div>
+                    <div className="balance">
+                      {formatBtc(balance)} <span>BTC</span>
+                    </div>
                   </div>
                   <div className="balance-bottom">
                     <span>
-                      {vaults.filter((v) => v.status === "confirmed").length}{" "}
-                      funded vaults
+                      {funded.length} funded {funded.length === 1 ? "vault" : "vaults"}
                     </span>
                     <span className="badge">
                       <LockKeyhole size={12} />
@@ -467,62 +850,16 @@ export default function App() {
                     </span>
                   </div>
                 </div>
-                <div className="intro-card">
-                  <div className="intro-heading">
-                    <span className="icon-square">
-                      <Fingerprint size={25} />
-                    </span>
-                    <span className="tiny-label">
-                      A DIFFERENT SPENDING CONDITION
-                    </span>
-                  </div>
-                  <h2>
-                    Keep the keys.
-                    <br />
-                    Change the protection.
-                  </h2>
-                  <p>
-                    QSB uses hash-based signing to protect a dedicated Bitcoin
-                    output. No wrapped assets. No bridge.
-                  </p>
-                  <button
-                    className="text-button"
-                    onClick={() => setPage("protocol")}
-                  >
-                    Understand QSB <ArrowRight size={16} />
-                  </button>
-                </div>
-              </div>
-              <div className="section-head">
-                <div>
-                  <h2>
-                    My vaults <span className="count">{vaults.length}</span>
-                  </h2>
-                  <p>Each vault has its own recovery backup and takes exactly one deposit.</p>
-                </div>
-                {vaults.length > 0 && (
-                  <button
-                    className="secondary"
-                    title="Downloads each vault's QSB version, deposit and status as JSON. No secrets."
-                    onClick={() => downloadVaultExport(vaults, stray)}
-                  >
-                    Export
-                  </button>
-                )}
-                <button className="primary" onClick={newVault}>
-                  <Plus size={17} />
-                  Create vault
-                </button>
-              </div>
+              )}
               {vaults.length === 0 ? (
                 <div className="empty-vault">
                   <div className="empty-icon">
                     <Layers3 size={34} />
                   </div>
-                  <h3>A place for your first vault.</h3>
+                  <h3>{wallet ? "Create your first vault." : "Connect Xverse to create your first vault."}</h3>
                   <p>
-                    Connect Xverse, generate your keys, and save your recovery
-                    backup before moving any Bitcoin.
+                    You'll generate the vault's keys on this device and save
+                    an encrypted backup before any Bitcoin moves.
                   </p>
                   <button
                     className="primary"
@@ -536,145 +873,195 @@ export default function App() {
                     ) : (
                       <WalletIcon size={17} />
                     )}{" "}
-                    {wallet
-                      ? "Create your first vault"
-                      : "Connect Xverse to begin"}
+                    {wallet ? "Create your first vault" : "Connect Xverse to begin"}
                     <ArrowRight size={16} />
                   </button>
-                  <span className="subnote">
-                    <LockKeyhole size={13} />
-                    Connecting never moves your funds.
-                  </span>
+                  {!wallet && (
+                    <span className="subnote">
+                      <LockKeyhole size={13} />
+                      Connecting never moves your funds.
+                    </span>
+                  )}
                 </div>
               ) : (
-                <div className="vault-list">
-                  {vaults.map((v) => {
-                    const flagged = stray.find((p) => p.vaultId === v.id);
-                    return (
-                    <article className="vault-row" key={v.id}>
-                      <div className="vault-icon">
-                        <LockKeyhole size={22} />
-                      </div>
-                      <div className="vault-name">
-                        <h3>{v.name}</h3>
-                        <p>{short(v.scriptHash)} · Config A</p>
-                        <p>
-                          {v.configuration?.protocol ?? "Unknown version"}
-                          {v.configuration && ` · generator ${v.configuration.generatorCommit.slice(0, 7)}`}
-                        </p>
-                        {v.funding && (
-                          <p>
-                            Deposit {short(v.funding.txid)}:{v.funding.vout}
-                          </p>
-                        )}
-                        {flagged && (
-                          <p className="vault-warning" role="status">
-                            {flagged.count === 1 ? "1 payment" : `${flagged.count} payments`} of{" "}
-                            {formatBtc(flagged.sats)} BTC reached this vault outside its one deposit. No
-                            withdrawal spends them, and the app can't recover them.
-                          </p>
-                        )}
-                      </div>
-                      <div className="vault-amount">
-                        {formatBtc(v.funding?.value || "0")} <span>BTC</span>
-                      </div>
-                      <span className="status-label">
-                        {v.status === "unfunded" ? "Ready to fund" : v.status}
-                      </span>
-                      {v.funding && (
-                        <button
-                          className="text-button"
-                          disabled={!!busy}
-                          onClick={() =>
-                            action("Checking transaction", async () => {
-                              const updated = await api<{
-                                vault: PublicVault;
-                                status: { confirmed: boolean };
-                                strayPayments?: StrayPayments | null;
-                              }>(`/vaults/${v.id}/funding`);
-                              setVaults((items) =>
-                                items.map((item) =>
-                                  item.id === v.id ? updated.vault : item,
-                                ),
-                              );
-                              setStray((items) => [
-                                ...items.filter((p) => p.vaultId !== v.id),
-                                ...(updated.strayPayments ? [updated.strayPayments] : []),
-                              ]);
-                              setNotice(
-                                `Funding transaction: ${updated.status.confirmed ? "confirmed" : "submitted"}. No transaction was resubmitted.`,
-                              );
-                            })
-                          }
-                        >
-                          Check transaction
-                        </button>
-                      )}
+                <>
+                  <div className="section-head">
+                    <div>
+                      <h2>
+                        Vaults <span className="count">{vaults.length}</span>
+                      </h2>
+                      <p>Each vault has its own recovery backup and takes exactly one deposit.</p>
+                    </div>
+                    <div className="section-actions">
                       <button
                         className="secondary"
-                        disabled={v.status === "spent"}
-                        onClick={() => {
-                          // Status alone never releases this vault's one-time commitments.
-                          // Paused/failed and stale submitted/confirmed rows still need review.
-                          // The server reservation checks remain authoritative for stale clients.
-                          if (jobs.some((job) => job.vaultId === v.id)) {
-                            setPage("activity");
-                            setNotice("This vault already has a withdrawal request. Review it in Activity.");
-                            return;
-                          }
-                          if (operationsAllowed(config))
-                            setTransaction({ vault: v });
-                          else setModal("readiness");
-                        }}
+                        title="Downloads each vault's QSB version, deposit and status as JSON. No secrets."
+                        onClick={() => downloadVaultExport(vaults, stray)}
                       >
-                        {v.status === "unfunded" ? (
-                          <ArrowDownLeft size={16} />
-                        ) : (
-                          <ArrowUpRight size={16} />
-                        )}{" "}
-                        {v.status === "unfunded" ? "Deposit" : "Withdraw"}
+                        Export
                       </button>
-                      {v.status === "submitted" && resendable.has(v.id) && submissionOn && (
-                        <button
-                          className="secondary"
-                          title="Resends the same signed deposit to MARA Slipstream. It can only confirm once."
-                          onClick={() => void resendDeposit(v)}
-                        >
-                          Resend deposit to MARA
-                        </button>
-                      )}
-                      {v.status === "submitted" && resendable.has(v.id) && submissionOn && (
-                        <button
-                          className="secondary"
-                          title="Shows the signed deposit so you can submit it on slipstream.mara.com yourself."
-                          onClick={() => void showManualDeposit(v)}
-                        >
-                          Submit manually on MARA
-                        </button>
-                      )}
-                    </article>
-                    );
-                  })}
-                </div>
-              )}
-              {manualDeposit && submissionOn && (
-                <section className="panel manual-slipstream" aria-label="Submit a deposit on MARA Slipstream">
-                  <h3>Submit the deposit yourself on MARA Slipstream</h3>
-                  <p>
-                    Paste this signed deposit into the "Transaction/Package Hex" field on{" "}
-                    <a href="https://slipstream.mara.com/" target="_blank" rel="noreferrer">slipstream.mara.com</a> and submit it
-                    there (that means accepting MARA's terms). It's the same deposit the app recorded, so it can only confirm
-                    once: don't create another. The vault shows as confirmed once it's mined.
-                  </p>
-                  <p>Transaction ID: {manualDeposit.txid}</p>
-                  <textarea readOnly rows={4} aria-label="Signed deposit transaction (hex)" value={manualDeposit.rawTxHex} />
-                  <button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(manualDeposit.rawTxHex).then(() => setNotice("Copied the signed deposit."), () => setError("Couldn't copy. Select the text and copy it yourself."))}>
-                    Copy transaction
-                  </button>
-                  <button type="button" className="secondary" onClick={() => setManualDeposit(undefined)}>
-                    Close
-                  </button>
-                </section>
+                      <button className="primary" onClick={newVault} disabled={!!busy}>
+                        <Plus size={17} />
+                        Create vault
+                      </button>
+                    </div>
+                  </div>
+                  <div className="vault-list">
+                    {vaults.map((v) => {
+                      const job = jobs.find((j) => j.vaultId === v.id);
+                      const key = `vault:${v.id}`;
+                      const stuck = v.status === "submitted" && resendable.has(v.id) && submissionOn;
+                      const flagged = stray.find((p) => p.vaultId === v.id);
+                      return (
+                        <article className="vault-row" key={v.id}>
+                          <div className="vault-main">
+                            <div className="vault-icon">
+                              <LockKeyhole size={22} />
+                            </div>
+                            <div className="vault-name">
+                              <h3>{v.name}</h3>
+                              <p>
+                                {v.status === "submitted"
+                                  ? `Deposit sent${failedLast(v.id) ? ` · last check failed ${clock(checkFailed[v.id])}` : checkedAt[v.id] ? ` · last checked ${clock(checkedAt[v.id])}` : ""}`
+                                  : v.status === "unfunded"
+                                    ? `Created ${new Date(v.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`
+                                    : `${v.status === "spent" ? "Withdrawal confirmed" : "Deposit confirmed"}${failedLast(v.id) ? ` · last check failed ${clock(checkFailed[v.id])}` : ""}`}
+                              </p>
+                              <p className="vault-meta">
+                                {v.configuration?.protocol ?? "Unknown version"}
+                                {v.configuration && ` · generator ${v.configuration.generatorCommit.slice(0, 7)}`}
+                                {v.funding && ` · deposit ${short(v.funding.txid)}:${v.funding.vout}`}
+                              </p>
+                              {flagged && (
+                                <p className="vault-warning" role="status">
+                                  {flagged.count === 1 ? "1 payment" : `${flagged.count} payments`} of{" "}
+                                  {formatBtc(flagged.sats)} BTC reached this vault outside its one deposit. No
+                                  withdrawal spends them, and the app can't recover them.
+                                </p>
+                              )}
+                            </div>
+                            <div className="vault-amount">
+                              {formatBtc(v.funding?.value || "0")} <span>BTC</span>
+                            </div>
+                            <span className={`status-label ${v.status}`}>{vaultLabel(v, job)}</span>
+                            <div className="vault-actions">
+                              {v.funding && (
+                                <button
+                                  className="text-button"
+                                  disabled={!!busy}
+                                  onClick={() =>
+                                    rowAction(key, "Checking the deposit", async () => {
+                                      const checked = await withChainTurn(() => checkDeposit(v));
+                                      // Branch on what the chain says now: a funded deposit can lose
+                                      // its confirmation (a reorg), and the row turns pending again.
+                                      const lost = !checked.status.confirmed && v.status !== "submitted";
+                                      say(
+                                        key,
+                                        lost ? "error" : "notice",
+                                        lost
+                                          ? "The deposit is no longer confirmed on the chain. Wait for it to confirm again, and don't deposit again."
+                                          : v.status === "submitted"
+                                            ? checked.status.confirmed
+                                              ? "Deposit confirmed."
+                                              : "Still waiting for confirmation. Nothing was resent."
+                                            : checked.strayPayments
+                                              ? "Checked. The payments outside the deposit are shown above."
+                                              : "Checked. Nothing else has reached this vault.",
+                                      );
+                                    })
+                                  }
+                                >
+                                  Check now
+                                </button>
+                              )}
+                              {v.status === "unfunded" && (
+                                <button className="secondary" onClick={() => startTransaction(v)}>
+                                  <ArrowDownLeft size={16} /> Deposit
+                                </button>
+                              )}
+                              {v.status === "submitted" && (
+                                <button className="secondary" disabled>
+                                  Waiting for confirmation
+                                </button>
+                              )}
+                              {v.status === "confirmed" &&
+                                (!job ? (
+                                  <button className="secondary" onClick={() => startTransaction(v)}>
+                                    <ArrowUpRight size={16} /> Withdraw
+                                  </button>
+                                ) : legacySearchControls(job).authorize ? (
+                                  <button className="primary" disabled={!!busy} onClick={() => openAuthorization(job)}>
+                                    Review and authorize
+                                  </button>
+                                ) : (
+                                  <button className="secondary" onClick={() => go("activity")}>
+                                    View withdrawal
+                                  </button>
+                                ))}
+                              {v.status === "spent" && job?.txid && (
+                                <a
+                                  className="text-button"
+                                  href={`${NETWORK_CONFIG.explorerUrl}/tx/${job.txid}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  View transaction <ExternalLink size={14} />
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                          {stuck && (
+                            <details className="stuck">
+                              <summary>Deposit stuck?</summary>
+                              <p>
+                                If it hasn't confirmed after a few blocks, send the same signed deposit again. It
+                                can only confirm once. Never make another deposit.
+                              </p>
+                              <div className="stuck-actions">
+                                <button
+                                  className="secondary"
+                                  title="Resends the same signed deposit to MARA Slipstream. It can only confirm once."
+                                  onClick={() => void resendDeposit(v)}
+                                >
+                                  Resend deposit to MARA
+                                </button>
+                                <button
+                                  className="secondary"
+                                  title="Shows the signed deposit so you can submit it on slipstream.mara.com yourself."
+                                  onClick={() => void showManualDeposit(v)}
+                                >
+                                  Submit manually on MARA
+                                </button>
+                              </div>
+                              {manualDeposit?.vaultId === v.id && (
+                                <section className="manual-slipstream" aria-label="Submit a deposit on MARA Slipstream">
+                                  <h3>Submit the deposit yourself on MARA Slipstream</h3>
+                                  <p>
+                                    Paste this signed deposit into the "Transaction/Package Hex" field on{" "}
+                                    <a href="https://slipstream.mara.com/" target="_blank" rel="noreferrer">slipstream.mara.com</a> and submit it
+                                    there (that means accepting MARA's terms). It's the same deposit the app recorded, so it can only confirm
+                                    once: don't create another. The vault shows as confirmed once it's mined.
+                                  </p>
+                                  <p>Transaction ID: {manualDeposit.txid}</p>
+                                  <textarea readOnly rows={4} aria-label="Signed deposit transaction (hex)" value={manualDeposit.rawTxHex} />
+                                  <div className="stuck-actions">
+                                    <button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(manualDeposit.rawTxHex).then(() => say(key, "notice", "Copied the signed deposit."), () => say(key, "error", "Couldn't copy. Select the text and copy it yourself."))}>
+                                      Copy transaction
+                                    </button>
+                                    <button type="button" className="secondary" onClick={() => setManualDeposit(undefined)}>
+                                      Close
+                                    </button>
+                                  </div>
+                                </section>
+                              )}
+                            </details>
+                          )}
+                          {rowMessage(key)}
+                        </article>
+                      );
+                    })}
+                  </div>
+                </>
               )}
               <div className="foot-grid">
                 <div>
@@ -707,146 +1094,123 @@ export default function App() {
           {page === "activity" && (
             <>
               <div className="section-head">
-                <h2>Withdrawal requests</h2>
-                <span className="status-label">{jobs.length} requests</span>
+                <h2>
+                  Withdrawals <span className="count">{jobs.length}</span>
+                </h2>
               </div>
               {jobs.length === 0 ? (
                 <div className="empty-vault">
                   <Activity size={36} strokeWidth={1.4} />
-                  <h3>No activity yet.</h3>
-                  <p>
-                    Deposit confirmations and withdrawal searches will appear
-                    here. Compute time and miner confirmation are tracked
-                    separately.
-                  </p>
-                  <button
-                    className="secondary"
-                    onClick={() => setPage("vaults")}
-                  >
-                    Back to vaults <ArrowRight size={16} />
-                  </button>
+                  <h3>No withdrawals yet.</h3>
+                  <p>When you withdraw from a vault, its progress shows here.</p>
+                  <a className="secondary" href="#/vaults">
+                    Go to my vaults <ArrowRight size={16} />
+                  </a>
                 </div>
               ) : (
-                jobs.map((j) => (
-                  <article className="job" key={j.id}>
-                    <div>
-                      <h3>{short(j.id)}</h3>
-                      <p>
-                        {j.stage} · {j.computeSeconds.toLocaleString()} compute
-                        seconds
-                      </p>
-                    </div>
-                    <span className="status-label">
-                      {j.status.replaceAll("_", " ")}
-                    </span>
-                    {j.error && <p role="status">{j.error}</p>}
-                    {j.txid && (
-                      <a
-                        href={`${NETWORK_CONFIG.explorerUrl}/tx/${j.txid}`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        View transaction
-                      </a>
-                    )}
-                    {legacySearchControls(j).authorize && (
-                      <button
-                        className="primary"
-                        onClick={() => {
-                          const vault = vaults.find((v) => v.id === j.vaultId);
-                          if (!vault) {
-                            setModal("readiness");
-                            return;
-                          }
-                          void action("Loading the solved result", async () => {
-                            const solvedResult = await api(
-                              `/jobs/${j.id}/solved-result`,
-                            );
-                            setTransaction({ vault, job: j, solvedResult });
-                          });
-                        }}
-                      >
-                        Review and authorize
-                      </button>
-                    )}
-                    {legacySearchControls(j).resume && (
-                      <button
-                        className="secondary"
-                        onClick={() =>
-                          action("Resuming", async () => {
-                            const updated = await api<{ job: Job }>(
-                              `/jobs/${j.id}/resume`,
-                              {},
-                            );
-                            setJobs((js) =>
-                              js.map((x) => (x.id === j.id ? updated.job : x)),
-                            );
-                          })
-                        }
-                      >
-                        Resume search
-                      </button>
-                    )}
-                    {j.txid && (
-                      <button
-                        className="secondary"
-                        onClick={() =>
-                          action("Checking confirmation", async () => {
-                            const observation = await api<{ status: string; alert?: string }>(
-                              `/transactions/${j.txid}/status`,
-                            );
-                            if (observation.status === "conflict") {
-                              throw Error(`${observation.alert ?? "Funding outpoint was spent by a different transaction."} Contact the operator; do not resubmit or spend the helper output.`);
-                            }
-                            if (observation.status !== "confirmed") {
-                              setNotice(
-                                `Withdrawal transaction: ${observation.status}. No transaction was resubmitted.`,
-                              );
-                              return;
-                            }
-                            const updated = await api<{ job: Job }>(
-                              `/jobs/${j.id}/status`,
-                            );
-                            setJobs((js) =>
-                              js.map((x) => (x.id === j.id ? updated.job : x)),
-                            );
-                            setVaults(
-                              (await api<{ vaults: PublicVault[] }>("/vaults"))
-                                .vaults,
-                            );
-                          })
-                        }
-                      >
-                        Refresh confirmation
-                      </button>
-                    )}
-                    {legacySearchControls(j).pause && (
-                      <button
-                        className="secondary"
-                        onClick={() =>
-                          action("Pausing", async () => {
-                            await api(`/jobs/${j.id}/pause`, {});
-                            setJobs((js) =>
-                              js.map((x) =>
-                                x.id === j.id ? { ...x, status: "paused" } : x,
-                              ),
-                            );
-                          })
-                        }
-                      >
-                        Pause search
-                      </button>
-                    )}
-                  </article>
-                ))
+                jobs.map((j) => {
+                  const key = `job:${j.id}`;
+                  const controls = legacySearchControls(j);
+                  return (
+                    <article className="job" key={j.id}>
+                      <div className="job-main">
+                        <div className="job-name">
+                          <h3>{vaultName(j.vaultId) ?? "Withdrawal"}</h3>
+                          <p>
+                            {j.manifest?.outputValue && `${formatBtc(j.manifest.outputValue)} BTC to ${short(j.manifest.destination)} · `}
+                            {gpuTime(j.computeSeconds)} of GPU time
+                          </p>
+                          <p className="job-id">
+                            Request {short(j.id)}
+                            {failedLast(j.id)
+                              ? ` · last check failed ${clock(checkFailed[j.id])}`
+                              : checkedAt[j.id] && ` · last checked ${clock(checkedAt[j.id])}`}
+                          </p>
+                        </div>
+                        <span className={`status-label job-${j.status}`}>{jobLabel(j)}</span>
+                        <div className="job-actions">
+                          {j.txid && j.status !== "confirmed" && (
+                            <button
+                              className="text-button"
+                              disabled={!!busy}
+                              onClick={() =>
+                                rowAction(key, "Checking confirmation", async () => {
+                                  const observation = await withChainTurn(() => checkWithdrawal(j));
+                                  if (observation.status === "conflict") throw Error(conflictText(observation.alert));
+                                  say(key, "notice", observation.status === "confirmed" ? "Withdrawal confirmed." : `Withdrawal transaction: ${observation.status}. Nothing was resent.`);
+                                })
+                              }
+                            >
+                              Check now
+                            </button>
+                          )}
+                          {j.txid && (
+                            <a
+                              className="text-button"
+                              href={`${NETWORK_CONFIG.explorerUrl}/tx/${j.txid}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              View transaction <ExternalLink size={14} />
+                            </a>
+                          )}
+                          {controls.pause && (
+                            <button
+                              className="secondary"
+                              disabled={!!busy}
+                              onClick={() =>
+                                rowAction(key, "Pausing", async () => {
+                                  await api(`/jobs/${j.id}/pause`, {});
+                                  setJobs((js) =>
+                                    js.map((x) =>
+                                      x.id === j.id ? { ...x, status: "paused" } : x,
+                                    ),
+                                  );
+                                })
+                              }
+                            >
+                              Pause search
+                            </button>
+                          )}
+                          {controls.resume && (
+                            <button
+                              className="secondary"
+                              disabled={!!busy}
+                              onClick={() =>
+                                rowAction(key, "Resuming", async () => {
+                                  const updated = await api<{ job: Job }>(
+                                    `/jobs/${j.id}/resume`,
+                                    {},
+                                  );
+                                  setJobs((js) =>
+                                    js.map((x) => (x.id === j.id ? updated.job : x)),
+                                  );
+                                })
+                              }
+                            >
+                              Resume search
+                            </button>
+                          )}
+                          {controls.authorize && (
+                            <button className="primary" disabled={!!busy} onClick={() => openAuthorization(j)}>
+                              Review and authorize
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {j.error && <p className="job-error" role="status">{j.error}</p>}
+                      {rowMessage(key)}
+                    </article>
+                  );
+                })
               )}
               <div className="info-note">
                 <BookOpen size={20} />
                 <p>
                   Customer billing and spending-limit enforcement are not
                   enabled. Recorded execution time is not an invoice. You can
-                  pause a search; completed work is retained. See Costs &
-                  billing for the itemized policy.
+                  pause a search; completed work is retained. See{" "}
+                  <a href="#/costs">Costs</a> for the itemized policy.
                 </p>
               </div>
             </>
@@ -1022,27 +1386,6 @@ export default function App() {
               </div>
             </>
           )}
-          <div className="readiness-banner">
-            <div>
-              <span className="amber-dot" />
-              <strong>
-                {operationsAllowed(config)
-                  ? `${NETWORK_CONFIG.label} funding and search are enabled.`
-                  : `${NETWORK_CONFIG.label} funding is not enabled yet.`}
-              </strong>
-              <span>Wallet and transaction validation are in progress.</span>
-            </div>
-            <button onClick={() => setModal("readiness")}>
-              View readiness <ArrowUpRight size={15} />
-            </button>
-          </div>
-          <footer>
-            <span>QSB / PROOF OF CONCEPT</span>
-            <span>Bitcoin-native. Noncustodial. Experimental.</span>
-            <button onClick={() => setPage("protocol")}>
-              Protocol notes <ArrowUpRight size={13} />
-            </button>
-          </footer>
         </main>
       </div>
       <dialog
@@ -1063,28 +1406,31 @@ export default function App() {
           </button>
           {modal === "readiness" ? (
             <>
-              <div className="eyebrow">RELEASE READINESS</div>
-              <h2>Verify first. Fund second.</h2>
-              <p>
-                Local key generation and backup are available. Deposits and
-                withdrawals require a matching network and an enabled server.
-                Mainnet remains disabled.
-              </p>
-              <div className="checklist">
-                {config.checks?.map((c: any) => (
-                  <div key={c.id}>
-                    {c.passed ? (
-                      <CheckCheck size={20} />
-                    ) : (
-                      <span className="unchecked" />
-                    )}
-                    <span>{c.label}</span>
-                    <b>{c.passed ? "Passed" : "Pending"}</b>
+              <div className="eyebrow">SERVICE STATUS</div>
+              <h2>{statusLabel[status]}.</h2>
+              <p>{statusDetail[status]}</p>
+              {checks.length > 0 && (
+                <>
+                  <h3 className="checklist-title">
+                    Release checks · {checks.filter((c) => c.passed).length} of {checks.length} passed
+                  </h3>
+                  <div className="checklist">
+                    {checks.map((c) => (
+                      <div key={c.id}>
+                        {c.passed ? (
+                          <CheckCheck size={20} />
+                        ) : (
+                          <span className="unchecked" />
+                        )}
+                        <span>{c.label}</span>
+                        <b>{c.passed ? "Passed" : "Pending"}</b>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </>
+              )}
               <button className="primary full" onClick={closeModal}>
-                Got it
+                Close
               </button>
             </>
           ) : (
@@ -1092,9 +1438,9 @@ export default function App() {
               <div className="eyebrow">NEW VAULT · STEP {step} OF 3</div>
               <h2>
                 {step === 1
-                  ? "Make it yours."
+                  ? "Name it and set a passphrase."
                   : step === 2
-                    ? "Save your way back."
+                    ? "Save your backup."
                     : "Your vault is ready."}
               </h2>
               <div className="steps">
@@ -1102,17 +1448,11 @@ export default function App() {
                   <span key={s} className={s <= step ? "done" : ""} />
                 ))}
               </div>
-              {error && (
-                <p className="inline-error" role="alert">
-                  {error}
-                </p>
-              )}
-              {step === 1 && <CostDisclosure />}
               {step === 1 ? (
                 <>
                   <p>
-                    Generate QSB keys on this device, then encrypt them with a
-                    passphrase only you know.
+                    The vault's keys are generated on this device, then
+                    encrypted with a passphrase only you know.
                   </p>
                   {!wallet ? (
                     <div className="connect-prompt">
@@ -1144,20 +1484,30 @@ export default function App() {
                         <input
                           type="password"
                           autoComplete="new-password"
+                          aria-describedby="pass-hint"
                           value={pass}
                           onChange={(e) => setPass(e.target.value)}
-                          placeholder="At least 14 characters"
+                          placeholder={`At least ${MIN_PASSPHRASE_LENGTH} characters`}
                         />
                       </label>
+                      <p id="pass-hint" className={passLongEnough ? "field-hint ok" : "field-hint"}>
+                        {passLongEnough ? <><Check size={13} /> Meets the {MIN_PASSPHRASE_LENGTH}-character minimum</> : `${pass.length} of ${MIN_PASSPHRASE_LENGTH} characters`}
+                      </p>
                       <label>
                         Confirm passphrase
                         <input
                           type="password"
                           autoComplete="new-password"
+                          aria-describedby="confirm-hint"
                           value={confirmPass}
                           onChange={(e) => setConfirmPass(e.target.value)}
                         />
                       </label>
+                      {confirmPass && (
+                        <p id="confirm-hint" className={passMatch ? "field-hint ok" : "field-hint bad"}>
+                          {passMatch ? <><Check size={13} /> Passphrases match</> : "Doesn't match yet"}
+                        </p>
+                      )}
                       <div className="info-note compact">
                         <LockKeyhole size={17} />
                         <p>
@@ -1165,10 +1515,15 @@ export default function App() {
                           recover it.
                         </p>
                       </div>
+                      {error && (
+                        <p className="inline-error" role="alert">
+                          {error}
+                        </p>
+                      )}
                       <button
                         className="primary full"
                         onClick={generate}
-                        disabled={!!busy}
+                        disabled={!!busy || !formReady}
                       >
                         {busy ? (
                           <LoaderCircle className="spin" size={17} />
@@ -1183,37 +1538,56 @@ export default function App() {
               ) : step === 2 ? (
                 <>
                   <p>
-                    Download your encrypted backup, then select that file again
-                    to confirm you can recover the vault.
+                    Save the encrypted backup, then open it again here. That
+                    proves the file can restore this vault before any Bitcoin
+                    moves.
                   </p>
-                  <button
-                    className="secondary full"
-                    onClick={() =>
-                      downloadBackup(encrypted, recovery!.vault.id)
-                    }
-                  >
-                    <Download size={18} />
-                    Download encrypted backup
-                  </button>
-                  <label className="file-drop">
-                    <FileKey2 size={25} />
-                    <strong>
-                      {verified
-                        ? "Backup successfully verified"
-                        : "Select your saved backup to verify"}
-                    </strong>
-                    <span>
-                      {verified
-                        ? "The keys and script match."
-                        : "Your file stays on this device."}
-                    </span>
-                    <input
-                      aria-label="Verify downloaded backup"
-                      type="file"
-                      accept=".json"
-                      onChange={(e) => void verifyFile(e.target.files?.[0])}
-                    />
-                  </label>
+                  <ol className="substeps">
+                    <li>
+                      <strong>Download the encrypted backup.</strong>
+                      <span>
+                        It saves as{" "}
+                        <code>{recovery ? recoveryBackupFilename(recovery.vault.id) : "qsb-recovery.json"}</code>.
+                        Keep it somewhere you control.
+                      </span>
+                      <button
+                        className="secondary full"
+                        onClick={() =>
+                          downloadBackup(encrypted, recovery!.vault.id)
+                        }
+                      >
+                        <Download size={18} />
+                        Download encrypted backup
+                      </button>
+                    </li>
+                    <li>
+                      <strong>Select the file you saved.</strong>
+                      <label className="file-drop">
+                        <FileKey2 size={25} />
+                        <strong>
+                          {verified
+                            ? "Backup successfully verified"
+                            : "Select your saved backup to verify"}
+                        </strong>
+                        <span>
+                          {verified
+                            ? "The keys and script match."
+                            : "Your file stays on this device."}
+                        </span>
+                        <input
+                          aria-label="Verify downloaded backup"
+                          type="file"
+                          accept=".json"
+                          onChange={(e) => void verifyFile(e.target.files?.[0])}
+                        />
+                      </label>
+                    </li>
+                  </ol>
+                  {error && (
+                    <p className="inline-error" role="alert">
+                      {error}
+                    </p>
+                  )}
                   <button
                     className="primary full"
                     disabled={!verified || !!busy}
@@ -1233,19 +1607,33 @@ export default function App() {
                     <Check size={34} />
                   </div>
                   <p>
-                    Your backup is verified. Only public vault metadata was
-                    saved to the service.
+                    Your backup is verified. Only the vault's public details
+                    were saved to the service. No Bitcoin has moved yet.
                   </p>
-                  <div className="info-note compact">
-                    <AlertCircle size={19} />
-                    <p>
-                      No Bitcoin has moved. Funding becomes available after the
-                      transaction pipeline is verified.
-                    </p>
-                  </div>
-                  <button className="primary full" onClick={closeModal}>
-                    Return to my vaults <ArrowRight size={17} />
-                  </button>
+                  {status === "on" ? (
+                    <>
+                      <button className="primary full" onClick={depositNow}>
+                        Deposit now <ArrowRight size={17} />
+                      </button>
+                      <button className="secondary full" onClick={closeModal}>
+                        Back to my vaults
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="info-note compact">
+                        <AlertCircle size={19} />
+                        <p>
+                          {status === "search-only"
+                            ? "Deposits can't be sent right now: submission to MARA is off. Deposit from My vaults once it's on."
+                            : "Deposits are off right now. Deposit from My vaults once they're on."}
+                        </p>
+                      </div>
+                      <button className="primary full" onClick={closeModal}>
+                        Back to my vaults <ArrowRight size={17} />
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </>

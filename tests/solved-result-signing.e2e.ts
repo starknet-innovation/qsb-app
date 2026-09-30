@@ -309,7 +309,7 @@ test("wallet session change after signing prevents approval from posting", async
 
 test("a signed rate below MARA's current floor submits nothing", async ({ page }) => {
   const f = await signForReview(page, { enabled: true, minerFloor: 1000 });
-  await expect(f.dialog).toContainText(/Signed size: [\d,]+ vB · about [\d.]+ sat\/vB/);
+  await expect(f.dialog).toContainText(/Signed size\s*[\d,]+ vB · about [\d.]+ sat\/vB/);
   await f.dialog.getByRole("button", { name: "Approve exact transaction and submit" }).click();
   await expect(f.dialog).toContainText("below MARA's current minimum of 1000 sat/vB. Nothing was submitted.");
   expect(f.submitted()).toBe(0);

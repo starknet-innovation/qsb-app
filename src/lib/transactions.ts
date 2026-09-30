@@ -137,11 +137,20 @@ export function minerMinimumRate(rates: { submit_fee_rate: number; market_rate?:
     ? market
     : rates.submit_fee_rate;
 }
+/** A sat/vB rate in millisatoshis per vB, rounded up. */
+export function ceilMilliSatPerVb(satPerVb: number): bigint {
+  // Round to a micro-sat first, so float error (4.03 * 1000 = 4030.0000000000005) can't lift the rate.
+  return BigInt(Math.ceil(Math.round(satPerVb * 1e6) / 1e3));
+}
+/** A rate in millisatoshis per vB as parseFeeRate accepts it back, for example "2" or "2.25". */
+export function formatFeeRate(milliSatPerVb: bigint): string {
+  const fraction = (milliSatPerVb % 1000n).toString().padStart(3, "0").replace(/0+$/, "");
+  return `${milliSatPerVb / 1000n}${fraction ? `.${fraction}` : ""}`;
+}
 /** Whether a rate (millisatoshis per vB) is below MARA's submission floor (sat/vB), rounding the floor up. */
 export function belowMinerFloor(milliSatPerVb: bigint, floorSatPerVb: number): boolean {
   if (!Number.isFinite(floorSatPerVb) || floorSatPerVb < 0) throw new Error("Invalid miner fee floor.");
-  // Round to a micro-sat first, so float error (4.03 * 1000 = 4030.0000000000005) can't lift the floor.
-  return milliSatPerVb < BigInt(Math.ceil(Math.round(floorSatPerVb * 1e6) / 1e3));
+  return milliSatPerVb < ceilMilliSatPerVb(floorSatPerVb);
 }
 /**
  * The miner fee fundingPsbt should use for a sat/vB rate. With change, the fee is
