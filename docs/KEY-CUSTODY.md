@@ -43,8 +43,8 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 | Wallet ↔ browser | No helper UTXO response comes from Xverse here. The browser gets candidates from the authenticated service's /payment-utxos endpoint. |
 | Browser | Unlocks the backup; the user chooses a destination, helper output and fee rate. The payout is calculated as the full funding value plus the helper value minus the fee; there is no independent withdrawal-amount choice. Saves a `-withdrawal` backup that binds that backup copy to this intent. The localStorage reminder is device-local; earlier unbound backups remain unbound and must not be reused for a different withdrawal, especially on another device. |
 | Crosses to the service | A bearer session token or API key and the withdrawal manifest: destination, amount, fee, and the funding and helper outpoints. The authenticated service supplies helper candidates through /payment-utxos. The service later returns the solution: sequence, locktime and the selected indices. |
-| Service | Reserves both outpoints atomically, then the coordinator runs the search. The CPU verifier re-checks every GPU hit before a solution is stored. |
-| Outside parties | The GPU solver on AWS Batch (attested qsb-solver image, pinned by digest) receives public search parameters and returns candidate hits. It isn't trusted: every hit is re-checked on CPU. |
+| Service | Reserves both outpoints atomically, then the coordinator runs the search. A hit used as a solution must pass independent CPU verification. The verifier stops at the first valid candidate; later hits in that bundle are not checked. |
+| Outside parties | The GPU solver on AWS Batch (attested qsb-solver image, pinned by digest) receives public search parameters and returns candidate hits. It isn't trusted: any hit used as a solution must pass independent CPU verification. |
 
 ## 4. Withdraw: sign and submit
 
@@ -64,7 +64,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 | Wallet private key | User's wallet | The wallet only | Nothing; the public key and address only |
 | HORS one-time secrets, 2 rounds × 150 | Local QSB runtime | Browser/worker memory or SDK/CLI Node-process memory while unlocked; encrypted backups at rest | Before withdrawal: hash commitments only. At submission: also the 15 disclosed preimages within the stored signed transaction (input 1 scriptSig); these become public by design |
 | Recovery passphrase | User | User | Nothing |
-| Backup files: vault, `-withdrawal`, `-signing` | Browser | User's own storage | Nothing |
+| Backup files: vault, `-withdrawal`, `-signing` | Browser or SDK/CLI, locally | User's own storage | Nothing |
 | Session token (1 hour) / API key (scoped, up to 90 days) | API, after a BIP-322 sign-in | Browser, or the SDK caller | SHA-256 hash at rest; receives the bearer credential on authenticated requests |
 | Webhook signing secret | API, shown once to the owner | Owner's webhook receiver | The secret, to sign deliveries (HMAC-SHA256) |
 | MARA Slipstream credential (optional) | Administrator | AWS Secrets Manager | Read at runtime by API roles; sent only to MARA |
@@ -73,7 +73,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 
 - **User**: the supported service flow requires their backup, passphrase and original wallet. The vault script does not bind that wallet; possession of decrypted recovery state can enable an outside-service spend using another controlled helper.
 - **QSB service**: can refuse or delay a withdrawal, but not redirect it: the destination is fixed by signatures made on the user's machine.
-- **GPU solver**: untrusted compute on public data. A wrong hit is caught by the CPU re-check.
+- **GPU solver**: untrusted compute on public data. Only independently CPU-verified hits can be used as solutions; verification does not necessarily examine every returned hit.
 - **Operator**: an MFA-backed role that reconciles records after an unknown outcome. It can't sign, and the tool never resubmits.
 - **MARA**: receives fully signed transactions and optional authorization/client-code credentials; withdrawals include the disclosed HORS preimages.
 
@@ -81,4 +81,4 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 
 ## Sources
 
-Written against `main` at `e150b56` (30 September 2026): `src/lib/backup.ts`, `public/qsb/bridge.py`, `public/qsb/qsb_pipeline.py`, `src/lib/wallet.ts`, `src/mainnet/localSignature.ts`, `server/app.ts`, `server/scoped-keys.ts`, `server/webhooks.ts`, `terraform/variables.tf`, `src/TransactionDialog.tsx`, `server/providers.ts`, `server/submit-exact.ts`, `src/App.tsx`, `server/transaction-checks.ts`, `sdk/runtime.ts`, `sdk/client.ts` and [EXACT-SUBMIT.md](EXACT-SUBMIT.md). Keep this page, `key-custody.html` and `key-custody.png` in step; see "Docs" in `AGENTS.md`.
+Written against `main` at `e150b56` (30 September 2026): `src/lib/backup.ts`, `public/qsb/bridge.py`, `public/qsb/qsb_pipeline.py`, `src/lib/wallet.ts`, `src/mainnet/localSignature.ts`, `server/app.ts`, `server/scoped-keys.ts`, `server/webhooks.ts`, `terraform/variables.tf`, `src/TransactionDialog.tsx`, `server/providers.ts`, `server/submit-exact.ts`, `src/App.tsx`, `server/transaction-checks.ts`, `sdk/runtime.ts`, `sdk/client.ts`, `sdk/cli.ts`, `worker/cpu/handler.py` and [EXACT-SUBMIT.md](EXACT-SUBMIT.md). Keep this page, `key-custody.html` and `key-custody.png` in step; see "Docs" in `AGENTS.md`.
