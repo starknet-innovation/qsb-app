@@ -19,7 +19,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 | --- | --- |
 | Wallet | Signs the sign-in challenge (BIP-322). The same address later funds the deposit and provides the withdrawal's helper input. |
 | Wallet ↔ browser | The challenge goes to the wallet; the signature comes back. |
-| Browser | Generates 2 × 150 one-time HORS secrets and their hash commitments, then builds the vault script. Encrypts them with the passphrase (14+ characters; PBKDF2-SHA256 with 600,000 rounds, then AES-256-GCM). The user downloads the backup, `qsb-recovery-<id>.json`, and re-opens it to prove it works. Then the app shuts the worker down and drops the secrets. |
+| Browser | Generates 2 × 150 one-time HORS secrets and their hash commitments, then builds the vault script. Encrypts them with the passphrase (14+ characters; PBKDF2-SHA256 with 600,000 rounds, then AES-256-GCM). Use a strong, unique passphrase: the 14-character minimum does not measure strength, and a copied backup allows offline guessing. The user downloads the backup, `qsb-recovery-<id>.json`, and re-opens it to prove it works. Then the app shuts the worker down and drops the secrets. |
 | Crosses to the service | The BIP-322 sign-in proof, then the public vault (script, script hash, HORS commitments and payment address). The service returns a 1-hour session token. Authenticated requests send that bearer token, or a scoped API key. |
 | Service | Verifies the BIP-322 signature and issues a random session token, storing only its SHA-256. Stores the public vault record. At vault creation it receives commitments, not wallet private keys or HORS preimages. |
 | Outside parties | Nothing leaves the service. |

@@ -135,7 +135,7 @@
 
 <div class="legend">
   <span class="chip secret">Secret</span><span>unrevealed spending material stays local</span>
-  <span class="chip enc">Encrypted</span><span>safe at rest, useless without the passphrase</span>
+  <span class="chip enc">Encrypted</span><span>protection depends on a strong, unique passphrase</span>
   <span class="chip cred">Credential</span><span>access or transport, cannot spend</span>
   <span class="chip pub">Public</span><span>safe to share</span>
 </div>
@@ -186,7 +186,7 @@
   </div>
   <div class="cell browser">
     <div class="step">Generates <b>2 × 150 one-time HORS secrets</b> and their hash commitments, then builds the vault script.<br><span class="chip secret">HORS secrets</span></div>
-    <div class="step">Encrypts them with your passphrase (PBKDF2-SHA256, 600k rounds, then AES-256-GCM).<br><span class="chip secret">passphrase, 14+ characters</span></div>
+    <div class="step">Encrypts them with your passphrase (PBKDF2-SHA256, 600k rounds, then AES-256-GCM). Use a strong, unique passphrase: the 14-character minimum does not measure strength, and copied backups allow offline guessing.<br><span class="chip secret">passphrase, 14+ characters</span></div>
     <div class="step">You download the backup and re-open it to prove it works. Then the app shuts the worker down and drops the secrets.<br><span class="chip enc">qsb-recovery-&lt;id&gt;.json</span></div>
   </div>
   <div class="cell browser">
