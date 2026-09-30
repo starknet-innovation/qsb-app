@@ -5,7 +5,7 @@ reach through IAM Identity Center.
 
 **Status (30 September 2026):** steps 1–10 are done, and the new stack is live. The GitHub part of step 12 is done.
 Left: retiring the old eu-west-1 stack ([step 11](#decommission-the-old-stack)) and, after the new stack has run a
-full deposit and withdrawal, deleting its data (cleanup). The old stack gets no more deploys.
+full deposit and withdrawal, deleting the old stack's retained data (cleanup; never the new stack's). The old stack gets no more deploys.
 
 **QSB started over in the new account.** The new stack was built from scratch, and no data was copied: the records
 table, sessions and owner data all started empty. Users see a new app URL and sign in again; vaults created on the

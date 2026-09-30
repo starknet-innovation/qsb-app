@@ -1,6 +1,6 @@
 # Solver descriptors
 
-Each JSON file here is one solver release's descriptor, copied verbatim from its qsb-solver release. [docs/SOLVER-REPOSITORY.md](../../../docs/SOLVER-REPOSITORY.md) lists the enrolled releases and how to enroll and serve one.
+Each JSON file here is one solver release's descriptor, copied verbatim from its qsb-solver release, except the archived `qsb-config-a-ranked-v2.json`, which predates qsb-solver. [docs/SOLVER-REPOSITORY.md](../../../docs/SOLVER-REPOSITORY.md) lists the enrolled releases and how to enroll and serve one.
 
 To add a release, copy the attested release's `solver.json` into this directory with a lowercase alphanumeric/hyphen filename. `scripts/generate-solver-registry.mjs` runs before tests, typechecking and builds, and writes the static imports in `registry.generated.ts`. Commit the descriptor and the regenerated registry; no coordinator change is needed. A schema-3 descriptor names the qsb-solver commit, an immutable image digest, the generator protocol and the `ranked-v2` search contract, and no CUDA source hashes. Unsupported search versions, mutable image tags, duplicate IDs and unknown fields are rejected.
 

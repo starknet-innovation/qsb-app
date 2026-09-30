@@ -28,5 +28,3 @@ __pycache__/
 *signed-result*.json
 *signing-bundle*.json
 .DS_Store
-
-/ops/aws-gpu-benchmark/.build/

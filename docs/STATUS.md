@@ -24,12 +24,11 @@ As of 30 September 2026. The plan of record is #8.
 
 - The first mainnet deposit and withdrawal, on the earlier eu-west-1 stack (#22).
 - The move to the new eu-west-2 account (REGION-MIGRATION.md steps 1–10, and the GitHub part of step 12).
-- The removal of the parked supervised stacks, the runtime handoff and the storage cutover (#105, #107), and of the regtest paths (#108), under #23.
 
 ## Open
 
 - **#22:** write the first withdrawal's evidence record under `docs/` (its acceptance), then close it.
-- **#23:** the rest of the unreachable code, including the supervised UI paths and testnet4 support. `terraform/scripts/build.mjs` and the Terraform `network` variable still accept `testnet4`, but the API Lambda refuses to start on any network but mainnet (`server/lambda.ts`).
+- **#23:** remove the remaining unreachable code: the supervised UI paths and testnet4 support. `terraform/scripts/build.mjs` and the Terraform `network` variable still accept `testnet4`, but the API Lambda refuses to start on any network but mainnet (`server/lambda.ts`).
 - **#24:** build-generated identities in place of in-repo self-hash pinning.
 - **#27:** record each deposit's QSB version as data.
 - **#85:** the non-custodial API and SDK. Phase 3 (billing, terms of use, WAF and rate limits) isn't done.

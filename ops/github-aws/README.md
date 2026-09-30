@@ -33,8 +33,10 @@ The runtime boundary allows QSB data access and, for API roles (`qsb-*-api`) onl
 `qsb/slipstream`: the optional MARA Slipstream credential (see `terraform/README.md`). It allows no other secret and
 no KMS decrypt. Deploying code confers that code's runtime access, so `qsb-operator` and `qsb-github-deploy` can
 reach this secret through an API role. Workflow log-delivery control APIs and regional metadata discovery require
-regional wildcard resources; these are the runtime control-plane exceptions. Runtime identities have no S3, SQS or
-ECR grants. KMS customer keys would need separately reviewed grants. This is a project deployment role, not a
+regional wildcard resources; these are the runtime control-plane exceptions. In S3, the boundary allows only the GPU
+job bucket's prefixes (`s3:PutObject` on `inputs/*`, `s3:GetObject` on `outputs/*`), which Terraform grants to the
+coordinator; runtime identities have no other S3 grant, and no SQS or ECR grant. The GPU roles have their own
+boundary ([below](#gpu-roles-and-spend)). KMS customer keys would need separately reviewed grants. This is a project deployment role, not a
 read-only role.
 
 The state bucket uses S3-managed encryption, versioning, public access blocking and an HTTPS-only policy. The deploy

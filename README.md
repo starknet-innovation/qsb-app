@@ -13,7 +13,7 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB) vaults: vault secrets are 
 - [`consensus/`](consensus/README.md): the offline Bitcoin Core script check run before a withdrawal is submitted.
 - `contracts/`: versioned search-range vectors shared with qsb-solver.
 - [`terraform/`](terraform/README.md): the AWS app stack; [`terraform/gpu/`](terraform/gpu/README.md): the AWS Batch GPU stack.
-- `ops/`: AWS identities and IAM tooling ([`github-aws`](ops/github-aws/README.md)), the [IAM sandbox](ops/iam-sandbox/README.md) and GPU tooling.
+- `ops/`: AWS identities and IAM tooling ([`github-aws`](ops/github-aws/README.md)), the [IAM sandbox](ops/iam-sandbox/README.md), and the positive-hit replay (`aws-gpu-migration`).
 - `scripts/`: vendoring, OpenAPI generation, and the operator reconcile CLIs.
 - `tests/`: unit, browser and reference tests.
 
@@ -34,6 +34,7 @@ The deployed API Lambda (`server/lambda.ts`) serves mainnet only. The deploy-tim
 - [Exact submission](docs/EXACT-SUBMIT.md): how a signed withdrawal reaches the miner once.
 - [App / solver boundary](docs/SOLVER-REPOSITORY.md): enrolled solver releases and how to enroll and serve one.
 - [Moving to eu-west-2](docs/REGION-MIGRATION.md): how a new account is built, and retiring the old stack.
+- [Key custody](docs/KEY-CUSTODY.md): who holds each key, passphrase and credential through vault creation, deposit and withdrawal, and what the service receives, as text and a [diagram](docs/key-custody.png).
 - [App-role IAM validation](docs/APP-ROLE-SANDBOX.md) and the [browser safety check](docs/ci/BROWSER-SAFETY.md).
 
 ## Local development
