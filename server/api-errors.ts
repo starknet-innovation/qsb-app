@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { z } from "zod";
 
 /**
  * Machine-readable codes for the API's JSON errors. Every error body is
@@ -181,4 +182,16 @@ export function attachedCodeStatusOf(
  */
 export function chainErrorStatus(code: ApiErrorCode): ContentfulStatusCode {
   return code === "chain_unavailable" ? attachedCodeStatus.chain_unavailable : 409;
+}
+// A thrown ZodError built by parse (unlike `new z.ZodError`) is an Error, which Hono's onError needs.
+const notJson = z.custom<never>(() => false, "Request body is not valid JSON.");
+/** The request's JSON body. Malformed JSON is a 400 invalid_request, like a schema failure. */
+export async function jsonBody(c: { req: { json(): Promise<unknown> } }) {
+  try {
+    return await c.req.json();
+  } catch (error) {
+    // Only a syntax error: a body over the limit must still reach bodyLimit's 413.
+    if (!(error instanceof SyntaxError)) throw error;
+    return notJson.parse(undefined);
+  }
 }

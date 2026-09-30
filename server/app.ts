@@ -14,6 +14,7 @@ import {
   attachedApiErrorCode,
   attachedCodeStatusOf,
   chainErrorStatus,
+  jsonBody,
 } from "./api-errors";
 import {
   CHALLENGE_SECONDS,
@@ -110,18 +111,6 @@ import { httpsTransport, systemResolver } from "./webhook-transport";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
-// A thrown ZodError built by parse (unlike `new z.ZodError`) is an Error, which Hono's onError needs.
-const notJson = z.custom<never>(() => false, "Request body is not valid JSON.");
-/** The request's JSON body. Malformed JSON is a 400 invalid_request, like a schema failure. */
-async function jsonBody(c: { req: { json(): Promise<unknown> } }) {
-  try {
-    return await c.req.json();
-  } catch (error) {
-    // Only a syntax error: a body over the limit must still reach bodyLimit's 413.
-    if (!(error instanceof SyntaxError)) throw error;
-    return notJson.parse(undefined);
-  }
-}
 function supervisedServiceJob(job: unknown): boolean {
   if (!job || typeof job !== "object") return false;
   const execution = (job as { execution?: { kind?: string } }).execution;

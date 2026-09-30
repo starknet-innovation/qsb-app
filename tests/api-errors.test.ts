@@ -704,6 +704,13 @@ describe("client refusals before any side effect", () => {
     await expectRefusal(await f.call(method, path, undefined, { raw: "{" }), 400, "invalid_request", "Invalid request");
     untouched();
   });
+  it("refuses malformed JSON on POST /api-keys with 400 invalid_request", async () => {
+    const f = await setup();
+    const untouched = watch(f);
+    const response = await f.call("POST", "/api-keys", undefined, { raw: "{", app: { apiKeys: true } });
+    await expectRefusal(response, 400, "invalid_request", "Invalid request");
+    untouched();
+  });
   it("still answers a streamed body over the limit with 413", async () => {
     const f = await setup();
     const response = await f.call("POST", "/jobs", undefined, { stream: JSON.stringify({ ...manifest, destination: "x".repeat(200_000) }) });
