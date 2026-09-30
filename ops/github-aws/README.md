@@ -26,8 +26,9 @@ encode project ownership, and some CloudFront resources cannot be protected
 with tags. **New CDN/API resources must first be allocated and registered by an
 administrator.** The role can fully manage registered infrastructure, but cannot
 create arbitrary new CDN/API resources or EC2/VPC/backup infrastructure. The removed supervised host, queue, watchdog and evidence stack has no
-deployment or runtime grants. Roles can be passed only to Lambda and Step
-Functions. The GitHub OIDC trust and authentication-only workflow are unchanged.
+deployment or runtime grants. Roles can be passed only to Lambda, Step
+Functions and EventBridge Scheduler, which runs the webhook dispatcher's schedule;
+the role can manage only `qsb-*` schedules in the default group. The GitHub OIDC trust and authentication-only workflow are unchanged.
 
 The runtime boundary allows QSB data access and, for API roles (`qsb-*-api`) only,
 read-only access to one secret, `qsb/slipstream`: the optional MARA Slipstream

@@ -20,6 +20,7 @@ export const requiredReleasePaths = [
   "server/store.ts",
   "server/transaction-checks.ts",
   "server/validation-search.ts",
+  "server/webhook-dispatcher.ts",
   "server/runtime/activation.ts",
   "server/runtime/capability.ts",
   "server/runtime/closure.ts",

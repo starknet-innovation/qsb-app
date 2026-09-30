@@ -840,7 +840,7 @@ describe("owner events and webhooks", () => {
     expect(mocks.transport).toHaveBeenCalledTimes(1);
   });
 
-  it("uses only GetItem and PutItem on OWNER rows, as the coordinator role already allows", async () => {
+  it("uses only GetItem and PutItem on the owner's OWNER# and WEBHOOK# rows, as the coordinator role allows", async () => {
     await seed();
     await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
     mocks.transport.mockResolvedValue({ status: 500 });
@@ -852,9 +852,12 @@ describe("owner events and webhooks", () => {
     expect(mocks.transport).toHaveBeenCalledTimes(1);
     for (const spy of other) expect(spy).not.toHaveBeenCalled();
     const keys = [...puts.mock.calls.map(([row]) => row.pk), ...gets.mock.calls.map(([key]) => key)];
-    expect(new Set(keys)).toEqual(new Set([pk]));
-    expect(decideAppRoleAccess("dynamodb:PutItem", [pk], "coordinator")).toBe("allow");
-    expect(decideAppRoleAccess("dynamodb:GetItem", [pk], "coordinator")).toBe("allow");
+    const webhooks = `WEBHOOK#${event.owner}`;
+    expect(new Set(keys)).toEqual(new Set([pk, webhooks]));
+    for (const key of [pk, webhooks]) {
+      expect(decideAppRoleAccess("dynamodb:PutItem", [key], "coordinator")).toBe("allow");
+      expect(decideAppRoleAccess("dynamodb:GetItem", [key], "coordinator")).toBe("allow");
+    }
     for (const spy of [puts, gets, ...other]) spy.mockRestore();
   });
 
@@ -904,11 +907,11 @@ describe("owner events and webhooks", () => {
     mocks.transport.mockResolvedValue({ status: 204 });
     expect(await handler(event, { getRemainingTimeInMillis: () => 20_000 })).toMatchObject({ done: false });
     expect(mocks.transport).not.toHaveBeenCalled();
-    expect(((await store.get(pk, "WEBHOOKS"))!.pending as { event: { type: string } }[]).map((p) => p.event.type)).toEqual(["withdrawal.searching"]);
+    expect(((await store.get(`WEBHOOK#${event.owner}`, "WEBHOOKS"))!.pending as { event: { type: string } }[]).map((p) => p.event.type)).toEqual(["withdrawal.searching"]);
     mocks.status.mockResolvedValue({ status: "IN_PROGRESS" });
     await handler(event);
     expect(mocks.transport).toHaveBeenCalledOnce();
-    expect((await store.get(pk, "WEBHOOKS"))!.pending).toEqual([]);
+    expect((await store.get(`WEBHOOK#${event.owner}`, "WEBHOOKS"))!.pending).toEqual([]);
   });
 
   it("skips delivery unless the Lambda has ample time left, and still records", async () => {

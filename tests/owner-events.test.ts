@@ -354,7 +354,7 @@ describe("owner event log", () => {
     for (const owner of ["a", "b"]) await registerWebhook(inner, owner, { url: "https://hooks.example.com/" }, hooks.resolve);
     const get = MemoryStore.prototype.get.bind(inner);
     vi.spyOn(inner, "get").mockImplementation((pk, sk) =>
-      pk === "OWNER#a" && sk === "WEBHOOKS" ? Promise.reject(Error("ThrottlingException")) : get(pk, sk),
+      pk === "WEBHOOK#a" && sk === "WEBHOOKS" ? Promise.reject(Error("ThrottlingException")) : get(pk, sk),
     );
     vi.spyOn(console, "error").mockImplementation(() => {});
     const store = recordOwnerEvents(inner);
@@ -419,7 +419,7 @@ describe("owner event log", () => {
     await f.store.put({ pk: "OWNER#owner-a", sk: `TX#${job.txid}`, version: 0, txid: job.txid, jobId: job.id });
     expect((await a.get(`/api/jobs/${job.id}/status`)).status).toBe(200);
     expect(f.hooks.transport).not.toHaveBeenCalled();
-    const row = await f.store.get("OWNER#owner-a", "WEBHOOKS");
+    const row = await f.store.get("WEBHOOK#owner-a", "WEBHOOKS");
     expect((row!.pending as { event: OwnerEvent }[]).map((p) => p.event.type)).toEqual(["withdrawal.confirmed", "deposit.spent"]);
     // Another owner's request doesn't send them; this owner's next one does.
     await b.get("/api/webhooks");
@@ -612,7 +612,7 @@ describe("operator notes", () => {
     expect(JSON.stringify(inventorySnapshot({ rows }))).not.toContain(secret);
     expect(JSON.stringify(rows)).toContain(secret);
     // Only that field is dropped: anything else credential-shaped still refuses.
-    expect(() => inventoryRows([...rows, { pk: "OWNER#owner-a", sk: "WEBHOOKS", version: 1, hooks: [], apiKey: "x" }])).toThrow(/CredentialMaterialRejected/);
+    expect(() => inventoryRows([...rows, { pk: "WEBHOOK#owner-a", sk: "WEBHOOKS", version: 1, hooks: [], apiKey: "x" }])).toThrow(/CredentialMaterialRejected/);
   });
 });
 
@@ -829,7 +829,7 @@ describe("webhook retries", () => {
     const event = { id: `evt_${"a".repeat(32)}`, type: "withdrawal.searching", subjectId: "j", status: "searching", at: new Date().toISOString() } as OwnerEvent;
     await enqueueDeliveries(store, "owner-a", [event, event]);
     const flush = () => deliverDue(store, "owner-a", hooks, { deadline: Date.now() + 3000 });
-    const hook = async () => ((await store.get("OWNER#owner-a", "WEBHOOKS"))!.hooks as any[])[0];
+    const hook = async () => ((await store.get("WEBHOOK#owner-a", "WEBHOOKS"))!.hooks as any[])[0];
     return { store, hooks, flush, hook, event };
   }
 
@@ -845,7 +845,7 @@ describe("webhook retries", () => {
     await f.flush();
     expect(f.hooks.transport).toHaveBeenCalledTimes(2);
     expect(await f.hook()).toMatchObject({ failures: 0, status: "active" });
-    expect((await f.store.get("OWNER#owner-a", "WEBHOOKS"))!.pending).toEqual([]);
+    expect((await f.store.get("WEBHOOK#owner-a", "WEBHOOKS"))!.pending).toEqual([]);
   });
 
   it(`marks a webhook failing after ${FAILING_AFTER} failed rounds and stops sending`, async () => {
@@ -859,7 +859,7 @@ describe("webhook retries", () => {
     await enqueueDeliveries(f.store, "owner-a", [{ ...f.event, id: `evt_${"b".repeat(32)}` }]);
     await f.flush();
     expect(f.hooks.transport).toHaveBeenCalledTimes(FAILING_AFTER);
-    expect((await f.store.get("OWNER#owner-a", "WEBHOOKS"))!.pending).toEqual([]);
+    expect((await f.store.get("WEBHOOK#owner-a", "WEBHOOKS"))!.pending).toEqual([]);
   });
 
   it("a round that outlived its lease leaves a delivery another round has claimed alone", async () => {
@@ -874,7 +874,7 @@ describe("webhook retries", () => {
     await vi.waitFor(() => expect(answers).toHaveLength(2));
     answers[0](500);
     await stale;
-    const [pending] = (await f.store.get("OWNER#owner-a", "WEBHOOKS"))!.pending as any[];
+    const [pending] = (await f.store.get("WEBHOOK#owner-a", "WEBHOOKS"))!.pending as any[];
     expect(pending.nextAt).toBeGreaterThan(Date.now());
     expect(pending.attempts).toBe(0);
     expect(await f.hook()).toMatchObject({ failures: 0 });
@@ -883,7 +883,7 @@ describe("webhook retries", () => {
     expect(f.hooks.transport).toHaveBeenCalledTimes(2);
     answers[1](200);
     await fresh;
-    expect((await f.store.get("OWNER#owner-a", "WEBHOOKS"))!.pending).toEqual([]);
+    expect((await f.store.get("WEBHOOK#owner-a", "WEBHOOKS"))!.pending).toEqual([]);
   });
 
   it("a round that outlived its lease counts no failure, and releases its delivery", async () => {
@@ -896,7 +896,7 @@ describe("webhook retries", () => {
     answer(500);
     await stale;
     expect(await f.hook()).toMatchObject({ failures: 0 });
-    expect((await f.store.get("OWNER#owner-a", "WEBHOOKS"))!.pending).toMatchObject([{ attempts: 0, nextAt: 0 }]);
+    expect((await f.store.get("WEBHOOK#owner-a", "WEBHOOKS"))!.pending).toMatchObject([{ attempts: 0, nextAt: 0 }]);
   });
 
   it("does not send a delivery that another flush has claimed", async () => {

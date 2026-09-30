@@ -28,7 +28,23 @@ export const RETRY_DELAYS_MS = [30e3, 120e3, 600e3, 1800e3, 3600e3, 7200e3, 1440
 export const REQUEST_TIMEOUT_MS = 3000;
 /** Deliveries a round claims, so two flushes don't send the same ones. Longer than any flush. */
 export const LEASE_MS = 30_000;
-const ROUND_LIMIT = 10;
+export const ROUND_LIMIT = 10;
+
+/**
+ * An owner's webhooks live in their own partition, WEBHOOK#<owner> / WEBHOOKS, apart from the
+ * owner's OWNER# rows (jobs, vaults, intents, events), so a role can be granted webhook rows and
+ * nothing else by partition key. Nothing was deployed under the old OWNER#<owner> / WEBHOOKS key.
+ */
+export const WEBHOOK_PARTITION = "WEBHOOK#";
+/**
+ * The due-delivery index: a sparse, keys-only global secondary index of the WEBHOOKS rows
+ * (terraform/data.tf). A row is in it, under WEBHOOK_DUE_QUEUE and sorted by webhookDueAt,
+ * exactly while it holds a delivery an active webhook can send. update() sets both attributes
+ * from the row's own queue on every write, so the index can't disagree with the row it was
+ * written with, and keeping it adds no request.
+ */
+export const WEBHOOK_DUE_INDEX = "webhook-due";
+export const WEBHOOK_DUE_QUEUE = "due";
 
 export type WebhookRequest = {
   url: string;
@@ -70,7 +86,15 @@ type Pending = {
   /** The round that holds this delivery until nextAt. */
   claim?: string;
 };
-type WebhookRow = Row & { hooks: Hook[]; pending: Pending[] };
+type WebhookRow = Row & {
+  hooks: Hook[];
+  pending: Pending[];
+  /** The due-delivery index keys; both present or both absent. */
+  webhookQueue?: typeof WEBHOOK_DUE_QUEUE;
+  webhookDueAt?: number;
+  /** Set by deferDue: the index lists the row no earlier than this, while it has anything queued. */
+  webhookDeferredUntil?: number;
+};
 
 export type WebhookUrlCode = Extract<
   ApiErrorCode,
@@ -179,9 +203,47 @@ export function webhookSignature(secret: string, timestamp: number, body: string
   return `t=${timestamp},v1=${digest}`;
 }
 
-const rowKey = (owner: string) => ({ pk: `OWNER#${owner}`, sk: "WEBHOOKS" });
+const rowKey = (owner: string) => ({ pk: `${WEBHOOK_PARTITION}${owner}`, sk: "WEBHOOKS" });
 
-/** Read-modify-write of the owner's one webhook row. `change` returns false to write nothing. */
+/**
+ * When deliverDue could next claim one of the row's deliveries: the earliest queued delivery
+ * of an active webhook, once its webhook's backoff has passed. Undefined when there's none.
+ */
+function nextDueAt(row: { hooks: Hook[]; pending: Pending[] }): number | undefined {
+  const retryAt = new Map(row.hooks.filter((h) => h.status === "active").map((h) => [h.id, h.retryAt ?? 0]));
+  let due: number | undefined;
+  for (const p of row.pending) {
+    const backoff = retryAt.get(p.hook);
+    if (backoff === undefined) continue;
+    const at = Math.max(p.nextAt, backoff);
+    if (due === undefined || at < due) due = at;
+  }
+  return due;
+}
+
+/** The row with its index attributes set from its own queue, no earlier than a deferral still ahead. */
+function indexed(row: WebhookRow): WebhookRow {
+  const { webhookQueue: _queue, webhookDueAt: _at, webhookDeferredUntil: deferred, ...rest } = row;
+  const dueAt = nextDueAt(rest);
+  if (dueAt === undefined) return rest;
+  return deferred !== undefined && deferred > dueAt
+    ? { ...rest, webhookQueue: WEBHOOK_DUE_QUEUE, webhookDueAt: deferred, webhookDeferredUntil: deferred }
+    : { ...rest, webhookQueue: WEBHOOK_DUE_QUEUE, webhookDueAt: dueAt };
+}
+const staleIndex = (row: WebhookRow) => {
+  const want = indexed(row);
+  return (
+    want.webhookQueue !== row.webhookQueue ||
+    want.webhookDueAt !== row.webhookDueAt ||
+    want.webhookDeferredUntil !== row.webhookDeferredUntil
+  );
+};
+
+/**
+ * Read-modify-write of the owner's one webhook row. `change` returns false to write nothing;
+ * a row whose index attributes are stale (written by code from before the index) is then
+ * rewritten with them corrected, so the index heals on the owner's next round.
+ */
 async function update(
   store: Pick<Store, "get" | "put">,
   owner: string,
@@ -190,9 +252,12 @@ async function update(
   const { pk, sk } = rowKey(owner);
   for (let attempt = 0; attempt < 4; attempt++) {
     const current = (await store.get(pk, sk)) as WebhookRow | undefined;
-    const next = change(current ? structuredClone(current) : undefined);
-    if (next === false) return current;
-    const row = { ...next, pk, sk, version: current ? current.version + 1 : 0 };
+    let next = change(current ? structuredClone(current) : undefined);
+    if (next === false) {
+      if (!current || !staleIndex(current)) return current;
+      next = structuredClone(current);
+    }
+    const row = indexed({ ...next, pk, sk, version: current ? current.version + 1 : 0 });
     try {
       await store.put(row, current?.version);
       return row;
@@ -344,13 +409,15 @@ async function round(
  *   example frozen with its Lambda) counts no failures, only successes.
  * - A webhook's failed round backs it off; after FAILING_AFTER in a row it is marked failing
  *   and gets no more deliveries.
+ * Returns how many deliveries the round claimed (fewer than ROUND_LIMIT means it claimed all that
+ * were due) and, when it claimed none, the version of the row it judged, for deferDue.
  */
 export async function deliverDue(
   store: Pick<Store, "get" | "put">,
   owner: string,
   delivery: Delivery,
   { deadline, requestTimeoutMs = REQUEST_TIMEOUT_MS }: { deadline: number; requestTimeoutMs?: number },
-) {
+): Promise<{ claimed: number; version?: number }> {
   const now = Date.now();
   const claim = randomBytes(8).toString("hex");
   let claimed: Pending[] = [];
@@ -365,7 +432,7 @@ export async function deliverDue(
     for (const p of claimed) Object.assign(p, { nextAt: now + LEASE_MS, claim });
     return row;
   });
-  if (!row || !claimed.length) return;
+  if (!row || !claimed.length) return { claimed: 0, version: row?.version };
   const outcomes = (
     await Promise.all(
       row.hooks.map((hook) => {
@@ -409,6 +476,34 @@ export async function deliverDue(
     });
     return row;
   });
+  return { claimed: claimed.length };
+}
+
+/**
+ * For the dispatcher: a deliverDue round that started at `dueBy` claimed nothing from the row at
+ * `version`, although that row's own queue was due by `dueBy`. That happens when the dispatcher
+ * can't send what's queued (for example a webhook it can't sign), so move the row's place in the
+ * index to `until` instead of letting it hold the head of every run. It defers only that same row
+ * version (the write is version-checked too), so a row another path rewrote since the round, or one
+ * that fell due after the round started, is left alone. Other paths still send the row's
+ * deliveries meanwhile; only the index moves. Returns whether it wrote.
+ */
+export async function deferDue(
+  store: Pick<Store, "get" | "put">,
+  owner: string,
+  { version, dueBy, until }: { version: number; dueBy: number; until: number },
+) {
+  let deferred = false;
+  await update(store, owner, (row) => {
+    deferred = false;
+    if (!row || row.version !== version) return false;
+    const due = nextDueAt(row);
+    if (due === undefined || due > dueBy) return false;
+    row.webhookDeferredUntil = until;
+    deferred = true;
+    return row;
+  });
+  return deferred;
 }
 
 /**
@@ -419,7 +514,7 @@ export function withoutWebhookSecrets<T>(rows: T): T {
   if (!Array.isArray(rows)) return rows;
   return rows.map((row) => {
     const r = row as Partial<WebhookRow> | null;
-    if (!r || r.sk !== "WEBHOOKS" || !r.pk?.startsWith("OWNER#") || !Array.isArray(r.hooks))
+    if (!r || r.sk !== "WEBHOOKS" || !r.pk?.startsWith(WEBHOOK_PARTITION) || !Array.isArray(r.hooks))
       return row;
     return { ...r, hooks: r.hooks.map(({ secret: _secret, ...hook }) => hook) };
   }) as T;

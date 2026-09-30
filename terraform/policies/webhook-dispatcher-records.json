@@ -1,21 +1,21 @@
 [
   {
-    "Sid": "ReadRecords",
+    "Sid": "FindDueOwners",
     "Effect": "Allow",
     "Action": [
-      "dynamodb:GetItem"
+      "dynamodb:Query"
     ]
   },
   {
-    "Sid": "WriteOwnedJobs",
+    "Sid": "ReadWriteWebhookRows",
     "Effect": "Allow",
     "Action": [
+      "dynamodb:GetItem",
       "dynamodb:PutItem"
     ],
     "Condition": {
       "ForAllValues:StringLike": {
         "dynamodb:LeadingKeys": [
-          "OWNER#*",
           "WEBHOOK#*"
         ]
       },

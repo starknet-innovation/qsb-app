@@ -69,7 +69,10 @@ it("documents one mainnet pipeline through createApp, startWorkflow, and the coo
   expect(lambda).not.toContain("installSupervisedCreation(");
   expect(app).toContain("await startWorkflow(job)");
   expect(workflow).toContain("function:${var.name}-coordinator");
-  expect(releaseGate).toContain('toset(["api", "coordinator", "reference"])');
+  // Three application Lambdas; the webhook dispatcher is added only by its own switch.
+  expect(releaseGate).toContain(
+    'toset(concat(["api", "coordinator", "reference"], var.webhook_dispatcher_enabled ? ["webhooks"] : []))',
+  );
   expect(releaseGate).not.toContain("provision_runtime");
   expect(release.mainnetEnabled).toBe(false);
   expect(capability.broadcastAuthorized).toBe(false);
