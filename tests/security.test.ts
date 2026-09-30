@@ -201,6 +201,28 @@ describe("transaction invariants", () => {
       helperPsbt(raw, helper, prev, { ...vault, scriptHex: "51".repeat(99) + "52" }),
     ).toThrow("QSB previous output amount or script mismatch");
   });
+  it("accepts a helper outpoint whose stored txid is not lowercase", () => {
+    // Jobs created before POST /api/jobs canonicalised txids keep the request's
+    // casing in their manifest; the client must still assemble them.
+    const { helper, previous, spend, vault } = withdrawal();
+    expect(helper.txid).toMatch(/[a-f]/);
+    const upper = { ...helper, txid: helper.txid.toUpperCase() };
+    const built = helperPsbt(
+      hex.encode(spend.toBytes(true, true)),
+      upper,
+      hex.encode(previous.toBytes(true, true)),
+      vault,
+    );
+    expect(hex.encode(built.getInput(0).txid!)).toBe(helper.txid.toLowerCase());
+    expect(() =>
+      helperPsbt(
+        hex.encode(spend.toBytes(true, true)),
+        { ...upper, txid: "ab".repeat(32).toUpperCase() },
+        hex.encode(previous.toBytes(true, true)),
+        vault,
+      ),
+    ).toThrow("Wrong helper input");
+  });
   it("preserves QSB authorization while preparing the helper PSBT and rejects wallet replacement", () => {
     const { helper, previous, spend, vault } = withdrawal();
     const expected = helperPsbt(

@@ -20,6 +20,10 @@ it("refuses http and https requests to public hosts, through every import form",
   expect(() => https.get(new URL("https://example.com/"))).toThrow(blocked);
   expect(() => http.request({ host: "169.254.169.254", path: "/latest/meta-data/" })).toThrow(blocked);
   expect(() => esmRequest({ hostname: "example.com" })).toThrow(blocked);
+  // In the (url, options) form the options override the URL's host.
+  expect(() => http.request("http://127.0.0.1/", { hostname: "example.com" })).toThrow(blocked);
+  expect(() => https.request(new URL("https://localhost/"), { host: "example.com" })).toThrow(blocked);
+  expect(() => http.get("http://127.0.0.1/", { host: "169.254.169.254" })).toThrow(blocked);
 });
 
 it("leaves loopback open and tells the AWS SDK not to probe instance metadata", async () => {

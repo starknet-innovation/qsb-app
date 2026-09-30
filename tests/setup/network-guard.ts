@@ -35,12 +35,20 @@ globalThis.fetch = function guardedFetch(input, init) {
 } as typeof fetch;
 
 type RequestArgs = Parameters<typeof http.request>;
+/**
+ * The host a request will open a socket to. Node accepts `request(options)`,
+ * `request(url)` and `request(url, options)`; in the last form the options
+ * override what the URL says, so they are consulted first.
+ */
 function hostOf(args: RequestArgs): string {
   const [first, second] = args;
-  if (typeof first === "string" || first instanceof URL)
-    return new URL(String(first)).hostname;
-  const options = (first ?? second) as http.RequestOptions | undefined;
-  return options?.hostname ?? options?.host ?? "localhost";
+  const options = (typeof first === "object" && !(first instanceof URL) ? first : second) as
+    | http.RequestOptions
+    | undefined;
+  const fromOptions = options?.hostname ?? options?.host;
+  if (fromOptions) return fromOptions;
+  if (typeof first === "string" || first instanceof URL) return new URL(String(first)).hostname;
+  return "localhost";
 }
 for (const mod of [http, https]) {
   const request = mod.request.bind(mod), get = mod.get.bind(mod);

@@ -156,7 +156,7 @@ These POSTs accept an optional `Idempotency-Key` header, 8 to 128 characters fro
 - `/jobs/:id/pause`
 - `/jobs/:id/resume`
 
-`POST /jobs` keeps the manifest's `idempotencyKey`, and its reuse for a different withdrawal is also `idempotency_conflict`. Other routes ignore the header. That includes `POST /webhooks`: its response carries the webhook's signing secret, which is never stored for a replay, so a retried registration registers a second webhook. List and delete the extra one.
+`POST /jobs` keeps the manifest's `idempotencyKey`, and its reuse for a different withdrawal is also `idempotency_conflict`. The stored manifest is the request with `funding.txid` and `helper.txid` lowercased, however the request spelled them; the response `manifest`, its `manifestHash` and the replay comparison all cover that stored form, so hash the lowercase manifest when comparing (the SDK sends lowercase already). Other routes ignore the header. That includes `POST /webhooks`: its response carries the webhook's signing secret, which is never stored for a replay, so a retried registration registers a second webhook. List and delete the extra one.
 
 A key names one attempt. It belongs to one owner and one route, and for 24 hours it is bound to its first request's path and body. A retry with the same key gets:
 

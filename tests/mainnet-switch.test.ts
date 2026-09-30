@@ -42,12 +42,14 @@ it("keeps the deployment switch defaults off in Terraform and never hard-codes t
     expect(block, `variable "${name}" defaults to false`).toMatch(/^\s*default\s*=\s*false\s*$/m);
     expect(block).not.toMatch(/^\s*default\s*=\s*true\s*$/m);
   }
-  // The Lambda environments carry the variables, never a literal.
+  // Each Lambda environment name carries its own variable, never a literal and
+  // never the other switch: enabling mainnet must not imply exact submission.
   const compute = readFileSync(new URL("../terraform/compute.tf", import.meta.url), "utf8");
-  for (const name of ["QSB_MAINNET_ENABLED", "QSB_EXACT_SUBMIT_ENABLED"]) {
+  const wiring = { QSB_MAINNET_ENABLED: "mainnet_enabled", QSB_EXACT_SUBMIT_ENABLED: "exact_submit_enabled" } as const;
+  for (const [name, variable] of Object.entries(wiring)) {
     const assignments = [...compute.matchAll(new RegExp(`${name}\\s*=\\s*([^,}]+)`, "g"))].map((m) => m[1].trim());
     expect(assignments.length, `${name} is wired`).toBeGreaterThan(0);
-    for (const value of assignments) expect(value).toMatch(/^tostring\(var\.(?:mainnet|exact_submit)_enabled\)$/);
+    for (const value of assignments) expect(value, name).toBe(`tostring(var.${variable})`);
   }
   expect(compute).not.toMatch(/QSB_REHEARSAL_ENABLED\s*=\s*"true"/);
 });
