@@ -10,6 +10,7 @@ import { createApp } from "../server/app";
 import {
   API_ERROR_CODES,
   attachedApiErrorCode,
+  attachedCodeStatusOf,
   withApiErrorCode,
   type ApiErrorCode,
 } from "../server/api-errors";
@@ -19,6 +20,7 @@ import { ChainError, Esplora } from "../server/chain";
 import { ConsensusError } from "../server/consensus";
 import {
   MinerAuthenticationError,
+  MinerHttpError,
   Slipstream,
   type MinerCredential,
 } from "../server/providers";
@@ -320,7 +322,11 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
     f.routes.set(`/tx/${"ab".repeat(32)}/hex`, () => new Response("", { status: 404 }));
     return f.call("POST", `/vaults/${vaultId}/fund`, { txid: "ab".repeat(32), amount: "50000", costAccepted: true });
   }],
-  ["chain_unavailable", 409, (f) => f.call("GET", "/payment-utxos")],
+  ["chain_unavailable", 503, (f) => f.call("GET", "/payment-utxos")],
+  ["chain_unavailable", 503, (f) => {
+    f.routes.set("/block-height/0", () => new Response("", { status: 429 }));
+    return f.call("GET", "/payment-utxos");
+  }],
   ["chain_error", 409, (f) => {
     genesis(f, "00".repeat(32));
     return f.call("GET", "/payment-utxos");
@@ -525,7 +531,8 @@ function appModules(): string[] {
 }
 /**
  * Every error site on the default routes, as "file | where | status | code | message":
- * each apiError call in app.ts, each code attached with withApiErrorCode, and each
+ * each apiError call in app.ts, each code attached with withApiErrorCode (with the status
+ * its code sets, if it sets one: "503 attached"), and each
  * thrown class app.onError answers for (ChainError and its subclasses, Conflict,
  * ConsensusError, SubmitDisabled, MinerAuthenticationError, MinerInclusionError), in
  * app.ts and the server modules it imports.
@@ -550,8 +557,11 @@ function errorSites(): string[] {
         const [, status, code, message] = node.arguments;
         if (node.expression.text === "apiError")
           sites.push([name, where(node), text(status), text(code), text(message)].join(" | "));
-        if (node.expression.text === "withApiErrorCode")
-          sites.push([name, where(node), "attached", text(node.arguments[0]), "-"].join(" | "));
+        if (node.expression.text === "withApiErrorCode") {
+          const code = text(node.arguments[0]) as ApiErrorCode;
+          const status = attachedCodeStatusOf(code);
+          sites.push([name, where(node), status ? `${status} attached` : "attached", code, "-"].join(" | "));
+        }
       }
       if (ts.isNewExpression(node) && node.expression.getText() in chainErrors) {
         const [message, code] = node.arguments ?? [];
@@ -570,57 +580,77 @@ function errorSites(): string[] {
   return sites;
 }
 
-// Provider failures that aren't an HTTP answer keep the status and body they had before
-// the codes; only `code` says what failed.
+// Failures that no error class identifies: an upstream provider's, or a missing input. Each
+// gets its code's status (attachedCodeStatus) and the generic retry message, never the
+// provider's zod issues.
 const retry = "Unable to complete the request. Please retry.";
-const unchanged: [ApiErrorCode, number, string, (f: Fixture) => Response | Promise<Response>][] = [
-  ["chain_unavailable", 500, retry, (f) => {
+const timeout = () => new DOMException("The operation was aborted due to timeout", "TimeoutError");
+const providerFailures: [ApiErrorCode, number, string, (f: Fixture) => Response | Promise<Response>][] = [
+  ["chain_unavailable", 503, retry, (f) => {
     f.routes.set("/block-height/0", () => {
       throw new TypeError("fetch failed");
     });
     return f.call("GET", "/payment-utxos");
   }],
-  ["chain_unavailable", 500, retry, (f) => {
+  ["chain_unavailable", 503, retry, (f) => {
+    f.routes.set("/block-height/0", () => {
+      throw timeout();
+    });
+    return f.call("GET", "/payment-utxos");
+  }],
+  ["chain_unavailable", 503, retry, (f) => {
     const broken = new ReadableStream({ start: (c) => c.error(new TypeError("terminated")) });
     f.routes.set("/block-height/0", () => new Response(broken));
     return f.call("GET", "/payment-utxos");
   }],
-  ["chain_error", 400, "Invalid request", async (f) => {
+  ["chain_error", 502, retry, async (f) => {
     await f.putVault({ status: "submitted", funding: { txid: "ab".repeat(32), vout: 0, value: "50000" } });
     genesis(f);
     f.routes.set(`/tx/${"ab".repeat(32)}/status`, () => new Response("{}"));
     return f.call("GET", `/vaults/${vaultId}/funding`);
   }],
-  ["chain_error", 500, retry, (f) => {
+  ["chain_error", 502, retry, (f) => {
     genesis(f);
     f.routes.set(`/address/${owner}/utxo`, () => new Response("not json"));
     return f.call("GET", "/payment-utxos");
   }],
-  ["chain_error", 500, retry, async (f) => {
+  ["chain_error", 502, retry, async (f) => {
     await f.putVault();
     genesis(f);
     f.routes.set(`/tx/${"ab".repeat(32)}/hex`, () => new Response("zz"));
     return f.call("POST", `/vaults/${vaultId}/fund`, { txid: "ab".repeat(32), amount: "50000", costAccepted: true });
   }],
-  ["input_not_found", 500, retry, (f) => f.call("POST", "/payment-input", { txid: previousTx(f), vout: 5, value: "70000" })],
-  ["miner_request_failed", 500, retry, async (f) => {
+  ["input_not_found", 409, retry, (f) => f.call("POST", "/payment-input", { txid: previousTx(f), vout: 5, value: "70000" })],
+  ["miner_request_failed", 502, retry, async (f) => {
     await resendable(f);
     const miner = slipstreamWith(() => new Response("", { status: 503 }));
     return f.call("POST", `/vaults/${vaultId}/fund/resubmit`, {}, { app: { miner } });
   }],
-  ["miner_request_failed", 500, retry, async (f) => {
+  ["miner_request_failed", 502, retry, async (f) => {
+    await resendable(f);
+    const miner = slipstreamWith(() => Response.json({ message: "slow down" }, { status: 429 }));
+    return f.call("POST", `/vaults/${vaultId}/fund/resubmit`, {}, { app: { miner } });
+  }],
+  ["miner_request_failed", 502, retry, async (f) => {
     await resendable(f);
     const miner = slipstreamWith(() => {
       throw new TypeError("fetch failed");
     });
     return f.call("POST", `/vaults/${vaultId}/fund/resubmit`, {}, { app: { miner } });
   }],
-  ["miner_request_failed", 400, "Invalid request", async (f) => {
+  ["miner_request_failed", 502, retry, async (f) => {
+    await resendable(f);
+    const miner = slipstreamWith(() => {
+      throw timeout();
+    });
+    return f.call("POST", `/vaults/${vaultId}/fund/resubmit`, {}, { app: { miner } });
+  }],
+  ["miner_request_failed", 502, retry, async (f) => {
     await resendable(f);
     const miner = slipstreamWith(() => Response.json({ transaction: {} }));
     return f.call("POST", `/vaults/${vaultId}/fund/resubmit`, {}, { app: { miner } });
   }],
-  ["miner_unavailable", 500, retry, async (f) => {
+  ["miner_unavailable", 503, retry, async (f) => {
     await f.putVault();
     const miner = new Slipstream("https://slipstream.mara.com", async () => {
       throw new Error("secret store down");
@@ -725,13 +755,13 @@ describe("API error codes", () => {
     if (code === "operations_disabled") expect(body.checks).toEqual(expect.any(Array));
     expectDocumented(f, status, code);
   });
-  it.each(unchanged)("returns %s with the unchanged HTTP %i and message %j", async (code, status, error, run) => {
+  it.each(providerFailures)("returns %s with HTTP %i and message %j, without provider issues", async (code, status, error, run) => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const f = await setup();
     const response = await run(f);
     const body = await response.json();
     expect({ status: response.status, code: body.code, error: body.error }).toEqual({ status, code, error });
-    if (status === 400) expect(body.issues).toEqual(expect.any(Array));
+    expect(body).not.toHaveProperty("issues");
     expectDocumented(f, status, code);
   });
   it("attaches a code without changing the error callers catch", async () => {
@@ -756,7 +786,7 @@ describe("API error codes", () => {
   });
   it("drives every listed code, and the list has no duplicates", () => {
     expect(new Set(API_ERROR_CODES).size).toBe(API_ERROR_CODES.length);
-    const driven = [...cases.map(([code]) => code), ...unchanged.map(([code]) => code)];
+    const driven = [...cases.map(([code]) => code), ...providerFailures.map(([code]) => code)];
     expect([...new Set(driven)].sort()).toEqual([...API_ERROR_CODES].sort());
   });
   it("lists every code once in docs/API.md", () => {
@@ -797,5 +827,115 @@ describe("API error codes", () => {
     // A changed code or message at any site fails here. Review a deliberate change, then
     // update the list with `npx vitest run tests/api-errors.test.ts -u`.
     await expect(JSON.stringify(errorSites(), null, 2) + "\n").toMatchFileSnapshot("./api-error-sites.json");
+  });
+});
+
+// The provider-failure statuses change only the response. Each path still does what it did:
+// the deposit intent stays recorded, nothing more is sent, nothing is written or reserved.
+describe("provider failures on the funds path", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+  const expectFailure = async (response: Response, status: number, code: ApiErrorCode) => {
+    const body = await response.json();
+    expect({ status: response.status, code: body.code }).toEqual({ status, code });
+    expect(body).not.toHaveProperty("issues");
+  };
+  const failingSecret = () =>
+    new Slipstream("https://slipstream.mara.com", async () => {
+      throw new Error("secret store down");
+    });
+  it("keeps a fresh deposit unfunded and unsent when the credential read fails (503)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = await setup();
+    await f.putVault();
+    const miner = failingSecret();
+    const post = vi.spyOn(miner, "submitFunding");
+    const response = await f.call("POST", `/vaults/${vaultId}/fund/submit`, { rawTxHex: deposit(), amount: "50000", costAccepted: true }, { app: { miner } });
+    await expectFailure(response, 503, "miner_unavailable");
+    expect(post).not.toHaveBeenCalled();
+    const row = await f.store.get(pk, `VAULT#${vaultId}`);
+    expect((row!.vault as PublicVault).status).toBe("unfunded");
+    expect(row!.fundingRawTxHex).toBeUndefined();
+  });
+  it.each([
+    ["fund/submit", () => new Response("", { status: 503 })],
+    ["fund/submit", () => Response.json({ transaction: {} })],
+    ["fund/resubmit", () => new Response("", { status: 429 })],
+    ["fund/resubmit", () => {
+      throw new TypeError("fetch failed");
+    }],
+  ] as const)("keeps a submitted deposit's intent and sends nothing when the miner check fails on %s (502)", async (route, answer) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = await setup();
+    await resendable(f);
+    const before = await f.store.get(pk, `VAULT#${vaultId}`);
+    const miner = slipstreamWith(answer);
+    const body = route === "fund/submit" ? { rawTxHex: before!.fundingRawTxHex, amount: "50000", costAccepted: true } : {};
+    await expectFailure(await f.call("POST", `/vaults/${vaultId}/${route}`, body, { app: { miner } }), 502, "miner_request_failed");
+    // Only the status lookup went out, never the POST.
+    const requests = vi.mocked(fetch).mock.calls.map(([url, init]) => `${init?.method ?? "GET"} ${new URL(String(url)).pathname}`);
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests.every((r) => r === "GET /api/transactions/status")).toBe(true);
+    const after = await f.store.get(pk, `VAULT#${vaultId}`);
+    expect(after!.vault).toEqual(before!.vault);
+    expect(after!.fundingRawTxHex).toBe(before!.fundingRawTxHex);
+  });
+  it("records no withdrawal intent when the credential read fails on submit (503)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = await setup();
+    const body = await readyToSubmit(f);
+    f.miner.credential.mockImplementation(() => failingSecret().credential());
+    await expectFailure(await f.call("POST", `/jobs/${jobId}/submit`, body), 503, "miner_unavailable");
+    expect(f.miner.submit).not.toHaveBeenCalled();
+    expect(await f.store.list(pk, "TX#")).toEqual([]);
+    expect(((await f.store.get(pk, `JOB#${jobId}`))!.job as Job).txid).toBeUndefined();
+  });
+  it.each([
+    ["chain_unavailable", 503, () => {
+      throw new TypeError("fetch failed");
+    }],
+    ["chain_error", 502, () => new Response("zz")],
+  ] as const)("records no withdrawal intent and reads no credential when the chain fails on submit (%s, %i)", async (code, status, hexAnswer) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = await setup();
+    const body = await readyToSubmit(f);
+    vi.mocked(f.chain.unspent).mockRestore();
+    genesis(f);
+    for (const point of [manifest.funding, manifest.helper]) f.routes.set(`/tx/${point.txid}/hex`, hexAnswer);
+    await expectFailure(await f.call("POST", `/jobs/${jobId}/submit`, body), status, code);
+    expect(f.miner.credential).not.toHaveBeenCalled();
+    expect(f.miner.submit).not.toHaveBeenCalled();
+    expect(await f.store.list(pk, "TX#")).toEqual([]);
+  });
+  it("creates no withdrawal and reserves no input when the funding output doesn't exist (409)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("SOLVER_RELEASE_ID", servedRelease.id);
+    const f = await setup();
+    const id = previousTx(f);
+    const funding = { txid: id, vout: 5, value: "100000" };
+    await f.putVault({ status: "confirmed", funding });
+    const response = await f.call("POST", "/jobs", { ...manifest, funding }, { app: { ownerLimits: ownerOff } });
+    await expectFailure(response, 409, "input_not_found");
+    expect(await f.store.list(pk, "JOB#")).toEqual([]);
+    expect(await f.store.reservationRows()).toEqual([]);
+  });
+  it("leaves each error's class unchanged for callers", async () => {
+    const f = await setup();
+    // input_not_found: whatever the transaction library throws, not a ChainError.
+    const missing = await f.chain.unspent({ txid: previousTx(f), vout: 5, value: "70000" }, "00").catch((e: unknown) => e);
+    expect(missing).not.toBeInstanceOf(ChainError);
+    expect(attachedApiErrorCode(missing)).toBe("input_not_found");
+    // miner_request_failed: the miner's own MinerHttpError, which seen() and submitFunding branch on.
+    const miner = slipstreamWith(() => new Response("", { status: 503 }));
+    const failed = await miner.seen("ab".repeat(32)).catch((e: unknown) => e);
+    expect(failed).toBeInstanceOf(MinerHttpError);
+    expect(attachedApiErrorCode(failed)).toBe("miner_request_failed");
+    // miner_unavailable: the secret store's own error.
+    const unread = await failingSecret().credential().catch((e: unknown) => e);
+    expect(unread).not.toBeInstanceOf(MinerAuthenticationError);
+    expect(attachedApiErrorCode(unread)).toBe("miner_unavailable");
   });
 });
