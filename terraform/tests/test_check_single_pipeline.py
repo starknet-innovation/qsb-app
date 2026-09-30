@@ -386,11 +386,22 @@ class DeployChecks(unittest.TestCase):
         for expression in ('rate(30 seconds)', 'rate(0 minutes)', 'cron(* * * * ? *)'):
             with self.subTest(expression=expression):
                 self.refused(with_dispatcher(expression=expression), 'rate of at least one minute')
+        scheduler = {'Effect': 'Allow', 'Principal': {'Service': 'scheduler.amazonaws.com'}, 'Action': 'sts:AssumeRole'}
         for trust in ([{'Effect': 'Allow', 'Principal': {'Service': 'lambda.amazonaws.com'}, 'Action': 'sts:AssumeRole',
                         'Condition': {'StringEquals': {'aws:SourceAccount': '123456789012'}}}],
-                      [{'Effect': 'Allow', 'Principal': {'Service': 'scheduler.amazonaws.com'}, 'Action': 'sts:AssumeRole'}]):
+                      [scheduler],
+                      # Another account's schedules, or any account's.
+                      [dict(scheduler, Condition={'StringEquals': {'aws:SourceAccount': '210987654321'}})],
+                      [dict(scheduler, Condition={'StringLike': {'aws:SourceAccount': '*'}})],
+                      [dict(scheduler, Condition={'StringEquals': {'aws:SourceAccount': ['123456789012', '210987654321']}})]):
             with self.subTest(trust=trust):
                 self.refused(with_dispatcher(trust=trust), 'trust only EventBridge Scheduler')
+
+    def test_the_dispatcher_reaches_only_this_accounts_table(self):
+        other = TABLE_ARN.replace('123456789012', '210987654321')
+        records = [dict(s, Resource=f'{other}/index/webhook-due' if s['Sid'] == 'FindDueOwners' else other)
+                   for s in dispatcher_records()]
+        self.refused(with_dispatcher(records=records), 'reaches only the records table')
 
     def test_the_dispatcher_gets_only_its_table(self):
         for env in ({'TABLE_NAME': 'qsb-app-records', 'QSB_MAINNET_ENABLED': 'true'},

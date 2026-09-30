@@ -125,12 +125,15 @@ def dispatcher_rules(rows, dispatcher):
     require(rate and int(rate.group(1)) >= 1, 'The webhook schedule must be a rate of at least one minute')
     target = (schedule.get('target') or [{}])[0]
     function_arn = target.get('arn')
-    require(isinstance(function_arn, str) and function_arn.endswith(':function:' + str(function.get('function_name'))),
+    target_arn = re.fullmatch(r'arn:aws[a-z-]*:lambda:[a-z0-9-]+:([0-9]{12}):function:([A-Za-z0-9_-]+)', str(function_arn))
+    require(target_arn is not None and target_arn.group(2) == function.get('function_name'),
             'The webhook schedule must invoke the webhook dispatcher and nothing else')
+    # The stack's own account, from the dispatcher's ARN: the schedule role trusts Scheduler for this account only.
+    account = target_arn.group(1)
     trust = json.loads(schedule_roles[0].get('values', {}).get('assume_role_policy') or '{}').get('Statement')
     require(isinstance(trust, list) and len(trust) == 1 and trust[0].get('Principal') == {'Service': 'scheduler.amazonaws.com'}
             and trust[0].get('Action') == 'sts:AssumeRole' and trust[0].get('Effect') == 'Allow'
-            and re.fullmatch(r'[0-9]{12}', str(trust[0].get('Condition', {}).get('StringEquals', {}).get('aws:SourceAccount'))),
+            and trust[0].get('Condition') == {'StringEquals': {'aws:SourceAccount': account}},
             'The schedule role must trust only EventBridge Scheduler, from this account')
     documents = {}
     for name, row in policies.items():
@@ -144,7 +147,7 @@ def dispatcher_rules(rows, dispatcher):
             and all(s.get('Effect') == 'Allow' and s.get('Action') == DISPATCHER_ACTIONS[sid] for sid, s in records.items()),
             'The webhook dispatcher may only Query the due-delivery index and GetItem/PutItem records')
     table_arn = records['ReadOwnerRows'].get('Resource')
-    require(isinstance(table_arn, str) and table_arn.endswith(':table/' + str(table.get('name')))
+    require(isinstance(table_arn, str) and table_arn.endswith(f':{account}:table/' + str(table.get('name')))
             and records['WriteWebhookRows'].get('Resource') == table_arn
             and records['FindDueOwners'].get('Resource') == f'{table_arn}/index/{DUE_INDEX}'
             and 'Condition' not in records['FindDueOwners'],
