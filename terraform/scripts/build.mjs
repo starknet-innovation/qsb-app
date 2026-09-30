@@ -21,7 +21,8 @@ execFileSync('npm',['run','build'],{stdio:'inherit',env:{...process.env,VITE_QSB
 const out = path.join(root,'terraform/.build');
 rmSync(out,{recursive:true,force:true});mkdirSync(out,{recursive:true});
 cpSync('dist',path.join(out,'frontend'),{recursive:true});
-for (const [name,entry] of [['api','server/lambda.ts'],['coordinator','server/coordinator.ts']]) {
+// The webhook dispatcher is its own small bundle: it doesn't contain the coordinator or the API.
+for (const [name,entry] of [['api','server/lambda.ts'],['coordinator','server/coordinator.ts'],['webhooks','server/webhook-dispatcher.ts']]) {
   mkdirSync(path.join(out,name));
   await build({entryPoints:[entry],outfile:path.join(out,name,'index.js'),bundle:true,platform:'node',target:'node22',format:'cjs',minify:true,define:{'import.meta.env':'undefined'},logLevel:'warning'});
 }
@@ -36,7 +37,7 @@ execFileSync('python3',[path.join(root,'terraform/scripts/zip.py'),out],{stdio:'
 const walk=(dir,prefix='')=>readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(dir,e.name),prefix+e.name+'/'):[prefix+e.name]);
 const frontendFiles=walk(path.join(out,'frontend')).sort();
 const files={};
-for(const n of ['api.zip','coordinator.zip','reference.zip',...frontendFiles.map(n=>'frontend/'+n)]) files[n]=createHash('sha256').update(readFileSync(path.join(out,n))).digest('hex');
+for(const n of ['api.zip','coordinator.zip','reference.zip','webhooks.zip',...frontendFiles.map(n=>'frontend/'+n)]) files[n]=createHash('sha256').update(readFileSync(path.join(out,n))).digest('hex');
 const identities = JSON.parse(execFileSync(process.execPath, ['--import','tsx','--input-type=module','-e',
   'import { buildIdentities } from "./server/build-identities.ts"; process.stdout.write(JSON.stringify(buildIdentities(...JSON.parse(process.env.QSB_BUILD_IDENTITIES_INPUT))));'
 ], {encoding:'utf8', env:{...process.env,QSB_BUILD_IDENTITIES_INPUT:JSON.stringify([solverId,commit,files['reference.zip']])}}));

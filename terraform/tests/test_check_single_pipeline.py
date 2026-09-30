@@ -55,6 +55,41 @@ def plan():
             'resource_changes': [{'mode': 'managed', 'change': {'actions': ['create']}}]}
 
 
+TABLE_ARN = 'arn:aws:dynamodb:eu-west-1:123456789012:table/qsb-app-records'
+DISPATCHER_ARN = 'arn:aws:lambda:eu-west-1:123456789012:function:qsb-app-webhooks'
+OWNER_KEYS = {'ForAllValues:StringLike': {'dynamodb:LeadingKeys': ['OWNER#*']}, 'Null': {'dynamodb:LeadingKeys': 'false'}}
+
+
+def dispatcher_records():
+    """terraform/policies/webhook-dispatcher-records.json as terraform/webhooks.tf scopes it."""
+    source = json.loads((SCRIPT.parents[1] / 'policies/webhook-dispatcher-records.json').read_text())
+    return [dict(s, Resource=f'{TABLE_ARN}/index/webhook-due' if s['Sid'] == 'FindDueOwners' else TABLE_ARN) for s in source]
+
+
+def with_dispatcher(doc=None, records=None, invoke=None, env=None, index=None, expression='rate(5 minutes)', trust=None):
+    """A plan with webhook_dispatcher_enabled: its function, two roles, two policies, schedule and index."""
+    doc = doc or plan()
+    rows = doc['planned_values']['root_module']['resources']
+    table = next(r for r in rows if r['type'] == 'aws_dynamodb_table')
+    table['values']['global_secondary_index'] = [index or {'name': 'webhook-due', 'projection_type': 'KEYS_ONLY',
+                                                           'non_key_attributes': None}]
+    policy = lambda name, statements: {'type': 'aws_iam_role_policy', 'name': name, 'mode': 'managed',
+                                       'values': {'policy': json.dumps({'Version': '2012-10-17', 'Statement': statements})}}
+    schedule_role = role('webhook_schedule')
+    schedule_role['values']['assume_role_policy'] = json.dumps({'Statement': trust or [{
+        'Effect': 'Allow', 'Principal': {'Service': 'scheduler.amazonaws.com'}, 'Action': 'sts:AssumeRole',
+        'Condition': {'StringEquals': {'aws:SourceAccount': '123456789012'}}}]})
+    rows += [{'type': 'aws_lambda_function', 'name': 'webhooks', 'mode': 'managed',
+              'values': {'function_name': 'qsb-app-webhooks',
+                         'environment': [{'variables': env or {'TABLE_NAME': 'qsb-app-records'}}]}},
+             role('lambda'), schedule_role,
+             policy('webhook_records', records or dispatcher_records()),
+             policy('webhook_schedule', invoke or [{'Effect': 'Allow', 'Action': 'lambda:InvokeFunction', 'Resource': DISPATCHER_ARN}]),
+             {'type': 'aws_scheduler_schedule', 'name': 'webhooks', 'mode': 'managed',
+              'values': {'schedule_expression': expression, 'target': [{'arn': DISPATCHER_ARN}]}}]
+    return doc
+
+
 class DeployChecks(unittest.TestCase):
     def run_check(self, document, *flags, jsonl=False):
         with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
@@ -296,6 +331,106 @@ class DeployChecks(unittest.TestCase):
             with self.subTest(fail=fail):
                 self.refused(self.with_workflow(fail=fail), 'NeedsOperatorAttention must stay a Fail state')
 
+    def test_the_webhook_dispatcher_passes_when_complete(self):
+        self.assertEqual(self.run_check(with_dispatcher(), '--deploy', '--first-apply')[0], 0)
+
+    def test_the_webhook_dispatcher_comes_whole_or_not_at_all(self):
+        for kind, name in (('aws_scheduler_schedule', 'webhooks'), ('aws_iam_role_policy', 'webhook_records'),
+                           ('aws_iam_role_policy', 'webhook_schedule')):
+            doc = with_dispatcher()
+            rows = doc['planned_values']['root_module']['resources']
+            rows.remove(next(r for r in rows if r['type'] == kind and r['name'] == name))
+            with self.subTest(missing=name):
+                self.refused(doc, 'needs exactly its schedule')
+        doc = with_dispatcher()
+        rows = doc['planned_values']['root_module']['resources']
+        rows.remove(next(r for r in rows if r['type'] == 'aws_lambda_function' and r['name'] == 'webhooks'))
+        rows.remove(next(r for r in rows if r['type'] == 'aws_iam_role' and r['name'] == 'lambda'))
+        rows.remove(next(r for r in rows if r['type'] == 'aws_iam_role' and r['name'] == 'webhook_schedule'))
+        self.refused(doc, 'come only with the webhook dispatcher')
+        doc = plan()
+        next(r for r in doc['planned_values']['root_module']['resources']
+             if r['type'] == 'aws_dynamodb_table')['values']['global_secondary_index'] = [{'name': 'webhook-due'}]
+        self.refused(doc, 'come only with the webhook dispatcher')
+
+    def test_the_dispatcher_records_grant_is_exactly_scoped(self):
+        wider = [dict(s, Action=s['Action'] + ['dynamodb:DeleteItem']) if s['Sid'] == 'WriteWebhookRows' else s
+                 for s in dispatcher_records()]
+        scan = [dict(s, Action=['dynamodb:Scan']) if s['Sid'] == 'FindDueOwners' else s for s in dispatcher_records()]
+        table_query = [dict(s, Resource=TABLE_ARN) if s['Sid'] == 'FindDueOwners' else s for s in dispatcher_records()]
+        any_key = [{k: v for k, v in s.items() if k != 'Condition'} if s['Sid'] == 'ReadOwnerRows' else s
+                   for s in dispatcher_records()]
+        system = [dict(s, Condition=dict(s['Condition'], **{'ForAllValues:StringLike': {'dynamodb:LeadingKeys': ['SYSTEM#*']}}))
+                  if s['Sid'] == 'WriteWebhookRows' else s for s in dispatcher_records()]
+        job_rows = [dict(s, Condition=dict(s['Condition'], **{'ForAllValues:StringEquals': {
+            'dynamodb:Attributes': ['pk', 'sk', 'version', 'job']}})) if s['Sid'] == 'WriteWebhookRows' else s
+            for s in dispatcher_records()]
+        extra = dispatcher_records() + [{'Sid': 'Extra', 'Effect': 'Allow', 'Action': ['dynamodb:GetItem'], 'Resource': TABLE_ARN}]
+        for records, message in ((wider, 'may only Query'), (scan, 'may only Query'), (extra, 'may only Query'),
+                                 (table_query, 'reaches only the records table'),
+                                 (any_key, 'present OWNER# keys'), (system, 'present OWNER# keys'),
+                                 (job_rows, "a WEBHOOKS row's attributes")):
+            with self.subTest(message=message):
+                self.refused(with_dispatcher(records=records), message)
+
+    def test_the_schedule_only_invokes_the_dispatcher(self):
+        self.refused(with_dispatcher(invoke=[{'Effect': 'Allow', 'Action': 'lambda:InvokeFunction',
+                                              'Resource': 'arn:aws:lambda:eu-west-1:123456789012:function:qsb-app-coordinator'}]),
+                     'may only invoke the webhook dispatcher')
+        self.refused(with_dispatcher(invoke=[{'Effect': 'Allow', 'Action': 'lambda:*', 'Resource': DISPATCHER_ARN}]),
+                     'may only invoke the webhook dispatcher')
+        doc = with_dispatcher()
+        next(r for r in doc['planned_values']['root_module']['resources']
+             if r['type'] == 'aws_scheduler_schedule')['values']['target'][0]['arn'] = DISPATCHER_ARN.replace('webhooks', 'coordinator')
+        self.refused(doc, 'must invoke the webhook dispatcher')
+        for expression in ('rate(30 seconds)', 'rate(0 minutes)', 'cron(* * * * ? *)'):
+            with self.subTest(expression=expression):
+                self.refused(with_dispatcher(expression=expression), 'rate of at least one minute')
+        for trust in ([{'Effect': 'Allow', 'Principal': {'Service': 'lambda.amazonaws.com'}, 'Action': 'sts:AssumeRole',
+                        'Condition': {'StringEquals': {'aws:SourceAccount': '123456789012'}}}],
+                      [{'Effect': 'Allow', 'Principal': {'Service': 'scheduler.amazonaws.com'}, 'Action': 'sts:AssumeRole'}]):
+            with self.subTest(trust=trust):
+                self.refused(with_dispatcher(trust=trust), 'trust only EventBridge Scheduler')
+
+    def test_the_dispatcher_gets_only_its_table(self):
+        for env in ({'TABLE_NAME': 'qsb-app-records', 'QSB_MAINNET_ENABLED': 'true'},
+                    {'TABLE_NAME': 'qsb-app-records', 'WORKFLOW_ARN': 'x'}, {'TABLE_NAME': 'qsb-other'}):
+            with self.subTest(env=env):
+                self.refused(with_dispatcher(env=env), 'gets only TABLE_NAME')
+        self.refused(with_dispatcher(env={'TABLE_NAME': 'qsb-app-records', 'AWS_BATCH_JOB_QUEUE': 'x'}), 'Only coordinator')
+        self.refused(with_dispatcher(env={'TABLE_NAME': 'qsb-app-records', 'SLIPSTREAM_SECRET_ARN': MINER}), 'Only the API')
+
+    def test_the_due_index_returns_keys_only(self):
+        for index in ({'name': 'webhook-due', 'projection_type': 'ALL'},
+                      {'name': 'webhook-due', 'projection_type': 'INCLUDE', 'non_key_attributes': ['hooks']},
+                      {'name': 'other', 'projection_type': 'KEYS_ONLY'}):
+            with self.subTest(index=index):
+                self.refused(with_dispatcher(index=index), 'one keys-only index')
+
+    def test_dispatcher_policies_stay_on_their_roles_once_known(self):
+        doc = with_dispatcher()
+        rows = doc['planned_values']['root_module']['resources']
+        dispatcher_role = [r for r in rows if r['type'] == 'aws_iam_role' and r['name'] == 'lambda'][-1]
+        dispatcher_role['index'], dispatcher_role['values']['name'] = 'webhooks', 'qsb-app-webhooks'
+        schedule_role = next(r for r in rows if r['name'] == 'webhook_schedule' and r['type'] == 'aws_iam_role')
+        records = next(r for r in rows if r['name'] == 'webhook_records')
+        records['values']['role'] = 'qsb-app-webhooks'
+        invoke = next(r for r in rows if r['name'] == 'webhook_schedule' and r['type'] == 'aws_iam_role_policy')
+        invoke['values']['role'] = schedule_role['values']['name']
+        self.assertEqual(self.run_check(doc, '--deploy')[0], 0)
+        rows.append({'type': 'aws_iam_role_policy', 'name': 'start', 'mode': 'managed', 'values': {
+            'role': 'qsb-app-webhooks', 'policy': json.dumps({'Statement': [{'Effect': 'Allow', 'Action': 'states:StartExecution', 'Resource': '*'}]})}})
+        self.refused(doc, 'only its logs and records policies')
+        rows.pop()
+        invoke['values']['role'] = 'qsb-app-webhooks'
+        self.refused(doc, 'only its logs and records policies')
+
+    def test_the_dispatcher_role_must_be_bounded(self):
+        doc = with_dispatcher()
+        next(r for r in doc['planned_values']['root_module']['resources']
+             if r['type'] == 'aws_iam_role' and r['name'] == 'webhook_schedule')['values']['permissions_boundary'] = None
+        self.refused(doc, 'qsb-runtime-boundary', '--deploy')
+
     def test_flags_need_a_saved_plan(self):
         events = [{'type': 'test_run', '@testrun': 'baseline'}, {'type': 'test_summary', 'test_summary': {'status': 'pass'}}]
         code, err = self.run_check(events, '--deploy', jsonl=True)
@@ -369,6 +504,13 @@ class SourceRules(unittest.TestCase):
                       'role   = aws_iam_role.lambda["coordinator"].id\n  policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "secretsmanager'),
                      'one statement on the API role')
         self.refused(('compute.tf', 'Resource = var.slipstream_secret_arn', 'Resource = "*"'), 'one statement on the API role')
+
+    def test_the_dispatcher_roles_are_used_only_by_their_own_resources(self):
+        self.refused(('compute.tf', 'role   = aws_iam_role.lambda["api"].id\n  policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "states:StartExecution"',
+                      'role   = aws_iam_role.lambda["webhooks"].id\n  policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "states:StartExecution"'),
+                     'may use aws_iam_role.lambda["webhooks"]')
+        self.refused(('webhooks.tf', None, '\nresource "aws_iam_role_policy" "extra" {\n  role   = aws_iam_role.webhook_schedule[0].id\n  policy = "{}"\n}\n'),
+                     'may use aws_iam_role.webhook_schedule')
 
     def test_only_the_api_receives_the_secret_reference(self):
         self.refused(('compute.tf', 'REFERENCE_FUNCTION = aws_lambda_function.reference.function_name',

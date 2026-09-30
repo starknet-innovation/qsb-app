@@ -490,7 +490,10 @@ registered webhook in plaintext, because HMAC signing needs it (see
 [API.md](API.md)). Handle it as a credential:
 
 - Readers: the API role, the coordinator role (its GetItem is not
-  prefix-restricted) and any operator session with table read access.
+  prefix-restricted), the webhook dispatcher's role when it is enabled (GetItem on
+  `OWNER#` keys; see [Scheduled webhook dispatcher](#scheduled-webhook-dispatcher))
+  and any operator session with table read access. The due-delivery index is keys
+  only, so a query of it returns no secret.
 - Backups: point-in-time recovery is on for the table, so a secret stays in its
   backups until they age out of the recovery window (35 days unless the table is
   configured shorter; check the table's setting). Deleting a webhook doesn't purge
@@ -503,6 +506,68 @@ registered webhook in plaintext, because HMAC signing needs it (see
   would keep plaintext secrets out of the table and its backups. It needs new IAM
   grants for the API and coordinator roles, so it needs the AWS admin's heads-up
   first.
+
+## Scheduled webhook dispatcher
+
+Queued webhook deliveries are sent at the end of API requests and coordinator
+ticks for the same owner. Once a withdrawal's last tick has run, a retry that falls
+due later waits for that owner's next activity. The dispatcher closes that gap:
+every 5 minutes EventBridge Scheduler invokes the `<name>-webhooks` Lambda
+(`server/webhook-dispatcher.ts`), which asks the due-delivery index which owners
+have a delivery due and runs the same delivery round as the API and coordinator
+(`deliverDue`: SSRF checks, HMAC signing, leases, backoff, the failing state).
+
+- **Index.** `webhook-due` is a sparse, keys-only global secondary index of the
+  records table on `webhookQueue` and `webhookDueAt`. Every write of a `WEBHOOKS`
+  row sets those two attributes from the row's own queue, in the same PutItem, so
+  the index adds no request and can't disagree with the row. A row written by older
+  code is corrected on its owner's next delivery round.
+- **Bounds.** One run takes at most 50 owners, most overdue first, serves 4 at a
+  time with up to 5 rounds of 10 deliveries each, and stops starting rounds after
+  40 seconds. The Lambda times out at 60 seconds, runs one at a time (reserved
+  concurrency 1, taken from the account's unreserved pool) and isn't retried: the
+  next run finds the same due deliveries.
+- **Isolation.** It runs no coordinator, API, payment or reconcile code, and its
+  bundle contains none (a test checks the bundle's inputs). Its role may query the
+  index, GetItem `OWNER#` rows and PutItem `OWNER#` items made only of a
+  `WEBHOOKS` row's attributes, so it can't write a job, vault, intent,
+  reservation or system row. IAM can't limit a key to its sort key, so it can read
+  other `OWNER#` rows; it never does. The schedule's role may only invoke it.
+- **Switch.** `webhook_dispatcher_enabled`, default `false`. Off, Terraform plans
+  no index, Lambda, role or schedule, and deliveries behave as before.
+
+**Admin steps, before the first enable.** The switch needs an IAM update that only
+the AWS administrator can install:
+
+1. From a clean `main` that includes this change, run
+   `ops/github-aws/update_installed.py` in plan mode as `qsb-viewonly`. Expect
+   `differs` for `qsb-github-deploy/qsb-terraform-deployment` and the
+   `qsb-operator-N` policies, and nothing else: `PassRuntimeRoles` also names
+   `scheduler.amazonaws.com`, and a new `QsbSchedules` statement allows
+   Create/Get/Update/DeleteSchedule on `schedule/default/qsb-*`. The runtime
+   boundary is `identical`: it already allows everything the two new roles use.
+   If the plan shows a different number of operator policies, stop: that needs a
+   separately reviewed step.
+2. Review it, then `--apply` as the administrator, confirmed or with
+   `--yes --plan-hash`.
+3. Run `verify.py --role-arn` against `qsb-github-deploy`; it includes the new
+   schedule and PassRole cases.
+
+**Enable.** Then, as `qsb-operator`, set `webhook_dispatcher_enabled = true` and
+plan. The plan adds the index to the table (an in-place update that backfills it),
+one Lambda with its log group and error alarm, the two roles, three role policies
+and the schedule, and changes nothing else. Run
+`check-single-pipeline.py --deploy` on it, then apply.
+
+**Check.** Within 10 minutes the dispatcher's log group shows one
+`{"webhookDispatch": {...}}` line of counts per run and no errors, and the
+`<name>-webhooks-errors` alarm stays quiet. An `AccessDeniedException` on its
+PutItem means AWS doesn't apply the `dynamodb:Attributes` condition as expected:
+turn the switch off and report it; don't widen the grant without review.
+
+**Back out.** Set the switch to `false` and apply. That removes the schedule,
+Lambda, roles and index. Rows keep the two index attributes, which do nothing
+without the index; deliveries go back to requests and ticks only.
 
 ## Deploy-time mainnet and submit switches
 

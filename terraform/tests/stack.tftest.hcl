@@ -533,3 +533,59 @@ run "reject_manifest_solver_override" {
   }
   expect_failures = [terraform_data.release]
 }
+
+run "webhook_dispatcher_default_off" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition     = length(aws_lambda_function.webhooks) == 0 && length(aws_scheduler_schedule.webhooks) == 0 && length(aws_iam_role.webhook_schedule) == 0 && length(aws_iam_role_policy.webhook_schedule) == 0 && length(aws_iam_role_policy.webhook_records) == 0 && toset(keys(aws_iam_role.lambda)) == toset(["api", "coordinator", "reference"]) && length(aws_dynamodb_table.records.global_secondary_index) == 0 && length(aws_dynamodb_table.records.attribute) == 2
+    error_message = "With the switch off, no dispatcher, schedule, role or index is planned, and the table keeps its two key attributes."
+  }
+}
+run "webhook_dispatcher_enabled" {
+  command = plan
+  variables {
+    network                      = "mainnet"
+    webhook_dispatcher_enabled   = true
+    iam_role_path                = "/qsb/runtime/"
+    iam_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary"
+  }
+  assert {
+    condition     = aws_scheduler_schedule.webhooks[0].name == "qsb-test-webhooks" && aws_scheduler_schedule.webhooks[0].schedule_expression == "rate(5 minutes)" && aws_scheduler_schedule.webhooks[0].flexible_time_window[0].mode == "OFF" && aws_scheduler_schedule.webhooks[0].target[0].arn == "arn:aws:lambda:eu-west-1:123456789012:function:${aws_lambda_function.webhooks[0].function_name}" && aws_scheduler_schedule.webhooks[0].target[0].retry_policy[0].maximum_retry_attempts == 0 && try(aws_scheduler_schedule.webhooks[0].target[0].input, null) == null
+    error_message = "Every 5 minutes the schedule invokes the dispatcher, with no input and no retry."
+  }
+  assert {
+    condition = jsonencode(jsondecode(aws_iam_role.webhook_schedule[0].assume_role_policy).Statement) == jsonencode([
+      { Effect = "Allow", Principal = { Service = "scheduler.amazonaws.com" }, Action = "sts:AssumeRole", Condition = { StringEquals = { "aws:SourceAccount" = var.aws_account_id } } }
+      ]) && jsonencode(jsondecode(aws_iam_role_policy.webhook_schedule[0].policy).Statement) == jsonencode([
+      { Effect = "Allow", Action = "lambda:InvokeFunction", Resource = "arn:aws:lambda:eu-west-1:123456789012:function:qsb-test-webhooks" }
+    ])
+    error_message = "Only EventBridge Scheduler in this account can use the schedule role, and it can only invoke the dispatcher."
+  }
+  assert {
+    condition = jsonencode(jsondecode(aws_iam_role_policy.webhook_records[0].policy).Statement) == jsonencode([
+      { Sid = "FindDueOwners", Effect = "Allow", Action = ["dynamodb:Query"], Resource = "arn:aws:dynamodb:eu-west-1:123456789012:table/qsb-test-records/index/webhook-due" },
+      { Sid = "ReadOwnerRows", Effect = "Allow", Action = ["dynamodb:GetItem"], Condition = { "ForAllValues:StringLike" = { "dynamodb:LeadingKeys" = ["OWNER#*"] }, Null = { "dynamodb:LeadingKeys" = "false" } }, Resource = "arn:aws:dynamodb:eu-west-1:123456789012:table/qsb-test-records" },
+      { Sid = "WriteWebhookRows", Effect = "Allow", Action = ["dynamodb:PutItem"], Condition = { "ForAllValues:StringEquals" = { "dynamodb:Attributes" = ["pk", "sk", "version", "hooks", "pending", "webhookQueue", "webhookDueAt"] }, "ForAllValues:StringLike" = { "dynamodb:LeadingKeys" = ["OWNER#*"] }, Null = { "dynamodb:Attributes" = "false", "dynamodb:LeadingKeys" = "false" } }, Resource = "arn:aws:dynamodb:eu-west-1:123456789012:table/qsb-test-records" }
+    ])
+    error_message = "The dispatcher may only query the due-delivery index, read OWNER# rows and write WEBHOOKS-shaped OWNER# items."
+  }
+  assert {
+    condition     = toset(keys(aws_iam_role.lambda)) == toset(["api", "coordinator", "reference", "webhooks"]) && alltrue([for role in concat(values(aws_iam_role.lambda), aws_iam_role.webhook_schedule) : role.path == "/qsb/runtime/" && role.permissions_boundary == var.iam_permissions_boundary_arn]) && contains(keys(aws_iam_role_policy.logs), "webhooks") && contains(keys(aws_cloudwatch_metric_alarm.lambda_errors), "webhooks") && contains(keys(aws_cloudwatch_log_group.lambda), "webhooks") && !contains(keys(aws_iam_role_policy.records), "webhooks")
+    error_message = "Both new roles keep the runtime path and boundary; the dispatcher gets logs and an error alarm, and not the API's record grant."
+  }
+  assert {
+    condition     = aws_lambda_function.webhooks[0].function_name == "qsb-test-webhooks" && aws_lambda_function.webhooks[0].handler == "index.handler" && aws_lambda_function.webhooks[0].timeout == 60 && aws_lambda_function.webhooks[0].reserved_concurrent_executions == 1 && aws_lambda_function.webhooks[0].environment[0].variables == tomap({ TABLE_NAME = aws_dynamodb_table.records.name })
+    error_message = "The dispatcher runs one at a time and gets only the table name: no mainnet, workflow, compute or credential setting."
+  }
+  assert {
+    condition = length(aws_dynamodb_table.records.global_secondary_index) == 1 && alltrue([
+      for index in aws_dynamodb_table.records.global_secondary_index : index.name == "webhook-due" && index.projection_type == "KEYS_ONLY" && length(coalesce(index.non_key_attributes, [])) == 0 && jsonencode([for key in index.key_schema : [key.attribute_name, key.key_type]]) == jsonencode([["webhookQueue", "HASH"], ["webhookDueAt", "RANGE"]])
+    ]) && toset([for a in aws_dynamodb_table.records.attribute : "${a.name}:${a.type}"]) == toset(["pk:S", "sk:S", "webhookQueue:S", "webhookDueAt:N"]) && aws_dynamodb_table.records.deletion_protection_enabled && aws_dynamodb_table.records.point_in_time_recovery[0].enabled
+    error_message = "The due-delivery index is one keys-only index, so a query of it returns no hook, secret or event; the table stays protected."
+  }
+  assert {
+    condition     = jsonencode(jsondecode(aws_iam_role_policy.coordinator_records.policy).Statement) == jsonencode([for s in jsondecode(file("policies/coordinator-records.json")) : merge(s, { Resource = "arn:aws:dynamodb:eu-west-1:123456789012:table/qsb-test-records" })]) && jsonencode(jsondecode(aws_iam_role_policy.records["api"].policy).Statement) == jsonencode([for s in jsondecode(file("policies/app-records.json")) : merge(s, { Resource = "arn:aws:dynamodb:eu-west-1:123456789012:table/qsb-test-records" })]) && !output.transactions_enabled && !output.exact_submit_enabled && aws_lambda_function.api.environment[0].variables.QSB_MAINNET_ENABLED == "false" && aws_lambda_function.coordinator.environment[0].variables.QSB_MAINNET_ENABLED == "false"
+    error_message = "Enabling the dispatcher changes no API or coordinator grant and no mainnet switch."
+  }
+}

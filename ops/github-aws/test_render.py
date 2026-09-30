@@ -70,8 +70,38 @@ class SinglePipelinePolicies(unittest.TestCase):
     def test_role_passing_only_to_retained_execution_services(self):
         passing = self.statement('deploy', 'PassRuntimeRoles')
         self.assertEqual(passing['Resource'], ['arn:aws:iam::123456789012:role/qsb/runtime/qsb-*'])
+        # Scheduler runs the webhook dispatcher's schedule (terraform/webhooks.tf) with a runtime role.
         self.assertEqual(passing['Condition'], {'StringEquals': {
-            'iam:PassedToService': ['lambda.amazonaws.com', 'states.amazonaws.com']}})
+            'iam:PassedToService': ['lambda.amazonaws.com', 'states.amazonaws.com', 'scheduler.amazonaws.com']}})
+        passes = [s for s in self.policies['deploy']['Statement'] if 'iam:PassRole' in s['Action']]
+        self.assertEqual(passes, [passing])
+
+    def test_schedules_are_qsb_named_in_the_default_group_only(self):
+        self.assertEqual(self.statement('deploy', 'QsbSchedules'), {
+            'Sid': 'QsbSchedules', 'Effect': 'Allow',
+            'Action': ['scheduler:CreateSchedule', 'scheduler:GetSchedule', 'scheduler:UpdateSchedule', 'scheduler:DeleteSchedule'],
+            'Resource': ['arn:aws:scheduler:eu-west-1:123456789012:schedule/default/qsb-*']})
+        # No schedule groups, tags or other Scheduler actions for the deployer, and none at all for runtime roles.
+        for kind, sids in (('deploy', {'QsbSchedules'}), ('boundary', set())):
+            with self.subTest(kind=kind):
+                self.assertEqual({s['Sid'] for s in self.policies[kind]['Statement']
+                                  if any(a.startswith('scheduler:') for a in s['Action'])}, sids)
+
+    def test_boundary_already_covers_the_webhook_dispatcher_and_its_schedule(self):
+        # The dispatcher's Query reaches the due-delivery index, a sub-resource of the table; the schedule's role
+        # invokes the dispatcher; both write their Lambda logs. The boundary needs no new statement for any of them.
+        allowed = [s for s in self.policies['boundary']['Statement'] if s['Effect'] == 'Allow']
+        covers = lambda action, resource: any(
+            any(fnmatch.fnmatchcase(action, a) for a in s['Action']) and any(fnmatch.fnmatchcase(resource, r) for r in s['Resource'])
+            and 'Condition' not in s for s in allowed)
+        arn = 'arn:aws:{}:eu-west-1:123456789012:{}'.format
+        for action, resource in (('dynamodb:Query', arn('dynamodb', 'table/qsb-app-records/index/webhook-due')),
+                                 ('dynamodb:GetItem', arn('dynamodb', 'table/qsb-app-records')),
+                                 ('dynamodb:PutItem', arn('dynamodb', 'table/qsb-app-records')),
+                                 ('lambda:InvokeFunction', arn('lambda', 'function:qsb-app-webhooks')),
+                                 ('logs:PutLogEvents', arn('logs', 'log-group:/aws/lambda/qsb-app-webhooks:log-stream:x'))):
+            with self.subTest(action=action):
+                self.assertTrue(covers(action, resource), (action, resource))
 
     def test_oidc_trust_is_exact_and_unchanged(self):
         self.assertEqual(self.policies['trust'], {'Version': '2012-10-17', 'Statement': [{
@@ -89,11 +119,12 @@ class SinglePipelinePolicies(unittest.TestCase):
 
     def test_boundary_covers_every_action_the_runtime_policies_allow(self):
         # A boundary gap is an implicit deny the role policy can't override; this caught ConditionCheckItem.
-        # All three files attach to /qsb/runtime/ roles under the boundary (compute.tf, operator.tf).
+        # All four files attach to /qsb/runtime/ roles under the boundary (compute.tf, operator.tf, webhooks.tf).
         root = Path(__file__).resolve().parents[2]
         policies = sorted((root / 'terraform/policies').glob('*.json'))
         self.assertEqual({p.name for p in policies},
-                         {'app-records.json', 'coordinator-records.json', 'operator-reconcile-records.json'})
+                         {'app-records.json', 'coordinator-records.json', 'operator-reconcile-records.json',
+                          'webhook-dispatcher-records.json'})
         allowed = [a.lower() for s in self.policies['boundary']['Statement'] if s['Effect'] == 'Allow'
                    for a in s['Action']]
         for policy in policies:

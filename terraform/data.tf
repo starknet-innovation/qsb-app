@@ -23,7 +23,8 @@ locals {
     var.owner_max_active_jobs == null ? {} : { QSB_OWNER_MAX_ACTIVE_JOBS = tostring(var.owner_max_active_jobs) },
     var.owner_max_gpu_seconds == null ? {} : { QSB_OWNER_MAX_GPU_SECONDS = tostring(var.owner_max_gpu_seconds) },
   )
-  functions = toset(["api", "coordinator", "reference"])
+  # The webhook dispatcher (webhooks.tf) gets the same role, log group and error alarm as the others, only when enabled.
+  functions = toset(concat(["api", "coordinator", "reference"], var.webhook_dispatcher_enabled ? ["webhooks"] : []))
   mime = {
     html = "text/html; charset=utf-8", js = "application/javascript", mjs = "application/javascript",
     css  = "text/css", json = "application/json", svg = "image/svg+xml", wasm = "application/wasm",
@@ -64,6 +65,30 @@ resource "aws_dynamodb_table" "records" {
   attribute {
     name = "sk"
     type = "S"
+  }
+  # The due-delivery index the webhook dispatcher queries (server/webhooks.ts). Sparse: only WEBHOOKS rows with a
+  # delivery due carry its keys. Keys only, so a query of it returns no hook, secret or event.
+  dynamic "attribute" {
+    for_each = var.webhook_dispatcher_enabled ? { webhookQueue = "S", webhookDueAt = "N" } : {}
+    content {
+      name = attribute.key
+      type = attribute.value
+    }
+  }
+  dynamic "global_secondary_index" {
+    for_each = var.webhook_dispatcher_enabled ? [local.webhook_due_index] : []
+    content {
+      name            = global_secondary_index.value
+      projection_type = "KEYS_ONLY"
+      key_schema {
+        attribute_name = "webhookQueue"
+        key_type       = "HASH"
+      }
+      key_schema {
+        attribute_name = "webhookDueAt"
+        key_type       = "RANGE"
+      }
+    }
   }
   ttl {
     attribute_name = "expiresAt"

@@ -47,7 +47,12 @@ def render(c):
     allow('CreateBoundedRuntimeRoles',['iam:CreateRole','iam:PutRolePolicy','iam:AttachRolePolicy','iam:UpdateAssumeRolePolicy','iam:PutRolePermissionsBoundary'],[runtime_roles],{'StringEquals':{'iam:PermissionsBoundary':boundary}})
     allow('ManageRuntimeRoles',['iam:GetRole','iam:ListInstanceProfilesForRole','iam:GetRolePolicy','iam:ListRolePolicies','iam:ListAttachedRolePolicies','iam:ListRoleTags','iam:TagRole','iam:UntagRole','iam:DeleteRolePolicy','iam:DetachRolePolicy','iam:DeleteRole','iam:UpdateRole','iam:UpdateRoleDescription'],[runtime_roles])
     allow('ReadRuntimeBoundary',['iam:GetPolicy','iam:GetPolicyVersion'],[boundary])
-    allow('PassRuntimeRoles',['iam:PassRole'],[runtime_roles],{'StringEquals':{'iam:PassedToService':['lambda.amazonaws.com','states.amazonaws.com']}})
+    # Scheduler runs the webhook dispatcher's schedule with its own runtime role (terraform/webhooks.tf). A separate
+    # name-scoped PassRole adds nothing, since this role can create a runtime role of any qsb-* name, and it would
+    # push qsb-operator (access.py) into another managed policy, which update_installed.py can't add.
+    allow('PassRuntimeRoles',['iam:PassRole'],[runtime_roles],{'StringEquals':{'iam:PassedToService':['lambda.amazonaws.com','states.amazonaws.com','scheduler.amazonaws.com']}})
+    # EventBridge Scheduler schedules named qsb-* in the default group. Schedules carry no tags.
+    allow('QsbSchedules',['scheduler:CreateSchedule','scheduler:GetSchedule','scheduler:UpdateSchedule','scheduler:DeleteSchedule'],[arn('scheduler','schedule/default/qsb-*')])
     allow('StateList',['s3:ListBucket','s3:GetBucketLocation'],['arn:aws:s3:::'+c['state_bucket']])
     allow('StateObjects',['s3:GetObject','s3:PutObject'],['arn:aws:s3:::'+c['state_bucket']+'/qsb/*'])
     allow('StateLocks',['s3:DeleteObject'],['arn:aws:s3:::'+c['state_bucket']+'/qsb/*.tflock'])

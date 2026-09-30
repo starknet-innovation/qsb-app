@@ -27,7 +27,7 @@ ALLOWED = {
     'aws_apigatewayv2_api', 'aws_apigatewayv2_integration',
     'aws_apigatewayv2_route', 'aws_apigatewayv2_stage',
     'aws_cloudfront_origin_access_control', 'aws_cloudfront_response_headers_policy',
-    'aws_cloudfront_distribution',
+    'aws_cloudfront_distribution', 'aws_scheduler_schedule',
 }
 EXPECTED = {
     'aws_dynamodb_table': {'records'},
@@ -35,6 +35,21 @@ EXPECTED = {
     'aws_lambda_function': {'api', 'coordinator', 'reference'},
     'aws_sfn_state_machine': {'withdrawal'},
 }
+
+
+# The scheduled webhook dispatcher (webhooks.tf), present only with webhook_dispatcher_enabled. Its resources come
+# as a set: the function, its records policy, the schedule and the schedule's role and policy.
+DISPATCHER_FUNCTION = 'webhooks'
+DISPATCHER_POLICIES = {'webhook_records', 'webhook_schedule'}
+DISPATCHER_ROLE = 'webhook_schedule'
+DISPATCHER_ENV = {'TABLE_NAME'}
+DUE_INDEX = 'webhook-due'
+# What the dispatcher's records policy may grant: Query on the due-delivery index, GetItem and PutItem on OWNER#
+# rows, and PutItem only of a WEBHOOKS row's attributes (server/webhooks.ts WEBHOOK_ROW_ATTRIBUTES).
+DISPATCHER_ACTIONS = {'FindDueOwners': ['dynamodb:Query'], 'ReadOwnerRows': ['dynamodb:GetItem'],
+                      'WriteWebhookRows': ['dynamodb:PutItem']}
+OWNER_KEYS = {'ForAllValues:StringLike': {'dynamodb:LeadingKeys': ['OWNER#*']}}
+WEBHOOK_ROW_ATTRIBUTES = ['pk', 'sk', 'version', 'hooks', 'pending', 'webhookQueue', 'webhookDueAt']
 
 
 def require(condition, message):
@@ -55,7 +70,7 @@ API_ENV_REFERENCES = {
     'var.slipstream_secret_arn',
 }
 # The mocked `terraform test` plans whose expanded inventory must pass validate().
-MOCK_RUNS = {'baseline', 'configured_single_pipeline', 'miner_credential_api_only'}
+MOCK_RUNS = {'baseline', 'configured_single_pipeline', 'miner_credential_api_only', 'webhook_dispatcher_enabled'}
 # The one secret any application role may read: the API's MARA Slipstream credential.
 MINER_SECRET = re.compile(r'^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:qsb/slipstream-[A-Za-z0-9]{6}$')
 MINER_POLICY = ('aws_iam_role_policy', 'miner_credential')
@@ -88,6 +103,91 @@ def workflow_rules(rows):
     # A Pass or Succeed here would end an unreconciled outcome as a succeeded execution, with no failure alarm.
     require(states.get('NeedsOperatorAttention', {}).get('Type') == 'Fail',
             'NeedsOperatorAttention must stay a Fail state, so the execution fails and the alarm fires')
+
+
+def dispatcher_rules(rows, dispatcher):
+    """The scheduled webhook dispatcher: all of it or none of it, each grant exactly scoped."""
+    by_type = lambda kind, names: [r for r in rows if r['type'] == kind and r['name'] in names]
+    schedules = [r for r in rows if r['type'] == 'aws_scheduler_schedule']
+    policies = {r['name']: r for r in by_type('aws_iam_role_policy', DISPATCHER_POLICIES)}
+    schedule_roles = by_type('aws_iam_role', {DISPATCHER_ROLE})
+    table = next(r for r in rows if r['type'] == 'aws_dynamodb_table').get('values', {})
+    indexes = table.get('global_secondary_index') or []
+    if not dispatcher:
+        require(not schedules and not policies and not schedule_roles and not indexes,
+                'The webhook schedule, its roles and the due-delivery index come only with the webhook dispatcher')
+        return
+    require(len(schedules) == 1 and schedules[0]['name'] == DISPATCHER_FUNCTION and set(policies) == DISPATCHER_POLICIES
+            and len(schedule_roles) == 1, 'The webhook dispatcher needs exactly its schedule, schedule role and two policies')
+    function = next(r for r in rows if r['type'] == 'aws_lambda_function' and r['name'] == DISPATCHER_FUNCTION)['values']
+    schedule = schedules[0].get('values', {})
+    rate = re.fullmatch(r'rate\((\d+) minutes?\)', str(schedule.get('schedule_expression')))
+    require(rate and int(rate.group(1)) >= 1, 'The webhook schedule must be a rate of at least one minute')
+    target = (schedule.get('target') or [{}])[0]
+    function_arn = target.get('arn')
+    require(isinstance(function_arn, str) and function_arn.endswith(':function:' + str(function.get('function_name'))),
+            'The webhook schedule must invoke the webhook dispatcher and nothing else')
+    trust = json.loads(schedule_roles[0].get('values', {}).get('assume_role_policy') or '{}').get('Statement')
+    require(isinstance(trust, list) and len(trust) == 1 and trust[0].get('Principal') == {'Service': 'scheduler.amazonaws.com'}
+            and trust[0].get('Action') == 'sts:AssumeRole' and trust[0].get('Effect') == 'Allow'
+            and re.fullmatch(r'[0-9]{12}', str(trust[0].get('Condition', {}).get('StringEquals', {}).get('aws:SourceAccount'))),
+            'The schedule role must trust only EventBridge Scheduler, from this account')
+    documents = {}
+    for name, row in policies.items():
+        document = row.get('values', {}).get('policy')
+        require(isinstance(document, str), f'aws_iam_role_policy.{name} must be known at plan')
+        documents[name] = as_list(json.loads(document).get('Statement'))
+    require(documents['webhook_schedule'] == [{'Effect': 'Allow', 'Action': 'lambda:InvokeFunction', 'Resource': function_arn}],
+            'The schedule role may only invoke the webhook dispatcher')
+    records = {s.get('Sid'): s for s in documents['webhook_records']}
+    require(len(records) == len(documents['webhook_records']) and set(records) == set(DISPATCHER_ACTIONS)
+            and all(s.get('Effect') == 'Allow' and s.get('Action') == DISPATCHER_ACTIONS[sid] for sid, s in records.items()),
+            'The webhook dispatcher may only Query the due-delivery index and GetItem/PutItem records')
+    table_arn = records['ReadOwnerRows'].get('Resource')
+    require(isinstance(table_arn, str) and table_arn.endswith(':table/' + str(table.get('name')))
+            and records['WriteWebhookRows'].get('Resource') == table_arn
+            and records['FindDueOwners'].get('Resource') == f'{table_arn}/index/{DUE_INDEX}'
+            and 'Condition' not in records['FindDueOwners'],
+            'The webhook dispatcher reaches only the records table and its due-delivery index')
+    for sid in ('ReadOwnerRows', 'WriteWebhookRows'):
+        condition = records[sid].get('Condition', {})
+        require(condition.get('ForAllValues:StringLike') == OWNER_KEYS['ForAllValues:StringLike']
+                and condition.get('Null', {}).get('dynamodb:LeadingKeys') == 'false',
+                'The webhook dispatcher may only read and write present OWNER# keys')
+    write = records['WriteWebhookRows']['Condition']
+    require(write.get('ForAllValues:StringEquals') == {'dynamodb:Attributes': WEBHOOK_ROW_ATTRIBUTES}
+            and write.get('Null', {}).get('dynamodb:Attributes') == 'false'
+            and set(write) == {'ForAllValues:StringLike', 'ForAllValues:StringEquals', 'Null'},
+            'The webhook dispatcher may only write items made of a WEBHOOKS row\'s attributes')
+    require(len(indexes) == 1 and indexes[0].get('name') == DUE_INDEX and indexes[0].get('projection_type') == 'KEYS_ONLY'
+            and not indexes[0].get('non_key_attributes'),
+            'The due-delivery index must be the one keys-only index, so a query of it returns no hook or secret')
+    # Known after the first apply: each dispatcher policy belongs to its own role, and the dispatcher role has no other.
+    dispatcher_role = next((r.get('values', {}).get('name') for r in rows if r['type'] == 'aws_iam_role'
+                            and r['name'] == 'lambda' and r.get('index') == DISPATCHER_FUNCTION), None)
+    schedule_role = schedule_roles[0].get('values', {}).get('name')
+    for row in rows:
+        owner = row.get('values', {}).get('role') if row['type'] == 'aws_iam_role_policy' else None
+        if not isinstance(owner, str):
+            continue
+        if isinstance(dispatcher_role, str) and owner == dispatcher_role:
+            require(row['name'] in ('logs', 'webhook_records'), 'The webhook dispatcher role has only its logs and records policies')
+        if isinstance(schedule_role, str) and owner == schedule_role:
+            require(row['name'] == 'webhook_schedule', 'The schedule role has only its invoke policy')
+
+
+def static_dispatcher_rules(root):
+    """Source rules for the webhook dispatcher's two roles, which hold even while role names are unknown at plan."""
+    allowed = {'aws_iam_role.lambda["webhooks"]': {('aws_iam_role_policy', 'webhook_records'), ('aws_lambda_function', 'webhooks')},
+               'aws_iam_role.webhook_schedule': {('aws_iam_role_policy', 'webhook_schedule'), ('aws_scheduler_schedule', 'webhooks')}}
+    for path in sorted(root.glob('*.tf')):
+        text = path.read_text()
+        blocks = list(resource_blocks(text))
+        for reference, owners in allowed.items():
+            for match in re.finditer(re.escape(reference), text):
+                inside = [(kind, name) for kind, name, start, end in blocks if start <= match.start() < end]
+                require(inside and inside[-1] in owners,
+                        f'{path.name}: only {sorted(f"{k}.{n}" for k, n in owners)} may use {reference}')
 
 
 def reads_secrets(action):
@@ -196,14 +296,21 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
     unknown_env = unknown_env or {}
     types = Counter(row['type'] for row in rows)
     require(not (types.keys() - ALLOWED), 'Unexpected application resource type')
+    dispatcher = any(r['type'] == 'aws_lambda_function' and r['name'] == DISPATCHER_FUNCTION for r in rows)
     for kind, names in EXPECTED.items():
+        if kind == 'aws_lambda_function' and dispatcher:
+            names = names | {DISPATCHER_FUNCTION}
         selected = [r for r in rows if r['type'] == kind]
         require(len(selected) == len(names) and {r['name'] for r in selected} == names,
                 f'Expected only {kind}: {sorted(names)}')
     roles = [r for r in rows if r['type'] == 'aws_iam_role']
-    require(len(roles) == (5 if expanded else 3) and {r['name'] for r in roles} == {'lambda', 'workflow', 'operator_reconcile'}, 'Expected only Lambda/workflow service roles and one reconciliation operator role')
+    role_names = {'lambda', 'workflow', 'operator_reconcile'} | ({DISPATCHER_ROLE} if dispatcher else set())
+    require(len(roles) == ((7 if dispatcher else 5) if expanded else len(role_names)) and {r['name'] for r in roles} == role_names,
+            'Expected only Lambda/workflow service roles, one reconciliation operator role and, with the webhook '
+            'dispatcher, its schedule role')
     if expanded:
         workflow_rules(rows)
+        dispatcher_rules(rows, dispatcher)
         funcs = {r['name']: r for r in rows if r['type'] == 'aws_lambda_function'}
         envs = {name: dict((row.get('values', {}).get('environment') or [{}])[0].get('variables', {}) or {})
                 for name, row in funcs.items()}
@@ -229,10 +336,15 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
                         'API and coordinator must use the same table (TABLE_NAME must be known at plan)')
         require(all(not any(k.startswith('SUPERVISED_') for k in env) for env in envs.values()),
                 'No supervised routing in application Lambda environments')
-        require('AWS_BATCH_JOB_QUEUE' not in envs['api'] and 'AWS_BATCH_JOB_QUEUE' not in envs['reference'],
+        require(all('AWS_BATCH_JOB_QUEUE' not in env for name, env in envs.items() if name != 'coordinator'),
                 'Only coordinator may receive the AWS Batch binding reference')
-        for name in ('coordinator', 'reference'):
+        for name in envs.keys() - {'api'}:
             require('SLIPSTREAM_SECRET_ARN' not in envs[name], 'Only the API may receive the miner credential reference')
+        if dispatcher:
+            require(DISPATCHER_FUNCTION not in whole and set(envs[DISPATCHER_FUNCTION]) == DISPATCHER_ENV
+                    and table is not None and envs[DISPATCHER_FUNCTION]['TABLE_NAME'] == table,
+                    'The webhook dispatcher gets only TABLE_NAME, the records table: no mainnet, workflow, compute, '
+                    'reference or credential setting')
         miner = [r for r in rows if r['type'] == 'aws_iam_role_policy' and r['name'] == 'miner_credential']
         require(len(miner) <= 1, 'At most one miner credential policy')
         grants = secret_grants(rows)
@@ -326,6 +438,7 @@ def module_resources(module):
 def main():
     root = Path(__file__).resolve().parents[1]
     static_secret_rules(root)
+    static_dispatcher_rules(root)
     if len(sys.argv) == 1:
         rows = [{'type': kind, 'name': name}
                 for file in root.glob('*.tf')
@@ -357,7 +470,7 @@ def main():
                     result['runs'][name] = validate(rows, True, None,
                                                     unknown_lambda_env(event['test_plan']['resource_changes']))
             require(set(result['runs']) == MOCK_RUNS,
-                    'The baseline, configured-provider and miner-credential plans are all required')
+                    'The baseline, configured-provider, miner-credential and webhook-dispatcher plans are all required')
         else:
             result = validate(module_resources(plan['planned_values']['root_module']), True, plan.get('configuration'),
                               unknown_lambda_env(plan.get('resource_changes', [])))

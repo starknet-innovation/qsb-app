@@ -104,6 +104,11 @@ variable "api_keys_enabled" {
   type        = bool
   default     = false
 }
+variable "webhook_dispatcher_enabled" {
+  description = "Scheduled webhook dispatcher: the records table's due-delivery index, a dispatcher Lambda and an EventBridge Scheduler schedule every 5 minutes, each with its own role (webhooks.tf). It sends queued webhook retries that would otherwise wait for the owner's next API request or coordinator tick. Keep false until the AWS administrator has installed the reviewed deploy-policy update (ops/github-aws/update_installed.py): before that the scoped roles can't create the schedule. Does not enable mainnet, deposits, withdrawals or submission."
+  type        = bool
+  default     = false
+}
 variable "slipstream_secret_arn" {
   description = "Optional existing Secrets Manager secret qsb/slipstream, created by an administrator in this account and region with the default aws/secretsmanager key and holding a JSON object with client_code (MARA's client code, added to the body of transaction submissions only), authorization (sent as the Authorization header) or both. Both go to MARA Slipstream only. Empty sends no credential. Terraform only references it: the value never enters state or plans."
   type        = string
