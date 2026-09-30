@@ -87,6 +87,7 @@ function solvedJob() {
     job,
     helper,
     previousTxHex,
+    vaultScriptHex: "51".repeat(100),
     raw: hex.encode(raw.toBytes(true, true)),
   };
 }
@@ -179,6 +180,7 @@ it("delivers the coordinator solved result and signs it locally without exportin
     stateJson: secretState,
     helper: fixture.helper,
     fundingPreviousTxHex: fixture.previousTxHex,
+    vaultScriptHex: fixture.vaultScriptHex,
     assemble: async (state, manifest, solution) => {
       calls.push(state, JSON.stringify(manifest), JSON.stringify(solution));
       return fixture.raw;

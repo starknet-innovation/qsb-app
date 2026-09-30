@@ -114,6 +114,21 @@ function supervisedServiceJob(job: unknown): boolean {
   return execution?.kind === "qsb-supervised-service-v1";
 }
 type Env = { Variables: { owner: string } };
+
+/**
+ * Hex is case-insensitive in the schema, but reservations, chain lookups, the
+ * exact-spend check and inclusion matching all key on the lowercase txid. Store
+ * the manifest that way so a job created through the API can always be submitted.
+ */
+function lowercaseOutpoints<
+  T extends { funding: { txid: string }; helper: { txid: string } },
+>(manifest: T): T {
+  return {
+    ...manifest,
+    funding: { ...manifest.funding, txid: manifest.funding.txid.toLowerCase() },
+    helper: { ...manifest.helper, txid: manifest.helper.txid.toLowerCase() },
+  };
+}
 export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
 /**
  * API Gateway gives up after 30 seconds. Webhook sending stops 25 s into a request, and all
@@ -919,7 +934,9 @@ export function createApp(
     }
   });
   app.post("/api/jobs", async (c) => {
-    const manifest = withdrawalSchema.parse(await jsonBody(c));
+    const manifest = lowercaseOutpoints(
+      withdrawalSchema.parse(await jsonBody(c)),
+    );
     if (!enabled)
       return apiError(
         c,

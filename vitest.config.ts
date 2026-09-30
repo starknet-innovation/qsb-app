@@ -4,6 +4,7 @@ export default defineConfig({
     env: { QSB_NETWORK: "mainnet" },
     include: ["tests/**/*.test.ts"],
     exclude: ["tests/**/*.e2e.ts"],
+    setupFiles: ["tests/setup/network-guard.ts"],
     testTimeout: 15000,
   },
 });

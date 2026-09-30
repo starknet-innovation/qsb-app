@@ -651,6 +651,7 @@ export default function TransactionDialog({
           stateJson: unlocked.stateJson,
           helper,
           fundingPreviousTxHex: previousTxHex,
+          vaultScriptHex: vault.scriptHex,
           assemble: assembleQsb,
         }) : undefined;
         const raw = local ? local.raw : await assembleQsb(
@@ -686,7 +687,10 @@ export default function TransactionDialog({
         await assertRecoveryAssembly(unlocked, solution, raw);
         const expected = local
           ? local.transaction
-          : helperPsbt(raw, helper, previousTxHex);
+          : helperPsbt(raw, helper, previousTxHex, {
+              value: job.manifest.funding.value,
+              scriptHex: vault.scriptHex,
+            });
         check();
         if (!local) await assertOperations();
       check();

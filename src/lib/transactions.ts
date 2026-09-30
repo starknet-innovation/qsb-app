@@ -251,24 +251,29 @@ export function verifySignedPsbt(
   }
   return actual;
 }
+/** What the manifest says the vault input is; checked against the previous transaction's bytes. */
+export type QsbPreviousOutput = { value: bigint | string; scriptHex: string };
 export function helperPsbt(
   rawQsbTxHex: string,
   helper: FundingInput,
   qsbPreviousTxHex: string,
+  qsbPrevious: QsbPreviousOutput,
 ) {
   const tx = btc.Transaction.fromRaw(hex.decode(rawQsbTxHex), opts);
   if (tx.inputsLength !== 2 || tx.outputsLength !== 1)
     throw new Error("Expected a two-input QSB withdrawal.");
+  // Parsed ids are lowercase; a manifest stored before txids were canonicalised may not be.
+  const helperTxid = helper.txid.toLowerCase();
   const input = tx.getInput(0);
   if (
     !input.txid ||
-    hex.encode(input.txid) !== helper.txid ||
+    hex.encode(input.txid) !== helperTxid ||
     input.index !== helper.vout
   )
     throw new Error("Wrong helper input.");
   const prev = btc.Transaction.fromRaw(hex.decode(helper.previousTxHex), opts);
   if (
-    prev.id !== helper.txid ||
+    prev.id !== helperTxid ||
     prev.getOutput(helper.vout).amount !== helper.value
   )
     throw new Error("Helper previous output mismatch.");
@@ -284,9 +289,18 @@ export function helperPsbt(
     throw new Error("Unsupported helper payment key or address.");
   if (qsbInput.index === undefined || !qsbPrev.getOutput(qsbInput.index).script)
     throw new Error("QSB previous output missing.");
+  // The QSB input's scriptSig doesn't commit to its amount, so an understated
+  // manifest value would still assemble, with the difference going to the miner
+  // fee. Bind the manifest to the previous output's real amount and script.
+  const qsbOutput = qsbPrev.getOutput(qsbInput.index);
+  if (
+    qsbOutput.amount !== BigInt(qsbPrevious.value) ||
+    hex.encode(qsbOutput.script!) !== qsbPrevious.scriptHex.toLowerCase()
+  )
+    throw new Error("QSB previous output amount or script mismatch.");
   if (!qsbInput.finalScriptSig?.length)
     throw new Error("QSB authorization is missing.");
-  if (helper.txid === qsbPrev.id && helper.vout === qsbInput.index)
+  if (helperTxid === qsbPrev.id && helper.vout === qsbInput.index)
     throw new Error("Helper and QSB input must be different outputs.");
   const script = outputScript(helper.address);
   if (hex.encode(prev.getOutput(helper.vout).script!) !== hex.encode(script))

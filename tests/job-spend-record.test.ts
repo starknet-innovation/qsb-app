@@ -159,6 +159,28 @@ describe("stored withdrawal spend record", () => {
     expect("broadcastAuthorized" in release).toBe(false);
   });
 
+  it("accepts a stored manifest whose helper txid is not lowercase", () => {
+    // The schema admits either case; parsed transaction ids are lowercase. A job
+    // stored with an uppercase helper txid must still match the bytes it spends.
+    const stored = job({
+      manifest: {
+        ...manifest,
+        helper: { ...manifest.helper, txid: "ab".repeat(32).toUpperCase() },
+      },
+    });
+    const record = buildStoredSpendRecord(stored);
+    expect(record.helper.txid).toBe("ab".repeat(32));
+    expect(() => assertStoredJobSpend(stored, signedTx(record))).not.toThrow();
+    expect(() =>
+      assertWithdrawalSpendAgainstJob(stored, signedTx(record)),
+    ).not.toThrow();
+    // Still a different outpoint when the bytes spend another helper.
+    assertMismatch(
+      signedTx(record, { helperTxid: "ac".repeat(32) }),
+      stored,
+    );
+  });
+
   it("rejects a wrong destination", () => {
     const record = buildStoredSpendRecord(job());
     assertMismatch(

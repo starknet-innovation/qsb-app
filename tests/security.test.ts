@@ -182,14 +182,54 @@ describe("transaction invariants", () => {
     spend.addInput({ txid: previous.id, index: 0 });
     spend.addOutputAddress(address, 180000n);
     spend.updateInput(1, { finalScriptSig: hex.decode("0101") }, true);
-    return { helper, previous, spend };
+    // What the manifest and vault record say the QSB input is.
+    const vault = { value: 100000n, scriptHex: "51".repeat(100) };
+    return { helper, previous, spend, vault };
   }
+  it("binds the QSB input to the previous output's real amount and script", () => {
+    const { helper, previous, spend, vault } = withdrawal();
+    const raw = hex.encode(spend.toBytes(true, true)),
+      prev = hex.encode(previous.toBytes(true, true));
+    expect(() => helperPsbt(raw, helper, prev, vault)).not.toThrow();
+    expect(() => helperPsbt(raw, helper, prev, { ...vault, value: "100000" })).not.toThrow();
+    // The QSB scriptSig doesn't commit to the amount: an understated manifest
+    // value would assemble, with the difference going to the miner fee.
+    expect(() => helperPsbt(raw, helper, prev, { ...vault, value: 99000n })).toThrow(
+      "QSB previous output amount or script mismatch",
+    );
+    expect(() =>
+      helperPsbt(raw, helper, prev, { ...vault, scriptHex: "51".repeat(99) + "52" }),
+    ).toThrow("QSB previous output amount or script mismatch");
+  });
+  it("accepts a helper outpoint whose stored txid is not lowercase", () => {
+    // Jobs created before POST /api/jobs canonicalised txids keep the request's
+    // casing in their manifest; the client must still assemble them.
+    const { helper, previous, spend, vault } = withdrawal();
+    expect(helper.txid).toMatch(/[a-f]/);
+    const upper = { ...helper, txid: helper.txid.toUpperCase() };
+    const built = helperPsbt(
+      hex.encode(spend.toBytes(true, true)),
+      upper,
+      hex.encode(previous.toBytes(true, true)),
+      vault,
+    );
+    expect(hex.encode(built.getInput(0).txid!)).toBe(helper.txid.toLowerCase());
+    expect(() =>
+      helperPsbt(
+        hex.encode(spend.toBytes(true, true)),
+        { ...upper, txid: "ab".repeat(32).toUpperCase() },
+        hex.encode(previous.toBytes(true, true)),
+        vault,
+      ),
+    ).toThrow("Wrong helper input");
+  });
   it("preserves QSB authorization while preparing the helper PSBT and rejects wallet replacement", () => {
-    const { helper, previous, spend } = withdrawal();
+    const { helper, previous, spend, vault } = withdrawal();
     const expected = helperPsbt(
       hex.encode(spend.toBytes(true, true)),
       helper,
       hex.encode(previous.toBytes(true, true)),
+      vault,
     );
     expect(hex.encode(expected.getInput(1).finalScriptSig!)).toBe("0101");
     expect(expected.getInput(0).sighashType).toBe(1);
@@ -204,11 +244,12 @@ describe("transaction invariants", () => {
     );
   });
   it("rejects a helper signed with a sighash other than SIGHASH_ALL", () => {
-    const { helper, previous, spend } = withdrawal();
+    const { helper, previous, spend, vault } = withdrawal();
     const expected = helperPsbt(
       hex.encode(spend.toBytes(true, true)),
       helper,
       hex.encode(previous.toBytes(true, true)),
+      vault,
     );
     const signed = expected.clone();
     if (!signed.signIdx(privateKey, 0)) throw new Error("missing helper signature");
@@ -226,7 +267,7 @@ describe("transaction invariants", () => {
     );
   });
   it("rejects a helper public key that does not control the quoted payment address", () => {
-    const { helper, previous, spend } = withdrawal();
+    const { helper, previous, spend, vault } = withdrawal();
     const wrongKey = hex.encode(
       secp256k1.getPublicKey(new Uint8Array(32).fill(2)),
     );
@@ -235,6 +276,7 @@ describe("transaction invariants", () => {
         hex.encode(spend.toBytes(true, true)),
         { ...helper, publicKey: wrongKey },
         hex.encode(previous.toBytes(true, true)),
+        vault,
       ),
     ).toThrow("helper payment key");
   });
