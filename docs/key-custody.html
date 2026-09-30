@@ -199,7 +199,7 @@
   </div>
   <div class="cell browser lane-end">
     <div class="step">Unlocks the backup and assembles the transaction locally, revealing only the <b>15 of 300</b> secrets the solution selects (vault input 1).</div>
-    <div class="step">Saves a <b>-signing</b> backup that binds this exact transaction.<br><span class="chip enc">-signing backup</span></div>
+    <div class="step">Saves a <b>-signing</b> backup binding the solution and assembled withdrawal hash <b>before</b> wallet signing. Final signed bytes are a separate signed-result download.<br><span class="chip enc">-signing backup</span></div>
     <div class="step">HORS state remains in memory through signed-transaction review while the dialog is open. Dialog effect cleanup calls lockQsb() to drop the worker state; signing does not immediately lock it. Never reuse the one-time keys.</div>
   </div>
 
@@ -252,13 +252,13 @@
   </div>
   <div class="cell external"><div class="empty">—</div></div>
   <div class="cell external">
-    <div class="step"><b>MARA Slipstream → Bitcoin.</b> The deposit confirms to the vault script.</div>
+    <div class="step"><b>MARA: possible mining.</b> Submission can fail or remain uncertain; acceptance is not inclusion. The deposit completes only after inclusion is independently confirmed.</div>
   </div>
   <div class="cell external">
     <div class="step"><b>GPU solver</b> on AWS Batch (attested qsb-solver image, pinned by digest). It works on public data and isn't trusted: any hit used as a solution must pass independent CPU verification.</div>
   </div>
   <div class="cell external lane-end">
-    <div class="step"><b>MARA Slipstream → Bitcoin.</b> Funds go to the destination the wallet signed.</div>
+    <div class="step"><b>MARA: possible mining.</b> Submission can fail or remain uncertain; acceptance is not inclusion. The transfer completes only after inclusion is independently confirmed.</div>
   </div>
 </div>
 

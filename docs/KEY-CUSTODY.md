@@ -33,7 +33,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 | Browser | Unlocks the backup locally to check it still opens; nothing secret is sent. Builds a deposit paying the vault script. Each vault takes exactly one deposit. |
 | Crosses to the service | The signed deposit transaction plus a bearer session token or API key. |
 | Service | Checks the transaction pays the vault script, records the exact bytes and submits them to MARA. Reads the optional MARA credential from Secrets Manager; only the API roles can. |
-| Outside parties | MARA receives the raw transaction and optional authorization/client-code credentials; it relays the transaction (not the credentials) to Bitcoin, and the deposit confirms to the vault script. |
+| Outside parties | MARA receives the signed transaction and optional authorization/client-code credentials for possible mining. Submission may fail or remain uncertain; acceptance is not block inclusion. The deposit completes only after inclusion is independently confirmed. |
 
 ## 3. Withdraw: search
 
@@ -52,10 +52,10 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 | --- | --- |
 | Wallet | Signs helper input 0 with SIGHASH_ALL, which fixes the destination, amount and fee. |
 | Wallet ↔ browser | The withdrawal PSBT goes to the wallet; the helper signature comes back. |
-| Browser | Unlocks the backup and assembles the transaction locally, revealing only the 15 of 300 secrets the solution selects (vault input 1). Saves a `-signing` backup that binds this exact transaction. HORS state remains in memory through signed-transaction review while the dialog is open. Dialog effect cleanup calls lockQsb() to drop the worker state; signing does not immediately lock it. Never reuse the one-time keys. |
+| Browser | Unlocks the backup and assembles the transaction locally, revealing only the 15 of 300 secrets the solution selects (vault input 1). Saves a `-signing` backup binding the solution and hash of the assembled withdrawal before the wallet signs helper input 0. This is not a backup of the final signed transaction bytes; those are downloaded separately as the signed result. HORS state remains in memory through signed-transaction review while the dialog is open. Dialog effect cleanup calls lockQsb() to drop the worker state; signing does not immediately lock it. Never reuse the one-time keys. |
 | Crosses to the service | The signed withdrawal transaction, including 15 disclosed HORS preimages in input 1, plus a bearer session token or API key. |
 | Service | Checks the exact spend (inputs, single output, amount, fee) and runs Bitcoin Core's consensus check on the signed bytes. Stores the signed bytes, including disclosed HORS preimages, in one submission intent, then POSTs to MARA exactly once. An unknown outcome goes to an operator and is never resent. |
-| Outside parties | MARA receives the raw transaction and optional authorization/client-code credentials; it relays the transaction (not the credentials) to Bitcoin, and the funds go to the destination the wallet signed. |
+| Outside parties | MARA receives the signed transaction (including disclosed preimages) and optional authorization/client-code credentials for possible mining. Submission may fail or remain uncertain; acceptance is not block inclusion. The transfer completes only after inclusion is independently confirmed. |
 
 ## Secrets and credentials
 
