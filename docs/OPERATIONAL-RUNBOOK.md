@@ -6,14 +6,14 @@ Procedures for the deployed stack. Operator commands run as `qsb-operator` (see 
 
 Two Terraform variables, both `false` by default:
 - `mainnet_enabled` sets `QSB_MAINNET_ENABLED` on **both** the API and the coordinator. Only the exact string `"true"` enables mainnet funding, job creation and resume. The reconcile CLI also reads this variable and needs the deployed value set explicitly (see below).
-- `exact_submit_enabled` sets `QSB_EXACT_SUBMIT_ENABLED`. Exact submission needs both switches, plus the exact-spend, offline Core and approval checks ([EXACT-SUBMIT.md](EXACT-SUBMIT.md)).
+- `exact_submit_enabled` sets `QSB_EXACT_SUBMIT_ENABLED`. Every miner submission needs both switches: relaying a signed deposit (`/fund/submit`, `/fund/resubmit`, and the manual-export bytes from `/fund/signed`) and submitting a withdrawal, which also needs the exact-spend, offline Core and approval checks ([EXACT-SUBMIT.md](EXACT-SUBMIT.md)). Otherwise these routes refuse with `submit_disabled`.
 
 | mainnet_enabled | exact_submit_enabled | Result |
 | --- | --- | --- |
 | false | false | Mainnet funding, search and submission disabled |
 | false | true | Mainnet operations and submission still disabled |
-| true | false | Funding and search allowed; signed backup download allowed; no exact submit |
-| true | true | Exact submit available only after explicit user approval and all exact-spend/Core/intent checks |
+| true | false | Search and resume allowed; the signed withdrawal can be downloaded; nothing is sent to the miner, so neither deposits nor withdrawals can be submitted |
+| true | true | Deposits can be relayed; a withdrawal is submitted only after explicit user approval and all exact-spend/Core/intent checks |
 
 The browser reads the same setting through uncached `GET /api/config` (`operationsEnabled`, bound to `network`) and rechecks it before funding and search. Absent, malformed and cross-network config stays disabled. Default-off refusals write no jobs, start no workflows and contact no miner. Neither switch approves a transaction or resubmits uncertain work.
 

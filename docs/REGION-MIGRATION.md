@@ -153,8 +153,9 @@ What stays with the AWS admin once `qsb-operator` manages the stack is in
 
 ## Rollback
 
-There is none. Since the switch-on (step 10), new deposits live only in the new account: fix forward. Step 11
-removes the old services, so the old stack can't be switched on by mistake.
+There is none: since the switch-on (step 10), users are sent to the new stack, so fix forward. Until step 11 the
+old stack still serves its routes and could still take a deposit, which is why step 11 re-checks it and removes its
+app stack first.
 
 ## Decommission the old stack
 
@@ -170,14 +171,20 @@ The old stacks need two settings before current code can plan them:
 - The GPU AMI is required too, so add `"gpu_ami": "ami-05db4db06e751ab89"` to the old GPU tfvars. That's the
   pinned Ireland AMI.
 
-1. **GPU stack** (operator, old account).
+Immediately before step 1, repeat the checks of "Build the new stack" step 1 on the old stack: no vault holds
+funds, no deposit is held or unconfirmed, no withdrawal intent is unconfirmed, the GPU queue is empty and the
+withdrawal state machine has no running executions. If any fails, stop and resolve it on the old stack first.
+
+1. **App stack** (operator, old account). This goes first, so nothing can take a deposit or start GPU work while the
+   rest is removed.
+   - Run `terraform state rm aws_dynamodb_table.records`, plus the frontend bucket and its configuration resources
+     (every address from `terraform state list | grep -E '^aws_s3_bucket[a-z_]*\.frontend$'`).
+   - Then run `terraform destroy`. It removes CloudFront, the API, the Lambdas, the state machine and the roles; the
+     old URL stops working.
+2. **GPU stack** (operator, old account).
    - Run `terraform state rm aws_ecr_repository.solver`, plus the job bucket and its configuration resources
      (every address from `terraform state list | grep -E '^aws_s3_bucket[a-z_]*\.jobs$'`).
    - Then run `terraform destroy`.
-2. **App stack** (operator, old account).
-   - Run `terraform state rm aws_dynamodb_table.records`, plus the frontend bucket and its configuration resources
-     (every address from `terraform state list | grep -E '^aws_s3_bucket[a-z_]*\.frontend$'`).
-   - Then run `terraform destroy`. It removes CloudFront, the Lambdas and the roles; the old URL stops working.
 3. **Cleanup** (old account's administrator). Delete these permanently, checking each against this list first:
    - the old records table (disable deletion protection first);
    - note that deleting a table with point-in-time recovery makes DynamoDB keep a system backup of it for 35 days.

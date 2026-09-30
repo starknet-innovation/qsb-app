@@ -12,7 +12,7 @@ With an AWS CLI profile allowed to call `iam:SimulateCustomPolicy`, from the rep
 python3 scripts/simulate-app-role-iam.py
 ```
 
-This rewrites `APP-ROLE-IAM-SIMULATION.json`: both policy files, a dummy table ARN, six actions (`GetItem`, `PutItem`, `DeleteItem`, `ConditionCheckItem`, `UpdateItem`, `BatchWriteItem`) and five key contexts (owner, outpoint, system, mixed owner/system, missing key). No role is assumed or changed and no table is accessed. The output records each source policy's hash and the simulator's decisions. The committed file matches the current API policy; the coordinator policy has changed since (#98 added `WEBHOOK#` PutItem), so rerun it to refresh the coordinator cases.
+This writes `APP-ROLE-IAM-SIMULATION.json` next to this doc: both policy files, a dummy table ARN, six actions (`GetItem`, `PutItem`, `DeleteItem`, `ConditionCheckItem`, `UpdateItem`, `BatchWriteItem`) and five key contexts (owner, outpoint, system, mixed owner/system, missing key). No role is assumed or changed and no table is accessed. The output records each source policy's hash and the simulator's decisions. Run it after changing either policy and commit its output with that change.
 
 ## 2–3. Live transaction and batch checks
 
