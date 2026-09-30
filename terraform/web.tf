@@ -1,8 +1,8 @@
 resource "aws_apigatewayv2_api" "api" {
   name          = "${var.name}-api"
   protocol_type = "HTTP"
-  # API Gateway tags use /tags/* resources the scoped operator role isn't granted; the SourceCommit
-  # default tag would otherwise change on every commit. Tags are set once by the first (admin) apply.
+  # API Gateway tags use /tags/* resources the scoped roles aren't granted, so tag changes are ignored:
+  # the first (admin) apply sets them once. Stacks built before the SourceCommit tag was dropped keep it here.
   lifecycle { ignore_changes = [tags, tags_all] }
 }
 resource "aws_apigatewayv2_integration" "api" {

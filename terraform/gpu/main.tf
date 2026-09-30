@@ -123,7 +123,8 @@ provider "aws" {
   allowed_account_ids = [var.aws_account_id]
   default_tags {
     tags = {
-      Project = "qsb-gpu", SourceCommit = var.source_commit, ManagedBy = "Terraform"
+      # No commit tag, so a new app commit doesn't touch every resource; the commit is in release_identity.
+      Project = "qsb-gpu", ManagedBy = "Terraform"
     }
   }
 
@@ -330,7 +331,8 @@ resource "aws_launch_template" "gpu" {
 
 }
 resource "aws_batch_compute_environment" "gpu" {
-  # Creation provenance on instances is immutable; changing the app commit must not replace idle capacity.
+  # Changing these tags replaces the compute environment. Environments created before the SourceCommit tag was
+  # dropped still carry it: ignore it, so removing it doesn't replace idle capacity.
   lifecycle { ignore_changes = [compute_resources[0].tags["SourceCommit"]] }
 
   name  = "qsb-gpu"
@@ -355,7 +357,7 @@ resource "aws_batch_compute_environment" "gpu" {
       version            = "1" # Immutable reviewed host template; changing metadata must not replace the compute environment.
     }
     tags = {
-      Project = "qsb-gpu", SourceCommit = var.source_commit
+      Project = "qsb-gpu"
     }
 
   }
