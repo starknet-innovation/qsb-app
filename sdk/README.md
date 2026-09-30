@@ -105,7 +105,7 @@ npm run qsb -- withdraw assemble <job> --backup signing.json --out signed.json -
 npm run qsb -- withdraw submit --signed signed.json   # shows the transaction; type its ID to submit
 ```
 
-`npm run qsb -- --help` lists every command and option. Output on stdout is JSON; prompts and explanations go to stderr. Exit codes: 0 done, 1 refused, failed or not final (for example, MARA's answer was lost), 2 usage, 3 waiting for an external signature.
+In this repository the command is `npm run qsb -- …`; from the installed package it's `qsb …`. `npm run qsb -- --help` lists every command and option. Output on stdout is JSON; prompts and explanations go to stderr. Exit codes: 0 done, 1 refused, failed or not final (for example, MARA's answer was lost), 2 usage, 3 waiting for an external signature.
 
 The default signer is external: the CLI writes each request (the sign-in message to stderr and `--message-out`, PSBTs to files) and reads the signature back from stdin or `--signed-psbt`, so any wallet can sign. `withdraw submit` prints the destination, payout, fee, fee rate and transaction ID, then submits only when you type that transaction ID.
 
@@ -122,9 +122,9 @@ npm run build -w @starknet-innovation/qsb-sdk   # dist/index.js, dist/cli.js (th
 node sdk/check-package.mjs                      # packs it, installs it outside the repo and uses it there
 ```
 
-The build ([`build.mjs`](build.mjs)) bundles the app's own `src/lib`, `src/mainnet` and `server/api-schemas` code into the package, so the SDK runs the same checks and signing preparation as the webapp. npm dependencies stay external, pinned to the repository's versions. It copies the pinned Python sources, `manifest.json` and their MIT `LICENSE` into `public/qsb`. At run time the SDK checks every Python file against that manifest before running it, as the webapp does. The network comes only from `QSB_NETWORK` at run time; the package has no default.
+The build ([`build.mjs`](build.mjs)) bundles the app's own `src/lib`, `src/mainnet` and `server/api-schemas` code into the package, so the SDK runs the same checks and signing preparation as the webapp. npm dependencies stay external, pinned to the repository's versions. The declarations get explicit `.js` extensions for Node ESM (`NodeNext`) consumers, and the release JSON they refer to is inlined as the type TypeScript infers for it, checked against that type at build time. It copies the pinned Python sources, `manifest.json` and their MIT `LICENSE` into `public/qsb`. At run time the SDK checks every Python file against that manifest before running it, as the webapp does. The network comes only from `QSB_NETWORK` at run time; the package has no default.
 
-[`check-package.mjs`](check-package.mjs) runs in CI. It checks that the tarball holds only the bundles, declarations, Python sources and README, and that the bundles reach nothing outside it. Then it installs the tarball into an empty project, generates and validates a vault in Pyodide through it, runs `qsb`, and type-checks a TypeScript consumer.
+[`check-package.mjs`](check-package.mjs) runs in CI. It checks that the tarball holds only the bundles, declarations, Python sources and README, and that the bundles reach nothing outside it. Then it installs the tarball into an empty project, generates and validates a vault in Pyodide through it, runs `qsb`, and type-checks two TypeScript consumers: a bundler, and a strict `NodeNext` project with declaration checking on and no DOM types.
 
 Publishing needs two decisions first: a licence for this code (the package stays `"private": true` until then; [`tests/sdk-package.test.ts`](../tests/sdk-package.test.ts) holds that), and npm access for the `@starknet-innovation` scope.
 

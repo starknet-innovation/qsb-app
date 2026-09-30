@@ -136,7 +136,7 @@ export type QsbClientOptions = {
    * `qsb-intent:<scriptHash>` (the withdrawal intent) and `qsb-assembly:<scriptHash>`
    * (the assembled transaction). A different value for a vault is refused. Defaults to memory.
    */
-  authorizations?: Pick<Storage, "getItem" | "setItem">;
+  authorizations?: AuthorizationStore;
   /** A session token from an earlier login by the same address. */
   token?: string;
   /**
@@ -177,7 +177,16 @@ const depositAnswerSchema = z.object({
 /** An unsigned deposit PSBT and its quote. Public data: nothing in it is secret. */
 export type PreparedDeposit = z.infer<typeof preparedDepositSchema>;
 
-function memoryStorage(): Pick<Storage, "getItem" | "setItem"> {
+/**
+ * Where the SDK keeps this device's one-time authorizations: the part of Web Storage it uses, so a Node
+ * consumer needs no DOM types. `localStorage` fits, as does the CLI's owner-only file store.
+ */
+export type AuthorizationStore = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+};
+
+function memoryStorage(): AuthorizationStore {
   const rows = new Map<string, string>();
   return { getItem: (key) => rows.get(key) ?? null, setItem: (key, value) => void rows.set(key, value) };
 }
@@ -284,7 +293,7 @@ export class QsbClient {
   private readonly wallet: Wallet;
   private readonly qsb: LocalQsb;
   private readonly pending: PendingDeposits;
-  private readonly authorizations: Pick<Storage, "getItem" | "setItem">;
+  private readonly authorizations: AuthorizationStore;
   private readonly guard: ReturnType<typeof persistentGuard>;
   private readonly appOrigin: string;
 
