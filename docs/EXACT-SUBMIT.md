@@ -10,8 +10,8 @@ The trusted server switch is QSB_EXACT_SUBMIT_ENABLED=true on mainnet. Terraform
 exposes exact_submit_enabled, default false; examples and deployed-source flags
 remain disabled. This switch controls only submission of an already solved and
 signed coordinator withdrawal, independently of the old disabled rehearsal
-permit. It does not turn on vault creation, job admission or the parked supervised
-pipeline. Do not activate it in a shared service before the #22 review.
+permit. It does not turn on vault creation or job admission. Do not activate it
+in a shared service before the #22 review.
 
 The authenticated POST /api/jobs/:id/submit accepts only rawTxHex. It loads the
 owner's stored job and vault, checks the #19 exact-spend binding (including the

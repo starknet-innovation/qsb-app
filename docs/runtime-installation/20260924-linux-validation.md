@@ -15,7 +15,7 @@ The public runtime manifest is `0efcca43ef7bd2599e2432c80724f1a1454e14a8c3ff2cd1
 
 ## Remaining enrollment
 
-The operator elected to provision the real encrypted Runpod credential. Follow [the private provisioning procedure](../../supervised/install/OPERATOR-CREDENTIAL.md); return only a success confirmation, never the key or encrypted file. A real disposable endpoint watchdog enrollment and live cleanup test remain pending. No Runpod API calls, GPU allocations, queue submissions, blockchain searches, fixture spends or broadcasts occurred in this validation.
+The operator elected to provision the real encrypted Runpod credential. Follow the private provisioning procedure (`supervised/install/OPERATOR-CREDENTIAL.md`, removed under #23); return only a success confirmation, never the key or encrypted file. A real disposable endpoint watchdog enrollment and live cleanup test remain pending. No Runpod API calls, GPU allocations, queue submissions, blockchain searches, fixture spends or broadcasts occurred in this validation.
 
 Credential provisioning alone does not complete production integration: protected queue/table/registry configuration and authority enrollment remain required. The sealed historical runtime's isolated table-prefix and registry bindings must be reconciled with the public Terraform configuration before enabling dispatch. Neither installation checks nor a dummy credential test proves an end-to-end provider-backed withdrawal or mainnet readiness.
 

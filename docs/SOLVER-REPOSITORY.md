@@ -51,8 +51,8 @@ it cannot replace the two-stage pipeline through a descriptor.
 
 Past reports may mention paths now moved to the solver repo. They record prior
 source/build experiments, not current app prerequisites or new image attestations.
-Parked supervised archives remain historical snapshots; their embedded wrappers
-are not the live coordinator and are not a second solver build route.
+The parked supervised archives and their embedded wrappers were removed under
+#23; they were never the live coordinator or a second solver build route.
 CUDA sources and build/validation tooling moved to the solver repository.
 Historical app source-audit checks were removed; their removal does not certify
 the optimized candidate. App coverage-accounting tests and independent CPU

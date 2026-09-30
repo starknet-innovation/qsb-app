@@ -2,12 +2,12 @@
 
 Mainnet job creation uses one pipeline: `createApp`, then `startWorkflow`, then the Step Functions coordinator.
 
-1. The deployed API Lambda (`server/lambda.ts`) serves mainnet with `createApp`. It does not mount `installSupervisedCreation`.
+1. The deployed API Lambda (`server/lambda.ts`) serves mainnet with `createApp`, and refuses to start for any other network.
 2. `POST /api/jobs` in `createApp` (`server/app.ts`) is the job-creation route. After the release gate, it writes the job and calls `startWorkflow`.
 3. `startWorkflow` starts the withdrawal state machine when `WORKFLOW_ARN` is set.
 4. That state machine's `CoordinateSearch` task invokes the coordinator Lambda (`terraform/workflow.tf`).
 
-`POST /api/jobs/supervised` is not a mainnet route. Supervised creation, dispatch, fresh-proof, activation, and miner-inclusion modules stay in the repository. Supervised tests remain and are off this path. Removing that code is a later step.
+The parked supervised creation, dispatch, host, fresh-proof and activation code, and its tests, were removed under #23; there is no `POST /api/jobs/supervised`.
 
 Terraform declares only this pipeline, with one records table and AWS Batch queue/job-definition and S3 artifact bindings. Supervised host, dispatch queue, evidence storage and watchdog infrastructure have been removed for the fresh-account deployment; there is no `provision_runtime` switch. See the [deployment instructions](../terraform/README.md).
 
@@ -21,7 +21,7 @@ transaction-approval checks. See the [switch matrix](OPERATIONAL-RUNBOOK.md#depl
 and [exact submission](EXACT-SUBMIT.md).
 
 The source metadata `release.mainnetEnabled` and capability `broadcastAuthorized`
-remain false for parked runtime components; they are not the deployed route
+remain false; they are not the deployed route
 switches. Disabling mainnet pauses non-terminal coordinator jobs while preserving
 provider IDs, submission intents, spend accounting and outpoint reservations.
 It does not cancel already submitted GPU work. Resume requires mainnet to be

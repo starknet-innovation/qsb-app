@@ -16,7 +16,7 @@ A research application for constructing and recovering quantum-safe Bitcoin vaul
 - `docs/STATUS.md`: achieved evidence summary.
 - [Mainnet readiness checklist](docs/MAINNET-READINESS.md): remaining tasks, dependencies and acceptance evidence.
 
-This is a curated export, not the complete operational workspace. Cloud deployment settings, credentials, customer data, signed transactions, raw validation journals, compiled artifacts and one-off recovery scripts are excluded. The [Linux supervisor source package](supervised/runtime/README.md) remains parked research source; the application Terraform does not deploy it.
+This is a curated export, not the complete operational workspace. Cloud deployment settings, credentials, customer data, signed transactions, raw validation journals, compiled artifacts and one-off recovery scripts are excluded.
 
 ## Local development
 
@@ -28,7 +28,6 @@ npm run vendor
 npm test
 npm run typecheck
 QSB_NETWORK=mainnet VITE_QSB_NETWORK=mainnet npm run build
-npm run package:release -- --check
 ```
 
 The preparation step supplies the pinned sources required by provenance tests and the browser Python transaction builder. Then start development. `mainnet` here is the network identity; it does not enable mainnet operations:
@@ -39,13 +38,13 @@ QSB_NETWORK=mainnet VITE_QSB_NETWORK=mainnet npm run dev
 
 `vendor` downloads an allowlist of generator/reference Python files and their license from one pinned upstream commit, then applies the checked-in patch; review `scripts/vendor.py` and `scripts/patch_upstream.py` before running it. It does not require wallet secrets. The local API uses an in-memory store. Do not put a real backup, recovery phrase, or passphrase into an issue or pull request.
 
-`package:release --check` rebuilds `release/source-manifest.json` from this checkout. That manifest is a source closure. It does not build the CUDA image, and the historical image name in the archived solver descriptor is not a deployable registry identity. CUDA sources and image builds belong to qsb-solver.
+The historical image name in the archived solver descriptor is not a deployable registry identity. CUDA sources and image builds belong to qsb-solver.
 
 The build and unit tests do not establish successful GPU execution, a fresh end-to-end optimized withdrawal, or external miner acceptance. Browser tests also require Playwright browser installation and their configured local services.
 
 ## Publication and provenance
 
-See [publication scope](docs/PUBLICATION.md) and [third-party notices](THIRD_PARTY_NOTICES.md). The historical private ECR account is replaced with a nonfunctional placeholder in the exported release descriptor; this snapshot is **not** an attestation of that deployable image. The Terraform folder provides a separate reviewed-plan deployment path for the research app; it does not activate mainnet or deploy the experimental supervised runtime.
+See [publication scope](docs/PUBLICATION.md) and [third-party notices](THIRD_PARTY_NOTICES.md). The historical private ECR account is replaced with a nonfunctional placeholder in the exported release descriptor; this snapshot is **not** an attestation of that deployable image. The Terraform folder provides a separate reviewed-plan deployment path for the research app; it does not activate mainnet.
 
 No project-wide license has been selected for original application code yet. Existing third-party licenses remain in their respective directories. Public visibility alone does not provide a broad reuse license for the original application code.
 
