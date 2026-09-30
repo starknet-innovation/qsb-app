@@ -155,11 +155,16 @@ export const attachedCodeStatus = {
   chain_error: 502,
   // The caller's outpoint is past its transaction's outputs, like the other input_* codes.
   input_not_found: 409,
-  // The miner credential couldn't be read, like a refused credential. It's read before any
-  // intent is recorded or any POST, so this request sent nothing.
+  // The two miner codes split by what the miner did, not by whether anything reached it.
+  // Neither comes from this request's own POST: submitFunding and submitExact catch its
+  // failures. On a retry (fund/submit with the same bytes, or fund/resubmit), an earlier
+  // request's POST may have landed, so neither is a refusal: clients must treat both as uncertain.
+  //
+  // The miner credential is unavailable: it couldn't be read, like a refused credential
+  // (a MinerAuthenticationError, which onError also answers with 503 miner_unavailable).
   miner_unavailable: 503,
-  // No usable answer from the miner: no response, an error status or a malformed body. Not
-  // 503: an earlier send of the same bytes may have reached the miner, so the outcome may be unknown.
+  // The miner answered badly or not at all: no response, an error status other than 401 or
+  // 403, or a malformed body.
   miner_request_failed: 502,
 } as const satisfies Partial<Record<ApiErrorCode, ContentfulStatusCode>>;
 /** The status attachedCodeStatus sets for `code`, if it sets one. */

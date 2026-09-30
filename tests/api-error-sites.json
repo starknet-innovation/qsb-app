@@ -8,7 +8,7 @@
   "app.ts | onError | chainErrorStatus(e.code) | e.code | e.message",
   "app.ts | onError | 400 | attached ?? \"invalid_request\" | Invalid request",
   "app.ts | onError | 409 | state_conflict | State changed. Refresh and try again.",
-  "app.ts | onError | coded ?? 500 | attached ?? \"internal_error\" | Unable to complete the request. Please retry.",
+  "app.ts | onError | coded ?? 500 | attached ?? \"internal_error\" | attached === \"input_not_found\" ? \"The input's output index doesn't exist in its transaction.\" : \"Unable to complete the request. Please retry.\"",
   "app.ts | GET /api/rates | 503 | miner_rate_unavailable | Live miner fee quote is temporarily unavailable.",
   "app.ts | POST /api/auth/challenge | 400 | network_mismatch | Wallet address does not match this Bitcoin network.",
   "app.ts | POST /api/auth/verify | 401 | challenge_expired | Sign-in request expired or already used.",
