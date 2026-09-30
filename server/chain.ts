@@ -212,6 +212,33 @@ export class Esplora {
       throw new ChainError("Input has already been spent.", "input_spent");
     return { previousTxHex: raw, confirmations: s.confirmations };
   }
+  /**
+   * Unspent outputs, confirmed or not, that pay the script whose SHA-256 is `scriptHash`: a
+   * vault's `scriptHash`, which is what Esplora indexes a bare script by.
+   */
+  async scriptOutputs(scriptHash: string) {
+    await this.assertNetwork();
+    txid.parse(scriptHash);
+    const text = await this.read(`/scripthash/${scriptHash.toLowerCase()}/utxo`);
+    const rows = answer(() =>
+      z
+        .array(
+          z.object({
+            txid,
+            vout: z.number().int().nonnegative().max(0xffffffff),
+            value: z.number().int().nonnegative().max(2100000000000000),
+            status: statusSchema,
+          }),
+        )
+        .parse(JSON.parse(text)),
+    );
+    return rows.map((x) => ({
+      txid: x.txid.toLowerCase(),
+      vout: x.vout,
+      value: String(x.value),
+      confirmed: x.status.confirmed,
+    }));
+  }
   async paymentUtxos(address: string) {
     await this.assertNetwork();
     outputScript(address); // Configured-network address checksum validation before URL construction.

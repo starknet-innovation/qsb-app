@@ -54,6 +54,30 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   treat_missing_data  = "notBreaching"
   alarm_actions       = var.alarm_actions
 }
+# The API logs one {"strayPayment": ...} line when it first flags a payment to a vault's script
+# beyond its recorded deposit (server/stray-outputs.ts). It's never spent; see the runbook.
+resource "aws_cloudwatch_log_metric_filter" "stray_payments" {
+  name           = "${var.name}-stray-payments"
+  log_group_name = aws_cloudwatch_log_group.lambda["api"].name
+  pattern        = "strayPayment"
+  metric_transformation {
+    name      = "StrayPayments"
+    namespace = "QSB/${var.name}"
+    value     = "1"
+  }
+}
+resource "aws_cloudwatch_metric_alarm" "stray_payments" {
+  alarm_name          = "${var.name}-stray-payments"
+  namespace           = aws_cloudwatch_log_metric_filter.stray_payments.metric_transformation[0].namespace
+  metric_name         = aws_cloudwatch_log_metric_filter.stray_payments.metric_transformation[0].name
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.alarm_actions
+}
 resource "aws_cloudwatch_metric_alarm" "workflow_failures" {
   alarm_name          = "${var.name}-workflow-failures"
   namespace           = "AWS/States"

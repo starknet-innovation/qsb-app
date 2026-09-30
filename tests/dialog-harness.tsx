@@ -4,10 +4,11 @@ import TransactionDialog from "../src/TransactionDialog";
 import { generateQsb, lockQsb } from "../src/lib/qsb";
 import { encryptRecovery } from "../src/lib/backup";
 import type { PublicVault } from "../src/lib/model";
+import { withVaultConfiguration } from "../src/lib/provenance";
 export async function mount(address: string) {
   const generated = await generateQsb();
   lockQsb();
-  const vault: PublicVault = {
+  const vault: PublicVault = withVaultConfiguration({
     id: crypto.randomUUID(),
     name: "Withdrawal browser fixture",
     createdAt: new Date().toISOString(),
@@ -19,7 +20,7 @@ export async function mount(address: string) {
     publicStateJson: generated.publicStateJson,
     status: "confirmed",
     funding: { txid: "11".repeat(32), vout: 0, value: "100000" },
-  };
+  });
   const backup = await encryptRecovery(
     { format: "qsb-recovery-v1", vault, stateJson: generated.stateJson },
     "browser transaction passphrase",

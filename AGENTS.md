@@ -5,7 +5,7 @@ Don't reopen these in code or PRs.
 - **One pipeline.** The Step Functions coordinator is the single mainnet pipeline (#9). The supervised stacks (the in-process handoff and the deployed Lambda → queue → host path) were removed under #23. QSB deploys on mainnet only.
 - **Solver release.** Solver images are built and attested in `starknet-innovation/qsb-solver` and enrolled verbatim as descriptors in `src/lib/releases` (#15, #35). Never edit an enrolled descriptor; keep `qsb-config-a-ranked-v2.json` byte-identical. A withdrawal pins the release the deployment serves (`SOLVER_RELEASE_ID`) when it's created. A deposit is never bound to one solver.
 - **GPUs on AWS Batch.** Runpod is neither the default nor a fallback.
-- **One deposit per vault.** Never offer a way to deposit into an existing vault. Payments to a vault's script from outside the app are flagged and never spent (#16, #27).
+- **One deposit per vault.** Never offer a way to deposit into an existing vault (#16). Payments to a vault's script from outside the app are never spent, and the app offers no way to recover them (#27).
 - **No test chains.** Testing happens on mainnet with small deposits (#22). Before submit, an offline consensus check runs Bitcoin Core's script interpreter on the exact signed transaction (#20).
 
 ## Keep
@@ -28,15 +28,15 @@ These are the funds-safety invariants:
 
 ## Reviews and merges
 
-- **Automatic review.** Every PR on a `cursor/` branch is reviewed automatically. Review threads can't be replied to from here, so address findings with new commits and one PR comment that lists what changed.
+- **Review before opening.** Before opening a PR, have a new subagent review the whole diff against `main` from scratch. Give it the diff and this file, not the session's reasoning. It checks the diff for correctness and against every rule in this file. Fix what it finds and review again with another new subagent until one finds nothing, then open the PR.
 - **Docs.** Every PR updates the docs its change affects, in the same PR: the README files and `docs/`. If it changes who holds a key, passphrase or credential, or what the service receives, update `docs/KEY-CUSTODY.md`, edit `docs/key-custody.html` to match, and re-render `docs/key-custody.png` with the command at the top of that file. If you can't run a browser, still update the text and say in the PR description that the diagram is out of date.
-- **Merging.** A PR is merged, and its issue closed, only when all of these hold:
-  - the review finds zero defects;
-  - the PR implements a plan step with every acceptance item met;
+- **Merging.** A PR is merged, closing its issue if it has one, only when all of these hold:
+  - the reviews on the PR find zero defects;
+  - if it closes an issue, every acceptance item in that issue is met;
   - it targets `main`;
   - CI passes;
-  - no review threads are open.
-- **Mainnet switch.** Any change that turns on `mainnet_enabled`, `exact_submit_enabled`, `QSB_MAINNET_ENABLED`, `QSB_EXACT_SUBMIT_ENABLED`, `release.mainnetEnabled` or `broadcastAuthorized` (including changing an off default), or that implements #22, needs the user's explicit approval before it's merged.
+  - no review thread is unresolved.
+- **Mainnet switch.** Any change that turns on `mainnet_enabled`, `exact_submit_enabled`, `QSB_MAINNET_ENABLED`, `QSB_EXACT_SUBMIT_ENABLED`, `release.mainnetEnabled` or `broadcastAuthorized` (including changing an off default) needs the user's explicit approval before it's merged.
 
 ## Deployment rule
 

@@ -1,5 +1,5 @@
 import { legacySearchControls } from "./lib/jobControls";
-import { vaultConfiguration } from "./lib/provenance";
+import { withVaultConfiguration } from "./lib/provenance";
 import { NETWORK_ID, NETWORK_CONFIG } from "./lib/network";
 import { operationsAllowed, serviceStatus } from "./lib/readiness";
 import { useEffect, useRef, useState } from "react";
@@ -48,7 +48,9 @@ import {
   type PublicVault,
   type Recovery,
   type Job,
+  type StrayPayments,
 } from "./lib/model";
+import { downloadVaultExport } from "./lib/vault-export";
 const pages = ["vaults", "activity", "costs", "recovery", "protocol"] as const;
 type Page = (typeof pages)[number];
 // The page lives in the URL, so Back, refresh and opening a page in a new tab all work.
@@ -146,6 +148,8 @@ export default function App() {
     [vaults, setVaults] = useState<PublicVault[]>([]),
     // Vaults whose unconfirmed deposit has stored Slipstream bytes the server can resend.
     [resendable, setResendable] = useState<Set<string>>(new Set()),
+    // Payments to a vault's script beyond its one deposit, flagged by the server. Never spent.
+    [stray, setStray] = useState<StrayPayments[]>([]),
     [manualDeposit, setManualDeposit] = useState<{ vaultId: string; txid: string; rawTxHex: string }>(),
     [jobs, setJobs] = useState<Job[]>([]),
     // Feedback shown next to the row that asked for it, keyed "vault:<id>" or "job:<id>".
@@ -282,11 +286,16 @@ export default function App() {
     const updated = await api<{
       vault: PublicVault;
       status: { confirmed: boolean };
+      strayPayments?: StrayPayments | null;
     }>(`/vaults/${v.id}/funding`);
     if (stale()) return false;
     setVaults((items) =>
       items.map((item) => (item.id === v.id ? updated.vault : item)),
     );
+    setStray((items) => [
+      ...items.filter((p) => p.vaultId !== v.id),
+      ...(updated.strayPayments ? [updated.strayPayments] : []),
+    ]);
     markChecked(v.id);
     return updated.status.confirmed;
   }
@@ -315,12 +324,13 @@ export default function App() {
     const refresh = async () => {
       try {
         const [v, j] = await Promise.all([
-          api<{ vaults: PublicVault[]; resendable?: string[] }>("/vaults"),
+          api<{ vaults: PublicVault[]; resendable?: string[]; strayPayments?: StrayPayments[] }>("/vaults"),
           api<{ jobs: Job[] }>("/jobs"),
         ]);
         if (disposed) return;
         setVaults(v.vaults);
         setResendable(new Set(v.resendable ?? []));
+        setStray(v.strayPayments ?? []);
         setJobs(j.jobs);
         setCheckedAt((c) => ({ ...c, ...readChainSeen(wallet.address) }));
         // Pending transactions are checked only while the page is on screen, by one tab.
@@ -392,6 +402,7 @@ export default function App() {
     setWalletMenu(false);
     setManualDeposit(undefined);
     setResendable(new Set());
+    setStray([]);
     setInline({});
     setCheckedAt({});
     setBusy("");
@@ -482,7 +493,7 @@ export default function App() {
       const data = await generateQsb();
       if (gen !== generation.current)
         throw new Error("Wallet changed during key generation.");
-      const vault: PublicVault = {
+      const vault = withVaultConfiguration({
         id: crypto.randomUUID(),
         name: name.trim(),
         createdAt: new Date().toISOString(),
@@ -493,8 +504,7 @@ export default function App() {
         publicStateJson: data.publicStateJson,
         paymentAddress: wallet.address,
         status: "unfunded",
-      };
-      vault.configuration = vaultConfiguration(vault);
+      });
       const r: Recovery = {
         format: "qsb-recovery-v1",
         vault,
@@ -772,19 +782,32 @@ export default function App() {
               ) : (
                 <>
                   <div className="section-head">
-                    <h2>
-                      Vaults <span className="count">{vaults.length}</span>
-                    </h2>
-                    <button className="primary" onClick={newVault} disabled={!!busy}>
-                      <Plus size={17} />
-                      Create vault
-                    </button>
+                    <div>
+                      <h2>
+                        Vaults <span className="count">{vaults.length}</span>
+                      </h2>
+                      <p>Each vault has its own recovery backup and takes exactly one deposit.</p>
+                    </div>
+                    <div className="section-actions">
+                      <button
+                        className="secondary"
+                        title="Downloads each vault's QSB version, deposit and status as JSON. No secrets."
+                        onClick={() => downloadVaultExport(vaults, stray)}
+                      >
+                        Export
+                      </button>
+                      <button className="primary" onClick={newVault} disabled={!!busy}>
+                        <Plus size={17} />
+                        Create vault
+                      </button>
+                    </div>
                   </div>
                   <div className="vault-list">
                     {vaults.map((v) => {
                       const job = jobs.find((j) => j.vaultId === v.id);
                       const key = `vault:${v.id}`;
                       const stuck = v.status === "submitted" && resendable.has(v.id) && submissionOn;
+                      const flagged = stray.find((p) => p.vaultId === v.id);
                       return (
                         <article className="vault-row" key={v.id}>
                           <div className="vault-main">
@@ -802,6 +825,18 @@ export default function App() {
                                       ? "Withdrawal confirmed"
                                       : "Deposit confirmed"}
                               </p>
+                              <p className="vault-meta">
+                                {v.configuration?.protocol ?? "Unknown version"}
+                                {v.configuration && ` · generator ${v.configuration.generatorCommit.slice(0, 7)}`}
+                                {v.funding && ` · deposit ${short(v.funding.txid)}:${v.funding.vout}`}
+                              </p>
+                              {flagged && (
+                                <p className="vault-warning" role="status">
+                                  {flagged.count === 1 ? "1 payment" : `${flagged.count} payments`} of{" "}
+                                  {formatBtc(flagged.sats)} BTC reached this vault outside its one deposit. No
+                                  withdrawal spends them, and the app can't recover them.
+                                </p>
+                              )}
                             </div>
                             <div className="vault-amount">
                               {formatBtc(v.funding?.value || "0")} <span>BTC</span>

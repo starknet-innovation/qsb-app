@@ -10,6 +10,7 @@ import { Esplora } from "../server/chain";
 import { Slipstream } from "../server/providers";
 import { fundingPsbt } from "../src/lib/transactions";
 import { release, type PublicVault } from "../src/lib/model";
+import { withVaultConfiguration } from "../src/lib/provenance";
 
 const key = new Uint8Array(32).fill(7),
   pub = secp256k1.getPublicKey(key),
@@ -57,7 +58,7 @@ function deposit(scriptHex: string, amount: bigint, inputTxid: string) {
   return { tx, raw, txid: tx.id };
 }
 function vaultOf(scriptHex: string): PublicVault {
-  return {
+  return withVaultConfiguration({
     id: crypto.randomUUID(),
     name: "Vault",
     createdAt: "2026-09-24T00:00:00.000Z",
@@ -73,7 +74,7 @@ function vaultOf(scriptHex: string): PublicVault {
     }),
     paymentAddress: address,
     status: "unfunded",
-  };
+  });
 }
 async function signIn(app: ReturnType<typeof createApp>) {
   const challenge = await (

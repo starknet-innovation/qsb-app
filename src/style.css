@@ -775,6 +775,18 @@ select {
   color: #8d9a82;
   margin-top: 7px;
 }
+.vault-name p.vault-warning {
+  color: #a04739;
+}
+.vault-name p.vault-meta {
+  font-size: 0.68rem;
+  color: #a0a997;
+  margin-top: 4px;
+}
+.section-actions {
+  display: flex;
+  gap: 10px;
+}
 .vault-amount {
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;

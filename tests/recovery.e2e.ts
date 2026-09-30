@@ -15,9 +15,11 @@ test("cold recovery restores an encrypted disposable vault locally in a fresh br
     await page.goto("/");
     fixture = await page.evaluate(async (password) => {
       const qsbPath = "/src/lib/qsb.ts",
-        backupPath = "/src/lib/backup.ts";
+        backupPath = "/src/lib/backup.ts",
+        provenancePath = "/src/lib/provenance.ts";
       const qsb = await import(qsbPath),
-        backup = await import(backupPath);
+        backup = await import(backupPath),
+        provenance = await import(provenancePath);
       // Generate real disposable HORS state in the application's Pyodide worker.
       // Only encrypted backup text and public identifiers leave this context.
       const generated = await qsb.generateQsb();
@@ -25,7 +27,7 @@ test("cold recovery restores an encrypted disposable vault locally in a fresh br
       const recovery = {
         format: "qsb-recovery-v1",
         stateJson: generated.stateJson,
-        vault: {
+        vault: provenance.withVaultConfiguration({
           id,
           name: "Cold recovery drill",
           createdAt: new Date().toISOString(),
@@ -36,7 +38,7 @@ test("cold recovery restores an encrypted disposable vault locally in a fresh br
           paymentAddress: "bc1qdisposableunfundedfixtureonly000000",
           publicStateJson: generated.publicStateJson,
           status: "unfunded",
-        },
+        }),
       };
       const encrypted = await backup.encryptRecovery(recovery, password);
       qsb.lockQsb();

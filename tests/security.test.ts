@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Signer } from "bip322-js";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { createApp } from "../server/app";
 import { MemoryStore, Conflict } from "../server/store";
@@ -12,6 +13,7 @@ import {
   type Recovery,
 } from "../src/lib/model";
 import { encryptRecovery, decryptRecovery } from "../src/lib/backup";
+import { withVaultConfiguration } from "../src/lib/provenance";
 import {
   fundingPsbt,
   helperPsbt,
@@ -128,18 +130,18 @@ describe("encrypted recovery", () => {
   const recovery: Recovery = {
     format: "qsb-recovery-v1",
     stateJson: '{"hors_secrets":["private-only"]}',
-    vault: {
+    vault: withVaultConfiguration({
       id: crypto.randomUUID(),
       name: "Test",
       createdAt: new Date().toISOString(),
       network: "mainnet",
       config: "A",
       scriptHex: "51",
-      scriptHash: "00".repeat(32),
+      scriptHash: hex.encode(sha256(hex.decode("51"))),
       paymentAddress: address,
       publicStateJson: "{}",
       status: "unfunded",
-    },
+    }),
   };
   it("restores exactly and rejects wrong passwords and tampering", async () => {
     const text = await encryptRecovery(recovery, "a long test passphrase");

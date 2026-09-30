@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hex } from "@scure/base";
+import { sha256 } from "@noble/hashes/sha2.js";
 import * as btc from "@scure/btc-signer";
 import {
   assertRecoveryAuthorization,
@@ -10,6 +11,7 @@ import {
 } from "../src/lib/backup";
 import { verifyWithdrawalCommitment } from "../src/lib/transactions";
 import type { Recovery, Withdrawal } from "../src/lib/model";
+import { withVaultConfiguration } from "../src/lib/provenance";
 
 const address = btc.p2wpkh(
   hex.decode(
@@ -52,18 +54,18 @@ async function recovery(): Promise<Recovery> {
   return {
     format: "qsb-recovery-v1",
     stateJson: "{}",
-    vault: {
+    vault: withVaultConfiguration({
       id: manifest.vaultId,
       name: "Test",
       createdAt: "2026-09-18T00:00:00.000Z",
       network: "mainnet",
       config: "A",
       scriptHex: "51",
-      scriptHash: "00".repeat(32),
+      scriptHash: hex.encode(sha256(hex.decode("51"))),
       paymentAddress: address,
       publicStateJson: "{}",
       status: "unfunded",
-    },
+    }),
     authorization: { manifestJson, manifestHash },
   };
 }

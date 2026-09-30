@@ -14,6 +14,7 @@ import { assertNoCredentialMaterial } from "../server/credential-material";
 import { outputScript } from "../src/lib/transactions";
 import { BITCOIN_NETWORK } from "../src/lib/network";
 import type { Job, PublicVault, Withdrawal } from "../src/lib/model";
+import { withVaultConfiguration } from "../src/lib/provenance";
 
 // Unsigned or placeholder-signed transactions only: no keys are needed or used.
 const opts = { allowUnknownOutputs: true, allowUnknownInputs: true };
@@ -33,7 +34,7 @@ afterEach(() => {
 });
 
 function vaultFor(paymentAddress: string, status: PublicVault["status"] = "unfunded"): PublicVault {
-  return {
+  return withVaultConfiguration({
     id: randomUUID(),
     name: "cold-1",
     createdAt: new Date().toISOString(),
@@ -44,7 +45,7 @@ function vaultFor(paymentAddress: string, status: PublicVault["status"] = "unfun
     paymentAddress,
     publicStateJson: JSON.stringify({ config: "A", hash_mode: "sha256", n: 150, round_sigs: [], full_script_hex: scriptHex }),
     status,
-  } as PublicVault;
+  });
 }
 
 function deposit(seed = 1) {

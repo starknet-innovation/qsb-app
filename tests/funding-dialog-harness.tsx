@@ -2,10 +2,12 @@
 import { createRoot } from "react-dom/client";
 import * as btc from "@scure/btc-signer";
 import { base64, hex } from "@scure/base";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import TransactionDialog from "../src/TransactionDialog";
 import { encryptRecovery } from "../src/lib/backup";
 import type { PublicVault } from "../src/lib/model";
+import { withVaultConfiguration } from "../src/lib/provenance";
 export async function mount() {
   const key = new Uint8Array(32).fill(7),
     pub = secp256k1.getPublicKey(key);
@@ -13,18 +15,18 @@ export async function mount() {
   const previous = new btc.Transaction();
   previous.addInput({ txid: "11".repeat(32), index: 0 });
   previous.addOutputAddress(address, 100000n);
-  const vault: PublicVault = {
+  const vault: PublicVault = withVaultConfiguration({
     id: "11111111-1111-4111-8111-111111111111",
     name: "Funding",
     createdAt: new Date().toISOString(),
     network: "mainnet",
     config: "A",
     scriptHex: "51".repeat(100),
-    scriptHash: "aa".repeat(32),
+    scriptHash: hex.encode(sha256(hex.decode("51".repeat(100)))),
     paymentAddress: address,
     publicStateJson: "{}",
     status: "unfunded",
-  };
+  });
   const password = "public browser test password";
   const backup = await encryptRecovery(
     { format: "qsb-recovery-v1", vault, stateJson: "{}" },

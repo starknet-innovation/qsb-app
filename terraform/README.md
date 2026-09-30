@@ -13,7 +13,7 @@ Applying Terraform doesn't turn mainnet on and doesn't authorize a spend: the de
 | Persistence | On-demand DynamoDB table with `pk`/`sk`, `expiresAt` TTL, point-in-time recovery and deletion protection |
 | Search control | Node.js 22 coordinator, Standard Step Functions loop and continuation; no generic retry around paid work (only a throttled coordinator invoke is retried) |
 | CPU checks | Python 3.13 ARM64 reference Lambda; public inputs only |
-| Operations | Separate service roles, resource-scoped data/compute grants, 30-day log retention and failure alarms |
+| Operations | Separate service roles, resource-scoped data/compute grants, 30-day log retention, failure alarms and a stray-payment alarm |
 | External | The GPU stack's AWS Batch queue, job definition and bucket, and an optional administrator-created `qsb/slipstream` secret (the API's MARA Slipstream credential); no secret values in Terraform |
 | Webhook retries (off by default) | A keys-only `webhook-due` index on the table, always; with `webhook_dispatcher_enabled`, a Node.js 22 dispatcher Lambda that Lambda doesn't retry and an EventBridge Scheduler schedule every 5 minutes, each with its own bounded role (`webhooks.tf`); see [Scheduled webhook dispatcher](../docs/OPERATIONAL-RUNBOOK.md#scheduled-webhook-dispatcher) |
 

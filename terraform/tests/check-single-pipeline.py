@@ -25,7 +25,7 @@ ALLOWED = {
     'aws_s3_bucket_server_side_encryption_configuration', 'aws_s3_object',
     'aws_s3_bucket_policy', 'aws_cloudwatch_log_group', 'aws_iam_role',
     'aws_iam_role_policy', 'aws_lambda_function', 'aws_lambda_permission',
-    'aws_sfn_state_machine', 'aws_cloudwatch_metric_alarm',
+    'aws_sfn_state_machine', 'aws_cloudwatch_metric_alarm', 'aws_cloudwatch_log_metric_filter',
     'aws_apigatewayv2_api', 'aws_apigatewayv2_integration',
     'aws_apigatewayv2_route', 'aws_apigatewayv2_stage',
     'aws_cloudfront_origin_access_control', 'aws_cloudfront_response_headers_policy',
