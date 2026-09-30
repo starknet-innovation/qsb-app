@@ -362,6 +362,9 @@ export default function TransactionDialog({
         (await validateRecovery(r.stateJson)) !== vault.scriptHash
       )
         throw Error("This backup belongs to a different vault.");
+      // Authorizing needs the backup saved when the search started; an earlier one can't sign.
+      if (job && !r.authorization)
+        throw Error(`This backup has no withdrawal intent. Select ${recoveryBackupFilename(`${vault.id}-withdrawal`)}, or the -signing backup if you saved one.`);
       check();
       setUnlocked(r);
       setAssemblyVerified(!!r.authorization?.assembly);
@@ -971,7 +974,16 @@ export default function TransactionDialog({
           <>
             {pendingNotice}
             <p>
-              Select this vault's recovery backup and enter its passphrase.
+              {job ? (
+                <>
+                  Select this withdrawal's backup,{" "}
+                  <code>{recoveryBackupFilename(`${vault.id}-withdrawal`)}</code>{" "}
+                  (or the <code>-signing</code> one if you saved it), and enter
+                  its passphrase.
+                </>
+              ) : (
+                "Select this vault's recovery backup and enter its passphrase."
+              )}{" "}
               It's checked on this device; neither the file nor the passphrase
               is uploaded.
             </p>

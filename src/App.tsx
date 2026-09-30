@@ -308,7 +308,7 @@ export default function App() {
       status: { confirmed: boolean };
       strayPayments?: StrayPayments | null;
     }>(`/vaults/${v.id}/funding`);
-    if (stale()) return false;
+    if (stale()) return updated;
     setVaults((items) =>
       items.map((item) => (item.id === v.id ? updated.vault : item)),
     );
@@ -317,7 +317,7 @@ export default function App() {
       ...(updated.strayPayments ? [updated.strayPayments] : []),
     ]);
     markChecked(v.id);
-    return updated.status.confirmed;
+    return updated;
   }
   async function checkWithdrawal(j: Job, stale = () => false) {
     const observation = await api<{ status: string; alert?: string }>(
@@ -613,6 +613,8 @@ export default function App() {
   const balance = funded.reduce((n, v) => n + BigInt(v.funding?.value || "0"), 0n);
   const ready = jobs.filter((j) => legacySearchControls(j).authorize);
   const vaultName = (id: string) => vaults.find((v) => v.id === id)?.name;
+  // A failure shows until a check succeeds, in this tab or another.
+  const failedLast = (id: string) => !!checkFailed[id] && !(checkedAt[id] > checkFailed[id]);
   const checks: { id: string; label: string; passed: boolean }[] = config.checks ?? [];
   const subtitle: Record<Page, string> = {
     vaults:
@@ -872,7 +874,7 @@ export default function App() {
                               <h3>{v.name}</h3>
                               <p>
                                 {v.status === "submitted"
-                                  ? `Deposit sent${checkFailed[v.id] ? ` · last check failed ${clock(checkFailed[v.id])}` : checkedAt[v.id] ? ` · last checked ${clock(checkedAt[v.id])}` : ""}`
+                                  ? `Deposit sent${failedLast(v.id) ? ` · last check failed ${clock(checkFailed[v.id])}` : checkedAt[v.id] ? ` · last checked ${clock(checkedAt[v.id])}` : ""}`
                                   : v.status === "unfunded"
                                     ? `Created ${new Date(v.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`
                                     : v.status === "spent"
@@ -897,29 +899,39 @@ export default function App() {
                             </div>
                             <span className={`status-label ${v.status}`}>{vaultLabel(v, job)}</span>
                             <div className="vault-actions">
+                              {v.funding && (
+                                <button
+                                  className="text-button"
+                                  disabled={!!busy}
+                                  onClick={() =>
+                                    rowAction(key, "Checking the deposit", async () => {
+                                      const checked = await checkDeposit(v);
+                                      say(
+                                        key,
+                                        "notice",
+                                        v.status === "submitted"
+                                          ? checked.status.confirmed
+                                            ? "Deposit confirmed."
+                                            : "Still waiting for confirmation. Nothing was resent."
+                                          : checked.strayPayments
+                                            ? "Checked. The payments outside the deposit are shown above."
+                                            : "Checked. Nothing else has reached this vault.",
+                                      );
+                                    })
+                                  }
+                                >
+                                  Check now
+                                </button>
+                              )}
                               {v.status === "unfunded" && (
                                 <button className="secondary" onClick={() => startTransaction(v)}>
                                   <ArrowDownLeft size={16} /> Deposit
                                 </button>
                               )}
                               {v.status === "submitted" && (
-                                <>
-                                  <button
-                                    className="text-button"
-                                    disabled={!!busy}
-                                    onClick={() =>
-                                      rowAction(key, "Checking the deposit", async () => {
-                                        const confirmed = await checkDeposit(v);
-                                        say(key, "notice", confirmed ? "Deposit confirmed." : "Still waiting for confirmation. Nothing was resent.");
-                                      })
-                                    }
-                                  >
-                                    Check now
-                                  </button>
-                                  <button className="secondary" disabled>
-                                    Waiting for confirmation
-                                  </button>
-                                </>
+                                <button className="secondary" disabled>
+                                  Waiting for confirmation
+                                </button>
                               )}
                               {v.status === "confirmed" &&
                                 (!job ? (
@@ -1059,7 +1071,7 @@ export default function App() {
                           </p>
                           <p className="job-id">
                             Request {short(j.id)}
-                            {checkFailed[j.id]
+                            {failedLast(j.id)
                               ? ` · last check failed ${clock(checkFailed[j.id])}`
                               : checkedAt[j.id] && ` · last checked ${clock(checkedAt[j.id])}`}
                           </p>

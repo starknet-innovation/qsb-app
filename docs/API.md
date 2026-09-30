@@ -85,10 +85,10 @@ A withdrawal never spends a stray output: `POST /api/jobs` accepts only the reco
 
 The webapp calls this route on its own while it's open and on screen:
 - A pending deposit is checked once a minute, once the tab has seen that deposit pending for five minutes, longer than a submission can run.
-- Each funded vault is checked about once an hour, at most three a minute.
+- Each funded or withdrawn vault is checked about once an hour, at most three a minute.
 - A submitted withdrawal is checked with `GET /api/transactions/:id/status` once a minute.
 
-One tab per wallet does the checking, and none does while a transaction dialog is open. This needs the browser's Web Locks API; without it the webapp checks only when the user asks.
+In each browser, one tab per wallet does the checking, and none does while a transaction dialog is open. Other browsers and devices check on their own. This needs the browser's Web Locks API. Without it, the webapp checks only when the user presses "Check now", which every vault with a deposit has.
 
 ## Events and webhooks
 

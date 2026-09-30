@@ -70,6 +70,9 @@ test("status follows the server switches and vault rows only offer what can happ
   await expect(page.locator(".vault-row", { hasText: "Emergency" }).getByRole("button", { name: /Deposit/ })).toBeEnabled();
   // A funded vault is checked too: that's where the server flags a payment outside its deposit.
   await expect(page.locator(".vault-row", { hasText: "Savings" })).toContainText("reached this vault outside its one deposit");
+  // A funded vault can also be checked by hand.
+  await page.locator(".vault-row", { hasText: "Savings" }).getByRole("button", { name: "Check now" }).click();
+  await expect(page.locator(".vault-row", { hasText: "Savings" })).toContainText("Checked. The payments outside the deposit are shown above.");
   // A deposit that has only just turned pending isn't checked: a first submission may still
   // be in flight. Once it has been pending for five minutes, it's checked without a click.
   expect(await page.evaluate(() => (window as any).apiCalls)).not.toContain(PENDING);
