@@ -4,6 +4,8 @@
 import http from "node:http";
 import https from "node:https";
 import { request as esmRequest } from "node:https";
+import net from "node:net";
+import tls from "node:tls";
 import { expect, it } from "vitest";
 
 const blocked = /Network access is blocked in unit tests/;
@@ -24,6 +26,15 @@ it("refuses http and https requests to public hosts, through every import form",
   expect(() => http.request("http://127.0.0.1/", { hostname: "example.com" })).toThrow(blocked);
   expect(() => https.request(new URL("https://localhost/"), { host: "example.com" })).toThrow(blocked);
   expect(() => http.get("http://127.0.0.1/", { host: "169.254.169.254" })).toThrow(blocked);
+});
+
+it("refuses raw TCP and TLS sockets to public hosts, in every connect form", () => {
+  expect(() => net.connect({ host: "example.com", port: 443 })).toThrow(blocked);
+  expect(() => net.connect(80, "example.com")).toThrow(blocked);
+  expect(() => net.createConnection({ host: "169.254.169.254", port: 80 })).toThrow(blocked);
+  expect(() => new net.Socket().connect({ host: "example.com", port: 443 })).toThrow(blocked);
+  expect(() => tls.connect({ host: "example.com", port: 443 })).toThrow(blocked);
+  expect(() => tls.connect(443, "example.com")).toThrow(blocked);
 });
 
 it("leaves loopback open and tells the AWS SDK not to probe instance metadata", async () => {

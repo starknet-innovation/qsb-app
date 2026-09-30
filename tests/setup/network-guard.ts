@@ -4,6 +4,7 @@
 // Loopback stays open for the SDK fixture and any local server a test starts.
 import http from "node:http";
 import https from "node:https";
+import net from "node:net";
 import { syncBuiltinESMExports } from "node:module";
 
 // The AWS SDK's default credential chain would otherwise probe the instance
@@ -63,6 +64,34 @@ for (const mod of [http, https]) {
     return get(...args);
   }) as typeof mod.get;
 }
+
+/**
+ * The host a socket will connect to, or undefined for a Unix socket. Node
+ * accepts `connect(options)`, `connect(port[, host])`, `connect(path)` and,
+ * from its own `net.createConnection`/`tls.connect`, a pre-normalised
+ * `[options, callback]` array. An omitted host means localhost.
+ */
+function socketHostOf(args: unknown[]): string | undefined {
+  let [first, second] = args;
+  if (Array.isArray(first)) [first, second] = first as unknown[];
+  if (typeof first === "object" && first !== null) {
+    const options = first as net.TcpSocketConnectOpts & net.IpcSocketConnectOpts;
+    if (options.path) return undefined;
+    return options.host ?? "localhost";
+  }
+  if (typeof first === "number" || (typeof first === "string" && /^\d+$/.test(first)))
+    return typeof second === "string" ? second : "localhost";
+  return undefined;
+}
+// Anything that bypasses http/https and opens the TCP socket itself (undici's
+// fetch, a raw `tls.connect`, a database driver) still goes through here.
+const socketConnect = net.Socket.prototype.connect as (...args: unknown[]) => net.Socket;
+net.Socket.prototype.connect = function guardedConnect(this: net.Socket, ...args: unknown[]) {
+  const host = socketHostOf(args);
+  if (host !== undefined && !loopback(host)) throw blocked(host);
+  return socketConnect.apply(this, args);
+} as typeof net.Socket.prototype.connect;
+
 // Named ESM imports of the builtins (`import { request } from "https"`) are
 // updated only when asked.
 syncBuiltinESMExports();
