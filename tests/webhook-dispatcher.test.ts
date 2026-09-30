@@ -142,7 +142,7 @@ describe("due-delivery index", () => {
     store.rows.set("WEBHOOK#owner-a|WEBHOOKS", { ...old, version: old.version + 1 });
     expect(await memoryDue(store)(Infinity, 10)).toEqual([]);
     // Still backing off, so nothing is claimed; the round writes the index keys alone.
-    expect(await deliverDue(store, "owner-a", hooks, { deadline: Date.now() + 3000 })).toBe(0);
+    expect((await deliverDue(store, "owner-a", hooks, { deadline: Date.now() + 3000 })).claimed).toBe(0);
     expect(await index(store, "owner-a")).toEqual({ webhookQueue: WEBHOOK_DUE_QUEUE, webhookDueAt: START + RETRY_DELAYS_MS[0] });
     // A current row isn't rewritten.
     const version = (await row(store, "owner-a")).version;
@@ -193,34 +193,42 @@ describe("due-delivery index", () => {
     }
   });
 
-  it("defers a row in the index, not its deliveries, and only while it's still due", async () => {
+  it("defers a row in the index, not its deliveries, and only the row version the round judged", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: START });
     const { store, hooks } = await queued("owner-a", 2);
     const until = START + DISPATCH_DEFER_MS;
-    expect(await deferDue(store, "owner-a", START, until)).toBe(true);
+    const version = async () => (await row(store, "owner-a")).version;
+    expect(await deferDue(store, "owner-a", { version: await version(), dueBy: START, until })).toBe(true);
     expect(await index(store, "owner-a")).toEqual({ webhookQueue: WEBHOOK_DUE_QUEUE, webhookDueAt: until });
     expect(await memoryDue(store)(START + 60_000, 10)).toEqual([]);
     // New events keep the row deferred; the API and coordinator still send its deliveries meanwhile.
     await enqueueDeliveries(store, "owner-a", events(1, 2));
     expect(await index(store, "owner-a")).toEqual({ webhookQueue: WEBHOOK_DUE_QUEUE, webhookDueAt: until });
-    expect(await deliverDue(store, "owner-a", hooks, { deadline: Date.now() + 3000 })).toBe(3);
+    expect((await deliverDue(store, "owner-a", hooks, { deadline: Date.now() + 3000 })).claimed).toBe(3);
     // Nothing left: the row leaves the index, deferral and all.
     expect(await row(store, "owner-a")).not.toHaveProperty("webhookDeferredUntil");
     expect(await index(store, "owner-a")).toEqual({ webhookQueue: undefined, webhookDueAt: undefined });
-    // A row that isn't due by now is left alone: nothing queued, or backing off after a failed round.
     const unchanged = async (defer: () => Promise<boolean>) => {
-      const version = (await row(store, "owner-a")).version;
+      const before = await version();
       expect(await defer()).toBe(false);
-      expect((await row(store, "owner-a")).version).toBe(version);
+      expect(await version()).toBe(before);
     };
-    await unchanged(() => deferDue(store, "owner-a", START, until));
+    // Nothing queued.
+    await unchanged(async () => deferDue(store, "owner-a", { version: await version(), dueBy: START, until }));
+    // Backing off after a failed round, so not due by the round's start.
     await enqueueDeliveries(store, "owner-a", events(1, 3));
     hooks.transport.mockResolvedValue({ status: 500 });
     await deliverDue(store, "owner-a", hooks, { deadline: Date.now() + 3000 });
-    await unchanged(() => deferDue(store, "owner-a", Date.now(), until));
-    // Once a deferral has passed, the row is due again.
+    await unchanged(async () => deferDue(store, "owner-a", { version: await version(), dueBy: Date.now(), until }));
+    // Due by now, but not by the round's start: the row fell due after the round began.
     vi.setSystemTime(START + RETRY_DELAYS_MS[0]);
-    expect(await deferDue(store, "owner-a", Date.now(), Date.now() + 1000)).toBe(true);
+    await unchanged(async () => deferDue(store, "owner-a", { version: await version(), dueBy: Date.now() - 1, until }));
+    // Due, but another path has rewritten the row since the round read it.
+    const judged = await version();
+    await enqueueDeliveries(store, "owner-a", events(1, 4));
+    await unchanged(() => deferDue(store, "owner-a", { version: judged, dueBy: Date.now(), until }));
+    // Once a deferral has passed, the row is due again.
+    expect(await deferDue(store, "owner-a", { version: await version(), dueBy: Date.now(), until: Date.now() + 1000 })).toBe(true);
     expect(await memoryDue(store)(Date.now(), 10)).toEqual([]);
     vi.setSystemTime(Date.now() + 1000);
     expect(await memoryDue(store)(Date.now(), 10)).toEqual(["owner-a"]);
@@ -392,7 +400,11 @@ describe("webhook dispatcher", () => {
       vi.setSystemTime(Date.now() + 1000);
     }
     // As a round would that can't sign owner-stuck's webhook: it claims nothing and writes nothing.
-    vi.mocked(deliverDue).mockImplementationOnce(async () => 0);
+    const cannotSign = async (s: Pick<Store, "get">, owner: string) => ({
+      claimed: 0,
+      version: (await s.get(`WEBHOOK#${owner}`, "WEBHOOKS"))!.version,
+    });
+    vi.mocked(deliverDue).mockImplementationOnce(cannotSign);
     expect(await dispatchWebhooks(store, memoryDue(store), hooks, { maxOwners: 1 })).toMatchObject({ served: 1, deferred: 1 });
     expect(hooks.transport).not.toHaveBeenCalled();
     expect((await index(store, "owner-stuck")).webhookDueAt).toBe(Date.now() + DISPATCH_DEFER_MS);
@@ -408,6 +420,39 @@ describe("webhook dispatcher", () => {
     await deliverDue(store, "owner-c", hooks, { deadline: Date.now() + 3000 });
     const stale: DueOwners = async () => ["owner-c"];
     expect(await dispatchWebhooks(store, stale, hooks)).toMatchObject({ served: 1, deferred: 0 });
+  });
+
+  it("doesn't defer an owner whose row another path rewrites, or that falls due, while its round runs", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: START });
+    const store = new MemoryStore();
+    const hooks = receiver(500);
+    await registerWebhook(store, "owner-a", { url: "https://hooks.example.com/" }, hooks.resolve);
+    await enqueueDeliveries(store, "owner-a", events(1));
+    // Backing off after a failed round: due at START + 30 s.
+    await deliverDue(store, "owner-a", hooks, { deadline: Date.now() + 3000 });
+    const dueAt = START + RETRY_DELAYS_MS[0];
+    vi.setSystemTime(dueAt - 5);
+    const listed: DueOwners = async () => ["owner-a"];
+    const actual = await vi.importActual<typeof import("../server/webhooks")>("../server/webhooks");
+    // The round starts 5 ms before the row is due and claims nothing; by the time it returns, the clock
+    // has passed the due time, so a check against a later clock would defer it.
+    vi.mocked(deliverDue).mockImplementationOnce(async (...args) => {
+      const outcome = await actual.deliverDue(...args);
+      vi.setSystemTime(dueAt + 5);
+      return outcome;
+    });
+    expect(await dispatchWebhooks(store, listed, hooks)).toMatchObject({ served: 1, rounds: 1, deferred: 0 });
+    expect(await index(store, "owner-a")).toEqual({ webhookQueue: WEBHOOK_DUE_QUEUE, webhookDueAt: dueAt });
+    expect(await row(store, "owner-a")).not.toHaveProperty("webhookDeferredUntil");
+    // A round that claims nothing, then another path rewrites the row before the deferral: left alone.
+    vi.mocked(deliverDue).mockImplementationOnce(async (s, owner) => {
+      const outcome = { claimed: 0, version: (await s.get(`WEBHOOK#${owner}`, "WEBHOOKS"))!.version };
+      await enqueueDeliveries(store, "owner-a", events(1, 1));
+      return outcome;
+    });
+    expect(await dispatchWebhooks(store, listed, hooks)).toMatchObject({ served: 1, deferred: 0 });
+    expect(await row(store, "owner-a")).not.toHaveProperty("webhookDeferredUntil");
+    expect((await index(store, "owner-a")).webhookDueAt).toBe(dueAt);
   });
 
   it("queries the keys-only index for owners due by now, and reads only WEBHOOKS keys from it", async () => {

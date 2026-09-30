@@ -569,10 +569,12 @@ have a delivery due and runs the same delivery round as the API and coordinator
   concurrency 1, taken from the account's unreserved pool). Neither Scheduler nor
   Lambda retries a failed run (`maximum_retry_attempts = 0` on both), since the
   next run finds the same due deliveries; one failure counts one error.
-- **Stuck owners.** If an owner's row is still due on a consistent read but its
-  first round claims nothing, because it holds deliveries the dispatcher can't
+- **Stuck owners.** If an owner's row was due when its first round started but
+  that round claims nothing, because it holds deliveries the dispatcher can't
   send, the dispatcher pushes the row back an hour in the index
-  (`webhookDeferredUntil`). Such owners can't hold the head of every run's query
+  (`webhookDeferredUntil`). It defers only the row version that round read,
+  judged against the round's start, so a row another path rewrote meanwhile, or
+  one that fell due during the round, isn't deferred. Such owners can't hold the head of every run's query
   and starve the others. Only the index moves; the API and coordinator still send
   the row's deliveries.
 - **Isolation.** It runs no coordinator, API, payment or reconcile code, and its

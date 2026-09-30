@@ -409,15 +409,15 @@ async function round(
  *   example frozen with its Lambda) counts no failures, only successes.
  * - A webhook's failed round backs it off; after FAILING_AFTER in a row it is marked failing
  *   and gets no more deliveries.
- * Returns how many deliveries the round claimed: fewer than ROUND_LIMIT means it claimed all
- * that were due.
+ * Returns how many deliveries the round claimed (fewer than ROUND_LIMIT means it claimed all that
+ * were due) and, when it claimed none, the version of the row it judged, for deferDue.
  */
 export async function deliverDue(
   store: Pick<Store, "get" | "put">,
   owner: string,
   delivery: Delivery,
   { deadline, requestTimeoutMs = REQUEST_TIMEOUT_MS }: { deadline: number; requestTimeoutMs?: number },
-) {
+): Promise<{ claimed: number; version?: number }> {
   const now = Date.now();
   const claim = randomBytes(8).toString("hex");
   let claimed: Pending[] = [];
@@ -432,7 +432,7 @@ export async function deliverDue(
     for (const p of claimed) Object.assign(p, { nextAt: now + LEASE_MS, claim });
     return row;
   });
-  if (!row || !claimed.length) return 0;
+  if (!row || !claimed.length) return { claimed: 0, version: row?.version };
   const outcomes = (
     await Promise.all(
       row.hooks.map((hook) => {
@@ -476,21 +476,29 @@ export async function deliverDue(
     });
     return row;
   });
-  return claimed.length;
+  return { claimed: claimed.length };
 }
 
 /**
- * For the dispatcher: a round it ran for an owner the index listed as due claimed nothing, although
- * the row, read consistently, is still due by `now`. That happens when the dispatcher can't send
- * what's queued (for example a webhook it can't sign), so push the row's place in the index back to
- * `until` instead of letting it hold the head of every run. Other paths still send the row's
- * deliveries meanwhile; the deferral only moves the index. Returns whether it wrote.
+ * For the dispatcher: a deliverDue round that started at `dueBy` claimed nothing from the row at
+ * `version`, although that row's own queue was due by `dueBy`. That happens when the dispatcher
+ * can't send what's queued (for example a webhook it can't sign), so move the row's place in the
+ * index to `until` instead of letting it hold the head of every run. It defers only that same row
+ * version (the write is version-checked too), so a row another path rewrote since the round, or one
+ * that fell due after the round started, is left alone. Other paths still send the row's
+ * deliveries meanwhile; only the index moves. Returns whether it wrote.
  */
-export async function deferDue(store: Pick<Store, "get" | "put">, owner: string, now: number, until: number) {
+export async function deferDue(
+  store: Pick<Store, "get" | "put">,
+  owner: string,
+  { version, dueBy, until }: { version: number; dueBy: number; until: number },
+) {
   let deferred = false;
   await update(store, owner, (row) => {
     deferred = false;
-    if (row?.webhookDueAt === undefined || row.webhookDueAt > now) return false;
+    if (!row || row.version !== version) return false;
+    const due = nextDueAt(row);
+    if (due === undefined || due > dueBy) return false;
     row.webhookDeferredUntil = until;
     deferred = true;
     return row;

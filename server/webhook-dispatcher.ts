@@ -74,9 +74,10 @@ export type DispatchResult = { owners: number; served: number; rounds: number; d
  * One run: take up to `maxOwners` due owners from the index and send their due deliveries
  * with deliverDue, within `budgetMs`. An owner gets further rounds while each claims a full
  * ROUND_LIMIT, up to OWNER_ROUNDS. The index is read without a consistent read, so an owner
- * it lists may have nothing due by now; deliverDue then claims and writes nothing. An owner still
- * due on a consistent read whose first round claims nothing (it has deliveries this path can't
- * send) is deferred by DISPATCH_DEFER_MS, so such owners can't hold the head of every run's query.
+ * it lists may have nothing due by now; deliverDue then claims and writes nothing. An owner whose
+ * row was due when its first round started, but that round claims nothing (it has deliveries this
+ * path can't send), is deferred by DISPATCH_DEFER_MS, so such owners can't hold the head of every
+ * run's query. deferDue defers only the row version that round read.
  */
 export async function dispatchWebhooks(
   store: Pick<Store, "get" | "put">,
@@ -96,10 +97,13 @@ export async function dispatchWebhooks(
       for (let round = 0; round < OWNER_ROUNDS && left() >= MIN_ROUND_MS; round++) {
         let claimed: number;
         try {
-          claimed = await deliverDue(store, owner, delivery, { deadline: Date.now() + Math.min(ROUND_MS, left()) });
-          if (round === 0 && claimed === 0) {
-            const now = Date.now();
-            if (await deferDue(store, owner, now, now + DISPATCH_DEFER_MS)) result.deferred++;
+          // Judged against the round's start, not a later clock: a row that falls due meanwhile isn't deferred.
+          const started = Date.now();
+          const outcome = await deliverDue(store, owner, delivery, { deadline: started + Math.min(ROUND_MS, left()) });
+          claimed = outcome.claimed;
+          if (round === 0 && claimed === 0 && outcome.version !== undefined) {
+            const version = outcome.version;
+            if (await deferDue(store, owner, { version, dueBy: started, until: Date.now() + DISPATCH_DEFER_MS })) result.deferred++;
           }
         } catch (error) {
           result.failed++;
