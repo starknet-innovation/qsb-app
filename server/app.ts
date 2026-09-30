@@ -107,6 +107,12 @@ import { httpsTransport, systemResolver } from "./webhook-transport";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
+// Persisted legacy rows remain unsupported until inventoried and reconciled.
+function supervisedServiceJob(job: unknown): boolean {
+  if (!job || typeof job !== "object") return false;
+  const execution = (job as { execution?: { kind?: string } }).execution;
+  return execution?.kind === "qsb-supervised-service-v1";
+}
 type Env = { Variables: { owner: string } };
 export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
 /**
@@ -901,6 +907,13 @@ export function createApp(
     const job = row.job as Job;
     if (job.owner !== c.get("owner"))
       return apiError(c, 404, "job_not_found", "Job not found");
+    if (supervisedServiceJob(job))
+      return apiError(
+        c,
+        409,
+        "job_unsupported",
+        "Supervised jobs are not delivered by the coordinator result.",
+      );
     try {
       return c.json(coordinatorPublicSolvedResult(job));
     } catch {
@@ -1100,6 +1113,13 @@ export function createApp(
     const r = await store.get(pk, sk);
     if (!r) return apiError(c, 404, "job_not_found", "Job not found");
     const job = r.job as Job;
+    if (supervisedServiceJob(job))
+      return apiError(
+        c,
+        409,
+        "job_unsupported",
+        "Supervised jobs are not controlled by this route.",
+      );
     if (!["searching", "queued"].includes(job.status))
       return apiError(
         c,
@@ -1134,6 +1154,13 @@ export function createApp(
       row = await store.get(pk, sk);
     if (!row) return apiError(c, 404, "job_not_found", "Job not found");
     const job = row.job as Job;
+    if (supervisedServiceJob(job))
+      return apiError(
+        c,
+        409,
+        "job_unsupported",
+        "Supervised jobs are not controlled by this route.",
+      );
     if (job.status !== "paused")
       return apiError(
         c,
@@ -1189,6 +1216,13 @@ export function createApp(
       row = await store.get(pk, sk);
     if (!row) return apiError(c, 404, "job_not_found", "Job not found");
     const job = row.job as Job;
+    if (supervisedServiceJob(job))
+      return apiError(
+        c,
+        409,
+        "job_unsupported",
+        "Supervised jobs are not controlled by this route.",
+      );
     if (!job.txid) return c.json({ job });
     const intent = await store.get(pk, `TX#${job.txid}`);
     if (!intent)

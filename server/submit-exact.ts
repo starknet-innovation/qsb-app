@@ -45,7 +45,10 @@ export async function submitExact(
   const row = await store.get(pk, "JOB#" + jobId);
   if (!row) throw new ChainError("Job not found.", "job_not_found");
   const job = row.job as Job;
-  if (job.owner !== owner || job.id !== jobId)
+  if (
+    job.owner !== owner || job.id !== jobId ||
+    (job as Job & { execution?: { kind?: string } }).execution?.kind === "qsb-supervised-service-v1"
+  )
     throw new ChainError("Job is not a coordinator withdrawal.", "job_unsupported");
   // A job without a solution can't be submitted yet. assertStoredJobSpend would refuse it
   // too, as a spend mismatch, before any other read; this only says why.

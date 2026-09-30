@@ -1056,6 +1056,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     },
     errors: {
       404: ["job_not_found", "solved_result_unavailable"],
+      409: ["job_unsupported"],
     },
   },
   {
@@ -1086,7 +1087,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     responses: { 200: { description: "The paused job.", schema: jobResponse } },
     errors: merge(writes, {
       404: ["job_not_found"],
-      409: ["job_state_invalid"],
+      409: ["job_unsupported", "job_state_invalid"],
     }),
   },
   {
@@ -1103,6 +1104,7 @@ export const apiRoutes: readonly ApiRoute[] = [
       429: ["owner_active_withdrawal_limit"],
       404: ["job_not_found"],
       409: [
+        "job_unsupported",
         "job_state_invalid",
         "reconcile_required",
         "operator_review_required",
@@ -1124,7 +1126,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     },
     errors: merge(chainLookup, writes, {
       404: ["job_not_found", "intent_not_found", "vault_not_found"],
-      409: ["intent_conflict"],
+      409: ["job_unsupported", "intent_conflict"],
     }),
   },
   {
