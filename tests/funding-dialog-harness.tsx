@@ -2,6 +2,7 @@
 import { createRoot } from "react-dom/client";
 import * as btc from "@scure/btc-signer";
 import { base64, hex } from "@scure/base";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import TransactionDialog from "../src/TransactionDialog";
 import { encryptRecovery } from "../src/lib/backup";
@@ -21,7 +22,7 @@ export async function mount() {
     network: "mainnet",
     config: "A",
     scriptHex: "51".repeat(100),
-    scriptHash: "aa".repeat(32),
+    scriptHash: hex.encode(sha256(hex.decode("51".repeat(100)))),
     paymentAddress: address,
     publicStateJson: "{}",
     status: "unfunded",

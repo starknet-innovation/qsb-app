@@ -53,9 +53,11 @@ test("real browser QSB generation, backup encryption and restore", async ({
   await page.goto("/");
   const result = await page.evaluate(async () => {
     const qsbPath = "/src/lib/qsb.ts",
-      backupPath = "/src/lib/backup.ts";
+      backupPath = "/src/lib/backup.ts",
+      provenancePath = "/src/lib/provenance.ts";
     const qsb = await import(qsbPath);
     const backup = await import(backupPath);
+    const provenance = await import(provenancePath);
     const r = await qsb.generateQsb();
     const digest = await qsb.validateRecovery(r.stateJson);
     const state = JSON.parse(r.stateJson);
@@ -63,7 +65,7 @@ test("real browser QSB generation, backup encryption and restore", async ({
     const data = {
       format: "qsb-recovery-v1",
       stateJson: r.stateJson,
-      vault: {
+      vault: provenance.withVaultConfiguration({
         id: crypto.randomUUID(),
         name: "Browser test",
         createdAt: new Date().toISOString(),
@@ -74,7 +76,7 @@ test("real browser QSB generation, backup encryption and restore", async ({
         paymentAddress: "bc1qexampleaddressfortestonly00000000",
         publicStateJson: r.publicStateJson,
         status: "unfunded",
-      },
+      }),
     };
     const text = await backup.encryptRecovery(
       data,
