@@ -7,6 +7,7 @@
   After editing, re-render from the repository root:
     npx playwright screenshot --device "Desktop Chrome HiDPI" --viewport-size 1800,1000 --full-page docs/key-custody.html docs/key-custody.png
   (run `npx playwright install chromium` once first). Update the commit in the footer to the one the diagram describes.
+  The page uses system fonts only, so line breaks can shift slightly between machines: check the PNG before committing it.
 -->
 <title>QSB key custody</title>
 <style>
@@ -35,7 +36,7 @@
     width: 1800px;
     background: var(--bg);
     color: var(--ink);
-    font-family: "Inter", -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
     font-size: 14px;
     line-height: 1.38;
     padding: 36px 40px 32px;
@@ -290,7 +291,7 @@
 
 <footer>
   <span>Source: starknet-innovation/qsb-app, main @ e150b56 (30 Sep 2026). Research snapshot; mainnet operations are off by default.</span>
-  <span>src/lib/backup.ts · public/qsb/bridge.py · src/lib/wallet.ts · server/app.ts · server/scoped-keys.ts · docs/EXACT-SUBMIT.md</span>
+  <span>Key sources: src/lib/backup.ts · public/qsb/bridge.py · server/app.ts · docs/EXACT-SUBMIT.md · full list in docs/KEY-CUSTODY.md</span>
 </footer>
 
 </body>
