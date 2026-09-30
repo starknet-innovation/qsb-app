@@ -87,6 +87,33 @@ class SinglePipelinePolicies(unittest.TestCase):
                 self.assertEqual({s['Sid'] for s in self.policies[kind]['Statement']
                                   if any(a.startswith('scheduler:') for a in s['Action'])}, sids)
 
+    def test_deployer_can_tag_what_default_tags_tag_and_schedules_need_no_tag_grant(self):
+        # terraform/versions.tf default_tags reach every taggable resource. The dispatcher's Lambda, log group, alarm
+        # and two roles are tagged through the same statements as the existing ones. EventBridge Scheduler can tag only
+        # schedule groups: aws_scheduler_schedule has no tags (provider v6.66.0 registers it without @Tags), so
+        # schedules need no scheduler:TagResource, UntagResource or ListTagsForResource.
+        unconditioned = [s for s in self.policies['deploy']['Statement'] if s['Effect'] == 'Allow' and 'Condition' not in s]
+        grants = lambda action, resource: any(
+            any(fnmatch.fnmatchcase(action, a) for a in s['Action']) and any(fnmatch.fnmatchcase(resource, r) for r in s['Resource'])
+            for s in unconditioned)
+        arn = 'arn:aws:{}:eu-west-1:123456789012:{}'.format
+        role = 'arn:aws:iam::123456789012:role/qsb/runtime/{}'.format
+        for action, resource in (('lambda:TagResource', arn('lambda', 'function:qsb-app-webhooks')),
+                                 ('lambda:UntagResource', arn('lambda', 'function:qsb-app-webhooks')),
+                                 ('lambda:ListTags', arn('lambda', 'function:qsb-app-webhooks')),
+                                 ('iam:TagRole', role('qsb-app-webhooks')), ('iam:UntagRole', role('qsb-app-webhooks')),
+                                 ('iam:ListRoleTags', role('qsb-app-webhooks')), ('iam:TagRole', role('qsb-app-webhook-schedule')),
+                                 ('iam:UntagRole', role('qsb-app-webhook-schedule')), ('iam:ListRoleTags', role('qsb-app-webhook-schedule')),
+                                 ('logs:TagResource', arn('logs', 'log-group:/aws/lambda/qsb-app-webhooks')),
+                                 ('logs:ListTagsForResource', arn('logs', 'log-group:/aws/lambda/qsb-app-webhooks')),
+                                 ('cloudwatch:TagResource', arn('cloudwatch', 'alarm:qsb-app-webhooks-errors')),
+                                 ('cloudwatch:ListTagsForResource', arn('cloudwatch', 'alarm:qsb-app-webhooks-errors'))):
+            with self.subTest(action=action, resource=resource):
+                self.assertTrue(grants(action, resource))
+        for action in ('scheduler:TagResource', 'scheduler:UntagResource', 'scheduler:ListTagsForResource'):
+            with self.subTest(action=action):
+                self.assertFalse(grants(action, arn('scheduler', 'schedule/default/qsb-app-webhooks')))
+
     def test_boundary_already_covers_the_webhook_dispatcher_and_its_schedule(self):
         # The dispatcher's Query reaches the due-delivery index, a sub-resource of the table; the schedule's role
         # invokes the dispatcher; both write their Lambda logs. The boundary needs no new statement for any of them.
