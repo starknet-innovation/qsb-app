@@ -618,8 +618,8 @@ const reservations = source(
 );
 // Any chain read checks the provider's network first. A request that fails
 // before any response, or an error status, is a 503 chain_unavailable. An
-// answer that doesn't parse is a 502 chain_error; one that parses but is wrong
-// (too large, another network, inconsistent) a 409 chain_error.
+// answer that doesn't parse is a 502 chain_error; one that is too large or
+// fails a check (another network, inconsistent) a 409 chain_error.
 const chainRead = source(
   ["chain.ts | read", "chain.ts | answer", "chain.ts | assertNetwork"],
   {
