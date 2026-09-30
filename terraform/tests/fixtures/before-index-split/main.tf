@@ -1,6 +1,6 @@
 # Test fixture only (tests/frontend_migration.tftest.hcl): the frontend bucket and objects as they were declared
-# before index.html moved to aws_s3_object.index, when one for_each held every built file. It is applied with the
-# mock provider to seed state; it is never deployed.
+# before index.html moved to aws_s3_object.index, when one for_each held every built file. The tests apply it with
+# the mock provider to seed state and plan it for the rollback check; it is never deployed.
 terraform {
   required_providers {
     aws = { source = "hashicorp/aws", version = "~> 6.0" }
@@ -25,6 +25,13 @@ resource "aws_s3_object" "frontend" {
   source_hash   = filesha256("${local.artifacts}/frontend/${each.value}")
   content_type  = each.value == "index.html" ? "text/html; charset=utf-8" : "application/octet-stream"
   cache_control = startswith(each.value, "assets/") ? "public,max-age=31536000,immutable" : "no-cache,max-age=0,must-revalidate"
+}
+# Stands in for the rollback runbook's `terraform state mv 'aws_s3_object.index' 'aws_s3_object.frontend["index.html"]'`,
+# which terraform test can't run: it moves the same address in state before planning. Old commits have no such block.
+# It is a no-op when the state holds no aws_s3_object.index, as in the first run of the test.
+moved {
+  from = aws_s3_object.index
+  to   = aws_s3_object.frontend["index.html"]
 }
 output "index_html_id" {
   value = aws_s3_object.frontend["index.html"].id
