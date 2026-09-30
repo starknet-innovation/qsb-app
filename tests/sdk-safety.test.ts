@@ -136,6 +136,22 @@ describe("withdrawals.submit", () => {
     }
   }, 120000);
 
+  it("names a conflicting spend instead of reporting an unexpected response", async () => {
+    let answer: unknown;
+    const s = await solvedWithdrawal(passphrase, (next) => (async (input: RequestInfo | URL, init?: RequestInit) =>
+      answer !== undefined && String(input).endsWith("/submit")
+        ? new Response(JSON.stringify(answer), { status: 200 })
+        : next(input, init)) as typeof fetch);
+    const signed = await s.client.withdrawals.assemble(s.job.id, { backup: s.backups[1], passphrase, saveBackup: s.keep });
+    answer = { txid: signed.txid, status: "conflict" };
+    const error = await rejection(s.client.withdrawals.submit(signed, { approve: (review) => review.txid }));
+    expect(error.message).toContain("Funding outpoint was spent by a different transaction");
+    expect(error.message).not.toContain("Unexpected submission response");
+    // A conflict reported for another transaction is still unexpected.
+    answer = { txid: "00".repeat(32), status: "conflict" };
+    await expect(s.client.withdrawals.submit(signed, { approve: (review) => review.txid })).rejects.toThrow("Unexpected submission response");
+  }, 120000);
+
   it("exits non-zero when MARA's answer is lost", async () => {
     const s = await solvedWithdrawal(passphrase);
     const c = cli(s.w, s.owner.wif);

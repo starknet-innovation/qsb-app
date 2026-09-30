@@ -169,16 +169,24 @@ export default function TransactionDialog({
         throw error;
       }
       assertCurrent();
+      // The same wording as Activity's confirmation check for a conflicting spend.
+      const conflict = "Funding outpoint was spent by a different transaction. Contact the operator; do not resubmit or spend the helper output.";
       try {
         const response = await api<{txid: string; status: string}>(`/jobs/${job.id}/submit`, {rawTxHex: signedReview.rawTxHex});
         assertCurrent();
+        if (response.txid === signedReview.txid && response.status === "conflict") {
+          onUpdated();
+          throw Error(conflict);
+        }
         if (response.txid !== signedReview.txid || !["submitted", "uncertain", "confirmed"].includes(response.status)) throw Error("Unexpected submission response.");
         setResult(`${response.status}: ${response.txid}. Keep the signed result and check Activity for chain confirmation. Do not submit another transaction.`);
         onUpdated();
       } catch (error) {
         assertCurrent();
         const message = error instanceof Error ? error.message : "Submission response unavailable.";
-        setResult(/disabled/i.test(message)
+        setResult(message === conflict
+          ? `${conflict} Keep the downloaded signed result.`
+          : /disabled/i.test(message)
           ? "Submission is disabled. Keep the downloaded signed result; no submission was accepted by this route."
           : "Submission outcome is uncertain. Keep the downloaded signed result and reconcile it from Activity. Do not submit again.");
         throw error;

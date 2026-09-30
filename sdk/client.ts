@@ -932,6 +932,11 @@ export class QsbClient {
         `The submission outcome is uncertain. Keep the signed result and check withdrawals.status; do not submit again.${detail}`,
       );
     }
+    // The funding outpoint was spent by another transaction, so this one can never confirm.
+    if (response.txid === signed.txid && response.status === "conflict")
+      throw new Error(
+        "Funding outpoint was spent by a different transaction. Contact the operator; do not resubmit or spend the helper output.",
+      );
     if (response.txid !== signed.txid || !["submitted", "uncertain", "confirmed"].includes(response.status))
       throw new Error("Unexpected submission response. Check withdrawals.status; do not submit again.");
     return response;
