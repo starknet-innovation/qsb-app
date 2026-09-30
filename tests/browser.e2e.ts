@@ -188,6 +188,34 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
     ).authorization;
   }, text);
   expect(JSON.parse(intent.manifestJson)).toEqual(submitted);
+  // The search didn't start (say POST /jobs failed): reopening with this backup restores its
+  // own destination and helper, locked, and retries exactly the same intent.
+  const first = submitted;
+  submitted = undefined;
+  await page.reload();
+  await page.evaluate(async ({ address, vault }) => {
+    const path = "/tests/dialog-harness.tsx";
+    await (await import(path)).mount(address, vault);
+  }, { address, vault });
+  await dialog.getByLabel("Recovery backup", { exact: true }).setInputFiles({
+    name: "withdrawal.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(text),
+  });
+  await dialog.getByLabel("Backup passphrase").fill("browser transaction passphrase");
+  await dialog.getByRole("button", { name: "Verify backup locally" }).click();
+  await expect(dialog.getByLabel("Withdrawal destination")).toHaveValue(address);
+  await expect(dialog.getByLabel("Withdrawal destination")).toHaveAttribute("readonly", "");
+  await expect(dialog.getByRole("radio")).toBeChecked();
+  await expect(dialog.getByRole("radio")).toBeDisabled();
+  await expect(dialog).toContainText("fixed by the saved intent");
+  await dialog.getByRole("button", { name: "Review withdrawal" }).click();
+  await dialog.getByRole("checkbox").check();
+  const again = page.waitForEvent("download");
+  await dialog.getByRole("button", { name: "Save backup and start search" }).click();
+  await again;
+  await expect(dialog).toContainText("Keep the updated withdrawal backup");
+  expect(submitted).toEqual(first);
   const { createHash } = await import("node:crypto");
   expect(intent.manifestHash).toBe(
     createHash("sha256").update(intent.manifestJson).digest("hex"),

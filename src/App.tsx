@@ -336,14 +336,50 @@ export default function App() {
   dialogOpen.current = !!transaction;
   // While a transaction dialog is open it holds the chain-check turn, so no tab checks the
   // chain for this wallet: a check of a pending deposit bumps the vault record (exportFunding),
-  // which would fence a deposit submission in flight.
+  // which would fence a deposit submission in flight. The dialog opens once it holds the turn,
+  // so it never overlaps a check already running. If another tab's dialog holds the turn (no
+  // check runs then), it opens after a few seconds and takes the turn when that one closes.
+  const heldTurn = useRef<{ release: () => void; abort: AbortController } | undefined>(undefined);
+  function releaseTurn() {
+    heldTurn.current?.release();
+    heldTurn.current?.abort.abort();
+    heldTurn.current = undefined;
+  }
+  async function openTransaction(next: { vault: PublicVault; job?: Job; solvedResult?: unknown }) {
+    releaseTurn();
+    const active = generation.current;
+    if (wallet && navigator.locks) {
+      const abort = new AbortController();
+      let release = () => {};
+      const granted = new Promise<void>((resolve) => {
+        navigator.locks
+          .request(chainTurnKey(wallet.address), { signal: abort.signal }, () =>
+            new Promise<void>((done) => {
+              release = done;
+              resolve();
+            }),
+          )
+          .catch(() => {}); // Aborted before it was granted.
+      });
+      heldTurn.current = { release: () => release(), abort };
+      await Promise.race([granted, new Promise((wait) => setTimeout(wait, 3000))]);
+    }
+    if (active !== generation.current) return releaseTurn();
+    setTransaction(next);
+  }
   useEffect(() => {
-    if (!transaction || !wallet || !navigator.locks) return;
-    let release = () => {};
-    const held = new Promise<void>((resolve) => (release = resolve));
-    void navigator.locks.request(chainTurnKey(wallet.address), () => held);
-    return () => release();
-  }, [transaction, wallet]);
+    if (!transaction) releaseTurn();
+  }, [transaction]);
+  useEffect(() => releaseTurn, []);
+  // A manual check takes the same turn, so it never runs beside another tab's check or open
+  // transaction dialog. Without Web Locks it runs directly.
+  async function withChainTurn<T>(check: () => Promise<T>): Promise<T> {
+    if (!wallet || !navigator.locks) return check();
+    return navigator.locks.request(chainTurnKey(wallet.address), { ifAvailable: true }, async (lock) => {
+      if (!lock) throw Error("Another tab is checking the chain or has a transaction open. Try again in a moment.");
+      return check();
+    });
+  }
   useEffect(() => {
     if (modal) dialog.current?.showModal();
     else dialog.current?.close();
@@ -515,7 +551,7 @@ export default function App() {
       return;
     }
     // A new deposit is submitted to MARA, so it needs submission on as well as operations.
-    if (v.status === "unfunded" ? submissionOn : operationsAllowed(config)) setTransaction({ vault: v });
+    if (v.status === "unfunded" ? submissionOn : operationsAllowed(config)) void openTransaction({ vault: v });
     else setModal("readiness");
   }
   function depositNow() {
@@ -531,7 +567,7 @@ export default function App() {
     }
     void action("Loading the solved result", async () => {
       const solvedResult = await api(`/jobs/${j.id}/solved-result`);
-      setTransaction({ vault, job: j, solvedResult });
+      await openTransaction({ vault, job: j, solvedResult });
     });
   }
   const passLongEnough = pass.length >= MIN_PASSPHRASE_LENGTH,
@@ -907,7 +943,7 @@ export default function App() {
                                   disabled={!!busy}
                                   onClick={() =>
                                     rowAction(key, "Checking the deposit", async () => {
-                                      const checked = await checkDeposit(v);
+                                      const checked = await withChainTurn(() => checkDeposit(v));
                                       // Branch on what the chain says now: a funded deposit can lose
                                       // its confirmation (a reorg), and the row turns pending again.
                                       const lost = !checked.status.confirmed && v.status !== "submitted";
@@ -1091,7 +1127,7 @@ export default function App() {
                               disabled={!!busy}
                               onClick={() =>
                                 rowAction(key, "Checking confirmation", async () => {
-                                  const observation = await checkWithdrawal(j);
+                                  const observation = await withChainTurn(() => checkWithdrawal(j));
                                   if (observation.status === "conflict") throw Error(conflictText(observation.alert));
                                   say(key, "notice", observation.status === "confirmed" ? "Withdrawal confirmed." : `Withdrawal transaction: ${observation.status}. Nothing was resent.`);
                                 })

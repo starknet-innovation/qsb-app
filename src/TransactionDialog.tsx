@@ -311,15 +311,16 @@ export default function TransactionDialog({
     }
   })();
   // Withdrawal fee from a sat/vB rate and the upper-bound size of the signed QSB spend.
-  // A saved intent already fixed its fee, so reopening it reuses that fee.
-  const savedIntentFee = (() => {
+  // A saved intent already fixed its fee, destination and helper, so reopening it reuses them.
+  const savedIntent = (() => {
     if (deposit || !unlocked?.authorization) return undefined;
     try {
-      return BigInt(withdrawalSchema.parse(JSON.parse(unlocked.authorization.manifestJson)).fee);
+      return withdrawalSchema.parse(JSON.parse(unlocked.authorization.manifestJson));
     } catch {
       return undefined;
     }
   })();
+  const savedIntentFee = savedIntent ? BigInt(savedIntent.fee) : undefined;
   const withdrawalQuote = (() => {
     if (deposit || job) return undefined;
     if (savedIntentFee !== undefined) return { fee: savedIntentFee, vsize: 0, saved: true as const };
@@ -368,6 +369,14 @@ export default function TransactionDialog({
       check();
       setUnlocked(r);
       setAssemblyVerified(!!r.authorization?.assembly);
+      // Resuming a saved intent (its search never started): show its own destination and
+      // helper, which the backup binds, so the same intent is retried.
+      if (!job && !deposit && r.authorization)
+        try {
+          const saved = withdrawalSchema.parse(JSON.parse(r.authorization.manifestJson));
+          setDestination(saved.destination);
+          setSelection([key(saved.helper)]);
+        } catch { /* Not a readable intent: beginWithdrawal refuses it. */ }
       setStage(job || (deposit && pendingFunding) ? "review" : "details");
     });
   }
@@ -834,8 +843,10 @@ export default function TransactionDialog({
       ? "No solver is available on this server, so a withdrawal can't start."
       : solverId === undefined
         ? "Checking the server's solver…"
-        : selection.length !== 1
-          ? "Choose one helper output."
+        : selection.length !== 1 || !selected[0]
+          ? savedIntent
+            ? "The helper output this backup fixed isn't among your wallet's confirmed outputs."
+            : "Choose one helper output."
           : typeof withdrawalQuote !== "object"
             ? withdrawalQuote ?? "Enter a fee rate."
             : payout === undefined || payout <= 0n
@@ -1035,8 +1046,9 @@ export default function TransactionDialog({
               </legend>
               {!deposit && (
                 <p className="hint">
-                  A small output from your wallet that the withdrawal also
-                  spends. Its value is added to your payout.
+                  {savedIntent
+                    ? "This backup already fixes this withdrawal's helper output, destination and fee, so it resumes that exact withdrawal."
+                    : "A small output from your wallet that the withdrawal also spends. Its value is added to your payout."}
                 </p>
               )}
               {points.length === 0 && (
@@ -1047,6 +1059,7 @@ export default function TransactionDialog({
                   <input
                     type={deposit ? "checkbox" : "radio"}
                     name="payment-output"
+                    disabled={!!savedIntent}
                     checked={selection.includes(key(p))}
                     onChange={(e) =>
                       setSelection(
@@ -1081,6 +1094,7 @@ export default function TransactionDialog({
                 Withdrawal destination
                 <input
                   value={destination}
+                  readOnly={!!savedIntent}
                   onChange={(e) => setDestination(e.target.value)}
                 />
               </label>

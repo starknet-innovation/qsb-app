@@ -5,7 +5,12 @@ import { generateQsb, lockQsb } from "../src/lib/qsb";
 import { encryptRecovery } from "../src/lib/backup";
 import type { PublicVault } from "../src/lib/model";
 import { withVaultConfiguration } from "../src/lib/provenance";
-export async function mount(address: string) {
+// With `existing`, remounts that vault (after a reload) without generating a new one or a backup.
+export async function mount(address: string, existing?: PublicVault) {
+  if (existing) {
+    render(address, existing);
+    return { backup: "", vault: existing };
+  }
   const generated = await generateQsb();
   lockQsb();
   const vault: PublicVault = withVaultConfiguration({
@@ -25,6 +30,10 @@ export async function mount(address: string) {
     { format: "qsb-recovery-v1", vault, stateJson: generated.stateJson },
     "browser transaction passphrase",
   );
+  render(address, vault);
+  return { backup, vault };
+}
+function render(address: string, vault: PublicVault) {
   const el = document.createElement("div");
   document.body.append(el);
   const root = createRoot(el);
@@ -36,5 +45,4 @@ export async function mount(address: string) {
       onUpdated={() => {}}
     />,
   );
-  return { backup, vault };
 }

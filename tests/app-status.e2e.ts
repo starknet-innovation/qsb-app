@@ -87,6 +87,17 @@ test("status follows the server switches and vault rows only offer what can happ
   await expect(page.getByText("Savings: your withdrawal is ready to authorize.")).toBeVisible();
   await expect(page.getByRole("link", { name: /^Activity.*1 ready to authorize/ })).toBeVisible();
 
+  // A manual check takes the same turn as the automatic ones, so it waits for another holder
+  // (another tab's check or open transaction dialog) instead of running beside it.
+  await page.evaluate((address) => {
+    void navigator.locks.request(`qsb-chain-check:${address}`, () => new Promise((release) => ((window as any).releaseTurn = release)));
+  }, "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4");
+  await pending.getByRole("button", { name: "Check now" }).click();
+  await expect(pending.getByRole("alert")).toContainText("Another tab is checking the chain or has a transaction open");
+  await page.evaluate(() => (window as any).releaseTurn());
+  await pending.getByRole("button", { name: "Check now" }).click();
+  await expect(pending).toContainText("Still waiting for confirmation");
+
   // The address opens a menu; disconnecting is a separate, labelled choice.
   await page.getByRole("button", { name: /bc1qw50/ }).click();
   await expect(page.getByRole("menuitem", { name: "Copy address" })).toBeVisible();
