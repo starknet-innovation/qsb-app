@@ -1,6 +1,6 @@
 # QSB TypeScript SDK and `qsb` CLI
 
-**Research snapshot, not a production release. Mainnet operations are disabled by default**, and nothing here changes that: the server's switches decide whether deposits, withdrawals and submissions are accepted. Do not use this to hold real funds.
+**Not a production release.** The server's switches decide whether deposits, withdrawals and submissions are accepted, and nothing here changes that. Do not use this to hold real funds.
 
 A non-custodial client for the API in [`server/app.ts`](../server/app.ts) ([docs/API.md](../docs/API.md)). It does in Node what the webapp does in the browser, with the same code: QSB state generation and assembly run the same pinned Python in Pyodide ([`src/lib/qsb-runtime.ts`](../src/lib/qsb-runtime.ts)), and backups, PSBTs and checks come from `src/lib` and `src/mainnet`. It stays in this repository; it is not published to npm.
 

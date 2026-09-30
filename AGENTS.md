@@ -3,9 +3,10 @@
 Don't reopen these in code or PRs.
 
 - **One pipeline.** The Step Functions coordinator is the single mainnet pipeline (#9). The supervised stacks (the in-process handoff and the deployed Lambda → queue → host path) were removed under #23. QSB deploys on mainnet only.
-- **Solver release.** The historical worker is built from `worker/Dockerfile` in `starknet-innovation/qsb-solver`; its attested image digest and repository commit are enrolled in a new descriptor in `src/lib/releases` (#15, #35). Keep `qsb-config-a-ranked-v2.json` byte-identical. The solver is chosen at withdrawal, from the releases compatible with the vault's protocol. A deposit is never bound to one solver.
+- **Solver release.** Solver images are built and attested in `starknet-innovation/qsb-solver` and enrolled verbatim as descriptors in `src/lib/releases` (#15, #35). Never edit an enrolled descriptor; keep `qsb-config-a-ranked-v2.json` byte-identical. A withdrawal pins the release the deployment serves (`SOLVER_RELEASE_ID`) when it's created. A deposit is never bound to one solver.
+- **GPUs on AWS Batch.** Runpod is neither the default nor a fallback.
 - **One deposit per vault.** Never offer a way to deposit into an existing vault. Payments to a vault's script from outside the app are flagged and never spent (#16, #27).
-- **No test chains.** The first end-to-end run is on mainnet with a small deposit (#22). Before submit, an offline consensus check runs Bitcoin Core's script interpreter on the exact signed transaction (#20).
+- **No test chains.** Testing happens on mainnet with small deposits (#22). Before submit, an offline consensus check runs Bitcoin Core's script interpreter on the exact signed transaction (#20).
 
 ## Keep
 
@@ -23,6 +24,7 @@ These are the funds-safety invariants:
 - **Gates that can only stay false.** Instead, add one real code path behind one explicit switch.
 - **Hand-pinned self-hashes, digest literals and new duplicate copies of source files.** Derive values from the source of truth instead.
 - **Library code that nothing calls, and work on parked components.**
+- **History in docs.** Docs describe the current state: no superseded snapshots, notes about what a merged PR changed, or descriptions of removed code. History lives in git and the issues.
 
 ## Reviews and merges
 
@@ -42,4 +44,4 @@ Never deploy code or infrastructure changes before committing them to Git. Verif
 
 ## Research boundaries
 
-Keep mainnet operations disabled until #22 is reached with the user's explicit approval. The user must authorize the exact transaction, amount and fee before any mainnet submit. Never upload wallet backups, passphrases, private recovery material, credentials, or operator runtime files. Do not treat historical replay, local Core acceptance, or component benchmarks as fresh end-to-end or external-miner certification.
+The mainnet switches change only with the user's explicit approval (see **Mainnet switch**). The user must authorize the exact transaction, amount and fee before any mainnet submit. Never upload wallet backups, passphrases, private recovery material, credentials, or operator runtime files. Don't present replays, local Core acceptance or component benchmarks as end-to-end evidence.

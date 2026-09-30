@@ -1,22 +1,9 @@
 # Solver descriptors
 
-The archived `qsb-config-a-ranked-v2.json` is immutable historical evidence. Its old
-source hashes are retained in that file, but app builds do not fetch or audit CUDA.
-The default remains that historical release until an operator chooses another
-registered compatible release at withdrawal.
+Each JSON file here is one solver release's descriptor, copied verbatim from its qsb-solver release, except the archived `qsb-config-a-ranked-v2.json`, which predates qsb-solver. [docs/SOLVER-REPOSITORY.md](../../../docs/SOLVER-REPOSITORY.md) lists the enrolled releases and how to enroll and serve one.
 
-For a new external release, copy the attested qsb-solver release's descriptor JSON
-into this directory with a lowercase alphanumeric/hyphen filename. The generator
-runs before tests, typechecking, builds and release packaging, producing static
-imports in `registry.generated.ts`. Commit the descriptor and regenerated registry.
-No coordinator code change is needed. The strict v3 descriptor identifies the
-qsb-solver repository commit, immutable GHCR or enrolled QSB ECR image digest, generator protocol and
-`ranked-v2` search contract; it contains no CUDA source hashes. Unsupported search
-versions, mutable image tags, duplicate IDs and unknown fields are rejected.
+To add a release, copy the attested release's `solver.json` into this directory with a lowercase alphanumeric/hyphen filename. `scripts/generate-solver-registry.mjs` runs before tests, typechecking and builds, and writes the static imports in `registry.generated.ts`. Commit the descriptor and the regenerated registry; no coordinator change is needed. A schema-3 descriptor names the qsb-solver commit, an immutable image digest, the generator protocol and the `ranked-v2` search contract, and no CUDA source hashes. Unsupported search versions, mutable image tags, duplicate IDs and unknown fields are rejected.
 
-The browser/API selects `solverReleaseId` at withdrawal. Omitting it preserves the
-historical default. Each job freezes the full descriptor and its fingerprint;
-resumed legacy jobs continue to identify the archived release explicitly. The CPU
-verifier remains in this app and independently checks every reported GPU hit.
+Never edit a descriptor once it is enrolled. The archived `qsb-config-a-ranked-v2.json` is kept byte-identical for inspecting old jobs; its image is a placeholder and not deployable.
 
-Before operating a selected release, configure the AWS Batch queue, revisioned job definition and S3 artifact bucket, and verify the release provenance and published range vectors. This is deployment configuration, separate from registering an app descriptor. The coordinator verifies the exact image digest, startup restrictions and compute limits before submission. A descriptor does not deploy or switch a job definition. Do not serve incompatible solver selections through one configured definition. Neither registration nor these tests enables mainnet or proves end-to-end mining.
+A new withdrawal pins the release the deployment serves (`SOLVER_RELEASE_ID`, `server/solver-deployment.ts`), and the job freezes the full descriptor and its fingerprint. There is no historical fallback: an unconfigured deployment serves no solver. Registering a descriptor doesn't configure AWS Batch or switch a job definition, and the CPU verifier in this app still checks every reported GPU hit.
