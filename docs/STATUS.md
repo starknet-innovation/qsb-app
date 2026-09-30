@@ -1,6 +1,6 @@
 # Status
 
-As of 30 September 2026. The plan of record is #8.
+As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete; what's open is listed below.
 
 ## Deployed
 
@@ -22,17 +22,19 @@ As of 30 September 2026. The plan of record is #8.
 
 ## Done
 
-- The first mainnet deposit and withdrawal, on the earlier eu-west-1 stack (#22).
+- The first mainnet deposit and withdrawal, on the earlier eu-west-1 stack (#22). The on-chain record is in [FIRST-MAINNET-WITHDRAWAL.md](FIRST-MAINNET-WITHDRAWAL.md).
+- Phases 1 and 2 of the non-custodial API and SDK (#85): `/v1`, the OpenAPI spec, scoped API keys, per-owner limits, signed webhooks, and the TypeScript SDK and `qsb` CLI ([API](API.md)).
 - The move to the new eu-west-2 account (REGION-MIGRATION.md steps 1–10, and the GitHub part of step 12).
 
 ## Open
 
-- **#22:** write the first withdrawal's evidence record under `docs/` (its acceptance), then close it.
+- **Legal:** confirm that the redistribution approval covers the served image `combined-aws-sm86-v0.2.0`. The earlier approval covered `aws-v0.1.0`. This needs legal review.
 - **testnet4 code** remains in `terraform/scripts/build.mjs`, the Terraform `network` variable, the SDK and the frontend, but the API Lambda refuses to start on any network but mainnet (`server/lambda.ts`).
 - **Legacy supervised jobs.** Persisted jobs marked `execution.kind: "qsb-supervised-service-v1"` stay rejected by exact submission and by the solved-result, pause, resume and status routes, and the UI hides their pause and resume controls. These guards stay until the production inventory is complete and any matching rows are reconciled or quarantined; removing the old UI doesn't show the table holds none.
 - **#24:** build-generated identities in place of in-repo self-hash pinning.
 - **#27:** record each deposit's QSB version as data.
-- **#85:** the non-custodial API and SDK. Phase 3 (billing, terms of use, WAF and rate limits) isn't done.
+- **#85 phase 3:** billing, terms of use, WAF and rate limits. This needs a separate decision.
+- **#119:** the QSB author's answers on the security figure, SHA-256 Config A, re-authorization and the single output.
 - **The old eu-west-1 stack** is still up. It is retired by REGION-MIGRATION.md step 11, then cleaned up.
 
 ## Known gaps

@@ -29,6 +29,7 @@ The deployed API Lambda (`server/lambda.ts`) serves mainnet only. The deploy-tim
 ## Documentation
 
 - [Status](docs/STATUS.md): what's deployed, what's done and what's open.
+- [First mainnet withdrawal](docs/FIRST-MAINNET-WITHDRAWAL.md): the on-chain record of the first deposit and withdrawal (#22).
 - [API](docs/API.md): prefixes, OpenAPI, errors, per-owner limits, events and webhooks, idempotency and API keys.
 - [Operational runbook](docs/OPERATIONAL-RUNBOOK.md): switches, GPU capacity and spend, incidents, reconciliation and rollback.
 - [Exact submission](docs/EXACT-SUBMIT.md): how a signed withdrawal reaches the miner once.
