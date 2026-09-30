@@ -96,6 +96,20 @@ const eventRows = (store: MemoryStore) =>
   [...store.rows.values()].filter((row) => row.sk.startsWith("EVENT#"));
 
 describe("owner event log", () => {
+  it.each(["pause", "resume", "status", "solved-result"])("rejects persisted supervised jobs through %s without effects", async (route) => {
+    const send = vi.spyOn(SFNClient.prototype, "send").mockResolvedValue({} as never);
+    const f = await setup();
+    const a = await f.as("legacy-owner");
+    const job = await seedJob(f.store, "legacy-owner", { status: route === "pause" ? "searching" : "paused", execution: { kind: "qsb-supervised-service-v1" } } as Partial<Job>);
+    const before = structuredClone([...f.store.rows.values()].filter(r => !r.pk.startsWith("SESSION#")));
+    const path = `/api/jobs/${job.id}/${route}`;
+    const response = await (route === "pause" || route === "resume" ? a.post(path) : a.get(path));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "job_unsupported" });
+    expect(send).not.toHaveBeenCalled();
+    expect([...f.store.rows.values()].filter(r => !r.pk.startsWith("SESSION#"))).toEqual(before);
+  });
+
   it("records pause and resume once each, with a thin payload", async () => {
     const f = await setup();
     const a = await f.as("owner-a");

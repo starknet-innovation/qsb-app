@@ -178,6 +178,20 @@ async function fixture() {
   return { store, stored, pk, consensus, miner, deps, raw, id, unspent };
 }
 describe("submitExact durable one-shot submission", () => {
+  it("rejects a persisted supervised job before chain, Core, credential or miner calls", async () => {
+    const f = await fixture();
+    const row = (await f.store.get(f.pk, `JOB#${f.stored.id}`))!;
+    await f.store.put({ ...row, version: 1, job: { ...f.stored, execution: { kind: "qsb-supervised-service-v1" } } }, 0);
+    const before = await f.store.get(f.pk, row.sk);
+    await expect(submitExact(f.stored.owner, f.stored.id, f.raw, f.deps)).rejects.toMatchObject({ code: "job_unsupported" });
+    expect(f.unspent).not.toHaveBeenCalled();
+    expect(f.consensus.verify).not.toHaveBeenCalled();
+    expect(f.miner.credential).not.toHaveBeenCalled();
+    expect(f.miner.submit).not.toHaveBeenCalled();
+    expect(await f.store.get(f.pk, row.sk)).toEqual(before);
+    expect(await f.store.list(f.pk, "TX#")).toEqual([]);
+  });
+
   it("persists intent and job pointer before the only miner POST and supplies a one-use exact permit", async () => {
     const f = await fixture();
     f.consensus.verify.mockImplementation(async () => {

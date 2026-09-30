@@ -10,7 +10,6 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import awsRelease from "../src/lib/releases/qsb-solver-aws-v0-1-0.json";
 import { decryptRecovery } from "../src/lib/backup";
 import { release, type Job, type PublicVault } from "../src/lib/model";
-import capability from "../server/mainnet-capability.json";
 import { runCli } from "../sdk/cli";
 import { loopbackTestSigner } from "../sdk";
 import { API, localQsb, solve, wallet, world, type Recorded } from "./sdk-fixture";
@@ -95,7 +94,6 @@ function assertNothingLeaks(requests: Recorded[], values: { never: string[]; rev
 
 it("drives vault creation, deposit, withdrawal, local assembly and approved submit through the CLI without sending a secret", async () => {
   expect(release.mainnetEnabled).toBe(false);
-  expect(capability.broadcastAuthorized).toBe(false);
   const w = world();
   const owner = wallet(w.chain);
   const destination = btc.p2wpkh(secp256k1.getPublicKey(randomBytes(32), true)).address!;

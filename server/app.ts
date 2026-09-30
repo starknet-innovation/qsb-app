@@ -8,7 +8,6 @@ import {
   type ConsensusVerifier,
 } from "./consensus";
 import { exactSubmitEnabled } from "./exact-submit-permit";
-import { mainnetUiConfig, type MainnetUiOptions } from "./mainnetConfig";
 import {
   apiError,
   attachedApiErrorCode,
@@ -108,6 +107,7 @@ import { httpsTransport, systemResolver } from "./webhook-transport";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
+// Persisted legacy rows remain unsupported until inventoried and reconciled.
 function supervisedServiceJob(job: unknown): boolean {
   if (!job || typeof job !== "object") return false;
   const execution = (job as { execution?: { kind?: string } }).execution;
@@ -130,7 +130,6 @@ export function createApp(
     exactSubmit?: boolean;
     apiKeys?: boolean;
     consensus?: ConsensusVerifier;
-    mainnetUi?: MainnetUiOptions;
     // Trusted server wiring only; routes under /api/jobs inherit the auth middleware.
     installAuthenticatedJobRoutes?: (routes: AuthenticatedJobRoutes) => void;
     /** Webhook HTTP and DNS. Defaults to the network; tests inject fakes. */
@@ -177,8 +176,6 @@ export function createApp(
     miner = dependencies.miner || slipstream;
   const enabled = dependencies.enabled ?? transactionsEnabled;
   const apiKeys = dependencies.apiKeys ?? apiKeysEnabled();
-  const mainnetUiOptions = { ...dependencies.mainnetUi };
-  const mainnetUiRoutes = { creation: false, admission: false };
   const limits = () => dependencies.ownerLimits ?? ownerLimits();
   // Cost- and funds-moving routes only; sign-in and reads stay open so the app can show this.
   const allowlisted = (owner: string) => limits().allowlist?.has(owner) ?? true;
@@ -326,12 +323,6 @@ export function createApp(
     c.header("Cache-Control", "no-store");
     return c.json({
       ...release,
-      ...(await mainnetUiConfig(
-        store,
-        NETWORK_ID,
-        mainnetUiOptions,
-        mainnetUiRoutes,
-      )),
       network: NETWORK_ID,
       mainnetEnabled: NETWORK_ID === "mainnet" && enabled,
       operationsEnabled: enabled,
@@ -1318,14 +1309,7 @@ export function createApp(
     // legacy scriptSig has a different transaction identifier.
     return c.json({ job, status, includedTxid });
   });
-  const authenticatedGet = {
-    get: ((path: string, ...handlers: any[]) => {
-      if (path === "/api/jobs/:id/mainnet-solved-state" && handlers.length > 0)
-        mainnetUiRoutes.admission = true;
-      return (app.get.bind(app) as (...a: any[]) => any)(path, ...handlers);
-    }) as typeof app.get,
-  };
-  dependencies.installAuthenticatedJobRoutes?.(authenticatedGet);
+  dependencies.installAuthenticatedJobRoutes?.(app);
   return app;
 }
 export const app = createApp(defaultStore, { versionedAlias: true });

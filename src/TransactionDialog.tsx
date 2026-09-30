@@ -1,8 +1,5 @@
 import {fingerprint} from './lib/provenance';
 import {readSessionEpoch} from './lib/api';
-import {prepareMainnetSearchRequest,retainedMainnetSubmission} from './mainnet/submission';
-import {retainedRequests} from './mainnet/retainedRequest';
-import {supervisedSearchClient,type SupervisedSearch} from './mainnet/submissionClient';
 import { operationsAllowed } from "./lib/readiness";
 import { useEffect, useRef, useState } from "react";
 import "./styles.css";
@@ -77,7 +74,6 @@ export default function TransactionDialog({
   solvedResult,
   onClose,
   onUpdated,
-  supervisedSearch,
 }: {
   vault: PublicVault;
   wallet: Wallet;
@@ -85,12 +81,10 @@ export default function TransactionDialog({
   solvedResult?: unknown;
   onClose: () => void;
   onUpdated: () => void;
-  supervisedSearch?: SupervisedSearch;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const generation = useRef(0);
-  const submission = useRef<ReturnType<typeof retainedMainnetSubmission>|undefined>(undefined);
-  const lifetimeKey=fingerprint({vault,wallet,job:job?.id,supervisedSearch,solved:solvedResult??null});
+  const lifetimeKey=fingerprint({vault,wallet,job:job?.id,solved:solvedResult??null});
   const lifetime=useRef(lifetimeKey);
   if(lifetime.current!==lifetimeKey){lifetime.current=lifetimeKey;generation.current++;}
 
@@ -233,7 +227,7 @@ export default function TransactionDialog({
     generation.current++;
     dialog.current?.showModal();
     setPendingFunding(readFundingGuard());
-    if (!job && !supervisedSearch && !deposit) {
+    if (!job && !deposit) {
       const active = generation.current;
       api<{solverReleaseId?: string | null}>("/config").then(config => {
         if (active === generation.current)
@@ -325,7 +319,7 @@ export default function TransactionDialog({
   async function act(label: string, fn: (check: () => void) => Promise<void>) {
     const active = generation.current;
     const check = () => {
-      if (generation.current !== active || (supervisedSearch && readSessionEpoch()!==supervisedSearch.sessionEpoch))
+      if (generation.current !== active)
         throw Error("Wallet session changed. Reopen the transaction.");
     };
     setBusy(label);
@@ -428,7 +422,6 @@ export default function TransactionDialog({
     onUpdated();
   }
   async function depositFunds() {
-    if(supervisedSearch){setError("Supervised search cannot deposit or broadcast.");return;}
     await act(
       pendingFunding
         ? pendingFunding.rawTxHex
@@ -514,9 +507,7 @@ export default function TransactionDialog({
   }
   async function beginWithdrawal() {
     await act("Saving the withdrawal intent", async (check) => {
-      if(supervisedSearch&&(deposit||job||vault.network!=='mainnet'||!vault.funding))throw Error('Supervised creation requires a confirmed mainnet vault and no existing job.');
-      const supervisedClient=supervisedSearch?supervisedSearchClient(supervisedSearch):undefined;
-      if(supervisedClient)await supervisedClient.assertAllowed();else await assertOperations();
+      await assertOperations();
       check();
       if (!unlocked || !accepted)
         throw Error("Verify your backup and accept the costs first.");
@@ -534,21 +525,16 @@ export default function TransactionDialog({
           const saved = unlocked.authorization
             ? withdrawalSchema.parse(JSON.parse(unlocked.authorization.manifestJson))
             : undefined;
-          // The parked supervised handoff doesn't submit through MARA from here; keep /rates out of it.
           if (saved) {
             // The saved fee can't change. Refuse to start a paid search MARA wouldn't accept.
-            if (!supervisedSearch) {
-              const vsize = withdrawalVsize(nestedPaymentAddress(wallet.address), saved.outputScript.length / 2);
-              await assertMinerFloor((BigInt(saved.fee) * 1000n) / BigInt(vsize));
-              check();
-            }
+            const vsize = withdrawalVsize(nestedPaymentAddress(wallet.address), saved.outputScript.length / 2);
+            await assertMinerFloor((BigInt(saved.fee) * 1000n) / BigInt(vsize));
+            check();
             return BigInt(saved.fee);
           }
           const rate = parseFeeRate(feeRate);
-          if (!supervisedSearch) {
-            await assertMinerFloor(rate);
-            check();
-          }
+          await assertMinerFloor(rate);
+          check();
           return withdrawalFeeForRate(
             nestedPaymentAddress(wallet.address),
             outputScript(destination).length,
@@ -563,16 +549,13 @@ export default function TransactionDialog({
             JSON.parse(unlocked.authorization.manifestJson),
           )
         : undefined;
-      let selectedSolver = previousIntent?.solverReleaseId;
-      if (!supervisedSearch) {
-        const config = await api<{solverReleaseId?: string | null}>("/config");
-        check();
-        if (!config.solverReleaseId || config.solverReleaseId !== solverId)
-          throw Error("The deployment solver is unavailable or changed. Reopen the withdrawal before saving an intent.");
-        if (previousIntent && previousIntent.solverReleaseId !== config.solverReleaseId)
-          throw Error("The saved intent uses a different solver. Keep its backup and contact the operator; do not create a new intent.");
-        selectedSolver = config.solverReleaseId;
-      }
+      const config = await api<{solverReleaseId?: string | null}>("/config");
+      check();
+      if (!config.solverReleaseId || config.solverReleaseId !== solverId)
+        throw Error("The deployment solver is unavailable or changed. Reopen the withdrawal before saving an intent.");
+      if (previousIntent && previousIntent.solverReleaseId !== config.solverReleaseId)
+        throw Error("The saved intent uses a different solver. Keep its backup and contact the operator; do not create a new intent.");
+      const selectedSolver = config.solverReleaseId;
       const manifest: Withdrawal = {
         vaultId: vault.id,
         funding,
@@ -583,7 +566,7 @@ export default function TransactionDialog({
         fee: feeSats.toString(),
         idempotencyKey: previousIntent?.idempotencyKey || crypto.randomUUID(),
         costAccepted: true,
-        ...(!supervisedSearch && selectedSolver ? { solverReleaseId: selectedSolver } : {}),
+        solverReleaseId: selectedSolver,
       };
       const manifestJson = JSON.stringify(withdrawalSchema.parse(manifest)),
         manifestHash = await digest(manifestJson),
@@ -610,7 +593,6 @@ export default function TransactionDialog({
       // destination even after the tab or the original device is lost.
       check();
       localStorage.setItem(storageKey, manifestHash);
-      if(supervisedClient&&localStorage.getItem(storageKey)!==manifestHash)throw Error('One-time intent was not retained.');
       setUnlocked({
         ...unlocked,
         authorization: {
@@ -622,15 +604,9 @@ export default function TransactionDialog({
       setIntentBackup(backup);
       downloadBackup(backup, `${vault.id}-withdrawal`);
       };
-      if(supervisedClient){if(!navigator.locks)throw Error('Browser request locking is unavailable.');await navigator.locks.request('qsb-mainnet-assembly:'+vault.scriptHash,{mode:'exclusive'},async()=>{check();supervisedClient.assertCurrent();await preserveBackup();});}else await preserveBackup();
+      await preserveBackup();
       check();
-      let r:{job:Job};
-      if(supervisedClient&&supervisedSearch){
-        const prepared=prepareMainnetSearchRequest({owner:wallet.address,vault:confirmed.vault,manifest,wallet,releaseId:supervisedSearch.releaseId});
-        if(submission.current&&fingerprint(submission.current.request)!==prepared.requestHash)throw Error('The original supervised request must be reconciled before a new search.');
-        if(!submission.current)submission.current=retainedMainnetSubmission(prepared,retainedRequests(localStorage,navigator.locks),()=>{try{check();supervisedClient.assertCurrent();return true;}catch{return false;}},supervisedClient.submit);
-        r=await submission.current.submit() as {job:Job};
-      }else r=await api<{job:Job}>('/jobs',manifest);
+      const r = await api<{job:Job}>('/jobs',manifest);
       check();
 
       setResult(
@@ -640,7 +616,6 @@ export default function TransactionDialog({
     });
   }
   async function authorize() {
-    if(supervisedSearch){setError("Use the separately verified recovery flow for this search.");return;}
     await act(
       "Assembling locally, then signing the helper in Xverse",
       async (check) => {
@@ -937,7 +912,7 @@ export default function TransactionDialog({
                     />
                   </label>
                 )}
-                {!deposit && !supervisedSearch && (
+                {!deposit && (
                   <label>
                     Solver release
                     <input value={solverId || "No runnable solver is configured"} readOnly />
