@@ -27,7 +27,7 @@ These are the funds-safety invariants:
 ## Reviews and merges
 
 - **Automatic review.** Every PR on a `cursor/` branch is reviewed automatically. Review threads can't be replied to from here, so address findings with new commits and one PR comment that lists what changed.
-- **Docs.** Every PR updates the docs its change affects, in the same PR: the README files and `docs/`. If it changes who holds a key, passphrase or credential, or what the service receives, update `docs/key-custody.png` as well, or say in the PR description that the diagram is out of date.
+- **Docs.** Every PR updates the docs its change affects, in the same PR: the README files and `docs/`. If it changes who holds a key, passphrase or credential, or what the service receives, edit `docs/key-custody.html` and re-render `docs/key-custody.png` with the command at the top of that file. If you can't run a browser, say in the PR description that the diagram is out of date.
 - **Merging.** A PR is merged, and its issue closed, only when all of these hold:
   - the review finds zero defects;
   - the PR implements a plan step with every acceptance item met;

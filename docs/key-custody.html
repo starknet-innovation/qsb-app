@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--
+  Source of docs/key-custody.png. After editing, re-render from the repository root:
+    npx playwright screenshot --device "Desktop Chrome HiDPI" --viewport-size 1800,1000 --full-page docs/key-custody.html docs/key-custody.png
+  (run `npx playwright install chromium` once first). Update the commit in the footer to the one the diagram describes.
+-->
+<title>QSB key custody</title>
+<style>
+  :root {
+    --bg: #f6f5f1;
+    --ink: #1d2126;
+    --muted: #5d6670;
+    --line: #d9d6cc;
+    --card: #ffffff;
+    --wallet: #fbf1e3;
+    --browser: #fdf6ec;
+    --service: #edf2f7;
+    --external: #f0f0ee;
+    --secret: #c2410c;
+    --secret-bg: #fde9df;
+    --enc: #6d3fc0;
+    --enc-bg: #efe8fb;
+    --cred: #1b5fb8;
+    --cred-bg: #e4eefb;
+    --pub: #56616d;
+    --pub-bg: #e9edf1;
+    --boundary: #c2410c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 1800px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Inter", -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.38;
+    padding: 36px 40px 32px;
+  }
+  header { display: flex; justify-content: space-between; align-items: flex-end; gap: 32px; margin-bottom: 18px; }
+  h1 { font-size: 30px; letter-spacing: -0.01em; font-weight: 700; }
+  .sub { color: var(--muted); font-size: 15px; margin-top: 6px; max-width: 980px; }
+  .keymsg {
+    background: var(--ink); color: #fff; border-radius: 12px; padding: 14px 18px; width: 520px; font-size: 15px;
+  }
+  .keymsg b { color: #ffb38a; }
+  .legend { display: flex; gap: 18px; align-items: center; margin: 4px 0 14px; color: var(--muted); font-size: 13px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 2px 9px 2px 7px;
+    font-size: 12px; font-weight: 600; white-space: nowrap; border: 1px solid; vertical-align: 1px;
+  }
+  .chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .secret { color: var(--secret); background: var(--secret-bg); border-color: #f3b89c; }
+  .enc { color: var(--enc); background: var(--enc-bg); border-color: #cdb9f2; }
+  .cred { color: var(--cred); background: var(--cred-bg); border-color: #a9c7ef; }
+  .pub { color: var(--pub); background: var(--pub-bg); border-color: #c5ced7; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 250px repeat(4, 1fr);
+    column-gap: 12px;
+  }
+  .phase {
+    font-weight: 700; font-size: 16px; padding: 8px 12px; border-bottom: 3px solid var(--ink); margin-bottom: 8px;
+    display: flex; gap: 10px; align-items: baseline;
+  }
+  .phase .n {
+    display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+    background: var(--ink); color: #fff; font-size: 13px; flex: none;
+  }
+  .lane-label { padding: 12px 12px 12px 14px; border-radius: 10px 0 0 10px; }
+  .lane-label h2 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .lane-label p { color: var(--muted); font-size: 12.5px; margin-bottom: 8px; }
+  .lane-label .holds { display: flex; flex-wrap: wrap; gap: 5px; }
+  .cell { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .wallet { background: var(--wallet); }
+  .browser { background: var(--browser); }
+  .service { background: var(--service); }
+  .external { background: var(--external); }
+  .lane-end { border-radius: 0 10px 10px 0; }
+  .step {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+    font-size: 13.2px;
+  }
+  .step .chip { margin-top: 5px; }
+  .empty { color: #a3a8ad; font-size: 13px; padding: 8px 10px; }
+
+  .conn { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; align-items: center; padding: 7px 4px; }
+  .pill {
+    background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px;
+    font-size: 12.5px; color: var(--ink); white-space: nowrap;
+  }
+  .pill .a { font-weight: 700; color: var(--muted); margin-right: 3px; }
+  .conn-label { color: var(--muted); font-size: 12px; padding: 7px 14px; align-self: center; }
+
+  .boundary-row { position: relative; padding: 10px 4px; }
+  .boundary-row::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2.5px dashed var(--boundary);
+  }
+  .boundary-row .conn { position: relative; padding: 0; }
+  .boundary-row .pill { border-color: #f0b595; }
+  .boundary-label {
+    position: relative; color: var(--boundary); font-weight: 700; font-size: 13px; line-height: 1.25;
+    background: var(--bg); padding: 2px 8px 2px 14px; align-self: center;
+  }
+
+  .bottom { display: grid; grid-template-columns: 1.55fr 1fr; gap: 20px; margin-top: 22px; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .panel h3 { font-size: 16px; margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding: 0 8px 7px; border-bottom: 1px solid var(--line); }
+  td { padding: 7px 8px; border-bottom: 1px solid #eeece6; vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { width: 29%; }
+  .who { display: grid; gap: 9px; }
+  .who div { display: grid; grid-template-columns: 128px 1fr; gap: 10px; font-size: 13.2px; }
+  .who b { font-size: 13.2px; }
+  .trust { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+  footer { margin-top: 14px; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>QSB vault: who holds which secret</h1>
+    <p class="sub">How keys, passphrases and credentials move through vault creation, deposit and withdrawal. Everything secret stays above the dashed line, on the user's machine; the service only ever receives public data and signed transactions.</p>
+  </div>
+  <div class="keymsg">Spending takes all three: the <b>backup file</b>, its <b>passphrase</b> and the <b>wallet</b>. Only the user holds them. The service holds no key that can move funds.</div>
+</header>
+
+<div class="legend">
+  <span class="chip secret">Secret</span><span>never leaves its holder</span>
+  <span class="chip enc">Encrypted</span><span>safe at rest, useless without the passphrase</span>
+  <span class="chip cred">Credential</span><span>access or transport, cannot spend</span>
+  <span class="chip pub">Public</span><span>safe to share</span>
+</div>
+
+<div class="grid">
+  <!-- phase headers -->
+  <div></div>
+  <div class="phase"><span class="n">1</span>Create vault</div>
+  <div class="phase"><span class="n">2</span>Deposit</div>
+  <div class="phase"><span class="n">3</span>Withdraw: search</div>
+  <div class="phase"><span class="n">4</span>Withdraw: sign and submit</div>
+
+  <!-- WALLET LANE -->
+  <div class="lane-label wallet">
+    <h2>Bitcoin wallet</h2>
+    <p>Xverse in the web app, or any BIP-322 and PSBT signer through the SDK (hardware wallet, Sparrow, HSM)</p>
+    <div class="holds"><span class="chip secret">wallet private key</span></div>
+  </div>
+  <div class="cell wallet">
+    <div class="step">Signs the sign-in challenge (BIP-322). The same address later funds the deposit and provides the withdrawal's helper input.</div>
+  </div>
+  <div class="cell wallet">
+    <div class="step">Signs the deposit PSBT. Broadcast is off: the app submits the signed bytes itself.</div>
+  </div>
+  <div class="cell wallet">
+    <div class="step">Supplies a small helper UTXO for the withdrawal. It's a public outpoint; nothing is signed yet.</div>
+  </div>
+  <div class="cell wallet lane-end">
+    <div class="step">Signs helper input 0 with <b>SIGHASH_ALL</b>, which fixes the destination, amount and fee.</div>
+  </div>
+
+  <!-- wallet <-> browser -->
+  <div class="conn-label">wallet ⇅ browser</div>
+  <div class="conn"><span class="pill"><span class="a">↑</span>challenge</span><span class="pill"><span class="a">↓</span>signature</span></div>
+  <div class="conn"><span class="pill"><span class="a">↑</span>deposit PSBT</span><span class="pill"><span class="a">↓</span>signed PSBT</span></div>
+  <div class="conn"><span class="pill"><span class="a">↓</span>helper UTXO (public)</span></div>
+  <div class="conn"><span class="pill"><span class="a">↑</span>withdrawal PSBT</span><span class="pill"><span class="a">↓</span>helper signature</span></div>
+
+  <!-- BROWSER LANE -->
+  <div class="lane-label browser">
+    <h2>User's browser <span style="font-weight:500;color:var(--muted)">or SDK / CLI</span></h2>
+    <p>Local QSB worker (Pyodide) running pinned, hash-checked sources. Secrets exist in memory only while the vault is unlocked.</p>
+    <div class="holds">
+      <span class="chip secret">HORS one-time secrets</span>
+      <span class="chip secret">passphrase</span>
+      <span class="chip enc">backup files</span>
+    </div>
+  </div>
+  <div class="cell browser">
+    <div class="step">Generates <b>2 × 150 one-time HORS secrets</b> and their hash commitments, then builds the vault script.<br><span class="chip secret">HORS secrets</span></div>
+    <div class="step">Encrypts them with your passphrase (PBKDF2-SHA256, 600k rounds, then AES-256-GCM).<br><span class="chip secret">passphrase, 14+ characters</span></div>
+    <div class="step">You download the backup and re-open it to prove it works. Then the app shuts the worker down and drops the secrets.<br><span class="chip enc">qsb-recovery-&lt;id&gt;.json</span></div>
+  </div>
+  <div class="cell browser">
+    <div class="step">Unlocks the backup locally to check it still opens. Nothing secret is sent.</div>
+    <div class="step">Builds a deposit paying the vault script. Each vault takes exactly one deposit.</div>
+  </div>
+  <div class="cell browser">
+    <div class="step">Unlocks the backup; you choose the destination, amount and fee.</div>
+    <div class="step">Saves a <b>-withdrawal</b> backup that binds this one-time intent, so the keys can't be used for a different withdrawal.<br><span class="chip enc">-withdrawal backup</span></div>
+  </div>
+  <div class="cell browser lane-end">
+    <div class="step">Unlocks the backup and assembles the transaction locally, revealing only the <b>15 of 300</b> secrets the solution selects (vault input 1).</div>
+    <div class="step">Saves a <b>-signing</b> backup that binds this exact transaction.<br><span class="chip enc">-signing backup</span></div>
+    <div class="step">Locks again. The revealed secrets are single-use, so this vault is finished.</div>
+  </div>
+
+  <!-- TRUST BOUNDARY -->
+  <div class="boundary-row" style="display:flex"><div class="boundary-label">Trust boundary<br><span style="font-weight:500">public data and signed txs only</span></div></div>
+  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>public vault: script, hash, commitments, address</span><span class="pill"><span class="a">↑</span>session token (1 h)</span></div></div>
+  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>signed deposit transaction</span></div></div>
+  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>manifest: destination, amount, fee, outpoints</span><span class="pill"><span class="a">↑</span>solution: sequence, locktime, indices</span></div></div>
+  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>signed withdrawal transaction</span></div></div>
+
+  <!-- SERVICE LANE -->
+  <div class="lane-label service">
+    <h2>QSB service <span style="font-weight:500;color:var(--muted)">on AWS</span></h2>
+    <p>API Lambda, records table, Step Functions coordinator and CPU verifier. Holds no spending key.</p>
+    <div class="holds">
+      <span class="chip pub">vault and job records</span>
+      <span class="chip cred">token and key hashes</span>
+      <span class="chip cred">MARA credential</span>
+      <span class="chip cred">webhook secrets</span>
+    </div>
+  </div>
+  <div class="cell service">
+    <div class="step">Verifies the BIP-322 signature and issues a random session token. It stores only the token's SHA-256.<br><span class="chip cred">session token</span></div>
+    <div class="step">Stores the public vault record. It never receives a private key or a HORS secret.<br><span class="chip pub">public vault</span></div>
+  </div>
+  <div class="cell service">
+    <div class="step">Checks the transaction pays the vault script, records the exact bytes and submits them to MARA.</div>
+    <div class="step">Reads the optional MARA credential from Secrets Manager; only the API roles can.<br><span class="chip cred">MARA Slipstream credential</span></div>
+  </div>
+  <div class="cell service">
+    <div class="step">Reserves both outpoints atomically, then the coordinator runs the search.</div>
+    <div class="step">The CPU verifier re-checks every GPU hit before a solution is stored.<br><span class="chip pub">solution</span></div>
+  </div>
+  <div class="cell service lane-end">
+    <div class="step">Checks the exact spend (inputs, single output, amount, fee) and runs Bitcoin Core's consensus check on the signed bytes.</div>
+    <div class="step">Records one submission intent, then POSTs to MARA exactly once. An unknown outcome goes to an operator and is never resent.</div>
+  </div>
+
+  <!-- service <-> external -->
+  <div class="conn-label">service ⇅ outside</div>
+  <div class="conn"><span class="empty">nothing leaves</span></div>
+  <div class="conn"><span class="pill"><span class="a">↓</span>raw deposit transaction</span></div>
+  <div class="conn"><span class="pill"><span class="a">↓</span>public search parameters</span><span class="pill"><span class="a">↑</span>candidate hits</span></div>
+  <div class="conn"><span class="pill"><span class="a">↓</span>raw withdrawal transaction</span></div>
+
+  <!-- EXTERNAL LANE -->
+  <div class="lane-label external">
+    <h2>Outside parties</h2>
+    <p>GPU solver, MARA Slipstream, Bitcoin. They see no secrets.</p>
+  </div>
+  <div class="cell external"><div class="empty">—</div></div>
+  <div class="cell external">
+    <div class="step"><b>MARA Slipstream → Bitcoin.</b> The deposit confirms to the vault script.</div>
+  </div>
+  <div class="cell external">
+    <div class="step"><b>GPU solver</b> on AWS Batch (attested qsb-solver image, pinned by digest). It works on public data and isn't trusted: every hit is re-checked on CPU.</div>
+  </div>
+  <div class="cell external lane-end">
+    <div class="step"><b>MARA Slipstream → Bitcoin.</b> Funds go to the destination the wallet signed.</div>
+  </div>
+</div>
+
+<div class="bottom">
+  <div class="panel">
+    <h3>Secrets and credentials</h3>
+    <table>
+      <tr><th>Item</th><th>Created by</th><th>Held by</th><th>What the service stores</th></tr>
+      <tr><td><span class="chip secret">Wallet private key</span></td><td>User's wallet</td><td>The wallet only</td><td>Nothing; the public key and address only</td></tr>
+      <tr><td><span class="chip secret">HORS one-time secrets</span><br>2 rounds × 150</td><td>Browser QSB worker</td><td>Browser memory while unlocked; encrypted backups at rest</td><td>Hash commitments only. The 15 revealed at withdrawal become public, by design</td></tr>
+      <tr><td><span class="chip secret">Recovery passphrase</span></td><td>User</td><td>User</td><td>Nothing</td></tr>
+      <tr><td><span class="chip enc">Backup files</span><br>vault, -withdrawal, -signing</td><td>Browser</td><td>User's own storage</td><td>Nothing</td></tr>
+      <tr><td><span class="chip cred">Session token / API key</span><br>1 h / scoped, up to 90 days</td><td>API, after a BIP-322 sign-in</td><td>Browser, or the SDK caller</td><td>SHA-256 hash only</td></tr>
+      <tr><td><span class="chip cred">Webhook signing secret</span></td><td>API, shown once to the owner</td><td>Owner's webhook receiver</td><td>The secret, to sign deliveries (HMAC-SHA256)</td></tr>
+      <tr><td><span class="chip cred">MARA Slipstream credential</span><br>optional</td><td>Administrator</td><td>AWS Secrets Manager</td><td>Read at runtime by API roles; sent only to MARA</td></tr>
+    </table>
+  </div>
+  <div class="panel">
+    <h3>Who can do what</h3>
+    <div class="who">
+      <div><b>User</b><span>The only party that can spend: backup file, passphrase and wallet together.</span></div>
+      <div><b>QSB service</b><span>Can refuse or delay a withdrawal, but not redirect it: the destination is fixed by signatures made on the user's machine.</span></div>
+      <div><b>GPU solver</b><span>Untrusted compute on public data. A wrong hit is caught by the CPU re-check.</span></div>
+      <div><b>Operator</b><span>MFA-backed role that reconciles records after an unknown outcome. It can't sign, and the tool never resubmits.</span></div>
+      <div><b>MARA</b><span>Receives fully signed transactions only.</span></div>
+    </div>
+    <p class="trust"><b>Trust note.</b> The web app is served from the deployment, so whoever can deploy controls the code that runs in the browser and can read the MARA credential. The SDK and CLI run code the user installs.</p>
+  </div>
+</div>
+
+<footer>
+  <span>Source: starknet-innovation/qsb-app, main @ e150b56 (30 Sep 2026). Research snapshot; mainnet operations are off by default.</span>
+  <span>src/lib/backup.ts · public/qsb/bridge.py · src/lib/wallet.ts · server/app.ts · server/scoped-keys.ts · docs/EXACT-SUBMIT.md</span>
+</footer>
+
+</body>
+</html>
