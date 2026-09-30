@@ -101,6 +101,49 @@ class DeployChecks(unittest.TestCase):
         # Without --first-apply, an update plan is fine.
         self.assertEqual(self.run_check(doc, '--deploy')[0], 0)
 
+    @staticmethod
+    def s3_change(address, actions, before_key=None, after_key=None, kind='aws_s3_object'):
+        return {'type': kind, 'address': address, 'mode': 'managed', 'change': {
+            'actions': actions, 'before': {'key': before_key} if before_key else None,
+            'after': {'key': after_key} if after_key else None}}
+
+    def test_a_normal_frontend_deploy_passes(self):
+        # A new bundle: the old hashed asset goes, the new one comes, index.html is updated in place.
+        doc = plan()
+        doc['resource_changes'] += [
+            self.s3_change('aws_s3_object.frontend["assets/index-old.js"]', ['delete'], before_key='assets/index-old.js'),
+            self.s3_change('aws_s3_object.frontend["assets/index-new.js"]', ['create'], after_key='assets/index-new.js'),
+            self.s3_change('aws_s3_object.index', ['update'], 'index.html', 'index.html')]
+        self.assertEqual(self.run_check(doc, '--deploy'), (0, ''))
+
+    def test_one_key_is_never_both_created_and_deleted(self):
+        # A pre-split commit applied over post-split state: one address deletes index.html, another uploads it.
+        rollback = plan()
+        rollback['resource_changes'] += [
+            self.s3_change('aws_s3_object.index', ['delete'], before_key='index.html'),
+            self.s3_change('aws_s3_object.frontend["index.html"]', ['create'], after_key='index.html')]
+        # A create_before_destroy replacement: the delete removes the key it just uploaded.
+        replaced = plan()
+        replaced['resource_changes'].append(
+            self.s3_change('aws_s3_object.frontend["qsb/bridge.py"]', ['create', 'delete'], 'qsb/bridge.py', 'qsb/bridge.py'))
+        for doc in (rollback, replaced):
+            self.refused(doc, 'both creates and deletes frontend object key(s)')
+            self.refused(doc, 'both creates and deletes frontend object key(s)', '--deploy')
+        self.refused(rollback, 'Rolling back past the index.html split')
+
+    def test_deploy_refuses_replacing_a_frontend_object_or_the_access_block(self):
+        # An object replacement already fails the key rule above; the access block has no key.
+        for actions in (['create', 'delete'], ['delete', 'create']):
+            doc = plan()
+            doc['resource_changes'].append(self.s3_change('aws_s3_bucket_public_access_block.frontend', actions,
+                                                          kind='aws_s3_bucket_public_access_block'))
+            with self.subTest(actions=actions):
+                self.refused(doc, 'aws_s3_bucket_public_access_block.frontend must not be replaced', '--deploy')
+                self.assertEqual(self.run_check(doc)[0], 0)
+        replaced = plan()
+        replaced['resource_changes'].append(self.s3_change('aws_s3_object.index', ['delete', 'create'], 'index.html', 'index.html'))
+        self.refused(replaced, "frontend object key(s) ['index.html']", '--deploy')
+
     def unknown_api_env(self, refs=None):
         """A real first plan: Terraform marks the API environment unknown, so its configuration is checked."""
         doc = plan()
@@ -369,6 +412,31 @@ class SourceRules(unittest.TestCase):
                       'role   = aws_iam_role.lambda["coordinator"].id\n  policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "secretsmanager'),
                      'one statement on the API role')
         self.refused(('compute.tf', 'Resource = var.slipstream_secret_arn', 'Resource = "*"'), 'one statement on the API role')
+
+    def test_index_html_stays_out_of_the_other_frontend_objects(self):
+        self.refused(('data.tf', 'setsubtract(fileset("${local.artifacts}/frontend", "**"), ["index.html"])',
+                      'fileset("${local.artifacts}/frontend", "**")'), 'must leave index.html to aws_s3_object.index')
+
+    def test_removed_frontend_files_are_deleted_after_the_new_index(self):
+        self.refused(('data.tf', 'lifecycle { create_before_destroy = true }', ''), 'needs create_before_destroy')
+        self.refused(('data.tf', 'lifecycle { create_before_destroy = true }', 'lifecycle { create_before_destroy = false }'),
+                     'needs create_before_destroy')
+
+    def test_index_html_is_uploaded_after_the_other_frontend_objects(self):
+        self.refused(('data.tf', 'aws_s3_bucket_public_access_block.frontend, aws_s3_object.frontend]',
+                      'aws_s3_bucket_public_access_block.frontend]'), 'must upload index.html after')
+
+    def test_the_existing_index_html_object_is_moved_not_recreated(self):
+        moved = 'moved {\n  from = aws_s3_object.frontend["index.html"]\n  to   = aws_s3_object.index\n}\n'
+        message = 'moved { from = aws_s3_object.frontend["index.html"], to = aws_s3_object.index }'
+        self.refused(('data.tf', moved, ''), message)
+        self.refused(('data.tf', 'from = aws_s3_object.frontend["index.html"]', 'from = aws_s3_object.frontend["assets/index.html"]'), message)
+        self.refused(('data.tf', 'to   = aws_s3_object.index', 'to   = aws_s3_object.frontend["index.html"]'), message)
+        self.refused(('data.tf', None, '\nmoved {\n  from = aws_s3_object.index\n  to   = aws_s3_object.entrypoint\n}\n'), message)
+
+    def test_frontend_objects_stay_in_the_two_reviewed_resources(self):
+        self.refused(('data.tf', None, '\nresource "aws_s3_object" "extra" {\n  bucket = aws_s3_bucket.frontend.id\n}\n'),
+                     'aws_s3_object.frontend and aws_s3_object.index only')
 
     def test_only_the_api_receives_the_secret_reference(self):
         self.refused(('compute.tf', 'REFERENCE_FUNCTION = aws_lambda_function.reference.function_name',

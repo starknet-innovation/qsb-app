@@ -60,6 +60,40 @@ Stop new submissions. Loss of a local process is not proof that remote GPU work 
 
 Rollback cannot revive legacy writers, release consumed commitments, or duplicate paid work. Rollback does not authorize a spend and does not set `release.mainnetEnabled` or `broadcastAuthorized`.
 
+### Rolling back past the index.html split
+
+Commits from #96 on hold the frontend's `index.html` at `aws_s3_object.index`. Earlier commits hold it at `aws_s3_object.frontend["index.html"]` and have no `moved` block back.
+
+**Don't apply an earlier commit directly over the current state.** Its plan deletes `aws_s3_object.index` and creates `aws_s3_object.frontend["index.html"]`, which is the same S3 key. Terraform deletes `index.html` first and uploads it again only after `terraform_data.release` is updated, so every visitor gets a 403 in between.
+
+To roll back to such a commit:
+
+1. Check that the commit is from before the split. This prints `0` for such a commit:
+   ```sh
+   git show COMMIT:terraform/data.tf | grep -c 'resource "aws_s3_object" "index"'
+   ```
+2. Build it as in [Updates and rollback](../terraform/README.md#updates-and-rollback): a clean checkout of that commit, `build.mjs`, and `TF_VAR_source_commit`.
+3. As `qsb-operator`, in that working copy, initialized on the state backend, move the object's state address **before planning**. This changes state only, not the bucket:
+   ```sh
+   terraform -chdir=terraform state mv 'aws_s3_object.index' 'aws_s3_object.frontend["index.html"]'
+   ```
+4. Plan, then check what the plan does to `index.html`:
+   ```sh
+   terraform -chdir=terraform plan -out=rollback.tfplan
+   terraform -chdir=terraform show -json rollback.tfplan > /tmp/qsb-rollback-plan.json
+   python3 -c 'import json, sys; [print(r["address"], ",".join(r["change"]["actions"])) for r in json.load(open(sys.argv[1]))["resource_changes"] if r["address"] in ("aws_s3_object.index", "aws_s3_object.frontend[\"index.html\"]")]' /tmp/qsb-rollback-plan.json
+   ```
+   It must print exactly one line: `aws_s3_object.frontend["index.html"] update` or `... no-op`. If it prints a `create`, a `delete`, or `aws_s3_object.index` at all, stop and don't apply.
+
+   **This check is required.** It is the only guard for this plan: that commit's own `check-single-pipeline.py` predates the rule that refuses a plan that creates and deletes one key. Still run that checker with `--deploy` as well, as for any deploy.
+5. Apply `rollback.tfplan`. The files it drops were written by later commits with `create_before_destroy`, so they're deleted only after `index.html` is updated. But the earlier layout uploads `index.html` in parallel with the assets it names, so `index.html` can land first, and edges can briefly show a blank page.
+
+Rolling forward needs no state command: the `moved` block in later commits moves the object back to `aws_s3_object.index`. That also applies if you ran the state move and then didn't apply the rollback.
+
+The first forward apply after a rollback behaves like the first apply of #96, and deletes the files it drops at the start of the apply. That's because the rollback apply stores every frontend object without `create_before_destroy`, and stores `index.html` with no dependency on the other objects. The apply after that is protected again.
+
+Between two commits that both have `aws_s3_object.index`, roll back as usual. `check-single-pipeline.py` in those commits refuses any plan that both creates and deletes one frontend object key. With `--deploy`, it also refuses any plan that replaces a frontend object or the bucket's public access block.
+
 ## Unknown paid outcomes
 
 Treat `unknown`, `timeout`, and `http-ambiguous` as unpaid-or-paid until a provider or invoice record says which. The only action is reconcile. `reconcilePaidOutcome` returns `retry: false`. Requesting retry throws `BlindRetryRefused`. A known success is recorded once and is not submitted again.
