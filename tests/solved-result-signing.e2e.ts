@@ -7,6 +7,8 @@ type SubmitOptions = {
   minerFloor?: number;
   /** The API's own error answer to the submit POST. */
   submitFailure?: { status: number; json: { error: string; code: string } };
+  /** The recorded status the submit POST answers with, for the transaction that was posted. */
+  submitStatus?: string;
 };
 async function fixture(
   page: Page,
@@ -74,7 +76,7 @@ async function fixture(
         { allowUnknownInputs: true, allowUnknownOutputs: true },
       ).id;
     }, lastBody!.rawTxHex);
-    await route.fulfill({ json: { txid, status: "submitted" } });
+    await route.fulfill({ json: { txid, status: options.submitStatus ?? "submitted" } });
   });
   await page.goto("/");
   const data = await page.evaluate(async () => {
@@ -266,6 +268,23 @@ for (const submitFailure of [
     ).toBeEnabled();
     expect(f.submitted()).toBe(1);
   });
+// The funding outpoint was spent by another transaction: name that, not an uncertain outcome.
+test("a conflict from submit names the conflicting spend", async ({ page }) => {
+  const f = await signForReview(page, { enabled: true, submitStatus: "conflict" });
+  const approve = f.dialog.getByRole("button", {
+    name: "Approve exact transaction and submit",
+  });
+  await approve.click();
+  const status = f.dialog.getByRole("status");
+  await expect(status).toContainText("Funding outpoint was spent by a different transaction");
+  await expect(status).toContainText("do not resubmit");
+  await expect(status).not.toContainText("Submission outcome is uncertain");
+  await expect(approve).toBeDisabled();
+  await expect(
+    f.dialog.getByRole("button", { name: "Download signed result again" }),
+  ).toBeEnabled();
+  expect(f.submitted()).toBe(1);
+});
 test("wallet session change after signing prevents approval from posting", async ({
   page,
 }) => {

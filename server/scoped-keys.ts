@@ -4,7 +4,7 @@ import { matchedRoutes } from "hono/route";
 import { z } from "zod";
 import { NETWORK_ID } from "../src/lib/network";
 import { Conflict, type Row, type Store } from "./store";
-import { apiError } from "./api-errors";
+import { apiError, jsonBody } from "./api-errors";
 
 // API keys are minted with a BIP-322 wallet session and act for that owner.
 // Only the key's SHA-256 is stored, like sessions.
@@ -187,7 +187,7 @@ export function installApiKeyRoutes(
 ) {
   app.post("/api/api-keys", async (c) => {
     if (!enabled) return disabled(c);
-    const body = apiKeyRequest.parse(await c.req.json());
+    const body = apiKeyRequest.parse(await jsonBody(c));
     const owner = c.get("owner"),
       pk = `OWNER#${owner}`,
       now = Math.floor(Date.now() / 1000);
