@@ -51,7 +51,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "1751e945658ded0908e29c96113550b6a3fb9faa902bf92f5c00c75b8198f8eb",
+      "api": "1c6c54b476965ad8e44c38a497322efc0e8d8f8a5b2344b130cc502fc132c6f5",
       "build-metadata": "473856897f432e05aba905984679781b962bd278f9b285dfa96e43cb5f4b0735",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "6b617f2a2c3aabb0cc2787a3ecb742a16f11c1adac87bf4a37b28d1bf5e3d2ce",
@@ -94,7 +94,7 @@
       "value": null
     },
     "sourceFiles": {
-      "AGENTS.md": "7447ec60da801e2e53f66444dca74b14d940805070e4f4e8be4a2c99a493f748",
+      "AGENTS.md": "a03cb4644c3c5952ea1b75a35bf12e3f66d009c1363725f15c42cbb205aa37f3",
       "README.md": "a0649108b1391eaaaa09cbbf8fc8f2e7bead0cb7af728055d740ebbb5e719cce",
       "contracts/ranked-v2.json": "1bf7fb177e684c7b9c520b2dcb3c6e840f346e6d9c2c37089b35ee6fae010076",
       "docs/source-build/20260924/solver-build-receipt.json": "1e243370561b16c7d2c1d9be68e756fe39fbea44167f0e70d8507d1a14dfc160",
