@@ -47,7 +47,6 @@
   "app.ts | GET /api/vaults/:id/funding | 409 | network_mismatch | Vault belongs to a different Bitcoin network.",
   "app.ts | GET /api/vaults/:id/funding | 409 | vault_not_funded | Vault is not funded",
   "app.ts | GET /api/vaults/:id/funding | ChainError | state_conflict | Funding intent changed during export. Refresh the vault.",
-  "app.ts | GET /api/jobs/:id/solved-result | 404 | solved_result_unavailable | Solved results are delivered on Bitcoin mainnet.",
   "app.ts | GET /api/jobs/:id/solved-result | 404 | job_not_found | Job not found",
   "app.ts | GET /api/jobs/:id/solved-result | 404 | job_not_found | Job not found",
   "app.ts | GET /api/jobs/:id/solved-result | 409 | job_unsupported | Supervised jobs are not delivered by the coordinator result.",

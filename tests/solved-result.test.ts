@@ -124,7 +124,7 @@ async function signIn(app: ReturnType<typeof deployedApiApp>) {
 it("delivers the coordinator solved result and signs it locally without exporting secrets", async () => {
   expect(release.mainnetEnabled).toBe(false);
   const store = new MemoryStore();
-  const app = deployedApiApp("mainnet", store);
+  const app = deployedApiApp(store);
   const token = await signIn(app);
   const fixture = solvedJob();
   await store.put({
@@ -230,7 +230,7 @@ it("delivers the coordinator solved result and signs it locally without exportin
 
 it("delivers the solved result when the stored manifest comes back with keys reordered", async () => {
   const store = new MemoryStore();
-  const app = deployedApiApp("mainnet", store);
+  const app = deployedApiApp(store);
   const token = await signIn(app);
   const fixture = solvedJob();
   // DynamoDB maps keep no key order; the hash was taken in schema order.

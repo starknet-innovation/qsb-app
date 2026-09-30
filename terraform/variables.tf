@@ -31,11 +31,11 @@ variable "source_commit" {
   }
 }
 variable "network" {
-  description = "Required network identity baked into this stack. mainnet or testnet4. No default: an omitted value must not select mainnet. This does not enable transactions."
+  description = "Required network identity baked into this stack: mainnet, the only network QSB runs on. No default, so every tfvars names it. This does not enable transactions."
   type        = string
   validation {
-    condition     = contains(["mainnet", "testnet4"], var.network)
-    error_message = "Set network to mainnet or testnet4."
+    condition     = var.network == "mainnet"
+    error_message = "Set network to mainnet."
   }
 }
 variable "batch_job_queue" {
@@ -106,10 +106,6 @@ variable "exact_submit_enabled" {
   description = "Single exact-withdrawal submit switch. Keep false until explicit issue #22 transaction authorization. Does not enable wallet creation or search."
   type        = bool
   default     = false
-  validation {
-    condition     = !var.exact_submit_enabled || var.network == "mainnet"
-    error_message = "Exact submission is implemented for mainnet only."
-  }
 }
 variable "api_keys_enabled" {
   description = "Scoped API keys (#85) for the API Lambda only. Keep false until the maintainer explicitly approves third-party access. Does not enable mainnet, deposits, withdrawals or submission."
@@ -146,10 +142,6 @@ variable "mainnet_enabled" {
   description = "Enable mainnet funding/search routes and coordinator. Requires explicit approval for issue #22; exact submission has a separate switch."
   type        = bool
   default     = false
-  validation {
-    condition     = !var.mainnet_enabled || var.network == "mainnet"
-    error_message = "mainnet_enabled is only supported on mainnet."
-  }
 }
 variable "owner_allowlist" {
   description = "Partner-phase owner allowlist (QSB_OWNER_ALLOWLIST) for the API and coordinator. Empty allows every signed-in owner, as today. When set, only these Bitcoin addresses may register vaults, deposit, or create or resume withdrawals, and the coordinator pauses other owners' withdrawals. Lambda environments hold 4 KB in all, so keep it to a short partner list."

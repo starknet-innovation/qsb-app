@@ -389,10 +389,7 @@ describe("Slipstream deposit transport", () => {
 
   it("never sends a credential to another miner origin", async () => {
     const fetch = respond(200, {});
-    // Teststream never resolves the credential.
-    expect(await new Slipstream("https://teststream.mara.com", async () => "Bearer placeholder").credential())
-      .toEqual(expect.any(MinerCredential));
-    // Any other origin refuses before any HTTP, whether the credential is read then or passed in.
+    // Any origin but Slipstream mainnet refuses before any HTTP, whether the credential is read then or passed in.
     const custom = new Slipstream("https://miner.example", async () => "Bearer placeholder");
     await expect(custom.status("ab".repeat(32))).rejects.toThrow("destination is invalid");
     await expect(custom.rates()).rejects.toThrow("destination is invalid");

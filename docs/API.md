@@ -5,7 +5,7 @@ The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts
 ## Prefixes
 
 - `/v1` is the stable prefix, for integrators and the mainnet webapp. The webapp builds every API URL from `API_BASE_PATH` in [`src/lib/network.ts`](../src/lib/network.ts) (#85).
-- `/api` serves the same routes and stays for compatibility: a browser may still run a bundle cached from before the move. QSB deploys on mainnet only; a testnet4 build of the webapp keeps calling `/api`.
+- `/api` serves the same routes and stays for compatibility: a browser may still run a bundle cached from before the move. The webapp calls `/v1`; QSB runs on mainnet only.
 
 Both prefixes reach the same handlers and middleware: secure headers, CORS, the body limit, sign-in and error mapping. With `versionedAlias`, `createApp` rewrites a leading `/v1` segment to `/api` before routing, so a route is defined once. Only the coordinator API opts in: the mainnet Lambda (`server/lambda.ts`) and the local server (`server/local.ts`). CloudFront forwards `/v1/*` and `/api/*` to the API with the same uncached behaviour (`terraform/web.tf`), and `npm run dev`'s Vite proxy forwards both to the local server.
 

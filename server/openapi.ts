@@ -1511,10 +1511,6 @@ function operation(route: ApiRoute) {
 
 /** The OpenAPI 3.1 document for the mainnet API. */
 export function openApiDocument() {
-  if (NETWORK_ID !== "mainnet")
-    throw new Error(
-      "The OpenAPI document describes the mainnet API. Set QSB_NETWORK=mainnet.",
-    );
   const paths: Record<string, Record<string, unknown>> = {};
   const sorted = [...apiRoutes].sort(
     (a, b) =>

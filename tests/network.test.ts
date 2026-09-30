@@ -13,15 +13,13 @@ it("throws when the network is unset", async () => {
     "Unsupported QSB network configuration",
   );
   expect(() => parseNetwork("")).toThrow("Unsupported QSB network configuration");
-  expect(() => parseNetwork("regtest")).toThrow(
-    "Unsupported QSB network configuration",
-  );
+  for (const other of ["regtest", "testnet4", "testnet", "Mainnet"])
+    expect(() => parseNetwork(other), other).toThrow("Unsupported QSB network configuration");
 });
 
-it("accepts only an explicit network", async () => {
+it("accepts only mainnet", async () => {
   const { parseNetwork } = await import("../src/lib/network");
   expect(parseNetwork("mainnet")).toBe("mainnet");
-  expect(parseNetwork("testnet4")).toBe("testnet4");
 });
 
 it("refuses to initialize when no network is configured", async () => {
@@ -44,12 +42,11 @@ it("uses the explicit process network configured for unit tests", async () => {
   vi.stubEnv("VITE_QSB_NETWORK", undefined);
   delete process.env.VITE_QSB_NETWORK;
   vi.stubEnv("QSB_NETWORK", "testnet4");
-  const testnet = await import("../src/lib/network");
-  expect(testnet.NETWORK_ID).toBe("testnet4");
+  await expect(import("../src/lib/network")).rejects.toThrow("Unsupported QSB network configuration");
 });
 
 it("deployment build requires --network", () => {
-  for (const args of [[], ["--network=regtest"], ["--network="]]) {
+  for (const args of [[], ["--network=regtest"], ["--network=testnet4"], ["--network="]]) {
     let stderr = "";
     expect(() => {
       try {
@@ -62,7 +59,7 @@ it("deployment build requires --network", () => {
         throw error;
       }
     }).toThrow();
-    expect(stderr).toContain("Set --network=mainnet or --network=testnet4");
+    expect(stderr).toContain("Set --network=mainnet");
   }
 });
 
@@ -78,7 +75,7 @@ it("build, deploy, and test configurations name a network", () => {
   expect(scripts["test:e2e"]).toContain("VITE_QSB_NETWORK=mainnet");
   expect(readFileSync("vitest.config.ts", "utf8")).toContain('QSB_NETWORK: "mainnet"');
   expect(readFileSync("vite.config.ts", "utf8")).toContain(
-    "Set VITE_QSB_NETWORK to mainnet or testnet4",
+    "Set VITE_QSB_NETWORK to mainnet",
   );
   for (const path of ["playwright.config.ts", "playwright.costs.config.ts"]) {
     const source = readFileSync(path, "utf8");

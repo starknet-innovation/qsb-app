@@ -63,7 +63,6 @@ it("documents one mainnet pipeline through createApp, startWorkflow, and the coo
   const app = readFileSync("server/app.ts", "utf8");
   const workflow = readFileSync("terraform/workflow.tf", "utf8");
   const releaseGate = readFileSync("terraform/data.tf", "utf8");
-  expect(lambda).toContain('if (network !== "mainnet") throw');
   expect(lambda).toContain("return createApp(records, { versionedAlias: true })");
   expect(app).toContain("await startWorkflow(job)");
   expect(workflow).toContain("function:${var.name}-coordinator");
@@ -77,7 +76,7 @@ it("documents one mainnet pipeline through createApp, startWorkflow, and the coo
 
 it("does not mount supervised job creation on the mainnet lambda", async () => {
   const store = new MemoryStore();
-  const app = deployedApiApp("mainnet", store);
+  const app = deployedApiApp(store);
   const token = await signIn(app);
   const response = await app.request(
     request("/api/jobs/supervised", {}, token),
@@ -91,12 +90,6 @@ it("does not mount supervised job creation on the mainnet lambda", async () => {
   expect(config.network).toBe(NETWORK_ID);
 });
 
-it("refuses to build the deployed API for any network but mainnet", () => {
-  expect(() => deployedApiApp("testnet4", new MemoryStore())).toThrow(
-    "The deployed API serves mainnet only.",
-  );
-});
-
 it("refuses mainnet funding, job creation, resume, and submit while the flags are false", async () => {
   vi.stubEnv(
     "WORKFLOW_ARN",
@@ -106,7 +99,7 @@ it("refuses mainnet funding, job creation, resume, and submit while the flags ar
     throw new Error("workflow must not start");
   });
   const store = new MemoryStore();
-  const app = deployedApiApp("mainnet", store);
+  const app = deployedApiApp(store);
   const token = await signIn(app);
   const created = await app.request(
     request("/api/jobs", withdrawalBody(), token),

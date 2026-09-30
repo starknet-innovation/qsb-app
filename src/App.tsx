@@ -166,11 +166,6 @@ export default function App() {
       clearInterval(t);
     };
   }, [wallet]);
-  useEffect(() => {
-    const changed = () => disconnect();
-    window.addEventListener("qsb-wallet-changed", changed);
-    return () => window.removeEventListener("qsb-wallet-changed", changed);
-  }, []);
   async function action(label: string, fn: () => Promise<void>, isCurrent = () => true) {
     setError("");
     setBusy(label);
@@ -396,14 +391,6 @@ export default function App() {
           </button>
         </header>
         <main>
-          {NETWORK_ID === "testnet4" && (
-            <div className="notice" role="status">
-              <strong>Testnet4 rehearsal · test coins only.</strong> Select
-              Testnet4 in Xverse and use a dedicated test wallet. Testnet3 and
-              mainnet wallets are not supported here. GPU work still has a real
-              monetary cost.
-            </div>
-          )}
           <div className="page-top">
             <div>
               <div className="eyebrow">BITCOIN, HELD FOR THE FUTURE</div>
@@ -420,9 +407,7 @@ export default function App() {
               </h1>
               <p className="subtitle">
                 {page === "vaults"
-                  ? NETWORK_ID === "testnet4"
-                    ? "Rehearse deposits and withdrawals with Testnet4 coins. Funding stays disabled until the server verifies the network and enables the rehearsal."
-                    : "Create and test an unfunded QSB vault. Mainnet funding is currently disabled."
+                  ? "Create and test an unfunded QSB vault. Mainnet funding is currently disabled."
                   : page === "activity"
                     ? "Follow transactions and the computation behind your withdrawals."
                     : page === "recovery"
@@ -731,18 +716,16 @@ export default function App() {
                         className="primary"
                         onClick={() => {
                           const vault = vaults.find((v) => v.id === j.vaultId);
-                          if (NETWORK_ID === "mainnet" && vault) {
-                            void action("Loading the solved result", async () => {
-                              const solvedResult = await api(
-                                `/jobs/${j.id}/solved-result`,
-                              );
-                              setTransaction({ vault, job: j, solvedResult });
-                            });
+                          if (!vault) {
+                            setModal("readiness");
                             return;
                           }
-                          if (vault && operationsAllowed(config))
-                            setTransaction({ vault, job: j });
-                          else setModal("readiness");
+                          void action("Loading the solved result", async () => {
+                            const solvedResult = await api(
+                              `/jobs/${j.id}/solved-result`,
+                            );
+                            setTransaction({ vault, job: j, solvedResult });
+                          });
                         }}
                       >
                         Review and authorize

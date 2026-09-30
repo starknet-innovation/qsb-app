@@ -63,7 +63,7 @@ export const routeScopes: Readonly<Record<string, ApiKeyScope | null>> = {
   "POST /api/api-keys/:id/revoke": null,
 };
 
-const bearerKey = /^Bearer (qsb_(mainnet|testnet4)_[A-Za-z0-9_-]{43})$/;
+const bearerKey = /^Bearer (qsb_mainnet_[A-Za-z0-9_-]{43})$/;
 // SHA-256, not a password KDF: a key is 32 random bytes, not a user-chosen
 // password, and its hash is the deterministic lookup key, as for SESSION# tokens.
 const hash = (value: string) =>
@@ -105,7 +105,6 @@ export async function authorizeApiKey(
       "network_mismatch",
       "API key belongs to a different Bitcoin network.",
     );
-  if (!key.startsWith(`qsb_${NETWORK_ID}_`)) return wrongNetwork();
   const row = await store.get(`APIKEY#${hash(key)}`, "AUTH");
   if (!row)
     return apiError(
