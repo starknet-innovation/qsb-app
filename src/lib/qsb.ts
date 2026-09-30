@@ -1,5 +1,7 @@
 import type { QsbMethod } from "./qsb-runtime";
 import { qsbOperations } from "./qsb-operations";
+// Still exported from here, as before the Node SDK needed it without this module's browser worker.
+export { qsbOperations } from "./qsb-operations";
 let worker: Worker | undefined;
 const pending = new Map<
   string,

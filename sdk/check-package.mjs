@@ -25,18 +25,21 @@ try {
   const required = ["package.json", "README.md", "dist/index.js", "dist/cli.js", "dist/types/sdk/index.d.ts",
     "public/qsb/manifest.json", "public/qsb/LICENSE", ...Object.keys(manifest).map((f) => `public/qsb/${f}`)];
   for (const file of required) if (!files.includes(file)) fail(`the tarball lacks ${file}`);
-  const stray = files.filter((f) => !(f === "package.json" || f === "README.md" || f.startsWith("dist/") ||
-    f.startsWith("public/qsb/")));
-  if (stray.length) fail(`the tarball holds files outside dist/ and public/qsb/: ${stray.join(", ")}`);
-  if (files.some((f) => f.startsWith("dist/") && !/\.(js|d\.ts)$/.test(f))) fail("dist/ holds a file that isn't JS or a declaration");
+  // Exactly those files, plus the generated declarations; anything else fails.
+  const stray = files.filter((f) => !required.includes(f) && !/^dist\/types\/.+\.d\.ts$/.test(f));
+  if (stray.length) fail(`the tarball holds unexpected files: ${stray.join(", ")}`);
 
-  // 2. The bundles reach nothing outside the package: npm dependencies are bare imports, and the only
-  // relative path is the runtime's ../public/qsb/.
+  // 2. The bundles reach nothing outside the package. Every import is a node: builtin or a declared
+  // dependency, and the only literal URL is the runtime's ../public/qsb/ (computed URLs build on it or on
+  // the caller's base URL).
+  const dependencies = Object.keys(JSON.parse(readFileSync(path.join(sdk, "package.json"), "utf8")).dependencies);
+  const declared = (spec) => spec.startsWith("node:") || dependencies.some((d) => spec === d || spec.startsWith(`${d}/`));
   for (const bundle of ["dist/index.js", "dist/cli.js"]) {
     const text = readFileSync(path.join(sdk, bundle), "utf8");
-    const relative = [...text.matchAll(/(?:from|import\()\s*["'](\.[^"']*)["']/g)].map((m) => m[1]);
-    if (relative.length) fail(`${bundle} imports ${relative.join(", ")}`);
-    const urls = [...text.matchAll(/new URL\(\s*["'](\.[^"']*)["']/g)].map((m) => m[1]);
+    const imports = [...text.matchAll(/(?:\bfrom|\bimport\s*\(|^\s*import)\s*["'`]([^"'`]+)["'`]/gm)].map((m) => m[1]);
+    const undeclared = imports.filter((spec) => !declared(spec));
+    if (undeclared.length) fail(`${bundle} imports ${[...new Set(undeclared)].join(", ")}`);
+    const urls = [...text.matchAll(/new URL\(\s*(["'`])((?:(?!\1).)*)\1/g)].map((m) => m[2]);
     if (urls.some((u) => u !== "../public/qsb/")) fail(`${bundle} resolves ${urls.join(", ")}`);
   }
 
