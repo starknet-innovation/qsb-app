@@ -33,7 +33,6 @@ import { MAINNET_SEARCH_PROFILE } from "./mainnet/submission";
 import TransactionDialog from "./TransactionDialog";
 import { MainnetRecoveryRoute } from "./mainnet/RecoveryRoute";
 import WalletCheck from "./WalletCheck";
-import OfflineFixture from "./OfflineFixture";
 import Costs, { CostDisclosure } from "./Costs";
 import { connectWallet, signMessage, type Wallet } from "./lib/wallet";
 import { generateQsb, validateRecovery, lockQsb } from "./lib/qsb";
@@ -992,10 +991,6 @@ export default function App() {
                 key={wallet?.address || "disconnected"}
                 wallet={wallet}
                 vaults={vaults}
-              />
-              <OfflineFixture
-                key={`offline-${wallet?.address || "disconnected"}`}
-                wallet={wallet}
               />
               <div className="panel protocol-caveat">
                 <h2>Experimental means experimental.</h2>

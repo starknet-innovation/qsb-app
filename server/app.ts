@@ -31,7 +31,6 @@ import {
 import {
   assertVaultConfiguration,
   pinSolver,
-  solverRelease,
   vaultConfiguration,
 } from "../src/lib/provenance";
 import { Hono } from "hono";
@@ -84,10 +83,6 @@ import {
   type OwnerLimits,
 } from "./owner-limits";
 import { gpuSpendLimits, nextGpuReservation } from "./gpu-spend";
-import {
-  coverageAccountStopped,
-  coverageLedgerSchema,
-} from "./coverage-ledger";
 import {
   MinerInclusionError,
   judgeInclusionEvidence,
@@ -1181,25 +1176,6 @@ export function createApp(
         409,
         "job_state_invalid",
         "Only a paused job can be resumed.",
-      );
-    const storedLedger = z
-      .object({ coverageLedger: coverageLedgerSchema.optional() })
-      .safeParse(row.validation);
-    const solverPin = job.solver
-      ? job.solver.descriptor.id
-      : solverRelease("qsb-config-a-ranked-v2-2791ed0").id;
-    if (
-      storedLedger.success &&
-      coverageAccountStopped(storedLedger.data.coverageLedger, {
-        sessionId: `${c.get("owner")}/${job.id}`,
-        solverPin,
-      })
-    )
-      return apiError(
-        c,
-        409,
-        "coverage_stopped",
-        "Stopped coverage cannot be resumed on this account.",
       );
     if (
       job.error?.includes("Submission outcome unknown") &&

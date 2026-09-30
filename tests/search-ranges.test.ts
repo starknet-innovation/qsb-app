@@ -35,6 +35,23 @@ describe("GPU work partitioning", () => {
     expect(() => workRange("round2", 4829)).toThrow("exhausted");
     expect(() => workRange("pinning", 134217728)).toThrow("exhausted");
   });
+  it("gives both subset rounds the same ranks, contiguous from 0 over all 4829 attempts", () => {
+    let end = 0n;
+    for (let attempt = 0; attempt < 4829; attempt += 1) {
+      const first = workRange("round1", attempt);
+      expect(workRange("round2", attempt)).toEqual(first);
+      expect(BigInt(first.start)).toBe(end);
+      end += BigInt(first.count);
+    }
+    expect(end).toBe(82947113349100n);
+  });
+  it("advances pinning by 16 sequences per attempt from 0x80000000", () => {
+    for (const attempt of [0, 1, 73, 134217727]) {
+      const range = workRange("pinning", attempt);
+      expect(range.sequence).toBe(0x80000000 + attempt * 16);
+      expect(range.sequenceCount).toBe(16);
+    }
+  });
 });
 
 it("maps HORS indices to exact GPU lexicographic ranks", () => {

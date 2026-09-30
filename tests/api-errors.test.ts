@@ -426,20 +426,6 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
     await f.putJob({ status: "paused", error: "Search range exhausted." });
     return f.call("POST", `/jobs/${jobId}/resume`);
   }],
-  ["coverage_stopped", 409, async (f) => {
-    const account = {
-      solverPin: "qsb-config-a-ranked-v2-2791ed0",
-      sessionId: `${owner}/${jobId}`,
-      pinning: [],
-      subsets: {},
-      stopped: true,
-      stopReason: "deterministic-failure",
-    };
-    await f.putJob({ status: "paused" }, {
-      validation: { coverageLedger: { holdSolverBinarySha256: null, measuresHoldSolverBinary: false, accounts: [account] } },
-    });
-    return f.call("POST", `/jobs/${jobId}/resume`);
-  }],
   ["intent_not_found", 404, (f) => f.call("GET", `/transactions/${"cd".repeat(32)}/status`)],
   ["intent_conflict", 409, async (f) => {
     await f.putJob({ txid: "cd".repeat(32) });

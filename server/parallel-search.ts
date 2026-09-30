@@ -26,7 +26,7 @@ import {
 import {
   HOST_HIT_CAPACITY,
   publishedHitRecords,
-} from "./coverage-ledger";
+} from "./hit-capacity";
 import { candidateOutput, applyVerifiedHit } from "./candidate-output";
 import type { Row, Store } from "./store";
 
