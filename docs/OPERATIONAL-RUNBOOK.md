@@ -83,10 +83,14 @@ To roll back to such a commit:
    terraform -chdir=terraform show -json rollback.tfplan > /tmp/qsb-rollback-plan.json
    python3 -c 'import json, sys; [print(r["address"], ",".join(r["change"]["actions"])) for r in json.load(open(sys.argv[1]))["resource_changes"] if r["address"] in ("aws_s3_object.index", "aws_s3_object.frontend[\"index.html\"]")]' /tmp/qsb-rollback-plan.json
    ```
-   It must print exactly one line: `aws_s3_object.frontend["index.html"] update` or `... no-op`. If it prints a `create`, a `delete`, or `aws_s3_object.index` at all, stop and don't apply. Also run that commit's own `check-single-pipeline.py --deploy`, as for any deploy.
-5. Apply `rollback.tfplan`. That commit still deletes the files it drops at the start of its apply, as every deploy did before the split. So edges without the old files cached can show a blank page for a few seconds.
+   It must print exactly one line: `aws_s3_object.frontend["index.html"] update` or `... no-op`. If it prints a `create`, a `delete`, or `aws_s3_object.index` at all, stop and don't apply.
+
+   **This check is required.** It is the only guard for this plan: that commit's own `check-single-pipeline.py` predates the rule that refuses a plan that creates and deletes one key. Still run that checker with `--deploy` as well, as for any deploy.
+5. Apply `rollback.tfplan`. The files it drops were written by later commits with `create_before_destroy`, so they're deleted only after `index.html` is updated. But the earlier layout uploads `index.html` in parallel with the assets it names, so `index.html` can land first, and edges can briefly show a blank page.
 
 Rolling forward needs no state command: the `moved` block in later commits moves the object back to `aws_s3_object.index`. That also applies if you ran the state move and then didn't apply the rollback.
+
+The first forward apply after a rollback behaves like the first apply of #96, and deletes the files it drops at the start of the apply. That's because the rollback apply stores every frontend object without `create_before_destroy`, and stores `index.html` with no dependency on the other objects. The apply after that is protected again.
 
 Between two commits that both have `aws_s3_object.index`, roll back as usual. `check-single-pipeline.py` in those commits refuses any plan that both creates and deletes one frontend object key. With `--deploy`, it also refuses any plan that replaces a frontend object or the bucket's public access block.
 
