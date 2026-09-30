@@ -81,7 +81,8 @@ Rules that carry over from the webapp:
 
 - A vault takes one deposit. A signed deposit is kept as pending before it is sent, and only those bytes are ever resent. `deposits.prepare` refuses while one is pending or the vault is funded, and MARA's floor is checked again right before a deposit is sent.
 - A withdrawal's one-time keys are bound to one intent and one assembly. `withdrawals.create` with a backup that already holds an intent resumes it unchanged, and `withdrawals.assemble` refuses a backup bound to another solution. Like the webapp's `qsb-intent:` and `qsb-assembly:` keys, `authorizations` remembers the intent and the assembled transaction per vault and refuses a different one, even from an older backup that doesn't bind it yet.
-- `withdrawals.submit` shows values only after checking that the stored intent hashes to the one bound at assembly. Only the server's own disabled refusal counts as "nothing was accepted"; any other failure, including a gateway 503, is reported as an uncertain outcome that must not be submitted again.
+- `withdrawals.submit` shows values only after checking that the stored intent hashes to the one bound at assembly. Only the server's own disabled refusal counts as "nothing was accepted"; any other failure, including a gateway 503 or the API's 502 and 503 for a failed chain or miner request (`chain_unavailable`, `chain_error`, `miner_unavailable`, `miner_request_failed`), is reported as an uncertain outcome that must not be submitted again.
+- `deposits.submit` keeps the signed deposit pending on any failure other than a per-owner refusal, including those 502s and 503s, so `deposits.resubmit` can resend exactly those bytes.
 
 ## CLI
 

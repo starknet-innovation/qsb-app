@@ -503,7 +503,7 @@ type _CreatedWebhook = Assert<
 
 type Method = "get" | "post";
 type SuccessStatus = 200 | 201 | 202;
-type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 503;
+type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 502 | 503;
 type Errors = Partial<Record<ErrorStatus, readonly ApiErrorCode[]>>;
 export type ApiRoute = {
   method: Method;
@@ -616,37 +616,36 @@ const reservations = source(
   ["runtime/storage-authority.ts | canonicalReservationWrites"],
   { 409: ["state_conflict"] },
 );
-// Any chain read checks the provider's network first. An error status is a
-// 409 chain_unavailable, a request that fails before any response a 500 one.
-// A malformed answer is chain_error: a 400 when it fails its zod parse,
-// otherwise a 500.
+// Any chain read checks the provider's network first. A request that fails
+// before any response, or an error status, is a 503 chain_unavailable. An
+// answer that doesn't parse is a 502 chain_error; one that parses but is wrong
+// (too large, another network, inconsistent) a 409 chain_error.
 const chainRead = source(
   ["chain.ts | read", "chain.ts | answer", "chain.ts | assertNetwork"],
   {
-    400: ["chain_error"],
-    409: ["chain_unavailable", "chain_error"],
-    500: ["chain_unavailable", "chain_error"],
+    409: ["chain_error"],
+    502: ["chain_error"],
+    503: ["chain_unavailable"],
   },
 );
 const chainLookup = source(
   ["chain.ts | read", "chain.ts | raw", "chain.ts | status"],
   merge(chainRead, { 409: ["chain_transaction_not_found"] }),
 );
-// A vout past the previous transaction's outputs is a 500.
+// A vout past the previous transaction's outputs is a 409 input_not_found.
 const inputCheck = source(
   ["chain.ts | unspent"],
   merge(chainLookup, {
-    409: ["input_mismatch", "input_unconfirmed", "input_spent"],
-    500: ["input_not_found"],
+    409: ["input_not_found", "input_mismatch", "input_unconfirmed", "input_spent"],
   }),
 );
-// A failed secret read is a 500; a refused credential a 503.
+// A failed secret read or a refused credential: a 503.
 const minerCredential = source(
   ["providers.ts | credential", "providers.ts | minerSecret"],
-  { 500: ["miner_unavailable"], 503: ["miner_unavailable"] },
+  { 503: ["miner_unavailable"] },
 );
-// A miner status lookup: a malformed answer that fails its zod parse is a
-// 400, any other failure a 500, and a 401 or 403 from the miner a 503.
+// A miner status lookup: no response, an error status or a malformed answer
+// is a 502, and a 401 or 403 from the miner a 503.
 const minerLookup = source(
   [
     "providers.ts | request",
@@ -654,8 +653,7 @@ const minerLookup = source(
     "providers.ts | secretFor",
   ],
   {
-    400: ["miner_request_failed"],
-    500: ["miner_request_failed"],
+    502: ["miner_request_failed"],
     503: ["miner_unavailable"],
   },
 );
@@ -1451,6 +1449,7 @@ const reasons: Record<ErrorStatus, string> = {
   413: "Request too large",
   429: "Too many requests",
   500: "Internal error",
+  502: "Bad gateway",
   503: "Unavailable",
 };
 const duration = (seconds: number) =>
