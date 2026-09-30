@@ -187,7 +187,7 @@ describe("OpenAPI document", () => {
     });
     expect(document.servers).toEqual([
       { url: "/v1" },
-      { url: "/api", description: "webapp alias" },
+      { url: "/api", description: "compatibility alias; the webapp uses /v1" },
     ]);
     const schemes = Object.keys(document.components.securitySchemes);
     const ids = operations.map(({ operation }) => operation.operationId);

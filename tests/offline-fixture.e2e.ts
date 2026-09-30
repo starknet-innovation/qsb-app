@@ -6,7 +6,7 @@ test("fresh offline fixture encrypts, reimports, and exports public-only request
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.route("**/api/config", (route) =>
+  await page.route("**/v1/config", (route) =>
     route.fulfill({
       json: {
         network: "mainnet",

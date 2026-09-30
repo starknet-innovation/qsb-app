@@ -24,16 +24,16 @@ async function fixture(page: Page, changedSolution = false) {
   `,
     }),
   );
-  await page.route("**/api/rates", (route) => route.fulfill({ json: { submit_fee_rate: 1 } }));
-  await page.route("**/api/config", (route) => route.fulfill({ json: { network: "mainnet", operationsEnabled: true } }));
+  await page.route("**/v1/rates", (route) => route.fulfill({ json: { submit_fee_rate: 1 } }));
+  await page.route("**/v1/config", (route) => route.fulfill({ json: { network: "mainnet", operationsEnabled: true } }));
   let previousTxHex = "";
-  await page.route("**/api/vaults/*/funding", (route) =>
+  await page.route("**/v1/vaults/*/funding", (route) =>
     route.fulfill({ json: { previousTxHex } }),
   );
-  await page.route("**/api/payment-input", (route) =>
+  await page.route("**/v1/payment-input", (route) =>
     route.fulfill({ json: { previousTxHex } }),
   );
-  await page.route("**/api/jobs/*/submit", () => {
+  await page.route("**/v1/jobs/*/submit", () => {
     throw new Error("No broadcast permitted in authorization test");
   });
   await page.goto("/");

@@ -8,10 +8,10 @@ async function fixture(
   const bodies: string[] = [];
   let submitted = 0;
   let lastBody: { rawTxHex: string } | undefined;
-  await page.route("**/api/rates", (route) =>
+  await page.route("**/v1/rates", (route) =>
     route.fulfill({ json: { submit_fee_rate: options.minerFloor ?? 1 } }),
   );
-  await page.route("**/api/config", (route) =>
+  await page.route("**/v1/config", (route) =>
     route.fulfill({ json: { exactSubmitEnabled: options.enabled === true } }),
   );
   page.on("request", (request) => {
@@ -44,13 +44,13 @@ async function fixture(
     }),
   );
   let previousTxHex = "";
-  await page.route("**/api/vaults/*/funding", (route) =>
+  await page.route("**/v1/vaults/*/funding", (route) =>
     route.fulfill({ json: { previousTxHex } }),
   );
-  await page.route("**/api/payment-input", (route) =>
+  await page.route("**/v1/payment-input", (route) =>
     route.fulfill({ json: { previousTxHex } }),
   );
-  await page.route("**/api/jobs/*/submit", async (route) => {
+  await page.route("**/v1/jobs/*/submit", async (route) => {
     submitted++;
     lastBody = route.request().postDataJSON();
     if (options.submitDisabled)

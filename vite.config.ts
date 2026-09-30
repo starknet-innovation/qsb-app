@@ -12,7 +12,9 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
-    proxy: { "/api": "http://127.0.0.1:8787" },
+    // The mainnet webapp calls /v1 and a testnet4 one /api (API_BASE_PATH in src/lib/network.ts);
+    // the local API (server/local.ts) serves both.
+    proxy: { "/v1": "http://127.0.0.1:8787", "/api": "http://127.0.0.1:8787" },
   },
   build: { target: "es2022" },
   worker: { format: "es" },

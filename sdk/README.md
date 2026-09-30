@@ -2,7 +2,7 @@
 
 **Research snapshot, not a production release. Mainnet operations are disabled by default**, and nothing here changes that: the server's switches decide whether deposits, withdrawals and submissions are accepted. Do not use this to hold real funds.
 
-A non-custodial client for the existing `/api` routes in [`server/app.ts`](../server/app.ts). It does in Node what the webapp does in the browser, with the same code: QSB state generation and assembly run the same pinned Python in Pyodide ([`src/lib/qsb-runtime.ts`](../src/lib/qsb-runtime.ts)), and backups, PSBTs and checks come from `src/lib` and `src/mainnet`. It stays in this repository; it is not published to npm.
+A non-custodial client for the API in [`server/app.ts`](../server/app.ts) ([docs/API.md](../docs/API.md)). It does in Node what the webapp does in the browser, with the same code: QSB state generation and assembly run the same pinned Python in Pyodide ([`src/lib/qsb-runtime.ts`](../src/lib/qsb-runtime.ts)), and backups, PSBTs and checks come from `src/lib` and `src/mainnet`. It stays in this repository; it is not published to npm.
 
 ## Security model
 
@@ -53,11 +53,11 @@ const tx = await qsb.withdrawals.assemble(job.id, { backup: withdrawalBackup, pa
 await qsb.withdrawals.submit(tx, { approve: async (review) => (await askUser(review)) ? review.txid : false });
 ```
 
-`QsbClient` options: `baseUrl`, `signer`, and optionally `basePath` (`/v1`, the default, or the webapp's `/api` alias), `appOrigin` (the origin the server's challenge names, its `APP_ORIGIN`; default `baseUrl`'s origin), `fetch`, `qsb` (the local runtime, default Pyodide in-process), `pendingDeposits` (where a signed deposit waits until MARA has it), `authorizations` (this device's one intent and one assembly per vault), `token` (a cached session), `apiKey` and `timeoutMs`.
+`QsbClient` options: `baseUrl`, `signer`, and optionally `basePath` (`/v1`, the default, or the `/api` compatibility alias), `appOrigin` (the origin the server's challenge names, its `APP_ORIGIN`; default `baseUrl`'s origin), `fetch`, `qsb` (the local runtime, default Pyodide in-process), `pendingDeposits` (where a signed deposit waits until MARA has it), `authorizations` (this device's one intent and one assembly per vault), `token` (a cached session), `apiKey` and `timeoutMs`.
 
 `apiKey` is an API key the owner minted with a wallet session ([docs/API.md](../docs/API.md#api-keys)). The SDK sends it as `Authorization: Bearer qsb_<network>_…` instead of signing in; its scopes decide what it can do. Minting, listing and revoking keys still need a wallet session, and the SDK doesn't wrap those routes. The key goes only in that header: never in a URL, body, error or log. The signer is still needed for the PSBTs. `pendingDeposits` and `authorizations` default to memory; the CLI keeps both under `~/.qsb`. `QSB_NETWORK` (`mainnet` or `testnet4`) must be set when the SDK is imported; it refuses a server on another network.
 
-The routes below are the webapp's `/api` paths; the SDK calls the same routes under `/v1` unless `basePath` is `/api`.
+The routes below are shown under `/api`; the SDK, like the mainnet webapp, calls them under `/v1` unless `basePath` is `/api`.
 
 | Call | Route | Local work |
 | --- | --- | --- |
@@ -110,13 +110,18 @@ The default signer is external: the CLI writes each request (the sign-in message
 
 `--approve-txid <txid>` answers that question in advance. It bypasses a person at the terminal, so it is meant for integrators who run their own approval gate first. The CLI still prints every value and a warning that approval is non-interactive, and it submits only if the ID matches the transaction exactly.
 
-`--signer test-key` uses a raw WIF key from `QSB_TEST_SIGNER_KEY`, for tests and local development against `npm run dev`. It refuses any API URL that isn't loopback (127.0.0.1, localhost or [::1]). With `npm run dev`, use `--api http://127.0.0.1:5173 --base-path /api`: Vite proxies `/api` only, and the challenge names that origin. Elsewhere the CLI calls `/v1`.
+`--signer test-key` uses a raw WIF key from `QSB_TEST_SIGNER_KEY`, for tests and local development against `npm run dev`. It refuses any API URL that isn't loopback (127.0.0.1, localhost or [::1]). With `npm run dev`, use `--api http://127.0.0.1:5173`: the challenge names that origin, and Vite proxies `/v1` (and `/api`) to the local API.
 
 `config` and `rates` need no wallet. With an API key in `QSB_API_KEY` or `--api-key-fd <n>` (never an argument), the CLI skips the wallet sign-in and caches no session; it still needs `--address` and `--public-key` for the PSBTs. Every other command needs `--address` and `--public-key`, or the test key.
 
 ## Limits
 
-- Phase 1 of #85: the existing `/api` routes only. There is no `/v1`, API key, webhook or OpenAPI spec yet.
+- The SDK calls `/v1` and can authenticate with an API key, but it doesn't wrap everything the API offers ([docs/API.md](../docs/API.md)):
+  - minting, listing and revoking API keys, which need a wallet session;
+  - the event log and webhooks (`GET /events`, `/webhooks`). Poll `withdrawals.status`, or call those routes yourself and verify deliveries as [docs/API.md](../docs/API.md#webhooks) shows;
+  - the `Idempotency-Key` header, which it doesn't send. `withdrawals.create` relies on the manifest's `idempotencyKey`, and `deposits.resubmit` resends only the same bytes.
+- The SDK is written by hand. It isn't generated from [`docs/api/openapi.json`](../docs/api/openapi.json), and no test checks it against that spec.
+- Phase 3 of #85 (billing, terms of use, WAF and rate limits) isn't done: `/config` reports `billing: "not_configured"`.
 - Withdrawal assembly uses the Step Functions coordinator's solved result, which the server delivers on mainnet only, so `withdrawals.assemble` and `withdrawals.submit` refuse on testnet4.
 - The tests can't run a GPU search. [`tests/sdk-e2e.test.ts`](../tests/sdk-e2e.test.ts) drives the CLI against `createApp` with the in-memory store, a fake chain and a fake miner; it stands in for the coordinator's solution and for the Python assembler, which refuses anything but a real hit ([`tests/sdk-runtime.test.ts`](../tests/sdk-runtime.test.ts)).
 - No licence has been chosen for the application code, including this SDK (see the top-level README).

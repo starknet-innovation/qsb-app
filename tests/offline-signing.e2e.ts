@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 async function setup(page: any) {
-  await page.route("**/api/config", (r: any) =>
+  await page.route("**/v1/config", (r: any) =>
     r.fulfill({
       json: {
         network: "mainnet",

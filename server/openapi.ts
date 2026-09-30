@@ -1576,7 +1576,7 @@ export function openApiDocument() {
       description: [
         "The QSB Vault server's JSON API: `createApp` in `server/app.ts`, as `server/lambda.ts` serves it on Bitcoin mainnet.",
         "",
-        "Paths are relative to a server: `/v1` is the stable prefix; `/api` is the same API under the webapp's prefix.",
+        "Paths are relative to a server: `/v1` is the stable prefix, which the mainnet webapp uses; `/api` is the same API, kept as a compatibility alias.",
         "",
         "The server coordinates; it holds no secret. QSB state generation, the recovery backup, deposit signing and withdrawal assembly run on the client.",
         "",
@@ -1587,7 +1587,7 @@ export function openApiDocument() {
     },
     servers: [
       { url: "/v1" },
-      { url: "/api", description: "webapp alias" },
+      { url: "/api", description: "compatibility alias; the webapp uses /v1" },
     ],
     paths,
     webhooks: {
