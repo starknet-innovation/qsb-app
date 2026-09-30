@@ -41,7 +41,9 @@ def render(c):
     allow('QsbBuckets', ['s3:*'], [f'arn:aws:s3:::qsb-*-{account}-{region}-*',f'arn:aws:s3:::qsb-*-{account}-{region}-*/*', 'arn:aws:s3:::qsbvaultweb-*','arn:aws:s3:::qsbvaultweb-*/*','arn:aws:s3:::qsbvaulttestnet4web-*','arn:aws:s3:::qsbvaulttestnet4web-*/*'])
     log_arns = [arn('logs','log-group:'+x) for x in ['/qsb/qsb-*','/aws/lambda/qsb-*','/aws/vendedlogs/states/qsb-*','QsbVault*','QsbXverse*']]
     allow('QsbLogs', ['logs:*'], log_arns)
-    allow('RegionalDiscovery', ['logs:DescribeLogGroups','lambda:ListFunctions','states:ListStateMachines','cloudwatch:DescribeAlarms'], ['*'], {'StringEquals':{'aws:RequestedRegion':region}})
+    # The AWS provider calls ValidateStateMachineDefinition at plan time whenever a state machine's definition
+    # changes; the action takes no resource, so the qsb-* StatesQsb grant doesn't cover it.
+    allow('RegionalDiscovery', ['logs:DescribeLogGroups','lambda:ListFunctions','states:ListStateMachines','states:ValidateStateMachineDefinition','cloudwatch:DescribeAlarms'], ['*'], {'StringEquals':{'aws:RequestedRegion':region}})
     # AWS has no tag/name authorization for OAC/response-header policy IDs.
     # Admin registers exact IDs; no wildcard permission to modify other projects.
     edge = [cf('distribution/'+x) for x in registered(c, 'distributions')]
