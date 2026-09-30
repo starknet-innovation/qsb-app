@@ -13,7 +13,7 @@ run "frontend_before_index_split" {
   variables {
     name           = "qsb-test"
     aws_account_id = "123456789012"
-    region         = "eu-west-1"
+    region         = "eu-west-2"
   }
 }
 run "frontend_index_moved_not_recreated" {
@@ -23,6 +23,7 @@ run "frontend_index_moved_not_recreated" {
     solver_release_id       = try(jsondecode(file(".build/manifest.json")).identities.solver.id, "")
     operator_principal_arns = ["arn:aws:iam::123456789012:user/reconcile-test"]
     aws_account_id          = "123456789012"
+    region                  = "eu-west-2"
     name                    = "qsb-test"
     network                 = "mainnet"
   }
@@ -44,6 +45,7 @@ run "frontend_after_index_split" {
     solver_release_id       = try(jsondecode(file(".build/manifest.json")).identities.solver.id, "")
     operator_principal_arns = ["arn:aws:iam::123456789012:user/reconcile-test"]
     aws_account_id          = "123456789012"
+    region                  = "eu-west-2"
     name                    = "qsb-test"
     network                 = "mainnet"
   }
@@ -55,7 +57,7 @@ run "frontend_rollback_keeps_index_html" {
   variables {
     name           = "qsb-test"
     aws_account_id = "123456789012"
-    region         = "eu-west-1"
+    region         = "eu-west-2"
   }
   assert {
     # A created object's id is unknown at plan, which fails this condition; the moved one keeps its stored id.
