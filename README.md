@@ -15,6 +15,7 @@ A research application for constructing and recovering quantum-safe Bitcoin vaul
 - `contracts/`: versioned search-range vectors shared with qsb-solver.
 - `docs/STATUS.md`: achieved evidence summary.
 - [Mainnet readiness checklist](docs/MAINNET-READINESS.md): remaining tasks, dependencies and acceptance evidence.
+- [Key custody diagram](docs/key-custody.png): who holds each key, passphrase and credential through vault creation, deposit and withdrawal, and what the service receives.
 
 This is a curated export, not the complete operational workspace. Cloud deployment settings, credentials, customer data, signed transactions, raw validation journals, compiled artifacts and one-off recovery scripts are excluded.
 
