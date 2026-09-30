@@ -1,123 +1,39 @@
 # App / solver boundary
 
-Issue #35 separates GPU work from custody and independent verification.
-The solver source and build pipeline are in https://github.com/starknet-innovation/qsb-solver.
-The app retains its coordinator, release registry, QSB generator, and worker/cpu.
-No CUDA fetch or compiler is needed by npm run vendor, tests, frontend or Lambda packaging.
+GPU work is separate from custody and independent verification (#35). The solver source, image builds and provenance attestations live in [qsb-solver](https://github.com/starknet-innovation/qsb-solver). This app keeps the coordinator, the release registry, the QSB generator and the `worker/cpu` verifier. No CUDA source or compiler is needed by `npm run vendor`, the tests, the frontend or the Lambda packaging.
 
-The GPU receives only public parameters, returns untrusted hits, and can waste
-compute by omitting work. The app independently verifies each hit with worker/cpu;
-a digest or provenance attestation identifies an image but does not prove its
-arithmetic or complete range coverage. Mainnet and broadcast flags are unchanged.
+The GPU receives only public parameters, returns untrusted hits, and can waste compute by omitting work. The app verifies each hit independently with `worker/cpu`. A digest or provenance attestation identifies an image; it doesn't prove its arithmetic or complete range coverage.
 
-## Contract and enrollment
+## Enrolled releases
 
-Both repos carry contracts/ranked-v2.json. Their independent TypeScript and Python
-partitioners check every valid and rejected vector. The solver release publishes
-that same file. A changed partition needs a new searchVersion and coordinated app
-support; it must never be silently presented as ranked-v2.
+The descriptors in `src/lib/releases` (see [its README](../src/lib/releases/README.md)):
 
-A tagged solver release builds the historical two-stage worker on native Linux,
-publishes its GHCR digest and GitHub provenance, and attaches solver.json plus the
-contract. Before enrollment:
+| Descriptor | Release | Use |
+| --- | --- | --- |
+| `qsb-solver-combined-aws-sm86-v0-2-0.json` | [`combined-aws-sm86-v0.2.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/combined-aws-sm86-v0.2.0), ID `qsb-ranked-v2-43c77084648a-e22afc720df1` | **Served.** The optimized subset kernel with the repaired pinning, from qsb-solver#2: the already tested image from source `43c77084…` (`candidate.yml`, tag `candidate-sm86-20260925-1`), not rebuilt. On an A10G, subset round 1 is about 31–32% faster than `aws-v0.1.0`, round 2 about 1.6–1.7%, and pinning unchanged. |
+| `qsb-solver-aws-v0-1-0.json` | [`aws-v0.1.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/aws-v0.1.0) | The historical two-stage worker built for AWS (`sm_86`). Enrolled, not served. |
+| `qsb-solver-v0-1-0.json` | [`v0.1.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/v0.1.0) | Schema 2, with no search-contract binding, so it is refused for new paid submissions. Kept byte-identical for inspecting jobs. |
+| `qsb-config-a-ranked-v2.json` | archived | The descriptor from before the split. Its image names a placeholder account (`000000000000`) and is not deployable. Kept byte-identical; never edit it. |
 
-1. Verify provenance against starknet-innovation/qsb-solver and the exact tag commit.
-2. Require schemaVersion 3 and `searchContract`, the SHA-256 of canonical sorted-key compact JSON from `contracts/ranked-v2.json`. The producer derives it after checking its valid/rejected vectors; the app registry independently compares it with `fingerprint()` of its imported contract before enrollment. Run both suites.
-3. Copy solver.json as a new JSON descriptor in src/lib/releases; never edit the
-   archived qsb-config-a-ranked-v2.json. It is retained byte-for-byte.
-4. Run the registry generator, tests and package build. Generated imports support
-   both Vite and the Lambda bundle; the app needs no CUDA source hashes.
-5. Separately register an immutable AWS Batch job-definition revision using the
-   enrolled digest, and configure its exact ARN in the deployment. Before every
-   paid submission, Batch preflight verifies the image, queue and compute limits.
-   A canonical GHCR image may be mirrored at the same digest into the queue's
-   account/region `qsb-solver` ECR repository. Different digests, tags or arbitrary
-   aliases fail closed before input upload and the paid intent. Preserve the
-   attested manifest digest when copying; index and platform digests are distinct.
-   This is control-plane consistency, not runtime attestation. Selecting a
-   descriptor does not reconfigure Batch or publish an image.
+Both AWS releases use the same protocol, generator commit and `ranked-v2` search contract, so vaults are unaffected by which one is served.
 
-The browser shows the deployment-selected release. New withdrawal requests default
-to that served ID; an explicit different ID is refused before reservations. The
-server freezes that descriptor in the job. Existing vaults are bound to
-protocol/generator, not a solver, and existing jobs retain their original pin.
-Build with `--solver-release=RELEASE_ID` to record the producer image/source
-identity alongside the CPU artifact in `terraform/.build/manifest.json`; deployment
-must select the same ID. An unconfigured build serves no solver. Archived pins
-continue to verify without being selected for new paid work. Imported optimized research remains HOLD and subset-only;
-it cannot replace the two-stage pipeline through a descriptor.
+## Search contract
 
-## Historical evidence
+Both repositories carry `contracts/ranked-v2.json`. Their independent TypeScript and Python partitioners check every valid and rejected vector, and a solver release publishes the same file. A changed partition needs a new `searchVersion` and coordinated app support; it must never be presented as `ranked-v2`.
 
-Past reports may mention paths now moved to the solver repo. They record prior
-source/build experiments, not current app prerequisites or new image attestations.
-The parked supervised archives and their embedded wrappers were removed under
-#23; they were never the live coordinator or a second solver build route.
-CUDA sources and build/validation tooling moved to the solver repository.
-Historical app source-audit checks were removed; their removal does not certify
-the optimized candidate. App coverage-accounting tests and independent CPU
-comparison tests remain here.
+## Enrolling a release
 
-The maintainer confirmed compiled-binary redistribution approval in the [25 September decision](https://github.com/starknet-innovation/qsb-app/pull/47#issuecomment-5829603150). This records that confirmation, not an independent legal opinion. The solver
-repo retains upstream notices and licenses. No funded fixture, GPU allocation,
-production deployment or mainnet submission is part of this extraction.
+A tagged qsb-solver release publishes a GHCR image by digest with GitHub build provenance, and attaches `solver.json` plus the contract. To enroll it:
 
-## First external release
+1. Verify the provenance against `starknet-innovation/qsb-solver` and the exact tag commit, and that the release asset is the file you enroll (commands below).
+2. Require `schemaVersion` 3 and `searchContract`: the SHA-256 of canonical sorted-key compact JSON of `contracts/ranked-v2.json`. The producer derives it after checking its vectors; the app registry independently compares it with `fingerprint()` of its own contract. Run both suites.
+3. Copy `solver.json` verbatim as a new descriptor in `src/lib/releases`. Never edit an existing descriptor.
+4. Run the registry generator (it runs before tests, typechecking and builds), the tests and a build, and commit the descriptor with the regenerated `registry.generated.ts`. No coordinator change is needed.
 
-[v0.1.0](https://github.com/starknet-innovation/qsb-solver/releases/tag/v0.1.0)
-was built by [release run 36113649324](https://github.com/starknet-innovation/qsb-solver/actions/runs/36113649324)
-from commit `d72fb4fca0b684501f3db4038dcbc105ead6c117`.
-The exact released descriptor is `src/lib/releases/qsb-solver-v0-1-0.json`.
-Its image is:
-
-```
-ghcr.io/starknet-innovation/qsb-solver@sha256:badfcac297db6c242cf0e91e78fe294fa900d3c59f363258ec6d0d502162c755
-```
-
-GitHub build provenance verification passed with the repository, release workflow,
-tag ref and exact source commit constrained:
+Enrolling a descriptor doesn't serve it, publish an image or change a job definition.
 
 ```sh
-gh attestation verify oci://ghcr.io/starknet-innovation/qsb-solver@sha256:badfcac297db6c242cf0e91e78fe294fa900d3c59f363258ec6d0d502162c755 \
-  --repo starknet-innovation/qsb-solver \
-  --signer-workflow starknet-innovation/qsb-solver/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.1.0 \
-  --source-digest d72fb4fca0b684501f3db4038dcbc105ead6c117
-```
-
-The public OCI index, Linux amd64 manifest and config were anonymously readable
-and their bytes matched their digests. Released range vectors matched the app's
-contract byte-for-byte. The release builds the historical two-stage worker; it
-is not an optimized-candidate promotion or a new GPU/end-to-end proof. Registration
-leaves the default, deployed endpoint, mainnet and broadcast settings unchanged.
-
-The published v0.1.0 schemaVersion 2 descriptor remains byte-identical for historical
-job inspection. Its missing contract binding now refuses **new paid submissions**.
-It is not silently upgraded. A new producer release and separately reviewed verbatim
-enrollment are required before that external solver can run. The archived app
-descriptor/default also remains byte-identical; its placeholder image is not a
-deployable release and fails the endpoint image check against a real deployment.
-
-The schema 3 producer update is [qsb-solver PR #3](https://github.com/starknet-innovation/qsb-solver/pull/3). The verified AWS release is enrolled below; the earlier v0.1.0 descriptor remains inspection-only.
-
-New job admission requires the explicit deployment `SOLVER_RELEASE_ID` (Terraform
-`solver_release_id`) shared by API and coordinator. Requests omitting a solver
-select that served release. A mismatched explicit request, missing configuration,
-unbound external descriptor or archived placeholder refuses before reservations.
-Historical pins remain readable. The enrolled AWS release below is available for explicit build/deployment selection. An unconfigured deployment still refuses new jobs before reservations.
-
-## AWS release enrollment: combined-aws-sm86-v0.2.0 (optimized subset, repaired pinning)
-
-The producer release asset
-[`combined-aws-sm86-v0.2.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/combined-aws-sm86-v0.2.0)
-is enrolled verbatim as `src/lib/releases/qsb-solver-combined-aws-sm86-v0-2-0.json`.
-
-- **What it is:** the already tested image, built from source `43c77084…` by `candidate.yml` (tag `candidate-sm86-20260925-1`). It was not rebuilt.
-- **Gates:** qsb-solver#2 recorded its release gates: native sm86 A10G checks, and a matched A10G performance check against `aws-v0.1.0`. Subset round 1 is about +31–32%, round 2 about +1.6–1.7%, and pinning is unchanged.
-- **Compatibility:** it uses the same protocol, generator commit and ranked-v2 search contract as `aws-v0.1.0`, so vaults are unaffected. Each withdrawal job pins the release the deployment serves when the job is created.
-- **Selection:** `aws-v0.1.0` remains enrolled. Select the combined release explicitly with `--solver-release`, and serve it through its own job definition revision, never alongside the other release.
-
-```sh
+# combined-aws-sm86-v0.2.0
 gh attestation verify "oci://$(node -p 'require("./src/lib/releases/qsb-solver-combined-aws-sm86-v0-2-0.json").image')" \
   --repo starknet-innovation/qsb-solver \
   --signer-workflow starknet-innovation/qsb-solver/.github/workflows/candidate.yml \
@@ -126,19 +42,8 @@ gh attestation verify "oci://$(node -p 'require("./src/lib/releases/qsb-solver-c
   --deny-self-hosted-runners
 gh release download combined-aws-sm86-v0.2.0 -R starknet-innovation/qsb-solver -p solver.json -O - \
   | cmp - src/lib/releases/qsb-solver-combined-aws-sm86-v0-2-0.json
-```
 
-## AWS release enrollment: aws-v0.1.0
-
-The verbatim [producer release asset](https://github.com/starknet-innovation/qsb-solver/releases/tag/aws-v0.1.0)
-is enrolled as `src/lib/releases/qsb-solver-aws-v0-1-0.json`. Its ID, canonical
-image digest and solver source commit are read from that file, not duplicated in
-deployment configuration. The historical descriptor and published v0.1.0 remain unchanged.
-The producer's [tag build](https://github.com/starknet-innovation/qsb-solver/actions/runs/36139077364)
-selects the AWS target and `sm_86`. GitHub CLI provenance verification passed against
-that release workflow, source commit and tag on 25 September 2026. An anonymous GHCR manifest fetch also matched the enrolled digest, confirming public registry access:
-
-```sh
+# aws-v0.1.0
 gh attestation verify "oci://$(node -p 'require("./src/lib/releases/qsb-solver-aws-v0-1-0.json").image')" \
   --repo starknet-innovation/qsb-solver \
   --signer-workflow starknet-innovation/qsb-solver/.github/workflows/release.yml \
@@ -149,7 +54,28 @@ gh release download aws-v0.1.0 -R starknet-innovation/qsb-solver -p solver.json 
   | cmp - src/lib/releases/qsb-solver-aws-v0-1-0.json
 ```
 
-Build the app with the descriptor's ID as `--solver-release` to generate the
-CPU/solver deployment identities. This enrollment does not select a live solver,
-copy an image to an operator account, enable mainnet, or certify a fresh full
-search/withdrawal. Those remain separate deployment and execution steps.
+## Serving a release
+
+A deployment serves exactly one release, `SOLVER_RELEASE_ID` (Terraform `solver_release_id`), shared by the API and the coordinator:
+
+1. Copy the image into the stack account's `qsb-solver` ECR repository with a digest-preserving registry copy, and check both registry digests match ([terraform/gpu/README.md](../terraform/gpu/README.md)).
+2. Build the app with `--solver-release=RELEASE_ID`. The build records the image digest, solver commit and descriptor hash beside the CPU `reference.zip` digest in `terraform/.build/manifest.json`. Without `--solver-release`, no solver is served and new withdrawals are refused.
+3. Apply the GPU stack with that manifest for a job-definition revision on the image, then set `solver_release_id` and `batch_job_definition` in the app stack and apply. Terraform rejects a `solver_release_id` that differs from the build. Serve each release through its own job-definition revision, never two releases through one.
+
+Batch preflight accepts the descriptor's GHCR image, or the same digest in the `qsb-solver` ECR repository of the queue's own account and region. Different digests, accounts, regions, repositories and tags are refused before the public input is uploaded or anything is paid for. This is control-plane consistency, not runtime attestation, and index and platform digests are distinct: preserve the attested manifest digest when copying.
+
+A withdrawal pins the served release when it is created, and the coordinator checks the image against that pin before each paid submission. A request that omits `solverReleaseId` gets the served release; a different ID is refused (`solver_not_served`) before any reservation. A vault binds only its protocol and generator, so a deposit can be made whatever is served. Don't change the served release or `batch_job_definition` while pinned withdrawals are still searching; see "Job-definition revision changes and recovery" in the [runbook](OPERATIONAL-RUNBOOK.md#job-definition-revision-changes-and-recovery).
+
+## Checking hits locally
+
+`ops/aws-gpu-migration/replay-positive-hits.ts` reads an external public signing bundle and passes mocked Batch/S3 completed results through the real Batch parser and the local CPU reference. Run `npm run vendor`, then:
+
+```sh
+npx tsx ops/aws-gpu-migration/replay-positive-hits.ts /path/to/public-signing-bundle.json
+```
+
+It never submits work, signs, broadcasts or credits ranges, and it doesn't copy the bundle into the repository. The recorded [replay evidence](../ops/aws-gpu-migration/positive-hit-replay.json) checks all three historical puzzle hits, malformed candidates, mismatched request and output hashes, and a changed subset locktime. Pinning candidates supply their own sequence and locktime, so that mutation isn't a pinning rejection test. These are real local cryptographic checks with mocked AWS transport, not a GPU search.
+
+## Licensing
+
+qsb-solver keeps the upstream notices and licenses that accompany its sources and images. The maintainer confirmed compiled-binary redistribution approval in the [25 September decision](https://github.com/starknet-innovation/qsb-app/pull/47#issuecomment-5829603150); that records the confirmation, not an independent legal opinion.

@@ -3,28 +3,23 @@
 The organisation requires all QSB infrastructure and data in eu-west-2 (London), in a new AWS account that people
 reach through IAM Identity Center.
 
-**QSB starts over in the new account.** The new stack is built from scratch, and no data is copied: the records
-table, sessions and owner data all start empty. Once the new stack is switched on, the old eu-west-1 stack is retired.
+**Status (30 September 2026):** steps 1–10 are done, and the new stack is live. The GitHub part of step 12 is done.
+Left: retiring the old eu-west-1 stack ([step 11](#decommission-the-old-stack)) and, after the new stack has run a
+full deposit and withdrawal, deleting its data (cleanup). The old stack gets no more deploys.
 
-It's a new stack, never a change of `region` or account on an existing one:
+**QSB started over in the new account.** The new stack was built from scratch, and no data was copied: the records
+table, sessions and owner data all started empty. Users see a new app URL and sign in again; vaults created on the
+old stack don't appear on the new one.
+
+A region or account move is always a new stack, never a change of `region` or account on an existing one:
 - Both Terraform stacks pin their state to a region (`terraform_data.region_pin`).
 - `check-single-pipeline.py --deploy` refuses a plan that doesn't find the resources in its state, or that finds
   them in another region.
 - Terraform refuses any account other than `aws_account_id`.
 
-**Built alongside, not replaced.** The new account is empty, so there are no IAM name clashes and the new stack is
-built beside the live one.
-- **Until the switch-on (step 10):** the old stack runs as it is and gets no more deploys. The new stack stays
-  switched off, it's used only by the operator, and its URL isn't shared.
-- **At the switch-on:** the old stack's services are retired straight away (step 11), so nothing can take a deposit
-  on the old stack once the new one is live.
-- **The old stack's data is kept** until the new stack has run a full deposit and withdrawal (cleanup).
+The steps below are how the new account was built. Follow them again for any other new account.
 
-**When to switch over:** only when nothing on the old stack needs it. That means no vault holding funds, no held or
-unconfirmed deposit, no withdrawal intent that isn't confirmed, and an empty GPU queue (step 1). Everything before
-the switch-on can happen earlier.
-
-**Who:** the steps below are marked by who runs them.
+**Who:** the steps are marked by who runs them.
 
 | Mark | Who |
 | --- | --- |
@@ -39,9 +34,6 @@ Claude never runs admin steps, never handles the client code, and never reads ta
 holds only while the administrator is a different person.
 - A stolen admin session could mint IAM keys, read the MARA credential or swap the frontend.
 - A stolen `qsb-operator` session lasts at most an hour and can't touch IAM.
-
-**What users see:** a new app URL, and everyone signs in again. Vaults created on the old stack don't appear on the
-new one.
 
 ## Build the new stack
 
@@ -137,7 +129,7 @@ Nothing live changes in this phase.
    - `GET /api/rates` through the new URL must return 200.
 9. **Check** (operator).
    - `/api/config` shows mainnet, the enrolled solver and the switches off.
-   - Run a bounded GPU preflight (driver visible, image pulled by digest), as for the eu-west-1 image preflight.
+   - Run a bounded GPU preflight (driver visible, image pulled by digest).
    - Signing in is fine. Create nothing else: with the switches off, creating a vault still works.
 
 ## Switch-over
@@ -145,7 +137,7 @@ Nothing live changes in this phase.
 10. **Switch on** (operator, with the owner's OK).
     - Repeat step 1's checks on the old stack.
     - Set both switches on in the new stack, plan and apply.
-11. **Retire the old stack's services straight away** (operator, old account). Steps 1 and 2 of "Decommission the
+11. **Retire the old stack's services** (the QSB owner, old account; pending). Steps 1 and 2 of "Decommission the
     old stack" below destroy everything that could take a deposit, and keep the data. Afterwards nothing is left to
     switch back on by mistake. Deleting the kept data still waits for the cleanup.
 12. **Point the tooling at the new account.** Rename the `qsb-new-operator` profile to `qsb-operator` once the old
@@ -156,26 +148,13 @@ Nothing live changes in this phase.
     - Point the local `qsb-view` and `qsb-operator` profiles at the new account's roles through Identity Center,
       with region eu-west-2.
 
-## Admin steps after the move
-
-These stay with the AWS admin, even once `qsb-operator` manages the stack:
-- **IAM changes.** When a change to `ops/github-aws/render.py` or `access.py` lands on main, the AWS admin runs
-  `update_installed.py`, checks its plan against the merged diff, then runs it with `--apply`. The updater also
-  compares the permission set's provisioned policy with the rendered `permission-set.json`, and refuses to run if
-  they differ, because it can't change Identity Center. When the rendered policy changes, the admin first attaches
-  the new `permission-set.json` in Identity Center and re-provisions the permission set, then runs the update.
-- **Temp admin role for the day,** as for the first apply, to:
-  - replace a registered resource (the CloudFront distribution, API, origin access control or response-headers
-    policy) and register the new ID;
-  - change the API's access logs.
-- **Alerts.** Alert routing, and its delivery test.
+What stays with the AWS admin once `qsb-operator` manages the stack is in
+[ops/github-aws/README.md](../ops/github-aws/README.md#what-stays-with-the-aws-administrator).
 
 ## Rollback
 
-- **Before step 10:** there's nothing to roll back. The old stack hasn't changed and is still live. Leave the new
-  stack switched off, or tear it down.
-- **After step 10:** new deposits live only in the new account, so don't roll back. Fix forward. Step 11 removes
-  the old services, so the old stack can't be switched on by mistake.
+There is none. Since the switch-on (step 10), new deposits live only in the new account: fix forward. Step 11
+removes the old services, so the old stack can't be switched on by mistake.
 
 ## Decommission the old stack
 

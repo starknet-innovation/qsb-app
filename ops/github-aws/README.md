@@ -1,84 +1,80 @@
-# QSB GitHub deployment identity
+# QSB AWS identities
 
-The administrator bootstrap creates `qsb-github-deploy` under `/qsb/bootstrap/`,
-`qsb-runtime-boundary`, and an encrypted, versioned, private Terraform state
-bucket. It creates no IAM users or access keys and does not start the application.
-The existing GitHub OIDC provider is reused.
+The AWS administrator's bootstraps create everything QSB's people and workflows use in an account:
+- `bootstrap.py`: the GitHub deploy role `qsb-github-deploy` under `/qsb/bootstrap/`, the runtime boundary
+  `qsb-runtime-boundary`, and an encrypted, versioned, private Terraform state bucket;
+- `bootstrap_access.py`: the human access roles `qsb-viewonly` and `qsb-operator`, the GPU boundary
+  `qsb-gpu-boundary`, and an IAM Access Analyzer external-access analyzer.
 
-The role trusts only the repository's exact OIDC `sub` for `main` and the
-`sts.amazonaws.com` audience. Read the actual subject prefix with
-`gh api repos/OWNER/REPO/actions/oidc/customization/sub`; newer repositories
-include immutable owner/repository IDs. Do not replace it with a guessed name
-or wildcard. Environment-bound jobs have different subjects and are not trusted.
+They create no access keys and don't start the application. The whole sequence for a new account is in
+[REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md).
 
-## Access scope
+## Deploy role
 
-The deployment role has Terraform control of QSB-named Lambda, DynamoDB,
-Step Functions, alarms, logs and frontend buckets in the
-configured account/region. The runtime role path is `/qsb/runtime/qsb-*`;
-creating/changing runtime policies requires the fixed administrator-owned
-boundary. It cannot modify its own identity, the boundary, other projects'
-roles, or create static credentials. Runtime roles cannot manage IAM.
+`qsb-github-deploy` trusts only the repository's exact OIDC `sub` for `main` and the `sts.amazonaws.com` audience,
+through the account's GitHub OIDC provider, which the administrator creates before `bootstrap.py` runs. Read the
+actual subject prefix with `gh api repos/OWNER/REPO/actions/oidc/customization/sub`; newer repositories include
+immutable owner/repository IDs. Don't replace it with a guessed name or wildcard. Environment-bound jobs have
+different subjects and are not trusted.
 
-CloudFront distributions, origin controls, response-header policies and HTTP
-APIs are restricted to explicitly registered QSB IDs. These identifiers do not
-encode project ownership, and some CloudFront resources cannot be protected
-with tags. **New CDN/API resources must first be allocated and registered by an
-administrator.** The role can fully manage registered infrastructure, but cannot
-create arbitrary new CDN/API resources or EC2/VPC/backup infrastructure. The removed supervised host, queue, watchdog and evidence stack has no
-deployment or runtime grants. Roles can be passed only to Lambda, Step
-Functions and EventBridge Scheduler, which runs the webhook dispatcher's schedule;
-the role can manage only `qsb-*` schedules in the default group. The GitHub OIDC trust and authentication-only workflow are unchanged.
+The deploy role has Terraform control of QSB-named Lambda, DynamoDB, Step Functions, alarms, logs and frontend
+buckets in the configured account and region. The runtime role path is `/qsb/runtime/qsb-*`; creating or changing
+runtime policies requires the fixed administrator-owned boundary. It can't modify its own identity, the boundary,
+other projects' roles, or create static credentials. Runtime roles can't manage IAM.
 
-The runtime boundary allows QSB data access and, for API roles (`qsb-*-api`) only,
-read-only access to one secret, `qsb/slipstream`: the optional MARA Slipstream
-credential (see `terraform/README.md`). It allows no other secret and no KMS
-decrypt. Deploying code confers that code's runtime access, so `qsb-operator` and
-`qsb-github-deploy` can reach this secret through an API role. Workflow
-log-delivery control APIs require regional wildcard resources; these are the
-one runtime control-plane exception. Regional metadata discovery also requires
-wildcard resources. Runtime identities have no S3, SQS or ECR grants. KMS customer keys require
-separately reviewed grants. This is a project deployment role, not a read-only
-role: deploying code also confers the runtime capabilities of that code.
+CloudFront distributions, origin controls, response-header policies and HTTP APIs are restricted to explicitly
+registered QSB IDs. These identifiers don't encode project ownership, and some CloudFront resources can't be
+protected with tags. **New CDN/API resources must first be allocated and registered by an administrator.** The role
+can fully manage registered infrastructure, but can't create arbitrary new CDN/API resources or EC2/VPC/backup
+infrastructure. Roles can be passed only to Lambda, Step Functions and EventBridge Scheduler, which runs the webhook
+dispatcher's schedule; the role can manage only `qsb-*` schedules in the default group.
+
+The runtime boundary allows QSB data access and, for API roles (`qsb-*-api`) only, read-only access to one secret,
+`qsb/slipstream`: the optional MARA Slipstream credential (see `terraform/README.md`). It allows no other secret and
+no KMS decrypt. Deploying code confers that code's runtime access, so `qsb-operator` and `qsb-github-deploy` can
+reach this secret through an API role. Workflow log-delivery control APIs and regional metadata discovery require
+regional wildcard resources; these are the runtime control-plane exceptions. Runtime identities have no S3, SQS or
+ECR grants. KMS customer keys would need separately reviewed grants. This is a project deployment role, not a
+read-only role.
+
+The state bucket uses S3-managed encryption, versioning, public access blocking and an HTTPS-only policy. The deploy
+role and `qsb-operator` can read and write objects only under `qsb/`, and delete only `.tflock` lock objects. They
+can't administer the bucket or delete state snapshots.
 
 ## Provision and verify
 
-`render.py` takes a private inventory containing `account`, `region`, `subject`,
-`state_bucket` and arrays `distributions`, `apis`, `origin_access_controls`, and
-`response_headers_policies`. Keep that inventory, policy renders, state, and
-receipts outside Git. The initial permission review used IAM Policy Autopilot
-against a private Terraform plan; the baseline's wildcard and unrelated
-permissions were narrowed before installation.
+`render.py` takes a private inventory containing `account`, `region`, `subject`, `state_bucket` and arrays
+`distributions`, `apis`, `origin_access_controls`, and `response_headers_policies`. `access.py` also reads
+`gpu_vpc` (the VPC of the `terraform/gpu` security group) and exactly one of `operator_sso_permission_set` or
+`operator_user` ([Human access without root](#human-access-without-root)). Keep that inventory, policy renders,
+state and receipts outside Git.
 
 1. Render with `python3 ops/github-aws/render.py INVENTORY OUTPUT_DIRECTORY`.
 2. Validate both identity policies with IAM Access Analyzer and run
    `python3 ops/github-aws/verify.py --profile ADMIN --inventory INVENTORY`.
 3. Commit and push; verify the checkout is clean and its remote branch matches.
-4. Run `python3 ops/github-aws/bootstrap.py --profile ADMIN --inventory INVENTORY --apply`.
-   It refuses to overwrite an existing role, boundary, or state bucket. If an
-   AWS operation fails midway, inspect and reconcile the partial resources;
-   do not delete persisted state to retry.
-5. Repeat `verify.py` with `--role-arn ROLE_ARN` and compare the live trust and
-   policies with the committed renderer. The simulator checks permissions;
-   only a GitHub job can prove the OIDC exchange end to end.
-
-The bootstrap state bucket uses S3-managed encryption, versioning, public
-access blocking and an HTTPS-only policy. GitHub can read/write objects only
-under `qsb/`, and delete only `.tflock` lock objects. It cannot administer the
-bucket or delete state snapshots. Use Terraform's S3 backend with
-`use_lockfile = true`, `encrypt = true` and a key such as
-`qsb/main/terraform.tfstate`; configure the backend in a reviewed deployment
-workflow before the first application apply. Do not assume the historical
-CloudFormation deployments are already managed by Terraform or in this state.
-A migration/import plan is required before Terraform takes ownership.
+4. Run `python3 ops/github-aws/bootstrap.py --profile ADMIN --inventory INVENTORY --apply`. It refuses to overwrite
+   an existing role, boundary, or state bucket. If an AWS operation fails midway, inspect and reconcile the partial
+   resources; don't delete persisted state to retry.
+5. Repeat `verify.py` with `--role-arn ROLE_ARN` and compare the live trust and policies with the committed renderer.
+   The simulator checks permissions; only a GitHub job can prove the OIDC exchange end to end.
+6. For the human access identities, check offline with `python3 ops/github-aws/test_access.py` and
+   `verify_access.py --profile ADMIN --inventory INVENTORY`, commit and push, then run
+   `python3 ops/github-aws/bootstrap_access.py --profile ADMIN --inventory INVENTORY`. It prints the plan (names and
+   policy sizes only); add `--apply` to create it. It refuses to touch an existing identity and never creates a
+   password, key or MFA device. If a call fails midway, don't delete anything or retry blind: rerun with
+   `--apply --resume`. It first checks that every identity that already exists matches what this commit renders
+   (path, policy documents, trust, session length, and no access keys, groups or extra policies; for each existing
+   policy, exactly one version and no attachment or boundary use outside its own role or the GPU roles), then creates
+   or attaches only what's missing, and anything that differs stops it.
+7. Check the installed roles with `verify_access.py --profile qsb-view --inventory INVENTORY --live`.
 
 ## GitHub usage
 
-Repository secrets. They're secrets because GitHub prints each step's inputs and
-environment in the public log, and masks only secrets:
+Repository secrets. They're secrets because GitHub prints each step's inputs and environment in the public log, and
+masks only secrets:
 
-- `QSB_AWS_ROLE_ARN` (the `qsb-github-deploy` role), `QSB_AWS_ACCOUNT_ID`,
-  `QSB_TERRAFORM_STATE_BUCKET`
+- `QSB_AWS_ROLE_ARN` (the `qsb-github-deploy` role), `QSB_AWS_ACCOUNT_ID`, `QSB_TERRAFORM_STATE_BUCKET`
 
 Repository variables:
 
@@ -86,73 +82,66 @@ Repository variables:
 - `QSB_SOLVER_RELEASE_ID`: the enrolled solver release the app is built with
 - `QSB_AWS_DEPLOY_ENABLED`: `deploy.yml` does nothing unless it's `true`
 
-`QSB_IAM_RUNTIME_BOUNDARY_ARN` and the older `QSB_AWS_ROLE_ARN`,
-`QSB_AWS_ACCOUNT_ID` and `QSB_TERRAFORM_STATE_BUCKET` variables aren't used; delete
-them. The private tfvars set the boundary, and `check-single-pipeline.py --deploy`
-refuses a plan with any other.
+The private tfvars set the runtime boundary, and `check-single-pipeline.py --deploy` refuses a plan with any other.
 
-`aws-auth.yml` is a manual authentication-only check, runnable on `main` after
-review/merge. It cannot deploy or resume the app. Like `deploy.yml`, it gets the
-role's credentials through `terraform/scripts/github_deploy.py credential-process`,
-which neither stores nor prints them, and prints only whether the session is the
-deploy role's.
+`aws-auth.yml` is a manual authentication-only check, runnable on `main`. It can't deploy or resume the app. Like
+`deploy.yml`, it gets the role's credentials through `terraform/scripts/github_deploy.py credential-process`, which
+neither stores nor prints them, and prints only whether the session is the deploy role's.
 
-`deploy.yml` is the reviewed Terraform workflow for the app stack: it plans each
-push to `main`, and applies that plan once a reviewer approves the `qsb-deploy`
-environment. See "Deploy from GitHub" in [`terraform/README.md`](../../terraform/README.md).
-The approval and `QSB_AWS_DEPLOY_ENABLED` are conventions the workflow checks,
-not IAM enforcement: they don't restrict direct AWS API calls made by another
+`deploy.yml` is the reviewed Terraform workflow for the app stack: it plans each push to `main`, and applies that
+plan once a reviewer approves the `qsb-deploy` environment. See "Deploy from GitHub" in
+[`terraform/README.md`](../../terraform/README.md#deploy-from-github). The approval and `QSB_AWS_DEPLOY_ENABLED` are
+conventions the workflow checks, not IAM enforcement: they don't restrict direct AWS API calls made by another
 workflow on `main`.
 
 See [GitHub's AWS OIDC guidance](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws).
 
 ## Local regression checks
 
-Run `python3 -m unittest discover -s ops/github-aws -p "test_*.py"` to check
-that the removed services stay absent while exact OIDC trust, state protection,
-registered edge/API resources and required pipeline grants remain. These are
-structural policy checks, not a live AWS authorization test. `verify.py` also
-includes explicit denied-service and PassRole cases for a later IAM simulation.
-Changing the renderer does not update already installed roles or boundaries;
-review and apply that administrator-managed policy change separately.
+Run `python3 -m unittest discover -s ops/github-aws -p "test_*.py"` to check that removed services stay absent while
+exact OIDC trust, state protection, registered edge/API resources and required pipeline grants remain. These are
+structural policy checks, not a live AWS authorization test. `verify.py` also includes explicit denied-service and
+PassRole cases for an IAM simulation. Changing the renderer doesn't update installed roles or boundaries: see
+[Keep installed IAM in line with `main`](#keep-installed-iam-in-line-with-main).
 
 ## Human access without root
 
-Day-to-day AWS work (checks, Terraform applies, GPU smoke runs, reconcile) must
-not use the account root. `access.py` renders three administrator-owned
-identities from the same private inventory, plus `operator_user` (the IAM user
-name) and `gpu_vpc` (the VPC of the `terraform/gpu` security group).
+Day-to-day AWS work (checks, Terraform applies, GPU smoke runs, reconciliation) never uses the account root.
+`access.py` renders two roles for people:
 
-**In an account reached through IAM Identity Center**, set
-`operator_sso_permission_set` (the permission set's name) instead of
-`operator_user`. There is then no IAM user:
-- `qsb-viewonly` and `qsb-operator` trust only that permission set's role (an
-  `ArnLike` match on the reserved `/aws-reserved/sso.amazonaws.com/` path, which
-  no one can create roles in).
-- Identity Center enforces MFA at sign-in.
-- `access.py INVENTORY DIR` writes `permission-set.json` in place of `user.json`.
-  The administrator attaches it to the permission set as its inline policy: it
-  allows assuming those two roles and nothing else.
+| Identity | Path | Can | Cannot |
+| --- | --- | --- | --- |
+| `qsb-viewonly` | `/qsb/bootstrap/` | AWS `ViewOnlyAccess`, plus Batch/Scheduler/IAM describe, IAM simulation and Cost Explorer reads | read data: S3 objects, DynamoDB items, secrets, parameters, KMS decrypt, log events, Lambda code, execution input/output |
+| `qsb-operator` | `/qsb/bootstrap/` | everything `qsb-github-deploy` can, plus the `terraform/gpu` stack and its smoke jobs | ingress rules, `RunInstances`, VPC/gateway creation, users, access keys or MFA devices, editing any `/qsb/bootstrap/` identity or policy, removing a boundary |
 
-Exactly one of the two must be set. See [REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md).
+Neither role can assume other roles, so editing a runtime role's trust doesn't let the operator become that role.
+Both roles' sessions last at most 1 hour.
 
-With Identity Center, the local profiles chain from the permission set's session:
+**Through IAM Identity Center** (the current account): the inventory sets `operator_sso_permission_set`, the
+permission set's name. There is no IAM user.
+- `qsb-viewonly` and `qsb-operator` trust only that permission set's role (an `ArnLike` match on the reserved
+  `/aws-reserved/sso.amazonaws.com/` path, which no one can create roles in).
+- Identity Center enforces MFA at sign-in; the administrator keeps it "always-on".
+- `access.py INVENTORY DIR` writes `permission-set.json`. The administrator attaches it to the permission set as its
+  inline policy: it allows assuming those two roles and nothing else.
+
+The local profiles chain from the permission set's session:
 
 ```ini
 [profile qsb-sso]
 sso_session = qsb
-sso_account_id = NEW_ACCOUNT_ID
+sso_account_id = ACCOUNT_ID
 sso_role_name = QsbOperator
 region = eu-west-2
 
 [profile qsb-operator]
 source_profile = qsb-sso
-role_arn = arn:aws:iam::NEW_ACCOUNT_ID:role/qsb/bootstrap/qsb-operator
+role_arn = arn:aws:iam::ACCOUNT_ID:role/qsb/bootstrap/qsb-operator
 region = eu-west-2
 
 [profile qsb-view]
 source_profile = qsb-sso
-role_arn = arn:aws:iam::NEW_ACCOUNT_ID:role/qsb/bootstrap/qsb-viewonly
+role_arn = arn:aws:iam::ACCOUNT_ID:role/qsb/bootstrap/qsb-viewonly
 region = eu-west-2
 
 [sso-session qsb]
@@ -161,145 +150,78 @@ sso_start_url = https://YOUR-PORTAL.awsapps.com/start
 sso_region = YOUR-IDENTITY-CENTER-REGION
 ```
 
-Sign in with `aws sso login --sso-session qsb`.
+Sign in with `aws sso login --sso-session qsb`. Agents such as Claude or Codex use a cached session that you started;
+they never see or type an MFA code.
 
-| Identity | Path | Can | Cannot |
-| --- | --- | --- | --- |
-| IAM user `operator_user` | `/qsb/operators/` | sign in (console or `aws login`), change its password, assume the two roles | assume any other role, even one whose trust names it; any other action, even one a resource policy grants it; it has no access keys |
-| `qsb-viewonly` | `/qsb/bootstrap/` | AWS `ViewOnlyAccess`, plus Batch/Scheduler/IAM describe, IAM simulation and Cost Explorer reads | read data: S3 objects, DynamoDB items, secrets, parameters, KMS decrypt, log events, Lambda code, execution input/output |
-| `qsb-operator` | `/qsb/bootstrap/` | everything `qsb-github-deploy` can, plus the `terraform/gpu` stack and its smoke jobs | ingress rules, `RunInstances`, VPC/gateway creation, users, access keys or MFA devices, editing any `/qsb/bootstrap/` identity or policy, removing a boundary |
+**Terraform can't use these profiles directly.** Open the session with the CLI, then export it into the shell for
+Terraform without printing it: `aws sts get-caller-identity --profile qsb-operator`, then
+`eval "$(aws configure export-credentials --profile qsb-operator --format env)" && unset AWS_PROFILE`. The exported
+credentials expire with the session.
 
-**With an IAM user (`operator_user`).** Both roles trust only that user, only with MFA (`aws:MultiFactorAuthPresent`),
-and only when that MFA is under an hour old (`aws:MultiFactorAuthAge`). An older
-sign-in session can't mint role sessions without a fresh code. Neither role can
-assume other roles, so editing a runtime role's trust doesn't let the operator
-become that role. Both roles' sessions last at most 1 hour. AWS counts a role
-session assumed from an `aws login` session as role chaining, which caps it at
-1 hour whatever the role's maximum. With an Identity Center permission set there is no user row in the table
-above: see the Identity Center paragraph above for the trust, MFA and permission-set policy.
+**Reconciliation** runs as `qsb-operator` ([runbook](../../docs/OPERATIONAL-RUNBOOK.md#operator-session)). Terraform
+still needs a value for `operator_principal_arns`: set it to the `qsb-operator` role ARN. `NoRoleChaining` keeps that
+principal from assuming the scoped runtime reconcile role, so that role stays dormant. This doesn't prevent the
+operator from granting an outside principal access through runtime trust or bucket policies (see below).
 
-GPU runtime roles (`/qsb/runtime/qsb-gpu-*`) can be created or changed only with
-the new `qsb-gpu-boundary`. It allows the ECS instance agent, pulling the
-`qsb-solver` image, the GPU log streams, reading job inputs, writing job outputs,
-and the watchdog's list/describe/terminate of `qsb-gpu`-tagged jobs. It does not
-allow submitting paid jobs, passing roles, reading secrets or broad S3 access.
-`terraform/gpu` must set `permissions_boundary` on its four roles to that policy.
-The operator is denied creating or changing a `qsb-gpu-*` role with any other
-boundary, including `qsb-runtime-boundary`.
+### With an IAM user instead
 
-**GPU spend under `qsb-operator`.** The app's GPU-time budget only covers jobs
-the coordinator submits. The operator can submit smoke jobs to the `qsb-gpu`
-queue directly. It can also change the compute environment: raise max vCPUs,
-switch the AMI or launch template version, attach an existing security group,
-or disable the watchdog rule. It can also rebuild the compute environment with
-other instance families or Spot capacity, so the effective caps are the
-account's EC2 vCPU quotas for every family (Standard, G and VT, P, and Spot),
-not just the G quota. Keep those quotas as low as the account needs, and set
-an AWS Budgets alert on the account.
+`access.py` also supports an account without Identity Center: set `operator_user` (the IAM user name) instead of
+`operator_sso_permission_set`, and it renders a `/qsb/operators/` user that can sign in (console or `aws login`),
+change its password and assume the two roles, and nothing else, even an action a resource policy grants it. Both
+roles then trust only that user, only with MFA (`aws:MultiFactorAuthPresent`) under an hour old
+(`aws:MultiFactorAuthAge`). After `bootstrap_access.py`, the administrator enables console access and assigns a
+TOTP MFA device (the CLI `mfa_serial` flow needs a six-digit code); the user has no MFA self-service. The role
+profiles then use `source_profile = qsb-user` with `mfa_serial` and `duration_seconds = 3600`. AWS counts a role
+session assumed from an `aws login` session as role chaining, which caps it at 1 hour. Whether `aws login`'s
+refreshed credentials keep an MFA age that still satisfies the trust is unverified: check it against current AWS
+documentation before relying on this mode.
 
-### Create them once, as root
+### GPU roles and spend
 
-Steps 1 and 5 and "Use them" below are for an IAM user (`operator_user`). For an account reached through IAM
-Identity Center, put `operator_sso_permission_set` in the inventory instead, skip step 5, attach the rendered
-`permission-set.json` to the permission set, and use the Identity Center profiles shown above. The whole sequence
-for a new account is in [REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md).
+GPU runtime roles (`/qsb/runtime/qsb-gpu-*`) can be created or changed only with `qsb-gpu-boundary`. It allows the
+ECS instance agent, pulling the `qsb-solver` image, the GPU log streams, reading job inputs, writing job outputs,
+and the watchdog's list/describe/terminate of `qsb-gpu`-tagged jobs. It doesn't allow submitting paid jobs, passing
+roles, reading secrets or broad S3 access. `terraform/gpu` sets `permissions_boundary` on its four roles to that
+policy, and the operator is denied creating or changing a `qsb-gpu-*` role with any other boundary.
 
-1. Add `operator_user` (or `operator_sso_permission_set`) and `gpu_vpc` to the private inventory (outside Git).
-2. Check offline: `python3 ops/github-aws/test_access.py`, then
-   `python3 ops/github-aws/verify_access.py --profile ADMIN --inventory INVENTORY`.
-3. Commit and push; the checkout must be clean and match its remote branch.
-4. `python3 ops/github-aws/bootstrap_access.py --profile ADMIN --inventory INVENTORY`
-   prints the plan (names and policy sizes only). Add `--apply` to create it. It
-   refuses to touch an existing identity and never creates a password, key or
-   MFA device. If a call fails midway, don't delete anything or retry blind: rerun with `--apply --resume`. It first checks that every identity that already exists matches what this commit renders: path, policy documents, trust, session length, and no access keys, groups or extra policies. Then it creates or attaches only what's missing, and anything that differs stops it. For each policy that already exists, the check also requires exactly one version, and no attachment or boundary use outside its own role or the GPU roles. The user must have no SSH keys, service credentials or signing certificates, and the script reports its MFA devices and console password. Role creation retries only IAM's `MalformedPolicyDocument` "Invalid principal in policy" error, up to 24 times, 5 seconds apart (about 2 minutes), because IAM rejects a trust policy naming a just-created user until it has propagated.
-5. As root in the console, enable console access and assign a virtual or hardware
-   TOTP MFA device: the CLI `mfa_serial` flow needs a six-digit TOTP code. A passkey
-   or security key alone supports console role switching, not this CLI flow.
-   Nobody else handles the password or MFA secret. Adding, resyncing or replacing
-   the device requires root; this user has no MFA self-service. Confirm console
-   sign-in works once after bootstrap, including the first-login password change.
+**GPU spend under `qsb-operator`.** The app's GPU-time budget only covers jobs the coordinator submits. The operator
+can submit smoke jobs to the `qsb-gpu` queue directly. It can also change the compute environment: raise max vCPUs,
+switch the AMI or launch template version, attach an existing security group, or disable the watchdog rule. It can
+also rebuild the compute environment with other instance families or Spot capacity, so the effective caps are the
+account's EC2 vCPU quotas for every family (Standard, G and VT, P, and Spot), not just the G quota. Keep those quotas
+as low as the account needs, and set an AWS Budgets alert on the account.
 
-### Use them
+### Persistent external access
 
-With an IAM user: `aws login --profile qsb-user` signs in as the user. Then define the role
-profiles in `~/.aws/config` (account number and MFA device ARN are yours to fill in):
+The operator is explicitly denied function URL creation and updates, DynamoDB resource policy writes and ECR
+repository policy writes. Lambda AddPermission is limited to API Gateway and EventBridge principals. That principal
+restriction doesn't validate the permission's `SourceArn` or `SourceAccount`; keep source restrictions bound to the
+reviewed account and resources in Terraform. An operator can still grant persistent outside access via:
 
-```ini
-[profile qsb-user]
-region = eu-west-2
-
-[profile qsb-view]
-role_arn = arn:aws:iam::ACCOUNT:role/qsb/bootstrap/qsb-viewonly
-source_profile = qsb-user
-mfa_serial = arn:aws:iam::ACCOUNT:mfa/DEVICE
-duration_seconds = 3600
-region = eu-west-2
-
-[profile qsb-operator]
-role_arn = arn:aws:iam::ACCOUNT:role/qsb/bootstrap/qsb-operator
-source_profile = qsb-user
-mfa_serial = arn:aws:iam::ACCOUNT:mfa/DEVICE
-duration_seconds = 3600
-region = eu-west-2
-```
-
-The intended flow is that the first call on each role profile asks for an MFA
-code, then the CLI caches the role session until it expires. Verify this profile
-combination after bootstrap as described below before relying on it. Agents such as Claude or Codex use a cached
-session that you started. They never see or type the code. Then:
-
-- confirm with `python3 ops/github-aws/verify_access.py --profile qsb-view --inventory INVENTORY --live`;
-- **Terraform can't use these profiles directly:** it can read neither an `aws login` source nor prompt for MFA. Open the session with the CLI, then export it into the shell for Terraform, without printing it:
-  `aws sts get-caller-identity --profile qsb-operator`, then
-  `eval "$(aws configure export-credentials --profile qsb-operator --format env)" && unset AWS_PROFILE`.
-  The exported credentials expire with the session, after at most 1 hour;
-- **With the Batch deployment installed**, run the #14 reconcile CLI as `qsb-operator`. It covers the records, workflow and Batch calls in that version. The older Runpod CLI requires secret access this role deliberately lacks; do not grant it Secrets Manager access to work around that dependency. The #25 reconcile role stays unreachable from this user and the two bootstrap roles by design: their explicit denies prevent chaining into a runtime role. This does not prevent the operator from granting an outside principal access through runtime trust or bucket policies. Terraform still needs a value for `operator_principal_arns`; set it to the `qsb-operator` role ARN, which `NoRoleChaining` keeps from assuming it, so that role stays dormant;
-- keep root for break-glass only.
-
-**Verify** before relying on these, against current AWS docs:
-- `aws login` MFA context, credential-refresh age and whether a `login_session` profile works as `source_profile` remain unverified. [AWS documents 15-minute refreshes for up to 12 hours](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html), not the MFA-age semantics of those refreshed credentials. More than one hour after login, attempt `aws sts assume-role --profile qsb-user --role-arn arn:aws:iam::ACCOUNT:role/qsb/bootstrap/qsb-operator --role-session-name age-check` without `--serial-number`: it must be denied. Then, after any cached operator session expires, `aws sts get-caller-identity --profile qsb-operator` must prompt the human for a fresh TOTP code and succeed. Do not print successful AssumeRole credentials or share the login cache. If either check fails, stop relying on this CLI profile flow and have root review it; do not weaken the trust policy;
-- Batch's `PassRole` service names for compute-environment instance roles;
-- whether the Terraform AWS provider sends `default_tags` as create-time tags for security groups and launch templates.
-
-### Persistent external access: remaining operator responsibility
-
-The operator explicitly denies function URL creation/updates, DynamoDB resource
-policy writes and ECR repository policy writes. Lambda AddPermission is limited
-to API Gateway and EventBridge principals. This principal restriction does not
-validate the permission's `SourceArn` or `SourceAccount`; keep source restrictions
-bound to the reviewed account and resources in Terraform. An operator can still grant persistent outside access via:
-
-- a Lambda permission for either allowed service principal whose `SourceArn` or
-  `SourceAccount` names another account, or whose source restrictions are missing;
-- runtime role trust changes, S3 bucket policies (including frontend content
-  access), or cross-account log subscriptions.
+- a Lambda permission for either allowed service principal whose `SourceArn` or `SourceAccount` names another
+  account, or whose source restrictions are missing;
+- runtime role trust changes, S3 bucket policies (including frontend content access), or cross-account log
+  subscriptions.
 
 [Cross-account API Gateway integrations](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-cross-account-lambda-integrations.html)
 and [EventBridge cross-account service targets](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-service-cross-account.html)
-can provide an outside invocation path through those allowed service principals.
-MFA on the original operator session does not make downstream grants expire.
-Do not assume Access Analyzer reports every service-principal permission; review
-the actual source restrictions and test alert delivery independently.
+can provide an outside invocation path through those allowed service principals. MFA on the original operator
+session doesn't make downstream grants expire. Don't assume Access Analyzer reports every service-principal
+permission; review the actual source restrictions and test alert delivery independently.
 
-`bootstrap_access.py` creates an IAM Access Analyzer external-access analyzer,
-`qsb-external-access`, if the selected region has no account analyzer. Before creating
-any human-access IAM policies, user or roles, it requires an existing `ACTIVE`
-analyzer or confirms the new analyzer becomes `ACTIVE`. Failed, disabled or
-unknown states stop the bootstrap. A new analyzer still creating after 20 polls
-(three-second intervals, plus bounded CLI request time) also stops before IAM
-writes; inspect it and rerun after it becomes active. Existing inactive analyzers
-are never replaced automatically. This checks analyzer readiness, not alert delivery.
-The operator is denied every
-Access Analyzer action, and `qsb-viewonly` can list findings. After bootstrap,
-root should route its findings to an independently controlled alert destination.
-Also alert on CloudTrail CreateRole, UpdateAssumeRolePolicy, PutBucketPolicy,
-PutSubscriptionFilter and Lambda AddPermission calls by qsb-operator. Review each
-Lambda service-principal permission's SourceArn/SourceAccount for missing or
-outside-account bindings. Keep alert rules outside `qsb-gpu-*`, and their roles,
-policies and destinations outside all QSB deploy resource patterns, so the
-operator cannot disable them. Configure and test delivery as root; the bootstrap
-creates only the analyzer, not alert or monitoring resources. Findings require human review,
-not automatic deletion of access.
+`bootstrap_access.py` creates the external-access analyzer `qsb-external-access` if the region has no account
+analyzer. Before creating any human-access IAM policies or roles, it requires an existing `ACTIVE` analyzer or
+confirms the new analyzer becomes `ACTIVE`. Failed, disabled or unknown states stop the bootstrap, and so does a new
+analyzer still creating after 20 polls (three-second intervals); inspect it and rerun after it becomes active.
+Existing inactive analyzers are never replaced automatically. The operator is denied every Access Analyzer action,
+and `qsb-viewonly` can list findings.
+
+The administrator routes the analyzer's findings to an independently controlled alert destination, and alerts on
+CloudTrail CreateRole, UpdateAssumeRolePolicy, PutBucketPolicy, PutSubscriptionFilter and Lambda AddPermission calls
+by `qsb-operator`. Review each Lambda service-principal permission's SourceArn/SourceAccount for missing or
+outside-account bindings. Keep alert rules outside `qsb-gpu-*`, and their roles, policies and destinations outside
+all QSB deploy resource patterns, so the operator can't disable them. The bootstrap creates only the analyzer, not
+alert or monitoring resources. Findings need human review, not automatic deletion of access.
 
 References: [Lambda permission conditions](https://docs.aws.amazon.com/lambda/latest/dg/access-control-resource-based.html),
 [Sign-In console actions](https://docs.aws.amazon.com/signin/latest/userguide/console-access-control.html),
@@ -307,38 +229,69 @@ and [AssumeRole MFA token](https://docs.aws.amazon.com/STS/latest/APIReference/A
 
 ## Keep installed IAM in line with `main`
 
-`bootstrap.py` and `bootstrap_access.py` create identities once and never update
-them, so a reviewed change to `render.py` or `access.py` doesn't reach AWS by
-itself. `update_installed.py` compares every installed administrator-managed QSB
-document with what the current clean, pushed commit renders:
+`bootstrap.py` and `bootstrap_access.py` create identities once and never update them, so a reviewed change to
+`render.py` or `access.py` doesn't reach AWS by itself. `update_installed.py` compares every installed
+administrator-managed QSB document with what the current clean, pushed commit renders:
 
 - from `render.py`: `qsb-github-deploy`'s inline policy and its GitHub OIDC trust, and `qsb-runtime-boundary`;
-- from `access.py`: `qsb-gpu-boundary`, the `qsb-viewonly-N` and `qsb-operator-N` policies, the operator user's inline policy, and both roles' trust and maximum session.
+- from `access.py`: `qsb-gpu-boundary`, the `qsb-viewonly-N` and `qsb-operator-N` policies, the operator user's
+  inline policy (IAM-user mode), and both roles' trust and maximum session. With Identity Center it also compares the
+  permission set's provisioned policy with the rendered `permission-set.json`, and refuses to run if they differ,
+  because it can't change Identity Center.
 
 ```sh
 python3 ops/github-aws/update_installed.py --profile qsb-view --inventory INVENTORY
 python3 ops/github-aws/update_installed.py --profile ADMIN --inventory INVENTORY --apply
 ```
 
-**Plan mode** can run as `qsb-viewonly` on any pushed branch. For each target it prints `identical`, `missing` or `differs`. For a changed statement it also shows the exact actions, resources, principals and conditions that differ, with account numbers masked. The inventory feeds these documents as much as the code does, so compare that detail with the reviewed diff: a principal or resource you don't recognise means the inventory, not the code, changed it. Masking covers account numbers only: the plan still shows VPC, CloudFront and API IDs, the state bucket and the operator user's name. Keep plan output out of this public repository.
+**Plan mode** can run as `qsb-viewonly` on any pushed branch. For each target it prints `identical`, `missing` or
+`differs`. For a changed statement it also shows the exact actions, resources, principals and conditions that
+differ, with account numbers masked. The inventory feeds these documents as much as the code does, so compare that
+detail with the reviewed diff: a principal or resource you don't recognise means the inventory, not the code,
+changed it. Masking covers account numbers only: the plan still shows VPC, CloudFront and API IDs, the state bucket
+and the operator user's name. Keep plan output out of this public repository.
 
-**`--apply`** runs only from a clean `main` that matches `origin`, with an administrator profile, today root. It shows the plan, then asks you to type `apply`.
+**`--apply`** runs only from a clean `main` that matches `origin`, with an administrator profile. It shows the plan,
+then asks you to type `apply`.
 
-Every plan-mode run prints a `plan_hash`, a digest of the commit and everything it read and would write. `--apply` runs don't print it, so a hash always comes from a plan someone could review. To apply without the prompt, for example when an agent runs it with your OK, pass `--yes --plan-hash HASH` using the hash from a plan-mode run you reviewed. If anything differs from that run, it refuses, including a target that plan mode couldn't read. A plan reviewed as `qsb-viewonly` therefore authorises only what that plan actually showed.
+Every plan-mode run prints a `plan_hash`, a digest of the commit and everything it read and would write. `--apply`
+runs don't print it, so a hash always comes from a plan someone could review. To apply without the prompt, for
+example when an agent runs it with your OK, pass `--yes --plan-hash HASH` using the hash from a plan-mode run you
+reviewed. If anything differs from that run, it refuses, including a target that plan mode couldn't read. A plan
+reviewed as `qsb-viewonly` therefore authorises only what that plan actually showed.
 
-The updater never changes who a role trusts. A trust update that would move a principal, or the GitHub OIDC `sub`/`aud`, is refused, because those values come from the inventory and need a separately reviewed step. It updates only what differs:
+The updater never changes who a role trusts. A trust update that would move a principal, or the GitHub OIDC
+`sub`/`aud`, is refused, because those values come from the inventory and need a separately reviewed step. It
+updates only what differs:
 - a new default version for managed policies;
 - `put-*-policy` for inline ones;
 - `update-assume-role-policy` or `update-role` for the roles.
 
-It reads back every change. It never creates or deletes an identity, never attaches or detaches a policy, and never deletes a policy version. It refuses before any write in any of these cases:
+It reads back every change. It never creates or deletes an identity, never attaches or detaches a policy, and never
+deletes a policy version. It refuses before any write in any of these cases:
 - a changed managed policy already has IAM's maximum of five versions;
 - the number of rendered access policies changed;
 - anything is missing, including all of a role's access policies;
 - any of the three roles carries a policy this commit doesn't render.
 
-Afterwards, run `verify.py --role-arn` and `verify_access.py --live`. Old policy versions stay stored but inactive. An administrator can delete them once verification passes.
+Afterwards, run `verify.py --role-arn` and `verify_access.py --live`. Old policy versions stay stored but inactive;
+an administrator can delete them once verification passes.
 
-Tightening `qsb-github-deploy` to `main` removes grants the parked CDK-era stacks
-used, such as ECR, SQS, EventBridge, and passing roles to EC2, Backup and API
-Gateway. It is intentional, and those stacks can no longer be deployed with that role.
+## What stays with the AWS administrator
+
+These stay with the AWS administrator, even though `qsb-operator` manages the stacks:
+- **IAM changes.** When a change to `render.py` or `access.py` lands on `main`, the administrator runs
+  `update_installed.py`, checks its plan against the merged diff, then runs it with `--apply`. When the rendered
+  `permission-set.json` changes, the administrator first attaches it in Identity Center and re-provisions the
+  permission set, then runs the update.
+- **A temporary admin role for the day,** as for an account's first apply, to:
+  - replace a registered resource (the CloudFront distribution, API, origin access control or response-headers
+    policy) and register the new ID;
+  - change the API's access logs.
+- **Alerts.** Alarm routing (the SNS topics in `alarm_actions`), the analyzer and CloudTrail alerts above, and their
+  delivery tests.
+- **Secrets.** Creating or changing `qsb/slipstream` with the key holder
+  ([MARA Slipstream credential](../../terraform/README.md#mara-slipstream-credential)).
+
+The boundaries and alerts only hold while the operator can't edit them, and that holds only while the administrator
+is a different person.

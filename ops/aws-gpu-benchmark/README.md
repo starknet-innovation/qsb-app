@@ -1,5 +1,9 @@
 # Isolated AWS A10G benchmark
 
+**Not in use.** This one-off tool was built for #45 and #52, both closed: AWS was chosen for GPU work on
+25 September 2026 without waiting for it, and the served release's A10G measurements were made in qsb-solver#2.
+`launch.py` accepts only the old eu-west-1 region. It isn't part of the mainnet path.
+
 This benchmark answers whether the current optimized subset source runs correctly
 on A10G and measures fixed-range wall-clock throughput. It does not activate the
 application, submit a transaction, enroll a solver release, or establish the cost
@@ -77,8 +81,7 @@ No observed candidates would mean candidate verification was not exercised.
 
 ## Ordered launch and cleanup procedure
 
-This PR does not launch anything. Following these steps requires separate launch
-authorization. Do not use the application's GitHub deployment role. An operator
+Following these steps requires separate launch authorization. Do not use the application's GitHub deployment role. An operator
 prepares a dedicated EC2-trusted instance profile containing only the checked-in
 SSM policy, a reviewed SSM-agent GPU AMI, subnet and ingress-free security group.
 Use a current SSM agent supporting `ssmmessages`; this minimal profile does not
