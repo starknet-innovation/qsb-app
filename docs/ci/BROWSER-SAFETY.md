@@ -20,7 +20,8 @@ Failures retain an HTML report, screenshots and traces for seven days in the
 material; never run this suite with real wallet backups or credentials.
 
 Repository owner action: add **browser-safety** to the required status checks
-alongside **typecheck-and-test** in the `main` branch protection/ruleset. This PR
+alongside **typecheck**, **unit-tests**, **terraform** and
+**terraform-selected-solver** in the `main` branch protection/ruleset. This PR
 does not change repository settings.
 
 Local reproduction:
