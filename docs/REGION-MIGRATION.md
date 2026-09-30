@@ -3,24 +3,26 @@
 The organisation requires all QSB infrastructure and data in eu-west-2 (London), in a new AWS account that people
 reach through IAM Identity Center.
 
-The move is a new stack, never a change of `region` or account on an existing one:
+**QSB starts over in the new account.** The new stack is built from scratch, and no data is copied: the records
+table, sessions and owner data all start empty. Once the new stack is switched on, the old eu-west-1 stack is retired.
+
+It's a new stack, never a change of `region` or account on an existing one:
 - Both Terraform stacks pin their state to a region (`terraform_data.region_pin`).
 - `check-single-pipeline.py --deploy` refuses a plan that doesn't find the resources in its state, or that finds
   them in another region.
 - Terraform refuses any account other than `aws_account_id`.
 
 **Built alongside, not replaced.** The new account is empty, so there are no IAM name clashes and the new stack is
-built beside the live one. Downtime is only the data copy and the switch-over.
-- **Until the switch-on (step 13):** the old stack stays intact but frozen, so rollback is just unfreezing it. The new
-  stack stays frozen, or used read-only by the operator, and its URL isn't shared.
-- **At the switch-on:** the old stack's services are retired straight away (step 14), so nothing can take a deposit
-  over the same vault rows. By then new deposits live only in the new account, so there's nothing to roll back to.
-- **Its data is kept:** the records table, the solver image and the buckets stay until the new stack has run a full
-  deposit and withdrawal (cleanup).
+built beside the live one.
+- **Until the switch-on (step 10):** the old stack runs as it is and gets no more deploys. The new stack stays
+  switched off, it's used only by the operator, and its URL isn't shared.
+- **At the switch-on:** the old stack's services are retired straight away (step 11), so nothing can take a deposit
+  on the old stack once the new one is live.
+- **The old stack's data is kept** until the new stack has run a full deposit and withdrawal (cleanup).
 
-**When to cut over:** only after the first mainnet withdrawal (#22) is complete, and only when nothing is in
-flight. That means no held or unconfirmed deposit, no withdrawal intent that isn't confirmed, and an empty GPU queue.
-Everything before the cutover can happen earlier.
+**When to switch over:** only when nothing on the old stack needs it. That means no vault holding funds, no held or
+unconfirmed deposit, no withdrawal intent that isn't confirmed, and an empty GPU queue (step 1). Everything before
+the switch-on can happen earlier.
 
 **Who:** the steps below are marked by who runs them.
 
@@ -38,23 +40,20 @@ holds only while the administrator is a different person.
 - A stolen admin session could mint IAM keys, read the MARA credential or swap the frontend.
 - A stolen `qsb-operator` session lasts at most an hour and can't touch IAM.
 
-**What users see:** a new app URL, and everyone signs in again. Deposits and withdrawals are off from the freeze
-(step 10) until the switch-on (step 13).
+**What users see:** a new app URL, and everyone signs in again. Vaults created on the old stack don't appear on the
+new one.
 
-## Before the cutover
+## Build the new stack
 
 Nothing live changes in this phase.
 
-1. **Pin the live stacks' region** (operator, old account). After this change, `region` is required and the backend
-   region is no longer in `versions.tf`.
-   - Add `"region": "eu-west-1"` to the old GPU tfvars. The app tfvars already has it.
-   - The GPU AMI is now required too, so add `"gpu_ami": "ami-05db4db06e751ab89"`. That's the pinned Ireland AMI.
-   - Re-initialise the app working copy with `-reconfigure -backend-config=bucket=<current state bucket>
-     -backend-config=region=eu-west-1`. Until then its plan stops with "Backend initialization required". The GPU
-     stack's backend block didn't change, so its working copy needs no re-init.
-   - Then plan and apply both stacks once. Expect the new `terraform_data.region_pin`, the `SourceCommit` tag
-     updates, and a replaced release record (`terraform_data.release` in the app, `terraform_data.release_identity`
-     in the GPU stack), as with any new commit. Nothing else should be replaced or destroyed.
+1. **Check the old stack has nothing to carry over** (operator, with the owner). The new stack won't know about
+   anything on the old one.
+   - No vault on the old stack holds funds. If one does, withdraw it there first.
+   - No deposit is held or unconfirmed, and no withdrawal intent is unconfirmed.
+   - The GPU queue is empty, and the withdrawal state machine has no running executions
+     (`aws stepfunctions list-executions --state-machine-arn <arn> --status-filter RUNNING` lists none).
+   - Repeat these checks just before the switch-on (step 10).
 2. **Identity Center and account basics** (AWS admin, new account).
    - Create a permission set for the QSB operator (for example `QsbOperator`). Assign it to the QSB owner in the new
      account. It gets its inline policy in step 4. Keep its session duration at one hour; `qsb-operator` sessions
@@ -102,6 +101,9 @@ Nothing live changes in this phase.
      installed roles, and the role Identity Center provisions in this account for the permission set, so it tests
      the permission set's installed policy, not the rendered file. It fails until the permission set is assigned to
      the account.
+   - **Profiles.** While the old stack is still up, give the new account's operator profile its own name, for
+     example `qsb-new-operator` (use the profile example in `ops/github-aws/README.md`, with that name), so it
+     can't be mistaken for the old account's `qsb-operator`. Step 12 renames it.
 5. **GPU stack** (operator, new account).
    - **Init** with the new state bucket: `-backend-config=region=eu-west-2 -backend-config=key=qsb/gpu/terraform.tfstate`.
    - **Tfvars:** the new `aws_account_id`, `region = "eu-west-2"`, the `gpu_ami` from step 2, `vpc_id`, `subnets`, the GPU
@@ -136,63 +138,17 @@ Nothing live changes in this phase.
 9. **Check** (operator).
    - `/api/config` shows mainnet, the enrolled solver and the switches off.
    - Run a bounded GPU preflight (driver visible, image pulled by digest), as for the eu-west-1 image preflight.
-   - Signing in is fine. It writes only a challenge and a session, which the copy in step 11 ignores.
+   - Signing in is fine. Create nothing else: with the switches off, creating a vault still works.
 
-## Cutover
+## Switch-over
 
-10. **Freeze** (operator, old account).
-    - Confirm the GPU queue is empty, no withdrawal or deposit is in flight, and the withdrawal state machine has no
-      running executions (`aws stepfunctions list-executions --state-machine-arn <arn> --status-filter RUNNING`
-      lists none).
-    - Freeze the old app: set `mainnet_enabled` and `exact_submit_enabled` to false **and `lambda_concurrency` to 0**,
-      then plan, check and apply. The switches alone don't stop writes: creating a vault and the status reads still
-      write to the table. With no concurrency, every function is throttled, so nothing reads or writes the old
-      table.
-    - No execution may be running before the freeze. The workflow retries a throttled coordinator call (up to 6
-      times, about 3 minutes in all), so an execution caught by the freeze would keep retrying, then stop in
-      `NeedsOperatorAttention`.
-    - Concurrency 0 stops new invocations but not ones already running. So wait at least 3 minutes after the apply,
-      longer than any application function's timeout (the API's 120 seconds is the longest). Then re-check that the
-      state machine has no running executions and the GPU queue is empty.
-    - Confirm the freeze: `curl -s -o /dev/null -w '%{http_code}' <old URL>/api/config` returns a throttling error
-      (429 or 5xx), not 200. From here only DynamoDB's own TTL deletes of expired rows touch the old table. The copy
-      leaves out rows that have expired or expire within the hour.
-    - Then take an on-demand backup of the old records table
-      (`aws dynamodb create-backup --region eu-west-1 --table-name <name>-records --backup-name qsb-pre-move`).
-11. **Copy the data** (operator, both accounts).
-    - **Freeze the new stack too.** Set its `lambda_concurrency` to 0, then plan and apply. Creating a vault writes
-      even with the switches off, so a write to the new table during the copy could otherwise escape verification.
-    - **Profiles.** One per account, with distinct names: during the move the old and new operator profiles can't
-      both be called `qsb-operator`. Keep the old account's as `qsb-operator`, and name the new account's
-      `qsb-new-operator` (use the profile example in `ops/github-aws/README.md`, with that name) until step 15. The
-      script can't answer an MFA prompt, so give it two helper profiles that reuse credentials the CLI already has:
-      - In `~/.aws/config`, add `[profile qsb-copy-from]` with
-        `credential_process = aws configure export-credentials --profile qsb-operator --format process`. Run
-        `aws sts get-caller-identity --profile qsb-operator` first, which prompts for MFA once and caches the session.
-      - Add `[profile qsb-copy-to]` with
-        `credential_process = aws configure export-credentials --profile qsb-new-operator --format process`, after
-        `aws sso login`.
-    - **Copy:** `npx tsx scripts/copy-records.ts --from eu-west-1:<old>-records --from-profile qsb-copy-from --to eu-west-2:<new>-records --to-profile qsb-copy-to`.
-      It counts first; add `--apply` to copy.
-    - It copies every item unchanged, including rows with a TTL such as owner events, API keys and idempotency
-      records. It leaves out sign-in challenges and sessions, since everyone signs in again at the new URL, and any
-      row that has expired or expires within the hour, since DynamoDB may delete those mid-copy. It overwrites any
-      row an earlier interrupted copy left under the same key, refuses a destination row whose key isn't in the
-      source, fails if the source changes during the copy, and verifies both tables item by item. The copy must
-      finish within that hour, which a table this size does easily.
-    - **Keep the new stack frozen** after the copy, and note the copy's output (item count and digest) for the
-      rollback check.
-    - It prints only counts and a digest. The data passes through the operator's machine, not any AI tool.
-12. **Verify** (operator).
-    - Unfreeze the new stack: restore its `lambda_concurrency` to its previous value, then plan and apply.
-    - Don't share the new URL before step 13. Until then only the operator uses it, read-only: creating a vault
-      works even with the switches off, and such a vault would exist only in the new table.
-    - Sign in at the new URL. The vault, its deposit and its status must show as before. Create nothing.
-13. **Switch on** (operator, with the owner's OK). Set both switches on in the new stack, plan and apply.
-14. **Retire the old stack's services straight away** (operator, old account). Steps 1 and 2 of "Decommission the
+10. **Switch on** (operator, with the owner's OK).
+    - Repeat step 1's checks on the old stack.
+    - Set both switches on in the new stack, plan and apply.
+11. **Retire the old stack's services straight away** (operator, old account). Steps 1 and 2 of "Decommission the
     old stack" below destroy everything that could take a deposit, and keep the data. Afterwards nothing is left to
     switch back on by mistake. Deleting the kept data still waits for the cleanup.
-15. **Point the tooling at the new account.** Rename the `qsb-new-operator` profile to `qsb-operator` once the old
+12. **Point the tooling at the new account.** Rename the `qsb-new-operator` profile to `qsb-operator` once the old
     account's profile is no longer needed.
     - Set the GitHub repository variables `QSB_AWS_ACCOUNT_ID`, `QSB_AWS_REGION` (eu-west-2) and
       `QSB_AWS_ROLE_ARN` (the new `qsb-github-deploy`).
@@ -215,30 +171,35 @@ These stay with the AWS admin, even once `qsb-operator` manages the stack:
 
 ## Rollback
 
-- **Before step 13:** first check that the new table holds nothing the copy didn't put there. Run the copy script in
-  reverse, count-only (`--from eu-west-2:<new>-records … --to eu-west-1:<old>-records …`, without `--apply`), and
-  compare its item count and digest with the copy's output from step 11. If they differ, stop: something was created
-  in the new stack and must be reconciled before rolling back. Then freeze the new stack again, restore the old app's
-  `lambda_concurrency` and switches to their values before the freeze, and plan and apply. Its table
-  hasn't changed since the freeze, and nothing in the new stack has taken a deposit.
-- **After step 13:** new deposits live only in the new account, so don't roll back. Fix forward. Step 14 removes
+- **Before step 10:** there's nothing to roll back. The old stack hasn't changed and is still live. Leave the new
+  stack switched off, or tear it down.
+- **After step 10:** new deposits live only in the new account, so don't roll back. Fix forward. Step 11 removes
   the old services, so the old stack can't be switched on by mistake.
 
 ## Decommission the old stack
 
-Steps 1 and 2 run at cutover step 14. They destroy the old services but keep the data. Step 3 deletes the kept data,
-after the new stack has run a full deposit and withdrawal.
+Steps 1 and 2 run at switch-over step 11. They destroy the old services but keep the data. Step 3 deletes the kept
+data, after the new stack has run a full deposit and withdrawal.
+
+The old stacks need two settings before current code can plan them:
+- `region` is required, and the backend region is no longer in `versions.tf`. Add `"region": "eu-west-1"` to the old
+  GPU tfvars (the app tfvars already has it). Re-initialise the app working copy with
+  `-reconfigure -backend-config=bucket=<current state bucket> -backend-config=region=eu-west-1`. Until then its
+  plan stops with "Backend initialization required". The GPU stack's backend block didn't change, so its working
+  copy needs no re-init.
+- The GPU AMI is required too, so add `"gpu_ami": "ami-05db4db06e751ab89"` to the old GPU tfvars. That's the
+  pinned Ireland AMI.
 
 1. **GPU stack** (operator, old account).
-   - Run `terraform state rm terraform_data.region_pin aws_ecr_repository.solver`, plus the job bucket and its
-     configuration resources (every address from `terraform state list | grep -E '^aws_s3_bucket[a-z_]*\.jobs$'`).
+   - Run `terraform state rm aws_ecr_repository.solver`, plus the job bucket and its configuration resources
+     (every address from `terraform state list | grep -E '^aws_s3_bucket[a-z_]*\.jobs$'`).
    - Then run `terraform destroy`.
 2. **App stack** (operator, old account).
-   - Run `terraform state rm terraform_data.region_pin aws_dynamodb_table.records`, plus the frontend bucket and its
-     configuration resources (every address from `terraform state list | grep -E '^aws_s3_bucket[a-z_]*\.frontend$'`).
+   - Run `terraform state rm aws_dynamodb_table.records`, plus the frontend bucket and its configuration resources
+     (every address from `terraform state list | grep -E '^aws_s3_bucket[a-z_]*\.frontend$'`).
    - Then run `terraform destroy`. It removes CloudFront, the Lambdas and the roles; the old URL stops working.
 3. **Cleanup** (old account's administrator). Delete these permanently, checking each against this list first:
-   - the old records table (disable deletion protection first) and its on-demand backup;
+   - the old records table (disable deletion protection first);
    - note that deleting a table with point-in-time recovery makes DynamoDB keep a system backup of it for 35 days.
      Treat it as retained until it expires, so the old account holds QSB data until then. After 35 days, confirm it has expired: `aws dynamodb list-backups --region eu-west-1 --backup-type SYSTEM`
      should list nothing for the old table;
