@@ -437,7 +437,7 @@ exported credentials out of the parent shell; never print or share credentials:
   # Verify the assumed-role ARN before proceeding; this prints no credentials.
   aws sts get-caller-identity
   export TABLE_NAME='your-records-table'
-  # The live stack's region: eu-west-1 until the eu-west-2 cutover (docs/REGION-MIGRATION.md).
+  # The stack's region (eu-west-2).
   export AWS_REGION='your-stack-region'
   export AWS_BATCH_JOB_QUEUE='arn:aws:batch:your-stack-region:123456789012:job-queue/qsb-gpu'
   export AWS_BATCH_JOB_DEFINITION='arn:aws:batch:your-stack-region:123456789012:job-definition/qsb-gpu-solver:1'

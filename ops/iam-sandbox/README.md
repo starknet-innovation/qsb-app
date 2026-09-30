@@ -13,8 +13,8 @@ Run it as `qsb-operator` from a clean, pushed checkout. Open the operator sessio
 
 ```sh
 aws sts get-caller-identity --profile qsb-operator
-python3 ops/iam-sandbox/run.py --profile qsb-operator --region eu-west-1 --evidence ~/qsb-operations/iam-sandbox.json
-# --region is the live stack's region: eu-west-1 until the eu-west-2 cutover (docs/REGION-MIGRATION.md).
+python3 ops/iam-sandbox/run.py --profile qsb-operator --region eu-west-2 --evidence ~/qsb-operations/iam-sandbox.json
+# --region is the stack's region (eu-west-2).
 ```
 
 It creates three resources, all named `qsb-iam-sandbox-<random>`:
