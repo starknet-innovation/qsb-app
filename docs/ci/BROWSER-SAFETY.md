@@ -19,8 +19,9 @@ Failures retain an HTML report, screenshots and traces for seven days in the
 `browser-safety-failure` artifact. Fixtures use disposable synthetic recovery
 material; never run this suite with real wallet backups or credentials.
 
-Neither **browser-safety** nor **typecheck-and-test** is a required status check
-on `main` today; making them required is a repository setting for the owner.
+None of the pull-request checks (**typecheck**, **unit-tests**, **terraform**,
+**terraform-selected-solver** and **browser-safety**) is a required status check on
+`main` today; making them required is a repository setting for the owner.
 
 Local reproduction:
 
