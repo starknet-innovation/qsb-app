@@ -41,6 +41,7 @@ import {
   decryptRecovery,
   downloadBackup,
   recoveryBackupFilename,
+  MIN_PASSPHRASE_LENGTH,
 } from "./lib/backup";
 import {
   formatBtc,
@@ -90,9 +91,7 @@ const vaultLabel = (v: PublicVault, job?: Job) =>
   v.status === "spent"
     ? "Withdrawn"
     : job && v.status === "confirmed"
-      ? job.status === "awaiting_authorization"
-        ? "Withdrawal ready"
-        : "Withdrawing"
+      ? ({ awaiting_authorization: "Withdrawal ready", failed: "Withdrawal failed", paused: "Withdrawal paused" } as Record<string, string>)[job.status] ?? "Withdrawing"
       : ({ unfunded: "Not funded", submitted: "Deposit pending", confirmed: "Funded" } as Record<string, string>)[v.status];
 // One tab at a time checks the chain for a wallet, at most once a minute across tabs. Each
 // check costs provider requests, and the status routes write a versioned record that two tabs
@@ -109,6 +108,9 @@ function readChainSeen(address: string): Record<string, string> {
     return {};
   }
 }
+// A settled vault is still checked now and then: the funding route is where the server flags a
+// payment that reached the vault's script outside its one deposit.
+const SETTLED_CHECK_MS = 10 * 60 * 1000;
 async function chainTurn(address: string, check: () => Promise<void>) {
   const key = chainTurnKey(address);
   const run = async () => {
@@ -202,7 +204,8 @@ export default function App() {
   }, [conflictingCreation]);
   const dialog = useRef<HTMLDialogElement>(null),
     walletMenuRef = useRef<HTMLDivElement>(null),
-    generation = useRef(0);
+    generation = useRef(0),
+    dialogOpen = useRef(false);
   useEffect(() => {
     api("/config")
       .then((value) => {
@@ -313,6 +316,17 @@ export default function App() {
     if (!stale()) setVaults(latest.vaults);
     return observation;
   }
+  dialogOpen.current = !!transaction;
+  // While a transaction dialog is open it holds the chain-check turn, so no tab checks the
+  // chain for this wallet: a check of a pending deposit bumps the vault record (exportFunding),
+  // which would fence a deposit submission in flight.
+  useEffect(() => {
+    if (!transaction || !wallet || !navigator.locks) return;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    void navigator.locks.request(chainTurnKey(wallet.address), () => held);
+    return () => release();
+  }, [transaction, wallet]);
   useEffect(() => {
     if (modal) dialog.current?.showModal();
     else dialog.current?.close();
@@ -333,11 +347,19 @@ export default function App() {
         setStray(v.strayPayments ?? []);
         setJobs(j.jobs);
         setCheckedAt((c) => ({ ...c, ...readChainSeen(wallet.address) }));
-        // Pending transactions are checked only while the page is on screen, by one tab.
-        if (document.visibilityState !== "visible") return;
+        // Transactions are checked only while the page is on screen, by one tab, and never
+        // while a transaction dialog is open (see the lock below).
+        if (document.visibilityState !== "visible" || dialogOpen.current) return;
         await chainTurn(wallet.address, async () => {
+          const seen = readChainSeen(wallet.address);
           for (const vault of v.vaults)
-            if (!disposed && vault.status === "submitted" && vault.funding)
+            if (
+              !disposed &&
+              vault.funding &&
+              (vault.status === "submitted" ||
+                !seen[vault.id] ||
+                Date.now() - Date.parse(seen[vault.id]) >= SETTLED_CHECK_MS)
+            )
               await checkDeposit(vault, stale).catch(() => {});
           for (const job of j.jobs)
             if (!disposed && job.txid && job.status === "submitted") {
@@ -457,7 +479,8 @@ export default function App() {
       setNotice("This vault already has a withdrawal request. Review it in Activity.");
       return;
     }
-    if (operationsAllowed(config)) setTransaction({ vault: v });
+    // A new deposit is submitted to MARA, so it needs submission on as well as operations.
+    if (v.status === "unfunded" ? submissionOn : operationsAllowed(config)) setTransaction({ vault: v });
     else setModal("readiness");
   }
   function depositNow() {
@@ -476,7 +499,7 @@ export default function App() {
       setTransaction({ vault, job: j, solvedResult });
     });
   }
-  const passLongEnough = pass.length >= 14,
+  const passLongEnough = pass.length >= MIN_PASSPHRASE_LENGTH,
     passMatch = confirmPass !== "" && pass === confirmPass,
     formReady = passLongEnough && passMatch && !!name.trim();
   async function generate() {
@@ -484,9 +507,9 @@ export default function App() {
       if (!wallet) throw new Error("Connect Xverse before creating a vault.");
       if (pass !== confirmPass)
         throw new Error("The passphrases do not match.");
-      if (pass.length < 14)
+      if (pass.length < MIN_PASSPHRASE_LENGTH)
         throw new Error(
-          "Use at least 14 characters for your recovery passphrase.",
+          `Use at least ${MIN_PASSPHRASE_LENGTH} characters for your recovery passphrase.`,
         );
       if (!name.trim()) throw new Error("Give your vault a name.");
       const gen = generation.current;
@@ -1368,11 +1391,11 @@ export default function App() {
                           aria-describedby="pass-hint"
                           value={pass}
                           onChange={(e) => setPass(e.target.value)}
-                          placeholder="At least 14 characters"
+                          placeholder={`At least ${MIN_PASSPHRASE_LENGTH} characters`}
                         />
                       </label>
                       <p id="pass-hint" className={passLongEnough ? "field-hint ok" : "field-hint"}>
-                        {passLongEnough ? <><Check size={13} /> Meets the 14-character minimum</> : `${pass.length} of 14 characters`}
+                        {passLongEnough ? <><Check size={13} /> Meets the {MIN_PASSPHRASE_LENGTH}-character minimum</> : `${pass.length} of ${MIN_PASSPHRASE_LENGTH} characters`}
                       </p>
                       <label>
                         Confirm passphrase

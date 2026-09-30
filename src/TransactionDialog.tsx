@@ -13,6 +13,8 @@ import {
   fundingPsbt,
   helperPsbt,
   belowMinerFloor,
+  ceilMilliSatPerVb,
+  formatFeeRate,
   minerMinimumRate,
   nestedPaymentAddress,
   parseFeeRate,
@@ -266,12 +268,12 @@ export default function TransactionDialog({
     };
   }, [fundingKey]);
   // Start from a rate MARA accepts: its current minimum for a deposit, and half as much again
-  // for a withdrawal, whose search can take hours. Typing a rate replaces it. The rate keeps
-  // parseFeeRate's milli-sat precision, rounded up the way belowMinerFloor rounds the floor.
+  // for a withdrawal, whose search can take hours. Typing a rate replaces it. The rate is
+  // rounded up the way belowMinerFloor rounds the floor.
   const suggestedRate = (() => {
     if (typeof minerFloor !== "number") return undefined;
-    const milli = Math.ceil(Math.round(minerFloor * (deposit ? 1 : 1.5) * 1e6) / 1e3);
-    return milli > 0 ? String(milli / 1000) : undefined;
+    const milli = ceilMilliSatPerVb(minerFloor * (deposit ? 1 : 1.5));
+    return milli > 0n ? formatFeeRate(milli) : undefined;
   })();
   useEffect(() => {
     if (!job && !feeTouched.current && suggestedRate !== undefined) setFeeRate(String(suggestedRate));
@@ -759,7 +761,6 @@ export default function TransactionDialog({
       setAssemblyVerified(true);
     });
   }
-  const short = (s: string) => `${s.slice(0, 7)}…${s.slice(-6)}`;
   const btc = (n: bigint | string) => `${formatBtc(n)} BTC`;
   const sats = (n: bigint) => `${n.toLocaleString()} sats (${btc(n)})`;
   const selected = points.filter((p) => selection.includes(key(p)));
@@ -801,7 +802,9 @@ export default function TransactionDialog({
         ["Vault balance", btc(vault.funding.value)],
         ["Helper output", `+ ${btc(selected[0].value)}`],
         ["Miner fee", `− ${sats(feeQuote.fee)}`],
-        ["You receive", payout > 0n ? `${btc(payout)} at ${short(destination)}` : "Nothing: the fee is larger than the amount"],
+        // The whole address: this is the last look before the search binds the payout to it.
+        ["Destination", destination],
+        ["You receive", payout > 0n ? btc(payout) : "Nothing: the fee is larger than the amount"],
       ];
     } catch {
       return undefined;
@@ -1269,7 +1272,7 @@ export default function TransactionDialog({
             </div>
             {errorLine}
             <div className="dialog-actions">
-              {!job && !pendingFunding && (
+              {!job && !(deposit && pendingFunding) && (
                 <button
                   className="secondary"
                   disabled={!!busy}

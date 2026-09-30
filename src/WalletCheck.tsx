@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { base64 } from "@scure/base";
 import { signPsbt, type Wallet } from "./lib/wallet";
 import {
@@ -41,12 +41,25 @@ export default function WalletCheck({
     [accepted, setAccepted] = useState(false);
   const vault = vaults.find((v) => v.id === selected) || vaults[0];
   const busy = running !== undefined;
-  // Runs the three synthetic signing requests in order and stops at the first that fails.
-  async function run() {
+  // Leaving the page, or disconnecting (which remounts this section), stops the checks.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const indexOf = (kind: WalletCheckKind) => kinds.findIndex((k) => k.kind === kind);
+  const lastFailed = outcomes.filter((o) => !o.ok).at(-1);
+  const failedAt = lastFailed ? indexOf(lastFailed.kind) : -1;
+  // Runs the synthetic signing requests in order from `from`, and stops at the first that
+  // fails so a declined request isn't followed by two more. The rest can then be continued.
+  async function run(from = 0) {
     if (!wallet || !vault || !accepted) return;
-    setOutcomes([]);
+    setOutcomes((o) => o.filter((x) => indexOf(x.kind) < from));
     try {
-      for (const { kind, passed } of kinds) {
+      for (const { kind, passed } of kinds.slice(from)) {
+        if (!mounted.current) return;
         setRunning(kind);
         try {
           const fixture = walletCheckFixture(wallet, vault.scriptHex, kind);
@@ -56,8 +69,10 @@ export default function WalletCheck({
             [0],
           );
           verifyWalletCheck(fixture, base64.decode(returned), wallet);
+          if (!mounted.current) return;
           setOutcomes((o) => [...o, { kind, ok: true, text: passed }]);
         } catch (e) {
+          if (!mounted.current) return;
           setOutcomes((o) => [
             ...o,
             {
@@ -70,7 +85,7 @@ export default function WalletCheck({
         }
       }
     } finally {
-      setRunning(undefined);
+      if (mounted.current) setRunning(undefined);
     }
   }
   return (
@@ -125,6 +140,15 @@ export default function WalletCheck({
             >
               Run wallet check
             </button>
+            {!busy && failedAt >= 0 && failedAt < kinds.length - 1 && (
+              <button
+                className="secondary"
+                disabled={!accepted}
+                onClick={() => void run(failedAt + 1)}
+              >
+                Continue with the remaining checks
+              </button>
+            )}
           </div>
         </>
       )}

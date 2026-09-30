@@ -162,6 +162,8 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
   expect(fee).toBeGreaterThan(0);
   await expect(dialog).toContainText("You receive");
   await dialog.getByRole("button", { name: "Review withdrawal" }).click();
+  // The review shows the whole destination, not a shortened one.
+  await expect(dialog.locator(".summary")).toContainText(address);
   await expect(dialog).toContainText(`qsb-recovery-${vault.id}-withdrawal.json`);
   await dialog.getByRole("checkbox").check();
   const downloaded = page.waitForEvent("download");

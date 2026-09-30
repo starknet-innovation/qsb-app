@@ -6,6 +6,8 @@ import { resolve } from "node:path";
 import {
   QSB_CONFIG_A_MAX_SCRIPTSIG,
   belowMinerFloor,
+  ceilMilliSatPerVb,
+  formatFeeRate,
   changeDustLimit,
   minerMinimumRate,
   fundingFeeForRate,
@@ -206,6 +208,22 @@ describe("transactionVsize", () => {
     const full = Buffer.from(tx.toBytes(true, true)).toString("hex");
     expect(transactionVsize(full)).toBe(Math.ceil(tx.weight / 4));
     expect(tx.toBytes(true, true).length).toBeGreaterThan(tx.toBytes(true, false).length);
+  });
+});
+
+describe("suggested fee rates", () => {
+  it("round up to a millisatoshi and read back through parseFeeRate unchanged", () => {
+    expect(ceilMilliSatPerVb(1.5)).toBe(1_500n);
+    expect(ceilMilliSatPerVb(1.5 * 1.5)).toBe(2_250n);
+    expect(ceilMilliSatPerVb(4.03)).toBe(4_030n);
+    expect(ceilMilliSatPerVb(1.0001)).toBe(1_001n);
+    for (const milli of [1n, 10n, 1_000n, 1_500n, 2_250n, 4_030n, 999_999n]) {
+      expect(parseFeeRate(formatFeeRate(milli))).toBe(milli);
+      expect(belowMinerFloor(parseFeeRate(formatFeeRate(milli)), Number(milli) / 1000)).toBe(false);
+    }
+    expect(formatFeeRate(2_000n)).toBe("2");
+    expect(formatFeeRate(2_250n)).toBe("2.25");
+    expect(formatFeeRate(1n)).toBe("0.001");
   });
 });
 

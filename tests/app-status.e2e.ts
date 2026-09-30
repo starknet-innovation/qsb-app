@@ -34,7 +34,11 @@ export async function api(path){
   if (path==='/vaults') return {vaults:f.vaults, resendable:[]};
   if (path==='/jobs') return {jobs:f.jobs};
   const m = /^\\/vaults\\/([^/]+)\\/funding$/.exec(path);
-  if (m) { const v=f.vaults.find(x=>x.id===m[1]); return {vault:v, status:{confirmed:false}}; }
+  if (m) {
+    const v=f.vaults.find(x=>x.id===m[1]);
+    const stray = v.status==='confirmed' ? {vaultId:v.id, count:1, sats:'546', outputs:[{txid:'5e'.repeat(32), vout:1, value:'546'}]} : null;
+    return {vault:v, status:{confirmed:v.status==='confirmed'}, strayPayments:stray};
+  }
   throw Error('Unexpected API '+path);
 }`,
     }),
@@ -67,6 +71,8 @@ test("status follows the server switches and vault rows only offer what can happ
     "/vaults/bbbbbbbb-2222-4222-8222-222222222222/funding",
   );
   await expect(page.locator(".vault-row", { hasText: "Emergency" }).getByRole("button", { name: /Deposit/ })).toBeEnabled();
+  // A funded vault is checked too: that's where the server flags a payment outside its deposit.
+  await expect(page.locator(".vault-row", { hasText: "Savings" })).toContainText("reached this vault outside its one deposit");
   await expect(page.getByText("Savings: your withdrawal is ready to authorize.")).toBeVisible();
   await expect(page.getByRole("link", { name: /^Activity.*1 ready to authorize/ })).toBeVisible();
 
@@ -93,6 +99,13 @@ for (const [switches, label] of [
     await page.getByRole("button", { name: label }).click();
     await expect(page.getByRole("dialog")).toContainText(`${label}.`);
     await expect(page.getByRole("dialog")).not.toContainText("Deposits and withdrawals on");
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    // A new deposit can't be submitted in this state, so Deposit explains why instead.
+    await page.getByRole("link", { name: "My vaults", exact: true }).click();
+    await page.getByRole("button", { name: "Connect Xverse", exact: true }).click();
+    await page.locator(".vault-row", { hasText: "Emergency" }).getByRole("button", { name: /Deposit/ }).click();
+    await expect(page.getByRole("dialog")).toContainText(`${label}.`);
+    await expect(page.getByRole("dialog")).not.toContainText("Unlock your backup");
   });
 
 test("two tabs share one chain check a minute and its result", async ({ page }) => {
@@ -101,7 +114,7 @@ test("two tabs share one chain check a minute and its result", async ({ page }) 
   const fundingCalls = async () =>
     (await Promise.all([page, second].map((tab) => tab.evaluate(() => (window as any).apiCalls as string[]))))
       .flat()
-      .filter((path) => path.endsWith("/funding")).length;
+      .filter((path) => path === "/vaults/bbbbbbbb-2222-4222-8222-222222222222/funding").length;
   await page.goto("/");
   await page.getByRole("button", { name: "Connect Xverse", exact: true }).click();
   await expect(page.locator(".vault-row", { hasText: "Travel fund" })).toContainText("last checked");
