@@ -2,7 +2,7 @@
 
 **Not a production release.** The server's switches decide whether deposits, withdrawals and submissions are accepted, and nothing here changes that. Do not use this to hold real funds.
 
-A non-custodial client for the API in [`server/app.ts`](../server/app.ts) ([docs/API.md](../docs/API.md)). It does in Node what the webapp does in the browser, with the same code: QSB state generation and assembly run the same pinned Python in Pyodide ([`src/lib/qsb-runtime.ts`](../src/lib/qsb-runtime.ts)), and backups, PSBTs and checks come from `src/lib` and `src/mainnet`. It stays in this repository; it is not published to npm.
+A non-custodial client for the API in [`server/app.ts`](../server/app.ts) ([docs/API.md](../docs/API.md)). It does in Node what the webapp does in the browser, with the same code: QSB state generation and assembly run the same pinned Python in Pyodide ([`src/lib/qsb-runtime.ts`](../src/lib/qsb-runtime.ts)), and backups, PSBTs and checks come from `src/lib` and `src/mainnet`. It's the npm workspace `@starknet-innovation/qsb-sdk` in this repository. The package is marked private, so npm won't publish it until a licence is chosen (see [Package](#package)).
 
 ## Security model
 
@@ -25,7 +25,7 @@ The CLI creates every file owner-only (`0600`) and never overwrites one: an outp
 ## SDK
 
 ```ts
-import { QsbClient, type Signer } from "./sdk";
+import { QsbClient, type Signer } from "@starknet-innovation/qsb-sdk"; // or "./sdk" from this repository
 
 const signer: Signer = {
   address, // P2WPKH or nested SegWit payment address
@@ -114,6 +114,19 @@ The default signer is external: the CLI writes each request (the sign-in message
 `--signer test-key` uses a raw WIF key from `QSB_TEST_SIGNER_KEY`, for tests and local development against `npm run dev`. It refuses any API URL that isn't loopback (127.0.0.1, localhost or [::1]). With `npm run dev`, use `--api http://127.0.0.1:5173`: the challenge names that origin, and Vite proxies `/v1` (and `/api`) to the local API.
 
 `config` and `rates` need no wallet. With an API key in `QSB_API_KEY` or `--api-key-fd <n>` (never an argument), the CLI skips the wallet sign-in and caches no session; it still needs `--address` and `--public-key` for the PSBTs. Every other command needs `--address` and `--public-key`, or the test key.
+
+## Package
+
+```sh
+npm run build -w @starknet-innovation/qsb-sdk   # dist/index.js, dist/cli.js (the qsb bin), dist/types, public/qsb
+node sdk/check-package.mjs                      # packs it, installs it outside the repo and uses it there
+```
+
+The build ([`build.mjs`](build.mjs)) bundles the app's own `src/lib`, `src/mainnet` and `server/api-schemas` code into the package, so the SDK runs the same checks and signing preparation as the webapp. npm dependencies stay external, pinned to the repository's versions. It copies the pinned Python sources, `manifest.json` and their MIT `LICENSE` into `public/qsb`. At run time the SDK checks every Python file against that manifest before running it, as the webapp does. The network comes only from `QSB_NETWORK` at run time; the package has no default.
+
+[`check-package.mjs`](check-package.mjs) runs in CI. It checks that the tarball holds only the bundles, declarations, Python sources and README, and that the bundles reach nothing outside it. Then it installs the tarball into an empty project, generates and validates a vault in Pyodide through it, runs `qsb`, and type-checks a TypeScript consumer.
+
+Publishing needs two decisions first: a licence for this code (the package stays `"private": true` until then; [`tests/sdk-package.test.ts`](../tests/sdk-package.test.ts) holds that), and npm access for the `@starknet-innovation` scope.
 
 ## Limits
 
