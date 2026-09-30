@@ -78,6 +78,11 @@ jobs:
       record: ${{ steps.plan.outputs.record }}
     env:
       STATE_BUCKET: ${{ secrets.QSB_TERRAFORM_STATE_BUCKET }}
+      QSB_ROLE_ARN: ${{ secrets.QSB_AWS_ROLE_ARN }}
+      QSB_ACCOUNT_ID: ${{ secrets.QSB_AWS_ACCOUNT_ID }}
+      QSB_SESSION: qsb-plan-${{ github.run_id }}
+      AWS_REGION: ${{ vars.QSB_AWS_REGION }}
+      AWS_DEFAULT_REGION: ${{ vars.QSB_AWS_REGION }}
       # Where this run keeps what's private: the saved plan and the raw logs, readable only through the state bucket.
       RECORD: qsb/github-deploy/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
@@ -101,17 +106,21 @@ jobs:
         with:
           terraform_version: 1.15.5
           terraform_wrapper: false
-      - name: Assume the deploy role
-        env:
-          ROLE_ARN: ${{ secrets.QSB_AWS_ROLE_ARN }}
-          ACCOUNT_ID: ${{ secrets.QSB_AWS_ACCOUNT_ID }}
-          REGION: ${{ vars.QSB_AWS_REGION }}
+      - name: Use the deploy role through GitHub's OIDC token
         run: |
-          for v in STATE_BUCKET ROLE_ARN ACCOUNT_ID REGION; do
+          for v in STATE_BUCKET QSB_ROLE_ARN QSB_ACCOUNT_ID AWS_REGION; do
             test -n "${!v}" || { echo "$v is empty: set its repository secret or variable (see terraform/README.md)"; exit 1; }
           done
-          printf '%s\n' "$STATE_BUCKET" "$ROLE_ARN" "$ACCOUNT_ID" > "$QSB_REDACT_FILE"
-          python3 terraform/scripts/github_deploy.py credentials "qsb-plan-$GITHUB_RUN_ID"
+          printf '%s\n' "$STATE_BUCKET" "$QSB_ROLE_ARN" "$QSB_ACCOUNT_ID" > "$QSB_REDACT_FILE"
+          # Each AWS CLI and Terraform process asks the helper for credentials; nothing stores or prints them.
+          printf '[profile qsb-deploy]\ncredential_process = python3 %s/terraform/scripts/github_deploy.py credential-process\n' \
+            "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/aws-config"
+          { echo "AWS_CONFIG_FILE=$RUNNER_TEMP/aws-config"; echo "AWS_PROFILE=qsb-deploy"; } >> "$GITHUB_ENV"
+          AWS_CONFIG_FILE="$RUNNER_TEMP/aws-config" AWS_PROFILE=qsb-deploy \
+            aws sts get-caller-identity --query Arn --output text > "$RUNNER_TEMP/caller" 2>&1 \
+            || { python3 terraform/scripts/github_deploy.py redact < "$RUNNER_TEMP/caller"; exit 1; }
+          grep -q ':assumed-role/qsb-github-deploy/' "$RUNNER_TEMP/caller" || { echo "That isn't qsb-github-deploy."; exit 1; }
+          echo "Using qsb-github-deploy."
       - name: Plan
         id: plan
         run: |
@@ -176,6 +185,11 @@ jobs:
       id-token: write
     env:
       STATE_BUCKET: ${{ secrets.QSB_TERRAFORM_STATE_BUCKET }}
+      QSB_ROLE_ARN: ${{ secrets.QSB_AWS_ROLE_ARN }}
+      QSB_ACCOUNT_ID: ${{ secrets.QSB_AWS_ACCOUNT_ID }}
+      QSB_SESSION: qsb-apply-${{ github.run_id }}
+      AWS_REGION: ${{ vars.QSB_AWS_REGION }}
+      AWS_DEFAULT_REGION: ${{ vars.QSB_AWS_REGION }}
       # The plan job's record, even when only this job is re-run.
       RECORD: ${{ needs.plan.outputs.record }}
     steps:
@@ -203,14 +217,21 @@ jobs:
         with:
           terraform_version: 1.15.5
           terraform_wrapper: false
-      - name: Assume the deploy role
-        env:
-          ROLE_ARN: ${{ secrets.QSB_AWS_ROLE_ARN }}
-          ACCOUNT_ID: ${{ secrets.QSB_AWS_ACCOUNT_ID }}
-          REGION: ${{ vars.QSB_AWS_REGION }}
+      - name: Use the deploy role through GitHub's OIDC token
         run: |
-          printf '%s\n' "$STATE_BUCKET" "$ROLE_ARN" "$ACCOUNT_ID" > "$QSB_REDACT_FILE"
-          python3 terraform/scripts/github_deploy.py credentials "qsb-apply-$GITHUB_RUN_ID"
+          for v in STATE_BUCKET QSB_ROLE_ARN QSB_ACCOUNT_ID AWS_REGION; do
+            test -n "${!v}" || { echo "$v is empty: set its repository secret or variable (see terraform/README.md)"; exit 1; }
+          done
+          printf '%s\n' "$STATE_BUCKET" "$QSB_ROLE_ARN" "$QSB_ACCOUNT_ID" > "$QSB_REDACT_FILE"
+          # Each AWS CLI and Terraform process asks the helper for credentials; nothing stores or prints them.
+          printf '[profile qsb-deploy]\ncredential_process = python3 %s/terraform/scripts/github_deploy.py credential-process\n' \
+            "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/aws-config"
+          { echo "AWS_CONFIG_FILE=$RUNNER_TEMP/aws-config"; echo "AWS_PROFILE=qsb-deploy"; } >> "$GITHUB_ENV"
+          AWS_CONFIG_FILE="$RUNNER_TEMP/aws-config" AWS_PROFILE=qsb-deploy \
+            aws sts get-caller-identity --query Arn --output text > "$RUNNER_TEMP/caller" 2>&1 \
+            || { python3 terraform/scripts/github_deploy.py redact < "$RUNNER_TEMP/caller"; exit 1; }
+          grep -q ':assumed-role/qsb-github-deploy/' "$RUNNER_TEMP/caller" || { echo "That isn't qsb-github-deploy."; exit 1; }
+          echo "Using qsb-github-deploy."
       - name: Apply the approved plan
         env:
           DIGEST: ${{ needs.plan.outputs.plan_digest }}
@@ -231,16 +252,8 @@ jobs:
           python3 $d run "$LOGS/apply.log" -- terraform -chdir=terraform apply -no-color -input=false -lock-timeout=10m \
             "$RUNNER_TEMP/app.tfplan"
           grep -E '^Apply complete!' "$LOGS/apply.log" | python3 $d redact | tee -a "$GITHUB_STEP_SUMMARY"
-      # A long apply can outlast the first session, and a failed one may leave errored.tfstate to push by hand.
-      - name: Assume the deploy role again to keep the logs
-        if: always()
-        env:
-          ROLE_ARN: ${{ secrets.QSB_AWS_ROLE_ARN }}
-          ACCOUNT_ID: ${{ secrets.QSB_AWS_ACCOUNT_ID }}
-          REGION: ${{ vars.QSB_AWS_REGION }}
-        run: |
-          test -n "${LOGS:-}" && test -d "$LOGS" || exit 0
-          python3 terraform/scripts/github_deploy.py credentials "qsb-logs-$GITHUB_RUN_ID"
+      # The profile fetches fresh credentials, so this works however long the apply took. A failed apply may
+      # leave errored.tfstate to push by hand.
       - name: Keep the raw logs privately
         if: always()
         run: |

@@ -9,21 +9,24 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    env:
+      QSB_ROLE_ARN: ${{ secrets.QSB_AWS_ROLE_ARN }}
+      QSB_ACCOUNT_ID: ${{ secrets.QSB_AWS_ACCOUNT_ID }}
+      QSB_SESSION: qsb-auth-${{ github.run_id }}
+      AWS_REGION: ${{ vars.QSB_AWS_REGION }}
+      AWS_DEFAULT_REGION: ${{ vars.QSB_AWS_REGION }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      # The repository is public: the role, account and caller identity stay out of the log
-      # (terraform/scripts/github_deploy.py credentials masks everything STS returns).
-      - name: Assume the deploy role
-        env:
-          ROLE_ARN: ${{ secrets.QSB_AWS_ROLE_ARN }}
-          ACCOUNT_ID: ${{ secrets.QSB_AWS_ACCOUNT_ID }}
-          REGION: ${{ vars.QSB_AWS_REGION }}
-        run: python3 terraform/scripts/github_deploy.py credentials "qsb-auth-$GITHUB_RUN_ID"
-      - name: Check the session
+      # The repository is public: the role, account and caller identity stay out of the log. The AWS CLI gets
+      # its credentials from terraform/scripts/github_deploy.py credential-process, which prints nothing.
+      - name: Check that GitHub can use the deploy role
         run: |
-          aws sts get-caller-identity --query Arn --output text > "$RUNNER_TEMP/caller" 2>&1 \
+          printf '[profile qsb-deploy]\ncredential_process = python3 %s/terraform/scripts/github_deploy.py credential-process\n' \
+            "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/aws-config"
+          AWS_CONFIG_FILE="$RUNNER_TEMP/aws-config" AWS_PROFILE=qsb-deploy \
+            aws sts get-caller-identity --query Arn --output text > "$RUNNER_TEMP/caller" 2>&1 \
             || { python3 terraform/scripts/github_deploy.py redact < "$RUNNER_TEMP/caller"; exit 1; }
-          grep -q ':assumed-role/qsb-github-deploy/' "$RUNNER_TEMP/caller"
+          grep -q ':assumed-role/qsb-github-deploy/' "$RUNNER_TEMP/caller" || { echo "That isn't qsb-github-deploy."; exit 1; }
           echo "Authenticated as qsb-github-deploy."

@@ -1,4 +1,5 @@
 """Offline checks that the deploy workflow's helpers never let identifying values into the public Actions log."""
+import io
 import json
 import os
 import subprocess
@@ -115,7 +116,7 @@ STS_RESPONSE = f"""<AssumeRoleWithWebIdentityResponse xmlns="https://sts.amazona
 </AssumeRoleWithWebIdentityResponse>""".encode()
 
 
-class Credentials(unittest.TestCase):
+class CredentialProcess(unittest.TestCase):
     def assume(self, account=ACCOUNT):
         calls = []
 
@@ -123,36 +124,31 @@ class Credentials(unittest.TestCase):
             calls.append(req)
             return json.dumps({'value': 'oidc-token-example'}).encode() if len(calls) == 1 else STS_RESPONSE
 
-        with tempfile.TemporaryDirectory() as d:
-            github_env = Path(d, 'env')
-            github_env.write_text('')
-            env = {'ROLE_ARN': ROLE, 'ACCOUNT_ID': account, 'REGION': 'eu-west-2', 'GITHUB_ENV': str(github_env),
-                   'ACTIONS_ID_TOKEN_REQUEST_URL': 'https://token.example/?api-version=2.0',
-                   'ACTIONS_ID_TOKEN_REQUEST_TOKEN': 'request-token'}
-            with mock.patch.dict(os.environ, env), mock.patch.object(gd, 'request', fake_request), \
-                    mock.patch('builtins.print') as printed:
-                code = gd.credentials('qsb-plan-1')
-            lines = [str(c.args[0]) for c in printed.call_args_list]
-            return code, lines, github_env.read_text(), calls
+        env = {'QSB_ROLE_ARN': ROLE, 'QSB_ACCOUNT_ID': account, 'QSB_SESSION': 'qsb-plan-1', 'AWS_REGION': 'eu-west-2',
+               'ACTIONS_ID_TOKEN_REQUEST_URL': 'https://token.example/?api-version=2.0',
+               'ACTIONS_ID_TOKEN_REQUEST_TOKEN': 'request-token'}
+        with mock.patch.dict(os.environ, env), mock.patch.object(gd, 'request', fake_request), \
+                mock.patch('sys.stdout', new_callable=io.StringIO) as out, \
+                mock.patch('sys.stderr', new_callable=io.StringIO) as err:
+            code = gd.credential_process()
+        return code, out.getvalue(), err.getvalue(), calls
 
-    def test_everything_sts_returns_is_masked_before_anything_else_prints(self):
-        code, lines, github_env, calls = self.assume()
-        self.assertEqual(code, 0)
-        self.assertTrue(calls[0].full_url.endswith('&audience=sts.amazonaws.com'))
+    def test_the_sdk_gets_credential_process_json_and_nothing_else(self):
+        code, out, err, calls = self.assume()
+        self.assertEqual((code, err), (0, ''))
+        self.assertTrue(calls[0].full_url.endswith('?api-version=2.0&audience=sts.amazonaws.com'))
         self.assertEqual(calls[1].full_url, 'https://sts.eu-west-2.amazonaws.com/')
-        masked = [l.removeprefix('::add-mask::') for l in lines if l.startswith('::add-mask::')]
-        self.assertEqual(set(masked), {'oidc-token-example', 'ASIAEXAMPLEEXAMPLE12', 'secret/example',
-                                       'session-token-example', 'AROAEXAMPLEEXAMPLE123:qsb-plan-1',
-                                       f'arn:aws:sts::{ACCOUNT}:assumed-role/qsb-github-deploy/qsb-plan-1'})
-        plain = [l for l in lines if not l.startswith('::add-mask::')]
-        self.assertEqual(plain, ['Assumed the deploy role for one hour.'])
-        self.assertIn('AWS_SESSION_TOKEN=session-token-example\n', github_env)
-        self.assertIn('AWS_REGION=eu-west-2\n', github_env)
+        sent = dict(p.split('=', 1) for p in calls[1].data.decode().split('&'))
+        self.assertEqual((sent['Action'], sent['RoleSessionName'], sent['WebIdentityToken']),
+                         ('AssumeRoleWithWebIdentity', 'qsb-plan-1', 'oidc-token-example'))
+        self.assertEqual(json.loads(out), {
+            'Version': 1, 'AccessKeyId': 'ASIAEXAMPLEEXAMPLE12', 'SecretAccessKey': 'secret/example',
+            'SessionToken': 'session-token-example', 'Expiration': '2026-01-01T00:00:00Z'})
 
     def test_a_role_in_another_account_is_refused(self):
-        code, lines, github_env, _ = self.assume(account='210987654321')
-        self.assertEqual((code, github_env), (1, ''))
-        self.assertIn('The role is not in the account QSB_AWS_ACCOUNT_ID names.', lines)
+        code, out, err, _ = self.assume(account='210987654321')
+        self.assertEqual((code, out), (1, ''))
+        self.assertIn('The role is not in the account QSB_AWS_ACCOUNT_ID names.', err)
 
 
 class Summary(unittest.TestCase):

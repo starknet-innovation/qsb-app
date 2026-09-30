@@ -92,9 +92,10 @@ them. The private tfvars set the boundary, and `check-single-pipeline.py --deplo
 refuses a plan with any other.
 
 `aws-auth.yml` is a manual authentication-only check, runnable on `main` after
-review/merge. It cannot deploy or resume the app. Like `deploy.yml`, it assumes the
-role with `terraform/scripts/github_deploy.py credentials`, which masks everything
-STS returns, and prints only whether the session is the deploy role's.
+review/merge. It cannot deploy or resume the app. Like `deploy.yml`, it gets the
+role's credentials through `terraform/scripts/github_deploy.py credential-process`,
+which neither stores nor prints them, and prints only whether the session is the
+deploy role's.
 
 `deploy.yml` is the reviewed Terraform workflow for the app stack: it plans each
 push to `main`, and applies that plan once a reviewer approves the `qsb-deploy`

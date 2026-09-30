@@ -122,7 +122,7 @@ Runs are one at a time. A newer push waits for the current run, and replaces any
 
 **The logs are public.** This repository is public, so its Actions logs, step summaries and artifacts are too.
 - Terraform and AWS CLI output goes to private log files, kept with the saved plan under `qsb/github-deploy/<run>/` in the state bucket.
-- The role is assumed by `github_deploy.py credentials`, not `aws-actions/configure-aws-credentials`, because that action logs the role's unique ID. Everything STS returns is masked before anything is printed.
+- The role is used through an AWS profile whose `credential_process` is `github_deploy.py credential-process`, not `aws-actions/configure-aws-credentials`, because that action logs the role's unique ID. The AWS CLI, Terraform and its S3 backend each fetch fresh credentials from GitHub's OIDC token when they need them, so nothing stores or prints them, and a long apply doesn't outlast its session.
 - The tfvars' identifying values and every Terraform output are masked as soon as they're read.
 - The run page shows only redacted errors, and a summary of which resources and attributes change, without their values (`terraform/scripts/github_deploy.py`).
 - The build artifact is public, because it holds only what the public source builds.

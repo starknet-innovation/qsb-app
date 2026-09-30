@@ -4,7 +4,7 @@
 Plans, applies and AWS CLI output carry account IDs, ARNs and resource IDs. Nothing from them reaches the log except
 through redact(): the raw output goes to a private log file, which the workflow keeps in the state bucket.
 
-  credentials SESSION              assume the deploy role through GitHub's OIDC token, masking everything it returns
+  credential-process               an AWS credential_process: the deploy role's credentials, from GitHub's OIDC token
   run LOG [--ok CODES] -- CMD...   run CMD with its output in LOG; on failure print only its redacted errors
   masks TFVARS                     print ::add-mask:: for the tfvars' identifying values, and record them for redact()
   masks --outputs OUTPUTS_JSON     the same for every value `terraform output -json` returns, except source_commit
@@ -150,39 +150,39 @@ def sts_credentials(body):
     """The credentials and identity in an AssumeRoleWithWebIdentity response."""
     result = ET.fromstring(body).find('sts:AssumeRoleWithWebIdentityResult', STS)
     field = lambda parent, name: result.find(f'sts:{parent}/sts:{name}', STS).text
-    return {name: field('Credentials', name) for name in ('AccessKeyId', 'SecretAccessKey', 'SessionToken')} | {
+    return {name: field('Credentials', name) for name in ('AccessKeyId', 'SecretAccessKey', 'SessionToken',
+                                                          'Expiration')} | {
         name: field('AssumedRoleUser', name) for name in ('Arn', 'AssumedRoleId')}
 
 
-def credentials(session):
-    """Assume the deploy role as aws-actions/configure-aws-credentials does, without logging the role's identity.
+def credential_process():
+    """The deploy role's credentials in credential_process form, for the AWS CLI, Terraform and its S3 backend.
 
-    Reads ROLE_ARN, ACCOUNT_ID and REGION; writes the credentials to GITHUB_ENV for the job's later steps."""
-    role, account, region = os.environ['ROLE_ARN'], os.environ['ACCOUNT_ID'], os.environ['REGION']
-    token = json.loads(request(urllib.request.Request(
+    The workflow names this in an AWS config profile, so each SDK asks for credentials when it needs them. They go
+    to the SDK over a pipe; nothing stores or logs them, and the SDKs refresh them before they expire. A fresh
+    OIDC token each time means no token outlives its use. Reads QSB_ROLE_ARN, QSB_ACCOUNT_ID, QSB_SESSION and
+    AWS_REGION, and refuses a role outside that account, as configure-aws-credentials' allowed-account-ids does."""
+    role, account = os.environ['QSB_ROLE_ARN'], os.environ['QSB_ACCOUNT_ID']
+    region, session = os.environ['AWS_REGION'], os.environ['QSB_SESSION']
+    oidc = json.loads(request(urllib.request.Request(
         os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=sts.amazonaws.com',
         headers={'Authorization': f'Bearer {os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]}'})))['value']
-    print(f'::add-mask::{token}')
     body = urllib.parse.urlencode({'Action': 'AssumeRoleWithWebIdentity', 'Version': '2011-06-15', 'RoleArn': role,
-                                   'RoleSessionName': session, 'WebIdentityToken': token,
+                                   'RoleSessionName': session, 'WebIdentityToken': oidc,
                                    'DurationSeconds': '3600'}).encode()
     try:
         c = sts_credentials(request(urllib.request.Request(
             f'https://sts.{region}.amazonaws.com/', data=body,
             headers={'Content-Type': 'application/x-www-form-urlencoded'})))
     except urllib.error.HTTPError as e:
-        print(f'AssumeRoleWithWebIdentity failed with HTTP {e.code}: '
-              f'{redact(e.read().decode(errors="replace"), [role, account])[:2000]}')
+        sys.stderr.write(f'AssumeRoleWithWebIdentity failed with HTTP {e.code}: '
+                         f'{redact(e.read().decode(errors="replace"), [role, account])[:2000]}\n')
         return 1
-    for value in c.values():
-        print(f'::add-mask::{value}')
     if c['Arn'].split(':')[4] != account:
-        print('The role is not in the account QSB_AWS_ACCOUNT_ID names.')
+        sys.stderr.write('The role is not in the account QSB_AWS_ACCOUNT_ID names.\n')
         return 1
-    with open(os.environ['GITHUB_ENV'], 'a') as env:
-        env.write(f'AWS_ACCESS_KEY_ID={c["AccessKeyId"]}\nAWS_SECRET_ACCESS_KEY={c["SecretAccessKey"]}\n'
-                  f'AWS_SESSION_TOKEN={c["SessionToken"]}\nAWS_REGION={region}\nAWS_DEFAULT_REGION={region}\n')
-    print('Assumed the deploy role for one hour.')
+    json.dump({'Version': 1, 'AccessKeyId': c['AccessKeyId'], 'SecretAccessKey': c['SecretAccessKey'],
+               'SessionToken': c['SessionToken'], 'Expiration': c['Expiration']}, sys.stdout)
     return 0
 
 
@@ -290,8 +290,8 @@ def main(argv):
     if argv[:2] == ['masks', '--outputs'] and len(argv) == 3:
         print('\n'.join(output_masks(argv[2])))
         return 0
-    if argv[:1] == ['credentials'] and len(argv) == 2:
-        return credentials(argv[1])
+    if argv == ['credential-process']:
+        return credential_process()
     if argv[:1] == ['summary'] and len(argv) == 2:
         sys.stdout.write(summary(json.loads(Path(argv[1]).read_text()), os.environ.get('GITHUB_SHA', ''),
                                  os.environ.get('QSB_PLAN_DIGEST', '')))
