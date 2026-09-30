@@ -128,13 +128,13 @@
 <header>
   <div>
     <h1>QSB vault: who holds which secret</h1>
-    <p class="sub">How keys, passphrases and credentials move through vault creation, deposit and withdrawal. Everything secret stays above the dashed line, on the user's machine; the service only ever receives public data and signed transactions.</p>
+    <p class="sub">How keys, passphrases and credentials move through vault creation, deposit and withdrawal. Wallet keys, passphrases and unrevealed HORS secrets stay on the user's side. Sign-in proofs, bearer credentials and signed transactions cross the boundary; withdrawals disclose selected HORS preimages.</p>
   </div>
   <div class="keymsg">Spending takes all three: the <b>backup file</b>, its <b>passphrase</b> and the <b>wallet</b>. Only the user holds them. The service holds no key that can move funds.</div>
 </header>
 
 <div class="legend">
-  <span class="chip secret">Secret</span><span>never leaves its holder</span>
+  <span class="chip secret">Secret</span><span>unrevealed spending material stays local</span>
   <span class="chip enc">Encrypted</span><span>safe at rest, useless without the passphrase</span>
   <span class="chip cred">Credential</span><span>access or transport, cannot spend</span>
   <span class="chip pub">Public</span><span>safe to share</span>
@@ -161,7 +161,7 @@
     <div class="step">Signs the deposit PSBT. Broadcast is off: the app submits the signed bytes itself.</div>
   </div>
   <div class="cell wallet">
-    <div class="step">Supplies a small helper UTXO for the withdrawal. It's a public outpoint; nothing is signed yet.</div>
+    <div class="step">Controls the helper UTXO selected for the withdrawal; signs helper input 0 later. The service supplies the available public outpoints.</div>
   </div>
   <div class="cell wallet lane-end">
     <div class="step">Signs helper input 0 with <b>SIGHASH_ALL</b>, which fixes the destination, amount and fee.</div>
@@ -171,7 +171,7 @@
   <div class="conn-label">wallet ⇅ browser</div>
   <div class="conn"><span class="pill"><span class="a">↑</span>challenge</span><span class="pill"><span class="a">↓</span>signature</span></div>
   <div class="conn"><span class="pill"><span class="a">↑</span>deposit PSBT</span><span class="pill"><span class="a">↓</span>signed PSBT</span></div>
-  <div class="conn"><span class="pill"><span class="a">↓</span>helper UTXO (public)</span></div>
+  <div class="conn"><span class="pill">no helper response from wallet</span></div>
   <div class="conn"><span class="pill"><span class="a">↑</span>withdrawal PSBT</span><span class="pill"><span class="a">↓</span>helper signature</span></div>
 
   <!-- BROWSER LANE -->
@@ -195,20 +195,20 @@
   </div>
   <div class="cell browser">
     <div class="step">Unlocks the backup; you choose the destination, amount and fee.</div>
-    <div class="step">Saves a <b>-withdrawal</b> backup that binds this one-time intent, so the keys can't be used for a different withdrawal.<br><span class="chip enc">-withdrawal backup</span></div>
+    <div class="step">Saves a <b>-withdrawal</b> backup that binds that backup copy to this intent. The localStorage reminder is device-local; earlier unbound backups remain unbound and must not be reused for a different withdrawal, especially on another device.<br><span class="chip enc">-withdrawal backup</span></div>
   </div>
   <div class="cell browser lane-end">
     <div class="step">Unlocks the backup and assembles the transaction locally, revealing only the <b>15 of 300</b> secrets the solution selects (vault input 1).</div>
     <div class="step">Saves a <b>-signing</b> backup that binds this exact transaction.<br><span class="chip enc">-signing backup</span></div>
-    <div class="step">Locks again. The revealed secrets are single-use, so this vault is finished.</div>
+    <div class="step">HORS state remains in memory through signed-transaction review while the dialog is open. Dialog effect cleanup calls lockQsb() to drop the worker state; signing does not immediately lock it. Never reuse the one-time keys.</div>
   </div>
 
   <!-- TRUST BOUNDARY -->
-  <div class="boundary-row" style="display:flex"><div class="boundary-label">Trust boundary<br><span style="font-weight:500">public data and signed txs only</span></div></div>
-  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>public vault: script, hash, commitments, address</span><span class="pill"><span class="a">↑</span>session token (1 h)</span></div></div>
-  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>signed deposit transaction</span></div></div>
-  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>manifest: destination, amount, fee, outpoints</span><span class="pill"><span class="a">↑</span>solution: sequence, locktime, indices</span></div></div>
-  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>signed withdrawal transaction</span></div></div>
+  <div class="boundary-row" style="display:flex"><div class="boundary-label">Trust boundary<br><span style="font-weight:500">public data, proofs, credentials and signed txs</span></div></div>
+  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>BIP-322 sign-in proof</span><span class="pill"><span class="a">↓</span>bearer token / API key</span><span class="pill"><span class="a">↓</span>public vault: script, hash, commitments, address</span><span class="pill"><span class="a">↑</span>session token (1 h)</span></div></div>
+  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>bearer token / API key</span><span class="pill"><span class="a">↓</span>signed deposit transaction</span></div></div>
+  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↑</span>/payment-utxos: helper candidates</span><span class="pill"><span class="a">↓</span>bearer token / API key</span><span class="pill"><span class="a">↓</span>manifest: destination, amount, fee, outpoints</span><span class="pill"><span class="a">↑</span>solution: sequence, locktime, indices</span></div></div>
+  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>bearer token / API key</span><span class="pill"><span class="a">↓</span>signed withdrawal + 15 preimages</span></div></div>
 
   <!-- SERVICE LANE -->
   <div class="lane-label service">
@@ -223,7 +223,7 @@
   </div>
   <div class="cell service">
     <div class="step">Verifies the BIP-322 signature and issues a random session token. It stores only the token's SHA-256.<br><span class="chip cred">session token</span></div>
-    <div class="step">Stores the public vault record. It never receives a private key or a HORS secret.<br><span class="chip pub">public vault</span></div>
+    <div class="step">Stores the public vault record. At vault creation it receives commitments, not wallet private keys or HORS preimages.<br><span class="chip pub">public vault</span></div>
   </div>
   <div class="cell service">
     <div class="step">Checks the transaction pays the vault script, records the exact bytes and submits them to MARA.</div>
@@ -235,20 +235,20 @@
   </div>
   <div class="cell service lane-end">
     <div class="step">Checks the exact spend (inputs, single output, amount, fee) and runs Bitcoin Core's consensus check on the signed bytes.</div>
-    <div class="step">Records one submission intent, then POSTs to MARA exactly once. An unknown outcome goes to an operator and is never resent.</div>
+    <div class="step">Stores the signed bytes, including disclosed preimages, in one submission intent, then POSTs to MARA exactly once. An unknown outcome goes to an operator and is never resent.</div>
   </div>
 
   <!-- service <-> external -->
   <div class="conn-label">service ⇅ outside</div>
   <div class="conn"><span class="empty">nothing leaves</span></div>
-  <div class="conn"><span class="pill"><span class="a">↓</span>raw deposit transaction</span></div>
+  <div class="conn"><span class="pill"><span class="a">↓</span>raw deposit transaction</span><span class="pill">optional MARA credentials</span></div>
   <div class="conn"><span class="pill"><span class="a">↓</span>public search parameters</span><span class="pill"><span class="a">↑</span>candidate hits</span></div>
-  <div class="conn"><span class="pill"><span class="a">↓</span>raw withdrawal transaction</span></div>
+  <div class="conn"><span class="pill"><span class="a">↓</span>raw withdrawal + disclosed preimages</span><span class="pill">optional MARA credentials</span></div>
 
   <!-- EXTERNAL LANE -->
   <div class="lane-label external">
     <h2>Outside parties</h2>
-    <p>GPU solver, MARA Slipstream, Bitcoin. They see no secrets.</p>
+    <p>The GPU solver receives public search inputs. MARA receives signed transactions and optional authorization/client-code credentials. MARA and Bitcoin see the selected HORS preimages disclosed in withdrawals.</p>
   </div>
   <div class="cell external"><div class="empty">—</div></div>
   <div class="cell external">
@@ -268,10 +268,10 @@
     <table>
       <tr><th>Item</th><th>Created by</th><th>Held by</th><th>What the service stores</th></tr>
       <tr><td><span class="chip secret">Wallet private key</span></td><td>User's wallet</td><td>The wallet only</td><td>Nothing; the public key and address only</td></tr>
-      <tr><td><span class="chip secret">HORS one-time secrets</span><br>2 rounds × 150</td><td>Browser QSB worker</td><td>Browser memory while unlocked; encrypted backups at rest</td><td>Hash commitments only. The 15 revealed at withdrawal become public, by design</td></tr>
+      <tr><td><span class="chip secret">HORS one-time secrets</span><br>2 rounds × 150</td><td>Browser QSB worker</td><td>Browser memory while unlocked; encrypted backups at rest</td><td>Before withdrawal: hash commitments only. At submission: also the 15 disclosed preimages within the stored signed transaction (input 1 scriptSig); these become public by design</td></tr>
       <tr><td><span class="chip secret">Recovery passphrase</span></td><td>User</td><td>User</td><td>Nothing</td></tr>
       <tr><td><span class="chip enc">Backup files</span><br>vault, -withdrawal, -signing</td><td>Browser</td><td>User's own storage</td><td>Nothing</td></tr>
-      <tr><td><span class="chip cred">Session token / API key</span><br>1 h / scoped, up to 90 days</td><td>API, after a BIP-322 sign-in</td><td>Browser, or the SDK caller</td><td>SHA-256 hash only</td></tr>
+      <tr><td><span class="chip cred">Session token / API key</span><br>1 h / scoped, up to 90 days</td><td>API, after a BIP-322 sign-in</td><td>Browser, or the SDK caller</td><td>SHA-256 hash at rest; receives bearer credentials on authenticated requests</td></tr>
       <tr><td><span class="chip cred">Webhook signing secret</span></td><td>API, shown once to the owner</td><td>Owner's webhook receiver</td><td>The secret, to sign deliveries (HMAC-SHA256)</td></tr>
       <tr><td><span class="chip cred">MARA Slipstream credential</span><br>optional</td><td>Administrator</td><td>AWS Secrets Manager</td><td>Read at runtime by API roles; sent only to MARA</td></tr>
     </table>
@@ -283,7 +283,7 @@
       <div><b>QSB service</b><span>Can refuse or delay a withdrawal, but not redirect it: the destination is fixed by signatures made on the user's machine.</span></div>
       <div><b>GPU solver</b><span>Untrusted compute on public data. A wrong hit is caught by the CPU re-check.</span></div>
       <div><b>Operator</b><span>MFA-backed role that reconciles records after an unknown outcome. It can't sign, and the tool never resubmits.</span></div>
-      <div><b>MARA</b><span>Receives fully signed transactions only.</span></div>
+      <div><b>MARA</b><span>Receives fully signed transactions and optional authorization/client-code credentials; withdrawals include the disclosed HORS preimages.</span></div>
     </div>
     <p class="trust"><b>Trust note.</b> The web app is served from the deployment, so whoever can deploy controls the code that runs in the browser and can read the MARA credential. The SDK and CLI run code the user installs.</p>
   </div>
