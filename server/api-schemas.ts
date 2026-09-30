@@ -36,6 +36,32 @@ export const submitRequest = z
   .strict();
 export const transactionIdParam = z.string().regex(/^[a-f0-9]{64}$/);
 
+/** Owner event types: a job status for `withdrawal.*`, a vault status for `deposit.*`. */
+export const EVENT_TYPES = [
+  "withdrawal.queued",
+  "withdrawal.searching",
+  "withdrawal.paused",
+  "withdrawal.failed",
+  "withdrawal.awaiting_authorization",
+  "withdrawal.submitted",
+  "withdrawal.confirmed",
+  "deposit.submitted",
+  "deposit.confirmed",
+  "deposit.spent",
+  "deposit.dropped",
+] as const;
+export type EventType = (typeof EVENT_TYPES)[number];
+export const eventType = z.enum(EVENT_TYPES);
+/** GET /api/events query parameters, as strings. */
+export const eventsCursorParam = z.string().regex(/^[A-Za-z0-9_-]{1,120}$/);
+export const eventsLimitParam = z.string().regex(/^(?:[1-9]\d?|100)$/);
+export const webhookRequest = z
+  .object({
+    url: z.string().max(2048),
+    events: z.array(eventType).min(1).max(EVENT_TYPES.length).optional(),
+  })
+  .strict();
+
 /** How long a sign-in challenge and a session last, in seconds. */
 export const CHALLENGE_SECONDS = 300;
 export const SESSION_SECONDS = 3600;

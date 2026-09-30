@@ -1,7 +1,7 @@
 import { deployedSolver, deployedSolverId } from "./solver-deployment";
 import { observeWithdrawal } from "./withdrawal-status";
 import { submitExact, SubmitDisabled } from "./submit-exact";
-import { exportFunding, submitFunding } from "./submit-funding";
+import { exportFunding, submitFunding, type FundingDependencies } from "./submit-funding";
 import {
   CoreConsensus,
   ConsensusError,
@@ -9,7 +9,12 @@ import {
 } from "./consensus";
 import { exactSubmitEnabled } from "./exact-submit-permit";
 import { mainnetUiConfig, type MainnetUiOptions } from "./mainnetConfig";
-import { apiError, attachedApiErrorCode } from "./api-errors";
+import {
+  apiError,
+  attachedApiErrorCode,
+  attachedCodeStatusOf,
+  chainErrorStatus,
+} from "./api-errors";
 import {
   CHALLENGE_SECONDS,
   SESSION_SECONDS,
@@ -20,6 +25,7 @@ import {
   submitRequest,
   transactionIdParam,
   verifyRequest,
+  webhookRequest,
 } from "./api-schemas";
 import {
   assertVaultConfiguration,
@@ -33,6 +39,7 @@ import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Verifier } from "bip322-js";
 import { z } from "zod";
 import {
@@ -83,6 +90,23 @@ import {
   judgeInclusionEvidence,
   reportEsploraInclusion,
 } from "./runtime/miner-inclusion";
+import {
+  SETTLE_CAP_MS,
+  eventQuery,
+  listOwnerEvents,
+  recordOwnerEvents,
+  type OwnerEventStore,
+  type StatusMemory,
+} from "./owner-events";
+import {
+  WebhookLimitError,
+  WebhookUrlError,
+  deleteWebhook,
+  listWebhooks,
+  registerWebhook,
+  type Delivery,
+} from "./webhooks";
+import { httpsTransport, systemResolver } from "./webhook-transport";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -106,8 +130,14 @@ function supervisedServiceJob(job: unknown): boolean {
 type Env = { Variables: { owner: string } };
 export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
 export type AuthenticatedJobPostRoutes = Pick<Hono<Env>, "post">;
+/**
+ * API Gateway gives up after 30 seconds. Webhook sending stops 25 s into a request, and all
+ * event work (rows, queuing, sending) 28 s into it, so it can't turn a response into a 504.
+ */
+const REQUEST_BUDGET_MS = 25_000;
+const REQUEST_LIMIT_MS = 28_000;
 export function createApp(
-  store: Store = defaultStore,
+  records: Store = defaultStore,
   dependencies: {
     chain?: Esplora;
     miner?: typeof slipstream;
@@ -125,12 +155,46 @@ export function createApp(
     inProcessHandoff?: boolean;
     /** Injected chain reads for supervised admission. Never the process-wide client by default. */
     fundingLedger?: FundingLedger;
+    /** Webhook HTTP and DNS. Defaults to the network; tests inject fakes. */
+    webhooks?: Partial<Delivery>;
+    /** Tests only: false builds an app that records no owner events, to compare against. */
+    recordEvents?: false;
     /** Also serve every route under /v1. Only the coordinator API opts in; parked supervised apps don't. */
     versionedAlias?: boolean;
     /** Trusted test configuration; the deployment reads QSB_OWNER_* from the environment. */
     ownerLimits?: OwnerLimits;
   } = {},
 ) {
+  // Routes write through `store`, so withdrawal and deposit status changes become owner
+  // events. Each request gets its own recorder, so its events and webhook work stay its own;
+  // only the memory of row statuses by version, which are facts, is shared.
+  const memory: StatusMemory = new Map();
+  const requestEvents = new AsyncLocalStorage<OwnerEventStore>();
+  const unrecorded: OwnerEventStore = {
+    get: (pk, sk) => records.get(pk, sk),
+    put: (row, expected, options) => records.put(row, expected, options),
+    delete: (pk, sk, expected) => records.delete(pk, sk, expected),
+    list: (pk, prefix) => records.list(pk, prefix),
+    reservationRows: () => records.reservationRows(),
+    atomicPut: (writes) => records.atomicPut(writes),
+    recordDropped: () => {},
+    settle: async () => {},
+  };
+  const current = () => requestEvents.getStore() ?? unrecorded;
+  const store: OwnerEventStore = {
+    get: (pk, sk) => current().get(pk, sk),
+    put: (row, expected, options) => current().put(row, expected, options),
+    delete: (pk, sk, expected) => current().delete(pk, sk, expected),
+    list: (pk, prefix) => current().list(pk, prefix),
+    reservationRows: () => current().reservationRows(),
+    atomicPut: (writes) => current().atomicPut(writes),
+    recordDropped: (owner, vaultId) => current().recordDropped(owner, vaultId),
+    settle: (options) => current().settle(options),
+  };
+  const delivery: Delivery = {
+    transport: dependencies.webhooks?.transport ?? httpsTransport,
+    resolve: dependencies.webhooks?.resolve ?? systemResolver,
+  };
   const ledger = dependencies.chain || chain,
     miner = dependencies.miner || slipstream;
   const enabled = dependencies.enabled ?? transactionsEnabled;
@@ -182,6 +246,24 @@ export function createApp(
         apiError(c, 413, "request_too_large", "Request is too large"),
     }),
   );
+  // After the route has answered: write its event rows, queue their webhooks and deliver this
+  // owner's due ones, all by REQUEST_LIMIT_MS into the request, delivery by REQUEST_BUDGET_MS.
+  // With no time left the event work is skipped (logged); the job and vault endpoints still
+  // carry the current status. Nothing here can change the response.
+  app.use("*", async (c, next) => {
+    if (dependencies.recordEvents === false) return next();
+    const started = Date.now();
+    const events = recordOwnerEvents(records, memory);
+    await requestEvents.run(events, next);
+    const owner = c.get("owner");
+    const elapsed = Date.now() - started;
+    await events.settle({
+      delivery,
+      owners: owner ? [owner] : [],
+      limitMs: Math.max(0, Math.min(SETTLE_CAP_MS, REQUEST_LIMIT_MS - elapsed)),
+      deliveryMs: Math.max(0, Math.min(SETTLE_CAP_MS, REQUEST_BUDGET_MS - elapsed)),
+    });
+  });
   app.onError((e, c) => {
     if (e instanceof OwnerLimitsInvalid)
       return apiError(
@@ -191,7 +273,8 @@ export function createApp(
         "This deployment's owner limits are misconfigured. Nothing was changed.",
       );
     // A code attached at a boundary (a chain or miner provider, a deposit's bytes) keeps
-    // the status and body its error class gets here.
+    // the status and body its error class gets here, except for the codes that set their
+    // own status (attachedCodeStatus): provider failures and a missing input.
     const attached = attachedApiErrorCode(e);
     if (e instanceof SubmitDisabled)
       return apiError(c, 503, "submit_disabled", e.message);
@@ -210,8 +293,12 @@ export function createApp(
             : "inclusion_check_failed"),
         e.message,
       );
-    if (e instanceof ChainError) return apiError(c, 409, e.code, e.message);
-    if (e instanceof z.ZodError)
+    if (e instanceof ChainError)
+      return apiError(c, chainErrorStatus(e.code), e.code, e.message);
+    // A provider's answer that fails its zod parse isn't the caller's invalid request: it gets
+    // its code's status below, without the provider's issues.
+    const coded = attachedCodeStatusOf(attached);
+    if (e instanceof z.ZodError && coded === undefined)
       return apiError(c, 400, attached ?? "invalid_request", "Invalid request", {
         issues: e.issues.map((i) => ({ path: i.path, message: i.message })),
       });
@@ -225,7 +312,7 @@ export function createApp(
     console.error(JSON.stringify({ error: e.name, route: c.req.path }));
     return apiError(
       c,
-      500,
+      coded ?? 500,
       attached ?? "internal_error",
       "Unable to complete the request. Please retry.",
     );
@@ -361,6 +448,9 @@ export function createApp(
   app.use("/api/jobs", auth);
   app.use("/api/payment-utxos", auth);
   app.use("/api/payment-input", auth);
+  app.use("/api/events", auth);
+  app.use("/api/webhooks", auth);
+  app.use("/api/webhooks/*", auth);
   app.use("/api/api-keys/*", auth);
   app.use("/api/api-keys", auth);
   for (const route of idempotentPosts)
@@ -387,6 +477,78 @@ export function createApp(
       );
     c.set("owner", session.owner);
     await next();
+  }
+  // The owner's event log, oldest first. It is the record; webhooks only notify.
+  app.get("/api/events", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const query = eventQuery(c.req.query("after"), c.req.query("limit"));
+    if (!query)
+      return apiError(
+        c,
+        400,
+        "invalid_request",
+        "Use a cursor from a previous page and a limit from 1 to 100.",
+      );
+    return c.json(await listOwnerEvents(records, c.get("owner"), query));
+  });
+  app.get("/api/webhooks", async (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json({ webhooks: await listWebhooks(records, c.get("owner")) });
+  });
+  app.post("/api/webhooks", async (c) => {
+    // Outbound requests for an owner: only allowlisted owners, when there's a list. Reads and
+    // deletion stay open.
+    if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
+    const body = webhookRequest.parse(await jsonBody(c));
+    c.header("Cache-Control", "no-store");
+    try {
+      // The signing secret is in this response only.
+      return c.json(await registerWebhook(records, c.get("owner"), body, delivery.resolve), 201);
+    } catch (e) {
+      if (e instanceof WebhookUrlError)
+        return e.code === "webhook_url_forbidden"
+          ? apiError(c, 400, "webhook_url_forbidden", e.message)
+          : e.code === "webhook_url_unresolvable"
+            ? apiError(c, 400, "webhook_url_unresolvable", e.message)
+            : apiError(c, 400, "webhook_url_invalid", e.message);
+      if (e instanceof WebhookLimitError)
+        return apiError(c, 409, "webhook_limit_reached", e.message);
+      throw e;
+    }
+  });
+  app.post("/api/webhooks/:id/delete", async (c) => {
+    if (!(await deleteWebhook(records, c.get("owner"), c.req.param("id"))))
+      return apiError(c, 404, "webhook_not_found", "Webhook not found.");
+    return c.json({ deleted: true });
+  });
+  /**
+   * submitFunding, watching the miner's answers without changing them. When the resend logic
+   * finds the miner no longer has a submitted deposit, and the resend isn't accepted either,
+   * the deposit is recorded as dropped after the decision is made.
+   */
+  async function submitDeposit(owner: string, vaultId: string, raw: string, amount: bigint) {
+    const observed = { unknown: false, accepted: false };
+    const watched: FundingDependencies["miner"] = {
+      credential: () => miner.credential(),
+      seen: async (txid, credential) => {
+        const known = await miner.seen(txid, credential);
+        if (!known) observed.unknown = true;
+        return known;
+      },
+      submitFunding: async (rawTx, permit, credential) => {
+        const response = await miner.submitFunding(rawTx, permit, credential);
+        observed.accepted = true;
+        return response;
+      },
+    };
+    const result = await submitFunding(owner, vaultId, raw, amount, {
+      store,
+      miner: watched,
+      enabled: dependencies.exactSubmit ?? exactSubmitEnabled(),
+    });
+    if (observed.unknown && !observed.accepted && result.vault.status === "submitted")
+      store.recordDropped(owner, vaultId);
+    return result;
   }
   installApiKeyRoutes(app, store, apiKeys);
   app.get("/api/vaults", async (c) => {
@@ -535,12 +697,11 @@ export function createApp(
       );
     if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
     const body = fundSubmitRequest.parse(await jsonBody(c));
-    const result = await submitFunding(
+    const result = await submitDeposit(
       c.get("owner"),
       c.req.param("id"),
       body.rawTxHex,
       BigInt(body.amount),
-      { store, miner, enabled: dependencies.exactSubmit ?? exactSubmitEnabled() },
     );
     // 201 for every outcome: `submission` says whether MARA accepted, refused or is unknown.
     return c.json(result, 201);
@@ -602,12 +763,11 @@ export function createApp(
         "signed_deposit_not_found",
         "This vault has no stored Slipstream deposit to resend.",
       );
-    const result = await submitFunding(
+    const result = await submitDeposit(
       c.get("owner"),
       c.req.param("id"),
       row.fundingRawTxHex,
       BigInt(vault.funding.value),
-      { store, miner, enabled: dependencies.exactSubmit ?? exactSubmitEnabled() },
     );
     return c.json(result, 201);
   });
@@ -1215,7 +1375,7 @@ export function createApp(
   dependencies.installAuthenticatedJobRoutes?.(authenticatedGet);
   dependencies.installAuthenticatedJobPostRoutes?.(authenticatedPost);
   if (dependencies.inProcessHandoff === true) {
-    installSupervisedRoutes(authenticatedGet, authenticatedPost, store, {
+    installSupervisedRoutes(authenticatedGet, authenticatedPost, records, {
       post: !registeredPosts.has("/api/jobs/supervised"),
       ledger: dependencies.fundingLedger,
     });

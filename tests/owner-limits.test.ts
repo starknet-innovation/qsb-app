@@ -302,10 +302,13 @@ describe("active withdrawals per owner", () => {
     const atomicPut = vi.spyOn(f.store, "atomicPut");
     expect((await f.post(`/api/jobs/${first.job.id}/resume`)).status).toBe(202);
     expect(atomicPut).toHaveBeenCalledOnce();
-    expect(atomicPut.mock.calls[0][0].map((w) => [w.row.sk, w.expected])).toEqual([
+    const [writes] = atomicPut.mock.calls[0];
+    expect(writes.filter((w) => !w.row.sk.startsWith("EVENT#")).map((w) => [w.row.sk, w.expected])).toEqual([
       [`JOB#${first.job.id}`, 1],
       [ACTIVE_JOBS_SK, 0],
     ]);
+    // The resume's owner event rides in the same transaction.
+    expect(writes.filter((w) => w.row.sk.startsWith("EVENT#")).map((w) => (w.row.event as { type: string }).type)).toEqual(["withdrawal.queued"]);
     expect(await f.store.get(pk, ACTIVE_JOBS_SK)).toMatchObject({ version: 1, jobId: first.job.id });
     expect((await f.post("/api/jobs", await f.withdrawal())).status).toBe(429);
   });

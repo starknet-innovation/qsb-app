@@ -8,6 +8,15 @@ const mocks = vi.hoisted(() => ({
   status: vi.fn(),
   cancel: vi.fn(),
   cpu: vi.fn(),
+  // Webhook HTTP and DNS: synthetic, never the network.
+  transport: vi.fn(async (): Promise<{ status: number }> => {
+    throw Error("Unexpected webhook request");
+  }),
+  resolve: vi.fn(async () => [{ address: "93.184.215.14", family: 4 }]),
+}));
+vi.mock("../server/webhook-transport", () => ({
+  httpsTransport: mocks.transport,
+  systemResolver: mocks.resolve,
 }));
 vi.mock("../src/lib/releases/registry.generated", async () => {
   const { servedFixture, otherFixture } = await import("./solver-fixture");
@@ -61,6 +70,8 @@ import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job, type SearchSlot } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
+import { EVENT_SETTLE_MS, listOwnerEvents } from "../server/owner-events";
+import { registerWebhook } from "../server/webhooks";
 import { GPU_SECONDS_SK, OWNER_GPU_BUDGET_REACHED } from "../server/owner-limits";
 
 const event = { owner: "test", jobId: "test-job", revision: 0 };
@@ -416,6 +427,80 @@ it("pauses as exhausted only after the last chunk of a stage has finished", asyn
   states["compute-1"] = output("pinning", last);
   await handler(event);
   expect(await saved()).toMatchObject({ status: "paused", error: expect.stringContaining("range exhausted") });
+});
+
+it.each(["throws", "hangs"])("a webhook receiver that %s changes nothing in a parallel tick", async (mode) => {
+  mocks.transport.mockImplementation(
+    mode === "hangs" ? () => new Promise(() => {}) : async () => { throw Error("ECONNRESET"); },
+  );
+  const tick = async (hooked: boolean) => {
+    (store as MemoryStore).rows.clear();
+    mocks.run.mockClear();
+    submitted = 0;
+    await seed();
+    if (hooked) await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    const result = await handler(event);
+    const { updatedAt, parallelSlots, ...job } = await saved();
+    return { result, job, slots: parallelSlots!.map(({ submissionStartedAt, ...slot }) => slot), runs: mocks.run.mock.calls.length };
+  };
+  const plain = await tick(false);
+  const started = Date.now();
+  const hooked = await tick(true);
+  expect(Date.now() - started).toBeLessThan(2500);
+  expect(hooked).toEqual(plain);
+  expect(plain.runs).toBe(4);
+  expect(mocks.transport).toHaveBeenCalledTimes(1);
+  const { events } = await listOwnerEvents(store, event.owner, { limit: 10 }, Date.now() + EVENT_SETTLE_MS + 1000);
+  expect(events.map((e) => e.type)).toEqual(["withdrawal.searching"]);
+}, 15_000);
+
+it.each(["throws", "hangs"])("a WEBHOOKS row that %s changes nothing in a parallel tick", async (mode) => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const tick = async (hooked: boolean) => {
+    (store as MemoryStore).rows.clear();
+    mocks.run.mockClear();
+    submitted = 0;
+    await seed();
+    if (hooked) await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    const memory = store as MemoryStore;
+    const get = MemoryStore.prototype.get.bind(memory);
+    const reads = vi.spyOn(memory, "get").mockImplementation((key, sort) =>
+      hooked && sort === "WEBHOOKS"
+        ? mode === "hangs" ? new Promise<never>(() => {}) : Promise.reject(Error("ThrottlingException"))
+        : get(key, sort),
+    );
+    const started = Date.now();
+    const result = await handler(event);
+    const elapsed = Date.now() - started;
+    reads.mockRestore();
+    const { updatedAt, parallelSlots, ...job } = await saved();
+    return { outcome: { result, job, slots: parallelSlots!.map(({ submissionStartedAt, ...s }) => s), runs: mocks.run.mock.calls.length }, elapsed };
+  };
+  const plain = await tick(false);
+  const faulted = await tick(true);
+  expect(faulted.outcome).toEqual(plain.outcome);
+  // A tick's webhook work, table faults included, stops within three seconds.
+  expect(faulted.elapsed).toBeLessThan(3500);
+}, 15_000);
+
+it("writes no event row before the tick's last paid POST", async () => {
+  await seed();
+  const order: string[] = [];
+  const memory = store as MemoryStore;
+  const put = MemoryStore.prototype.put.bind(memory);
+  const puts = vi.spyOn(memory, "put").mockImplementation(async (row, expected, options) => {
+    await put(row, expected, options);
+    if (row.sk.startsWith("EVENT#")) order.push("event");
+  });
+  mocks.run.mockImplementation(async () => {
+    order.push("POST");
+    return { id: `compute-${submitted}` };
+  });
+  await handler(event);
+  puts.mockRestore();
+  expect(order.filter((step) => step === "POST")).toHaveLength(4);
+  expect(order.slice(0, order.lastIndexOf("POST"))).not.toContain("event");
+  expect(order.at(-1)).toBe("event");
 });
 
 describe("owner GPU budget", () => {

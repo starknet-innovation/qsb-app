@@ -2,9 +2,16 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { assertNoCredentialMaterial } from "../server/runtime/host-requirements";
 import { inventoryRows } from "../server/runtime/storage-authority";
+import { withoutWebhookSecrets } from "../server/webhooks";
 import type { Row } from "../server/store";
 
-export function inventorySnapshot(parsed: unknown) {
+export function inventorySnapshot(snapshot: unknown) {
+  // Drop webhook signing secrets first; any other credential still refuses the snapshot.
+  const parsed = Array.isArray(snapshot)
+    ? withoutWebhookSecrets(snapshot)
+    : snapshot && typeof snapshot === "object" && Array.isArray((snapshot as { rows?: unknown }).rows)
+      ? { ...snapshot, rows: withoutWebhookSecrets((snapshot as { rows: unknown[] }).rows) }
+      : snapshot;
   assertNoCredentialMaterial(parsed);
   const rows = Array.isArray(parsed)
     ? parsed

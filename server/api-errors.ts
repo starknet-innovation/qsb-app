@@ -86,6 +86,13 @@ export const apiErrorCodes = {
   miner_request_failed:
     "A miner request failed, or its answer was malformed. Retry later.",
   miner_rate_unavailable: "The miner's live fee quote is unavailable. Retry later.",
+  webhook_url_invalid:
+    "The webhook URL isn't a URL, isn't https on port 443, or has credentials in it.",
+  webhook_url_forbidden:
+    "The webhook URL's host is a local name, or it is or resolves to a private or reserved address.",
+  webhook_url_unresolvable: "The webhook URL's host name doesn't resolve.",
+  webhook_limit_reached: "The account already has the most webhooks it can register.",
+  webhook_not_found: "No webhook with this id for the signed-in owner.",
   state_conflict: "The record changed during the request. Refresh and retry.",
   internal_error: "An unexpected server error. Retry.",
 } as const;
@@ -132,4 +139,41 @@ export function attachedApiErrorCode(error: unknown): ApiErrorCode | undefined {
   return typeof error === "object" && error !== null
     ? attached.get(error)
     : undefined;
+}
+
+/**
+ * The status app.onError gives an error carrying one of these attached codes, whatever its
+ * class, unless onError maps the class first. Each marks a failure that no error class
+ * identifies. Other attached codes keep their class's status. Only the response changes: the
+ * error keeps its class and message, so no catch or instanceof check behaves differently.
+ */
+export const attachedCodeStatus = {
+  // The chain provider gave no answer (DNS, refused connection, timeout, broken body). Chain
+  // reads have no side effects, so a retry later is safe.
+  chain_unavailable: 503,
+  // The provider answered, but the answer doesn't parse. It's the provider's fault, not the caller's.
+  chain_error: 502,
+  // The caller's outpoint is past its transaction's outputs, like the other input_* codes.
+  input_not_found: 409,
+  // The miner credential couldn't be read, like a refused credential. It's read before any
+  // intent is recorded or any POST, so this request sent nothing.
+  miner_unavailable: 503,
+  // No usable answer from the miner: no response, an error status or a malformed body. Not
+  // 503: an earlier send of the same bytes may have reached the miner, so the outcome may be unknown.
+  miner_request_failed: 502,
+} as const satisfies Partial<Record<ApiErrorCode, ContentfulStatusCode>>;
+/** The status attachedCodeStatus sets for `code`, if it sets one. */
+export function attachedCodeStatusOf(
+  code: ApiErrorCode | undefined,
+): ContentfulStatusCode | undefined {
+  return code !== undefined && code in attachedCodeStatus
+    ? attachedCodeStatus[code as keyof typeof attachedCodeStatus]
+    : undefined;
+}
+/**
+ * The status app.onError gives a ChainError with this code: 409, except chain_unavailable
+ * (the chain provider's error status), which has the same status as an unanswered request.
+ */
+export function chainErrorStatus(code: ApiErrorCode): ContentfulStatusCode {
+  return code === "chain_unavailable" ? attachedCodeStatus.chain_unavailable : 409;
 }

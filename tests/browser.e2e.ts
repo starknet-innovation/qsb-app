@@ -2,7 +2,12 @@ import { test, expect } from "@playwright/test";
 test("working surface, navigation, wallet absence and readiness", async ({
   page,
 }) => {
+  // The mainnet app calls the API under /v1 only; the dev proxy reaches the local API.
+  const paths: string[] = [];
+  page.on("request", (r) => paths.push(new URL(r.url()).pathname));
+  const config = page.waitForResponse((r) => new URL(r.url()).pathname === "/v1/config");
   await page.goto("/");
+  expect(await (await config).json()).toMatchObject({ network: "mainnet" });
   await expect(
     page.getByRole("heading", {
       name: "Your Bitcoin. A new layer of protection.",
@@ -40,6 +45,7 @@ test("working surface, navigation, wallet absence and readiness", async ({
     path: "test-results/qsb-mobile.png",
     fullPage: true,
   });
+  expect(paths.filter((p) => p === "/api" || p.startsWith("/api/"))).toEqual([]);
 });
 test("real browser QSB generation, backup encryption and restore", async ({
   page,
@@ -105,21 +111,21 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
     secp256k1.getPublicKey(new Uint8Array(32).fill(8)),
   ).address!;
   let vault: any, submitted: any;
-  await page.route("**/api/config", (route) =>
+  await page.route("**/v1/config", (route) =>
     route.fulfill({ json: { network: "mainnet", operationsEnabled: true, solverReleaseId: "browser-served-test" } }),
   );
-  await page.route("**/api/rates", (route) =>
+  await page.route("**/v1/rates", (route) =>
     route.fulfill({ json: { submit_fee_rate: 1 } }),
   );
-  await page.route("**/api/payment-utxos", (route) =>
+  await page.route("**/v1/payment-utxos", (route) =>
     route.fulfill({
       json: { utxos: [{ txid: "22".repeat(32), vout: 0, value: "10000" }] },
     }),
   );
-  await page.route("**/api/vaults/*/funding", (route) =>
+  await page.route("**/v1/vaults/*/funding", (route) =>
     route.fulfill({ json: { vault, status: { confirmed: true } } }),
   );
-  await page.route("**/api/jobs", (route) => {
+  await page.route("**/v1/jobs", (route) => {
     submitted = route.request().postDataJSON();
     return route.fulfill({
       status: 201,

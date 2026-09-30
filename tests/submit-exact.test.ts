@@ -15,6 +15,7 @@ import {
 } from "../server/job-spend-record";
 import type { Job, PublicVault, Withdrawal } from "../src/lib/model";
 import { outputScript } from "../src/lib/transactions";
+import { recordOwnerEvents } from "../server/owner-events";
 /** A real, opaque credential for tests; the placeholder is not a real key. */
 const credentialFor = (authorization?: string) =>
   new Slipstream("https://slipstream.mara.com", async () => authorization).credential();
@@ -333,6 +334,59 @@ describe("submitExact durable one-shot submission", () => {
       expect(f.miner.submit).not.toHaveBeenCalled();
     },
   );
+  it("resolves two racing submits exactly as without the recorder: one POST, the loser reads the winner", async () => {
+    const race = async (recording: boolean) => {
+      const f = await fixture();
+      const store = recording ? recordOwnerEvents(f.store) : f.store;
+      // Both pass every check before either writes, so the second intent transaction is refused.
+      let arrived = 0;
+      let release!: () => void;
+      const barrier = new Promise<void>((resolve) => (release = resolve));
+      f.consensus.verify.mockImplementation(async () => {
+        if (++arrived === 2) release();
+        await barrier;
+      });
+      const transactions = vi.spyOn(f.store, "atomicPut");
+      const reads = vi.spyOn(f.store, "get");
+      const results = await Promise.all([
+        submitExact(f.stored.owner, f.stored.id, f.raw, { ...f.deps, store }),
+        submitExact(f.stored.owner, f.stored.id, f.raw, { ...f.deps, store }),
+      ]);
+      const settled = await Promise.allSettled(transactions.mock.results.map((r) => r.value));
+      return {
+        results,
+        posts: f.miner.submit.mock.calls.length,
+        refused: settled.map((r) => r.status),
+        intentReads: reads.mock.calls.filter(([, sk]) => sk === `TX#${f.id}`).length,
+        events: [...f.store.rows.values()].filter((row) => row.sk.startsWith("EVENT#")).length,
+      };
+    };
+    const main = await race(false),
+      recording = await race(true);
+    expect(main.refused).toEqual(["fulfilled", "rejected"]);
+    expect({ ...recording, events: 0 }).toEqual({ ...main, events: 0 });
+    expect(main.posts).toBe(1);
+    expect(recording.events).toBe(1);
+  });
+  it("records withdrawal.submitted in the intent's transaction, before the POST, once", async () => {
+    const f = await fixture();
+    const store = recordOwnerEvents(f.store);
+    const deps = { ...f.deps, store };
+    const events = () =>
+      [...f.store.rows.values()].filter((row) => row.sk.startsWith("EVENT#")).map((row) => row.event);
+    f.miner.submit.mockImplementation(async () => {
+      expect(events()).toMatchObject([
+        { type: "withdrawal.submitted", subjectId: f.stored.id, status: "submitted" },
+      ]);
+      return { accepted: true };
+    });
+    expect(await submitExact(f.stored.owner, f.stored.id, f.raw, deps)).toEqual({ txid: f.id, status: "submitted" });
+    // A retry with the same bytes returns the existing intent and records nothing new.
+    await submitExact(f.stored.owner, f.stored.id, f.raw, deps);
+    await store.settle();
+    expect(f.miner.submit).toHaveBeenCalledOnce();
+    expect(events()).toHaveLength(1);
+  });
 });
 
 describe("authenticated exact submit route", () => {

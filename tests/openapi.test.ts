@@ -3,7 +3,12 @@ import { inspectRoutes } from "hono/dev";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../server/app";
 import { deployedApiApp } from "../server/lambda";
-import { API_ERROR_CODES, apiErrorCodes } from "../server/api-errors";
+import {
+  API_ERROR_CODES,
+  apiErrorCodes,
+  chainErrorStatus,
+  type ApiErrorCode,
+} from "../server/api-errors";
 import { MemoryStore } from "../server/store";
 import { routeScopes } from "../server/scoped-keys";
 import type { Esplora } from "../server/chain";
@@ -62,6 +67,30 @@ const offline = () =>
       },
     } as unknown as Slipstream,
   });
+
+/** The only query parameters in the document. */
+const queryParameters: Record<string, string[]> = { "get /events": ["after", "limit"] };
+/**
+ * Path parameters match the template; query parameters are exactly those listed above, all
+ * optional strings; the only other parameter is the optional Idempotency-Key header.
+ */
+function checkParameters(method: string, path: string, params: Json[]) {
+  const templated = [...path.matchAll(/\{(\w+)\}/g)].map(([, n]) => n);
+  const inPath = params.filter((p) => p.in === "path");
+  expect(inPath.map((p) => p.name)).toEqual(templated);
+  for (const p of inPath) expect(p).toMatchObject({ required: true, schema: {} });
+  const query = params.filter((p) => p.in === "query");
+  expect(query.map((p) => p.name), `${method} ${path}`).toEqual(queryParameters[`${method} ${path}`] ?? []);
+  for (const p of query)
+    expect(p).toMatchObject({ required: false, schema: { type: "string", pattern: expect.any(String) } });
+  for (const p of params.filter((p) => p.in !== "path" && p.in !== "query"))
+    expect(p).toMatchObject({
+      name: "Idempotency-Key",
+      in: "header",
+      required: false,
+      schema: { type: "string", pattern: expect.any(String) },
+    });
+}
 
 describe("OpenAPI document", () => {
   it("matches docs/api/openapi.json (npm run openapi regenerates it)", () => {
@@ -153,6 +182,7 @@ describe("OpenAPI document", () => {
       "info",
       "servers",
       "paths",
+      "webhooks",
       "components",
     ]);
     expect(document.openapi).toBe("3.1.0");
@@ -162,7 +192,7 @@ describe("OpenAPI document", () => {
     });
     expect(document.servers).toEqual([
       { url: "/v1" },
-      { url: "/api", description: "webapp alias" },
+      { url: "/api", description: "compatibility alias; the webapp uses /v1" },
     ]);
     const schemes = Object.keys(document.components.securitySchemes);
     const ids = operations.map(({ operation }) => operation.operationId);
@@ -172,20 +202,7 @@ describe("OpenAPI document", () => {
       expect(path).toMatch(/^\/(?!api\/|v1\/)/);
       expect(["get", "post"]).toContain(method);
       expect(operation.summary).toEqual(expect.any(String));
-      const templated = [...path.matchAll(/\{(\w+)\}/g)].map(([, n]) => n);
-      const params = (operation.parameters ?? []) as Json[];
-      const inPath = params.filter((p) => p.in === "path");
-      expect(inPath.map((p) => p.name)).toEqual(templated);
-      for (const p of inPath)
-        expect(p).toMatchObject({ required: true, schema: {} });
-      // The only other parameter is the optional Idempotency-Key header.
-      for (const p of params.filter((p) => p.in !== "path"))
-        expect(p).toMatchObject({
-          name: "Idempotency-Key",
-          in: "header",
-          required: false,
-          schema: { type: "string", pattern: expect.any(String) },
-        });
+      checkParameters(method, path, (operation.parameters ?? []) as Json[]);
       for (const requirement of operation.security ?? [])
         for (const name of Object.keys(requirement))
           expect(schemes).toContain(name);
@@ -197,6 +214,17 @@ describe("OpenAPI document", () => {
         expect(Object.keys(response.content)).toEqual(["application/json"]);
       }
     }
+    // The outbound webhook: a POST of one OwnerEvent, signed, with an id to drop duplicates by.
+    expect(Object.keys(document.webhooks)).toEqual(["ownerEvent"]);
+    const hook = document.webhooks.ownerEvent.post as Json;
+    expect(hook.requestBody.content["application/json"].schema).toEqual({
+      $ref: "#/components/schemas/OwnerEvent",
+    });
+    expect((hook.parameters as Json[]).map((p) => [p.name, p.in, p.required])).toEqual([
+      ["QSB-Signature", "header", true],
+      ["QSB-Event-Id", "header", true],
+    ]);
+    expect(Object.keys(hook.responses)).toEqual(["2XX"]);
     // Every reference resolves, and every component is referenced.
     const refs = [
       ...JSON.stringify(document).matchAll(/"\$ref":"([^"]+)"/g),
@@ -206,6 +234,19 @@ describe("OpenAPI document", () => {
       expect(components).toContain(ref.replace("#/components/schemas/", ""));
     for (const id of components)
       expect(refs).toContain(`#/components/schemas/${id}`);
+  });
+
+  it("refuses a query parameter anywhere but GET /events's after and limit", () => {
+    const params = (method: string, path: string) =>
+      (document.paths[path][method].parameters ?? []) as Json[];
+    const stray = { name: "stray", in: "query", required: false, schema: { type: "string", pattern: "^x$" } };
+    expect(() => checkParameters("get", "/vaults", [...params("get", "/vaults"), stray])).toThrow();
+    expect(() => checkParameters("get", "/events", [...params("get", "/events"), stray])).toThrow();
+    expect(() => checkParameters("get", "/events", params("get", "/events").slice(0, 1))).toThrow();
+    expect(() =>
+      checkParameters("get", "/events", params("get", "/events").map((p) => ({ ...p, required: true }))),
+    ).toThrow();
+    checkParameters("get", "/events", params("get", "/events"));
   });
 
   it("requires a session exactly where the server does", async () => {
@@ -248,10 +289,8 @@ describe("OpenAPI document", () => {
   });
 
   it("lists every error site in tests/api-error-sites.json", () => {
+    const chainClasses = ["ChainError", "ChainNotFound", "WithdrawalConflict"];
     const classStatus: Record<string, number> = {
-      ChainError: 409,
-      ChainNotFound: 409,
-      WithdrawalConflict: 409,
       MinerInclusionError: 409,
       Conflict: 409,
       ConsensusError: 409,
@@ -264,8 +303,13 @@ describe("OpenAPI document", () => {
     ) as string[];
     const sites = lines.map((line) => {
       const [file, where, kind, code] = line.split(" | ");
-      // An HTTP status, or the status app.onError gives the thrown class.
-      const status = /^\d{3}$/.test(kind) ? Number(kind) : classStatus[kind];
+      // An HTTP status (an apiError call, or the one an attached code sets), or the status
+      // app.onError gives the thrown class; a ChainError's depends on its code.
+      const status = /^\d{3}(?: attached)?$/.test(kind)
+        ? Number(kind.slice(0, 3))
+        : chainClasses.includes(kind)
+          ? chainErrorStatus(code as ApiErrorCode)
+          : classStatus[kind];
       return {
         line,
         key: `${file} | ${where}`,

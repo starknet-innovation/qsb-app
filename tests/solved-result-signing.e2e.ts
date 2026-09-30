@@ -1,17 +1,24 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
+type SubmitOptions = {
+  enabled?: boolean;
+  submitDisabled?: boolean;
+  minerFloor?: number;
+  /** The API's own error answer to the submit POST. */
+  submitFailure?: { status: number; json: { error: string; code: string } };
+};
 async function fixture(
   page: Page,
-  options: { enabled?: boolean; submitDisabled?: boolean; minerFloor?: number } = {},
+  options: SubmitOptions = {},
 ) {
   const bodies: string[] = [];
   let submitted = 0;
   let lastBody: { rawTxHex: string } | undefined;
-  await page.route("**/api/rates", (route) =>
+  await page.route("**/v1/rates", (route) =>
     route.fulfill({ json: { submit_fee_rate: options.minerFloor ?? 1 } }),
   );
-  await page.route("**/api/config", (route) =>
+  await page.route("**/v1/config", (route) =>
     route.fulfill({ json: { exactSubmitEnabled: options.enabled === true } }),
   );
   page.on("request", (request) => {
@@ -44,13 +51,13 @@ async function fixture(
     }),
   );
   let previousTxHex = "";
-  await page.route("**/api/vaults/*/funding", (route) =>
+  await page.route("**/v1/vaults/*/funding", (route) =>
     route.fulfill({ json: { previousTxHex } }),
   );
-  await page.route("**/api/payment-input", (route) =>
+  await page.route("**/v1/payment-input", (route) =>
     route.fulfill({ json: { previousTxHex } }),
   );
-  await page.route("**/api/jobs/*/submit", async (route) => {
+  await page.route("**/v1/jobs/*/submit", async (route) => {
     submitted++;
     lastBody = route.request().postDataJSON();
     if (options.submitDisabled)
@@ -58,6 +65,7 @@ async function fixture(
         status: 503,
         json: { error: "Exact submission is disabled." },
       });
+    if (options.submitFailure) return route.fulfill(options.submitFailure);
     const txid = await page.evaluate(async (raw: string) => {
       const p = "/node_modules/.vite/deps/@scure_btc-signer.js";
       const btc = await import(p);
@@ -143,7 +151,7 @@ test("browser signs a coordinator solved result in Xverse without broadcasting o
 
 async function signForReview(
   page: Page,
-  options: { enabled?: boolean; submitDisabled?: boolean; minerFloor?: number } = {},
+  options: SubmitOptions = {},
 ) {
   const f = await fixture(page, options);
   const backupEvent = page.waitForEvent("download");
@@ -233,6 +241,31 @@ test("503 preserves signed download and disables further submission", async ({
   ).toBeEnabled();
   expect(f.submitted()).toBe(1);
 });
+// A failed chain or miner request is a 502 or 503 with its code (docs/API.md). The outcome
+// stays uncertain: only the disabled refusal says nothing was accepted.
+for (const submitFailure of [
+  { status: 502, json: { error: "Unable to complete the request. Please retry.", code: "miner_request_failed" } },
+  { status: 503, json: { error: "Miner API credential is unavailable. Contact the service operator.", code: "miner_unavailable" } },
+  { status: 503, json: { error: "Chain lookup failed (500). Retry before signing.", code: "chain_unavailable" } },
+])
+  test(`a ${submitFailure.status} ${submitFailure.json.code} from submit is uncertain, never disabled`, async ({
+    page,
+  }) => {
+    const f = await signForReview(page, { enabled: true, submitFailure });
+    const approve = f.dialog.getByRole("button", {
+      name: "Approve exact transaction and submit",
+    });
+    await approve.click();
+    const status = f.dialog.getByRole("status");
+    await expect(status).toContainText("Submission outcome is uncertain");
+    await expect(status).toContainText("Do not submit again.");
+    await expect(status).not.toContainText("Submission is disabled");
+    await expect(approve).toBeDisabled();
+    await expect(
+      f.dialog.getByRole("button", { name: "Download signed result again" }),
+    ).toBeEnabled();
+    expect(f.submitted()).toBe(1);
+  });
 test("wallet session change after signing prevents approval from posting", async ({
   page,
 }) => {

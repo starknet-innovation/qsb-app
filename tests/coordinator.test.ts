@@ -7,6 +7,15 @@ const mocks = vi.hoisted(() => ({
   status: vi.fn(),
   cancel: vi.fn(),
   cpu: vi.fn(),
+  // Webhook HTTP and DNS: synthetic, never the network.
+  transport: vi.fn(async (): Promise<{ status: number }> => {
+    throw Error("Unexpected webhook request");
+  }),
+  resolve: vi.fn(async () => [{ address: "93.184.215.14", family: 4 }]),
+}));
+vi.mock("../server/webhook-transport", () => ({
+  httpsTransport: mocks.transport,
+  systemResolver: mocks.resolve,
 }));
 vi.mock("../src/lib/releases/registry.generated", async () => {
   const { servedFixture, otherFixture } = await import("./solver-fixture");
@@ -67,6 +76,9 @@ import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
+import { EVENT_SETTLE_MS, listOwnerEvents } from "../server/owner-events";
+import { registerWebhook } from "../server/webhooks";
+import { decideAppRoleAccess } from "../server/runtime/app-role-records";
 import {
   ACTIVE_JOBS_SK,
   GPU_SECONDS_SK,
@@ -757,6 +769,157 @@ it.each(["configuration", "prepare"])("retains pending request allowance during 
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
+describe("owner events and webhooks", () => {
+  const events = async () =>
+    (await listOwnerEvents(store, event.owner, { limit: 100 }, Date.now() + EVENT_SETTLE_MS + 1000)).events;
+  async function tick(hooked: boolean, faults?: () => () => void) {
+    (store as MemoryStore).rows.clear();
+    mocks.run.mockClear();
+    await seed();
+    if (hooked) await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    const restore = faults?.();
+    const started = Date.now();
+    const result = await handler(event).catch((error: Error) => ({ threw: error.message }));
+    const elapsed = Date.now() - started;
+    restore?.();
+    const { updatedAt, submissionStartedAt, ...job } = (await store.get(pk, sk))!.job as Job;
+    return { outcome: { result, job, runs: mocks.run.mock.calls.length }, elapsed };
+  }
+  /** The table failing under the webhook work: the WEBHOOKS row or an EVENT# write. */
+  const fault = (target: string, mode: string) => () => {
+    const memory = store as MemoryStore;
+    const get = MemoryStore.prototype.get.bind(memory),
+      put = MemoryStore.prototype.put.bind(memory);
+    const fail = () =>
+      mode === "hangs" ? new Promise<never>(() => {}) : Promise.reject(Error("AccessDeniedException"));
+    const reads = vi.spyOn(memory, "get").mockImplementation((key, sort) =>
+      target === "WEBHOOKS get" && sort === "WEBHOOKS" ? fail() : get(key, sort),
+    );
+    const writes = vi.spyOn(memory, "put").mockImplementation((row, expected, options) =>
+      (target === "WEBHOOKS put" && row.sk === "WEBHOOKS") ||
+      (target === "EVENT put" && row.sk.startsWith("EVENT#"))
+        ? fail()
+        : put(row, expected, options),
+    );
+    return () => {
+      reads.mockRestore();
+      writes.mockRestore();
+    };
+  };
+
+  it("records the tick's status change once", async () => {
+    await seed();
+    await handler(event);
+    mocks.status.mockResolvedValue({ status: "IN_PROGRESS" });
+    await handler(event);
+    expect((await events()).map((e) => [e.type, e.subjectId, e.stage])).toEqual([
+      ["withdrawal.searching", event.jobId, "pinning"],
+    ]);
+  });
+
+  it.each(["throws", "hangs"])("a webhook receiver that %s changes nothing in a tick", async (mode) => {
+    mocks.transport.mockImplementation(
+      mode === "hangs" ? () => new Promise(() => {}) : async () => { throw Error("ECONNRESET"); },
+    );
+    const plain = await tick(false);
+    const hooked = await tick(true);
+    // Coordinator delivery has a two-second budget, less than the API's.
+    expect(hooked.elapsed).toBeLessThan(2500);
+    expect(hooked.outcome).toEqual(plain.outcome);
+    expect(mocks.transport).toHaveBeenCalledTimes(1);
+    expect((await events()).map((e) => e.type)).toEqual(["withdrawal.searching"]);
+  }, 15_000);
+
+  it("a tick that throws still throws the same error after recording", async () => {
+    await seed();
+    await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    mocks.transport.mockResolvedValue({ status: 204 });
+    mocks.run.mockRejectedValueOnce(Error("lost response"));
+    await expect(handler(event)).rejects.toThrow("lost response");
+    expect((await store.get(pk, sk))!.job).toMatchObject({ status: "searching" });
+    expect(mocks.transport).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses only GetItem and PutItem on OWNER rows, as the coordinator role already allows", async () => {
+    await seed();
+    await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    mocks.transport.mockResolvedValue({ status: 500 });
+    const memory = store as MemoryStore;
+    const puts = vi.spyOn(memory, "put"),
+      gets = vi.spyOn(memory, "get");
+    const other = [vi.spyOn(memory, "list"), vi.spyOn(memory, "atomicPut"), vi.spyOn(memory, "delete")];
+    await handler(event);
+    expect(mocks.transport).toHaveBeenCalledTimes(1);
+    for (const spy of other) expect(spy).not.toHaveBeenCalled();
+    const keys = [...puts.mock.calls.map(([row]) => row.pk), ...gets.mock.calls.map(([key]) => key)];
+    expect(new Set(keys)).toEqual(new Set([pk]));
+    expect(decideAppRoleAccess("dynamodb:PutItem", [pk], "coordinator")).toBe("allow");
+    expect(decideAppRoleAccess("dynamodb:GetItem", [pk], "coordinator")).toBe("allow");
+    for (const spy of [puts, gets, ...other]) spy.mockRestore();
+  });
+
+  it.each(["WEBHOOKS get", "WEBHOOKS put", "EVENT put"])(
+    "a failing or hanging %s changes nothing in a tick",
+    async (target) => {
+      mocks.transport.mockResolvedValue({ status: 204 });
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const plain = await tick(false);
+      for (const mode of ["throws", "hangs"]) {
+        const faulted = await tick(true, fault(target, mode));
+        expect(faulted.outcome).toEqual(plain.outcome);
+        expect(faulted.elapsed).toBeLessThan(3500);
+      }
+      // A tick that fails still fails with its own error.
+      mocks.run.mockRejectedValueOnce(Error("lost response"));
+      const failing = await tick(true, fault(target, "throws"));
+      expect(failing.outcome.result).toEqual({ threw: "lost response" });
+    },
+    20_000,
+  );
+
+  it("writes no event row between the paid intent and its POST", async () => {
+    await seed();
+    const order: string[] = [];
+    const memory = store as MemoryStore;
+    const put = MemoryStore.prototype.put.bind(memory);
+    const puts = vi.spyOn(memory, "put").mockImplementation(async (row, expected, options) => {
+      await put(row, expected, options);
+      order.push(row.sk.startsWith("EVENT#") ? "event" : `${row.sk.split("#")[0]}:${(row.job as Job | undefined)?.status}`);
+    });
+    mocks.run.mockImplementationOnce(async () => {
+      order.push("POST");
+      return { id: "compute-1" };
+    });
+    await handler(event);
+    puts.mockRestore();
+    const post = order.indexOf("POST");
+    expect(order[post - 1]).toBe("JOB:searching");
+    expect(order.slice(0, post)).not.toContain("event");
+    expect(order.slice(post)).toContain("event");
+  });
+
+  it("queues webhooks when there's no time to send them, and the next tick sends them", async () => {
+    await seed();
+    await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    mocks.transport.mockResolvedValue({ status: 204 });
+    expect(await handler(event, { getRemainingTimeInMillis: () => 20_000 })).toMatchObject({ done: false });
+    expect(mocks.transport).not.toHaveBeenCalled();
+    expect(((await store.get(pk, "WEBHOOKS"))!.pending as { event: { type: string } }[]).map((p) => p.event.type)).toEqual(["withdrawal.searching"]);
+    mocks.status.mockResolvedValue({ status: "IN_PROGRESS" });
+    await handler(event);
+    expect(mocks.transport).toHaveBeenCalledOnce();
+    expect((await store.get(pk, "WEBHOOKS"))!.pending).toEqual([]);
+  });
+
+  it("skips delivery unless the Lambda has ample time left, and still records", async () => {
+    await seed();
+    await registerWebhook(store, event.owner, { url: "https://hooks.example.com/" }, mocks.resolve);
+    expect(await handler(event, { getRemainingTimeInMillis: () => 20_000 })).toMatchObject({ done: false });
+    expect(mocks.transport).not.toHaveBeenCalled();
+    expect((await events()).map((e) => e.type)).toEqual(["withdrawal.searching"]);
+  });
+});
+
 describe("owner limits", () => {
   const budgetRow = () => store.get(pk, GPU_SECONDS_SK);
   const job = async () => (await store.get(pk, sk))!.job as Job;
@@ -787,12 +950,26 @@ describe("owner limits", () => {
     await handler(event);
     expect(mocks.run).toHaveBeenCalledOnce();
     expect(atomicPut).toHaveBeenCalledOnce();
-    expect(atomicPut.mock.calls[0][0].map((w) => [w.row.sk, w.expected])).toEqual([
+    const [writes] = atomicPut.mock.calls[0];
+    expect(writes.filter((w) => !w.row.sk.startsWith("EVENT#")).map((w) => [w.row.sk, w.expected])).toEqual([
       [sk, 0],
       [GPU_SECONDS_SK, undefined],
     ]);
+    // The paid intent's owner event rides in that transaction: no separate write before the POST.
+    expect(writes.filter((w) => w.row.sk.startsWith("EVENT#")).map((w) => (w.row.event as { type: string }).type)).toEqual(["withdrawal.searching"]);
     expect(atomicPut.mock.invocationCallOrder[0]).toBeLessThan(mocks.run.mock.invocationCallOrder[0]);
     expect(await job()).toMatchObject({ runpodId: "compute-1", gpuSubmissions: 1, ownerGpuChargedSeconds: 900 });
+  });
+
+  it.each(["allowlist", "budget"])("records the pause when the owner %s stops a withdrawal", async (limit) => {
+    if (limit === "allowlist") vi.stubEnv("QSB_OWNER_ALLOWLIST", "someone-else");
+    else vi.stubEnv("QSB_OWNER_MAX_GPU_SECONDS", "36000");
+    await seed();
+    if (limit === "budget") await withBudget(35101);
+    expect(await handler(event)).toMatchObject({ done: true });
+    expect(await job()).toMatchObject({ status: "paused" });
+    const { events } = await listOwnerEvents(store, event.owner, { limit: 10 }, Date.now() + EVENT_SETTLE_MS + 1000);
+    expect(events.map((e) => [e.type, e.subjectId])).toEqual([["withdrawal.paused", event.jobId]]);
   });
 
   it("pauses before preparing when the owner budget is used, like the per-job cap", async () => {

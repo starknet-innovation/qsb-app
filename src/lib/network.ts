@@ -11,6 +11,16 @@ export function parseNetwork(value: string | undefined): NetworkId {
 const configured = import.meta.env?.VITE_QSB_NETWORK ??
   (typeof process !== "undefined" ? process.env.QSB_NETWORK : undefined);
 export const NETWORK_ID = parseNetwork(configured);
+export type ApiBasePath = "/v1" | "/api";
+/**
+ * The prefix of every webapp API call. Mainnet's coordinator API serves `/v1`, the stable
+ * prefix, and keeps `/api` for bundles cached before this move (docs/API.md). The testnet4
+ * deployment is the parked supervised app, which serves `/api` only, so it stays there.
+ */
+export function apiBasePath(network: NetworkId): ApiBasePath {
+  return network === "mainnet" ? "/v1" : "/api";
+}
+export const API_BASE_PATH = apiBasePath(NETWORK_ID);
 export const BITCOIN_NETWORK = NETWORK_ID === "testnet4" ? btc.TEST_NETWORK : btc.NETWORK;
 export const NETWORK_CONFIG = NETWORK_ID === "testnet4" ? {
   label: "Bitcoin Testnet4",
