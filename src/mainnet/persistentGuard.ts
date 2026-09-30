@@ -1,0 +1,2 @@
+/** Same persistent keys as existing withdrawal screens. The sealed backup is still authoritative across devices. */
+export function persistentGuard(storage:Pick<Storage,'getItem'|'setItem'>){return {claim(key:string,value:string){const previous=storage.getItem(key);if(previous!==null&&previous!==value)throw Error('This vault already authorizes a different withdrawal or assembly. Resume its original backup.');storage.setItem(key,value);if(storage.getItem(key)!==value)throw Error('Could not retain one-time authorization.');}};}

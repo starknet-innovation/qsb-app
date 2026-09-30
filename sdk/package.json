@@ -1,0 +1,36 @@
+{
+  "name": "@starknet-innovation/qsb-sdk",
+  "version": "0.0.0",
+  "description": "Non-custodial TypeScript SDK and qsb CLI for the QSB vault API. Research snapshot; not a production release.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "qsb": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/types/sdk/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "public/qsb",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.0.0",
+    "@scure/base": "^2.4.0",
+    "@scure/btc-signer": "2.4.1",
+    "bip322-js": "4.0.0",
+    "pyodide": "0.29.3",
+    "zod": "^4.0.0"
+  }
+}

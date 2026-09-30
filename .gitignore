@@ -1,5 +1,7 @@
 node_modules/
 dist*/
+# The SDK build copies the pinned Python sources here (sdk/build.mjs).
+sdk/public/
 vendor/
 public/pyodide/
 worker/build/

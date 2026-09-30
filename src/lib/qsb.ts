@@ -1,4 +1,5 @@
 import type { QsbMethod } from "./qsb-runtime";
+import { qsbOperations } from "./qsb-operations";
 let worker: Worker | undefined;
 const pending = new Map<
   string,
@@ -29,28 +30,6 @@ function call<T>(method: QsbMethod, args: string[] = []): Promise<T> {
     pending.set(id, { resolve, reject });
     worker!.postMessage({ id, method, args });
   });
-}
-/** Typed bridge calls over a runtime: this browser worker, or the Node SDK's loader. */
-export function qsbOperations(
-  run: (method: QsbMethod, args?: string[]) => Promise<string>,
-) {
-  return {
-    async generateQsb() {
-      return JSON.parse(await run("generate")) as {
-        stateJson: string;
-        publicStateJson: string;
-        scriptHex: string;
-        scriptHash: string;
-      };
-    },
-    validateRecovery: (stateJson: string) => run("validate", [stateJson]),
-    assembleQsb: (state: string, manifest: unknown, solution: unknown) =>
-      run("assemble", [
-        state,
-        JSON.stringify(manifest),
-        JSON.stringify(solution),
-      ]),
-  };
 }
 export const { generateQsb, validateRecovery, assembleQsb } = qsbOperations(
   (method, args) => call<string>(method, args),
