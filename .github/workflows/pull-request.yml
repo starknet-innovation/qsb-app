@@ -5,10 +5,16 @@ on:
       - main
 permissions:
   contents: read
+concurrency:
+  # A newer push to the same PR supersedes the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+# The jobs are independent and run in parallel. Each one checks out the PR,
+# installs with npm ci and ends with a clean tree, so none relies on another.
 jobs:
-  typecheck-and-test:
+  typecheck:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
+    timeout-minutes: 10
     env:
       PYTHONDONTWRITEBYTECODE: "1"
     steps:
@@ -42,9 +48,48 @@ jobs:
       - name: Fail if vendoring changed tracked files
         run: git diff --exit-code
       - run: npm run typecheck
-      - run: npm test -- --no-file-parallelism
       - name: Test the CPU verifier that re-checks every GPU hit
         run: python3 tests/test_reference.py
+      - name: Fail if a step changed the tree
+        run: |
+          git status --porcelain
+          test -z "$(git status --porcelain)"
+
+  unit-tests:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.2
+      - run: npm ci --ignore-scripts
+      - run: npm run vendor
+      # Test files run in parallel, as they do locally. Each SDK test boots its
+      # own Pyodide, so tests/sdk-safety.test.ts alone sets this job's length.
+      - run: npm test
+      - name: Fail if the tests changed the tree
+        run: |
+          git status --porcelain
+          test -z "$(git status --porcelain)"
+
+  terraform:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.2
+      - run: npm ci --ignore-scripts
       - name: Build coordinator deployment artifacts
         run: node terraform/scripts/build.mjs --network=mainnet
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
@@ -72,7 +117,32 @@ jobs:
           python3 ops/github-aws/test_bootstrap_access.py
           python3 ops/github-aws/test_update_installed.py
           python3 ops/iam-sandbox/test_run.py
+      - name: Fail if the build or Terraform tests changed the tree
+        run: |
+          git status --porcelain
+          test -z "$(git status --porcelain)"
 
+  terraform-selected-solver:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.2
+      - run: npm ci --ignore-scripts
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: 1.15.5
+          terraform_wrapper: false
+      - name: Initialize Terraform without AWS credentials
+        run: |
+          terraform -chdir=terraform init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=terraform/gpu init -backend=false -input=false -lockfile=readonly
       - name: Test explicitly selected solver deployment identities
         run: |
           git status --porcelain
@@ -82,6 +152,10 @@ jobs:
           terraform -chdir=terraform test -json -verbose -var="source_commit=$(git rev-parse HEAD)" > /tmp/qsb-terraform-selected-test.jsonl
           python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-selected-test.jsonl
           terraform -chdir=terraform/gpu test
+      - name: Fail if the build or Terraform tests changed the tree
+        run: |
+          git status --porcelain
+          test -z "$(git status --porcelain)"
 
   browser-safety:
     runs-on: ubuntu-24.04
