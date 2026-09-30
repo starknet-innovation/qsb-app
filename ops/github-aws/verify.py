@@ -8,7 +8,7 @@ import argparse
 import json
 import subprocess
 from pathlib import Path
-from render import render
+from render import registered, render
 
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--profile',required=True);p.add_argument('--inventory',type=Path,required=True)
@@ -57,9 +57,9 @@ cases=[
  ('other role','iam:PutRolePolicy',f'arn:aws:iam::{account}:role/unrelated',False,ctx),
  ('pass runtime','iam:PassRole',role,True,[{'ContextKeyName':'iam:PassedToService','ContextKeyValues':['lambda.amazonaws.com'],'ContextKeyType':'string'}]),
  ('pass administrator','iam:PassRole',f'arn:aws:iam::{account}:role/Administrator',False,[{'ContextKeyName':'iam:PassedToService','ContextKeyValues':['lambda.amazonaws.com'],'ContextKeyType':'string'}]),
- ('qsb distribution','cloudfront:UpdateDistribution',f'arn:aws:cloudfront::{account}:distribution/{c["distributions"][0]}',True,[]),
+ ('qsb distribution','cloudfront:UpdateDistribution',f'arn:aws:cloudfront::{account}:distribution/{registered(c, "distributions")[0]}',True,[]),
  ('other distribution','cloudfront:UpdateDistribution',f'arn:aws:cloudfront::{account}:distribution/UNRELATED',False,[]),
- ('qsb api','apigateway:PATCH',f'arn:aws:apigateway:{region}::/apis/{c["apis"][0]}',True,[]),
+ ('qsb api','apigateway:PATCH',f'arn:aws:apigateway:{region}::/apis/{registered(c, "apis")[0]}',True,[]),
  ('other api','apigateway:PATCH',f'arn:aws:apigateway:{region}::/apis/unrelated',False,[]),
  ('credential creation','iam:CreateAccessKey',f'arn:aws:iam::{account}:user/anyone',False,[]),
 ]

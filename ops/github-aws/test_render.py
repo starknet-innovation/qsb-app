@@ -3,12 +3,16 @@
 These inspect policy structure; use verify.py for AWS IAM simulation.
 """
 import json
+import os
+import subprocess
+import sys
+import tempfile
 import unittest
 import fnmatch
 import re
 from pathlib import Path
 
-from render import render
+from render import registered, render
 
 
 class SinglePipelinePolicies(unittest.TestCase):
@@ -24,6 +28,25 @@ class SinglePipelinePolicies(unittest.TestCase):
 
     def statement(self, policy, sid):
         return next(s for s in self.policies[policy]['Statement'] if s['Sid'] == sid)
+
+    def test_verify_builds_its_cases_for_a_new_account(self):
+        # verify.py reads the first registered ID of each kind; with none it must use the same placeholder
+        # render.py grants, not fail before simulating anything. A fake aws CLI stops it at the first call.
+        with tempfile.TemporaryDirectory() as tmp:
+            inventory = Path(tmp) / 'inventory.json'
+            inventory.write_text(json.dumps(dict(self.inventory, distributions=[], apis=[], origin_access_controls=[],
+                                                 response_headers_policies=[])))
+            fake = Path(tmp) / 'aws'
+            fake.write_text('#!/bin/sh\nexit 7\n')
+            fake.chmod(0o755)
+            result = subprocess.run([sys.executable, str(Path(__file__).with_name('verify.py')), '--profile', 'x',
+                                     '--inventory', str(inventory)], capture_output=True, text=True,
+                                    env={**os.environ, 'PATH': f"{tmp}:{os.environ['PATH']}"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('IndexError', result.stderr)
+        self.assertIn('CalledProcessError', result.stderr)
+        self.assertEqual(registered(dict(distributions=[]), 'distributions'), ['UNREGISTERED'])
+        self.assertEqual(registered(dict(distributions=['E1']), 'distributions'), ['E1'])
 
     def test_a_new_account_without_registered_edge_ids_renders_valid_policies(self):
         empty = render(dict(self.inventory, distributions=[], apis=[], origin_access_controls=[], response_headers_policies=[]))
