@@ -90,6 +90,7 @@ export function walletCheckFixture(
       hex.encode(withdrawal.toBytes(true, true)),
       payment,
       hex.encode(parentRaw),
+      { value: 100000n, scriptHex },
     ),
   };
 }

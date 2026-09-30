@@ -842,6 +842,7 @@ export class QsbClient {
         stateJson: recovery.stateJson,
         helper: await this.fundingInput(job.manifest.helper),
         fundingPreviousTxHex: funding.previousTxHex,
+        vaultScriptHex: funding.vault.scriptHex,
         assemble: this.qsb.assembleQsb,
       });
       const bound = await bindRecoveryAssembly(recovery, local.solved.solution, local.raw);

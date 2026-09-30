@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import { Signer } from "bip322-js";
 import * as btc from "@scure/btc-signer";
@@ -30,6 +31,25 @@ it.each([undefined, "false", "TRUE", "1", " true", "true"])("server and browser 
   const manifest = {vaultId:crypto.randomUUID(),funding:{txid:"11".repeat(32),vout:0,value:"1000"},helper:{txid:"22".repeat(32),vout:1,value:"500"},destination:address,outputScript:"0014"+"ab".repeat(20),outputValue:"1000",fee:"500",idempotencyKey:crypto.randomUUID(),costAccepted:true};
   expect((await post("/api/jobs", manifest, login.token)).status).toBe(enabled ? 404 : 503);
   expect((await post("/api/jobs/00000000-0000-4000-8000-000000000001/submit", {}, login.token)).status).toBe(503);
+});
+// AGENTS.md: turning a switch on, or changing an off default, needs the user's
+// explicit approval. Keep that visible in CI rather than only in review tooling.
+it("keeps the deployment switch defaults off in Terraform and never hard-codes them on", () => {
+  const variables = readFileSync(new URL("../terraform/variables.tf", import.meta.url), "utf8");
+  for (const name of ["mainnet_enabled", "exact_submit_enabled", "api_keys_enabled"]) {
+    const block = new RegExp(`^variable "${name}" \\{\\n([\\s\\S]*?)\\n\\}`, "m").exec(variables)?.[1];
+    expect(block, `variable "${name}" is declared`).toBeDefined();
+    expect(block, `variable "${name}" defaults to false`).toMatch(/^\s*default\s*=\s*false\s*$/m);
+    expect(block).not.toMatch(/^\s*default\s*=\s*true\s*$/m);
+  }
+  // The Lambda environments carry the variables, never a literal.
+  const compute = readFileSync(new URL("../terraform/compute.tf", import.meta.url), "utf8");
+  for (const name of ["QSB_MAINNET_ENABLED", "QSB_EXACT_SUBMIT_ENABLED"]) {
+    const assignments = [...compute.matchAll(new RegExp(`${name}\\s*=\\s*([^,}]+)`, "g"))].map((m) => m[1].trim());
+    expect(assignments.length, `${name} is wired`).toBeGreaterThan(0);
+    for (const value of assignments) expect(value).toMatch(/^tostring\(var\.(?:mainnet|exact_submit)_enabled\)$/);
+  }
+  expect(compute).not.toMatch(/QSB_REHEARSAL_ENABLED\s*=\s*"true"/);
 });
 it.each([[false,false,false],[false,true,false],[true,false,false],[true,true,true]])("submit requires both switches (%s/%s)", async (mainnet, submit, expected) => {
   vi.stubEnv("QSB_MAINNET_ENABLED", String(mainnet));

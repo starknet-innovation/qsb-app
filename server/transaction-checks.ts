@@ -96,8 +96,9 @@ export function assertWithdrawalSpendAgainstJob(job: Job, raw: string): void {
       [1, m.funding, hit.sequence],
     ] as const) {
       const input = tx.getInput(index);
+      // Parsed txids are lowercase; a stored manifest may not be.
       if (
-        hex.encode(input.txid!) !== point.txid ||
+        hex.encode(input.txid!) !== point.txid.toLowerCase() ||
         input.index !== point.vout ||
         input.sequence !== sequence
       )

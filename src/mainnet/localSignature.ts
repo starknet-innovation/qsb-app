@@ -69,6 +69,7 @@ export async function rebuildWithdrawalFromSolvedResult(input: {
   stateJson: string;
   helper: FundingInput;
   fundingPreviousTxHex: string;
+  vaultScriptHex: string;
   assemble: Assemble;
 }): Promise<{
   solved: CoordinatorSolvedResult;
@@ -92,7 +93,10 @@ export async function rebuildWithdrawalFromSolvedResult(input: {
     solved.solution,
   );
   verifyWithdrawalCommitment(raw, solved.manifest, solved.solution);
-  const transaction = helperPsbt(raw, input.helper, input.fundingPreviousTxHex);
+  const transaction = helperPsbt(raw, input.helper, input.fundingPreviousTxHex, {
+    value: solved.manifest.funding.value,
+    scriptHex: input.vaultScriptHex,
+  });
   if (transaction.getInput(0).sighashType !== 1)
     throw new Error("Helper input was not requested with SIGHASH_ALL.");
   return { solved, raw, transaction };

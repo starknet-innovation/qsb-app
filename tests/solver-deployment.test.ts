@@ -61,6 +61,23 @@ it.each([false,true])("pins the served release before reserving funds (explicit=
   expect(f.workflow).toHaveBeenCalledTimes(1);
   expect((await (await f.app.request("/api/config")).json()).solverReleaseId).toBe(servedFixture.id);
 });
+it("stores outpoint txids lowercase however the request spelled them",async () => {
+  vi.stubEnv("SOLVER_RELEASE_ID",servedFixture.id);
+  const f = await fixture();
+  const helper = {...f.manifest.helper,txid:"ab".repeat(32).toUpperCase()};
+  const response = await f.post({...f.manifest,helper});
+  expect(response.status).toBe(201);
+  const {job} = await response.json();
+  expect(job.manifest.helper.txid).toBe("ab".repeat(32));
+  expect(job.manifest.funding.txid).toBe(f.manifest.funding.txid);
+  expect(f.unspent).toHaveBeenCalledWith(expect.objectContaining({txid:"ab".repeat(32)}),expect.any(String));
+  const reservations = [...f.store.rows.values()].filter(row=>row.pk.startsWith("OUTPOINT#")).map(row=>row.pk).sort();
+  expect(reservations).toEqual([`OUTPOINT#${f.manifest.funding.txid}:0`,`OUTPOINT#${"ab".repeat(32)}:0`]);
+  // The stored manifest is what the hash covers, so a lowercase replay is the same job.
+  const replay = await f.post({...f.manifest,helper:{...helper,txid:"ab".repeat(32)}});
+  expect(replay.status).toBe(200);
+  expect((await replay.json()).job.id).toBe(job.id);
+});
 it("does not advertise absent or legacy deployment configuration",async () => {
   const f = await fixture();
   for (const id of [undefined,old.id,archived.id,"unknown"]) {

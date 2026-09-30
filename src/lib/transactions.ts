@@ -251,10 +251,13 @@ export function verifySignedPsbt(
   }
   return actual;
 }
+/** What the manifest says the vault input is; checked against the previous transaction's bytes. */
+export type QsbPreviousOutput = { value: bigint | string; scriptHex: string };
 export function helperPsbt(
   rawQsbTxHex: string,
   helper: FundingInput,
   qsbPreviousTxHex: string,
+  qsbPrevious: QsbPreviousOutput,
 ) {
   const tx = btc.Transaction.fromRaw(hex.decode(rawQsbTxHex), opts);
   if (tx.inputsLength !== 2 || tx.outputsLength !== 1)
@@ -284,6 +287,15 @@ export function helperPsbt(
     throw new Error("Unsupported helper payment key or address.");
   if (qsbInput.index === undefined || !qsbPrev.getOutput(qsbInput.index).script)
     throw new Error("QSB previous output missing.");
+  // The QSB input's scriptSig doesn't commit to its amount, so an understated
+  // manifest value would still assemble, with the difference going to the miner
+  // fee. Bind the manifest to the previous output's real amount and script.
+  const qsbOutput = qsbPrev.getOutput(qsbInput.index);
+  if (
+    qsbOutput.amount !== BigInt(qsbPrevious.value) ||
+    hex.encode(qsbOutput.script!) !== qsbPrevious.scriptHex.toLowerCase()
+  )
+    throw new Error("QSB previous output amount or script mismatch.");
   if (!qsbInput.finalScriptSig?.length)
     throw new Error("QSB authorization is missing.");
   if (helper.txid === qsbPrev.id && helper.vout === qsbInput.index)
