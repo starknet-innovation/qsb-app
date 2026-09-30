@@ -90,7 +90,7 @@ class SinglePipelinePolicies(unittest.TestCase):
         self.assertEqual(self.statement('deploy', 'QsbSchedules'), {
             'Sid': 'QsbSchedules', 'Effect': 'Allow',
             'Action': ['scheduler:CreateSchedule', 'scheduler:GetSchedule', 'scheduler:UpdateSchedule', 'scheduler:DeleteSchedule'],
-            'Resource': ['arn:aws:scheduler:eu-west-1:123456789012:schedule/default/qsb-*']})
+            'Resource': ['arn:aws:scheduler:eu-west-2:123456789012:schedule/default/qsb-*']})
         # No schedule groups, tags or other Scheduler actions for the deployer, and none at all for runtime roles.
         for kind, sids in (('deploy', {'QsbSchedules'}), ('boundary', set())):
             with self.subTest(kind=kind):
@@ -106,7 +106,7 @@ class SinglePipelinePolicies(unittest.TestCase):
         grants = lambda action, resource: any(
             any(fnmatch.fnmatchcase(action, a) for a in s['Action']) and any(fnmatch.fnmatchcase(resource, r) for r in s['Resource'])
             for s in unconditioned)
-        arn = 'arn:aws:{}:eu-west-1:123456789012:{}'.format
+        arn = 'arn:aws:{}:eu-west-2:123456789012:{}'.format
         role = 'arn:aws:iam::123456789012:role/qsb/runtime/{}'.format
         for action, resource in (('lambda:TagResource', arn('lambda', 'function:qsb-app-webhooks')),
                                  ('lambda:UntagResource', arn('lambda', 'function:qsb-app-webhooks')),
@@ -126,7 +126,7 @@ class SinglePipelinePolicies(unittest.TestCase):
 
     def test_deployer_can_manage_the_dispatchers_async_invoke_settings(self):
         # terraform/webhooks.tf turns Lambda's async retries off for the dispatcher (aws_lambda_function_event_invoke_config).
-        function = 'arn:aws:lambda:eu-west-1:123456789012:function:qsb-app-webhooks'
+        function = 'arn:aws:lambda:eu-west-2:123456789012:function:qsb-app-webhooks'
         lambdas = self.statement('deploy', 'LambdaQsb')
         for action in ('lambda:PutFunctionEventInvokeConfig', 'lambda:GetFunctionEventInvokeConfig',
                        'lambda:UpdateFunctionEventInvokeConfig', 'lambda:DeleteFunctionEventInvokeConfig'):
@@ -142,7 +142,7 @@ class SinglePipelinePolicies(unittest.TestCase):
         covers = lambda action, resource: any(
             any(fnmatch.fnmatchcase(action, a) for a in s['Action']) and any(fnmatch.fnmatchcase(resource, r) for r in s['Resource'])
             and 'Condition' not in s for s in allowed)
-        arn = 'arn:aws:{}:eu-west-1:123456789012:{}'.format
+        arn = 'arn:aws:{}:eu-west-2:123456789012:{}'.format
         # The dispatcher's item grant is limited to WEBHOOK# keys by its own policy; the boundary is table-wide.
         for action, resource in (('dynamodb:Query', arn('dynamodb', 'table/qsb-app-records/index/webhook-due')),
                                  ('dynamodb:GetItem', arn('dynamodb', 'table/qsb-app-records')),

@@ -43,6 +43,8 @@ jobs:
         run: git diff --exit-code
       - run: npm run typecheck
       - run: npm test -- --no-file-parallelism
+      - name: Test the CPU verifier that re-checks every GPU hit
+        run: python3 tests/test_reference.py
       - name: Build coordinator deployment artifacts
         run: node terraform/scripts/build.mjs --network=mainnet
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
