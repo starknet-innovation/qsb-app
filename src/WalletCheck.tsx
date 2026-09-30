@@ -50,8 +50,11 @@ export default function WalletCheck({
     };
   }, []);
   const indexOf = (kind: WalletCheckKind) => kinds.findIndex((k) => k.kind === kind);
+  // After a failure, the first later check that hasn't run yet, if any.
   const lastFailed = outcomes.filter((o) => !o.ok).at(-1);
-  const failedAt = lastFailed ? indexOf(lastFailed.kind) : -1;
+  const resumeAt = lastFailed
+    ? kinds.findIndex((k, i) => i > indexOf(lastFailed.kind) && !outcomes.some((o) => o.kind === k.kind))
+    : -1;
   // Runs the synthetic signing requests in order from `from`, and stops at the first that
   // fails so a declined request isn't followed by two more. The rest can then be continued.
   async function run(from = 0) {
@@ -140,11 +143,11 @@ export default function WalletCheck({
             >
               Run wallet check
             </button>
-            {!busy && failedAt >= 0 && failedAt < kinds.length - 1 && (
+            {!busy && resumeAt >= 0 && (
               <button
                 className="secondary"
                 disabled={!accepted}
-                onClick={() => void run(failedAt + 1)}
+                onClick={() => void run(resumeAt)}
               >
                 Continue with the remaining checks
               </button>

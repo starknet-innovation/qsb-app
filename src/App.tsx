@@ -115,9 +115,10 @@ const SETTLED_CHECK_MS = 60 * 60 * 1000;
 const SETTLED_PER_TURN = 3;
 // For a deposit that isn't mined yet, the funding route exports its signed bytes, a versioned
 // write that stops a first submission still in flight from clearing a refused intent. So a
-// pending deposit is checked automatically only once this tab has seen it pending for longer
-// than a submission request can run (API Gateway ends requests at 30 seconds).
-const PENDING_SETTLE_MS = 2 * 60 * 1000;
+// pending deposit is checked automatically only once this tab has seen it pending for well
+// over the longest a submission can run: the API Lambda's 120-second timeout
+// (terraform/compute.tf), not API Gateway's 30 seconds, which only ends the client's wait.
+const PENDING_SETTLE_MS = 5 * 60 * 1000;
 async function chainTurn(address: string, check: () => Promise<void>) {
   const key = chainTurnKey(address);
   const run = async () => {
@@ -355,8 +356,11 @@ export default function App() {
         ]);
         if (disposed) return;
         setVaults(v.vaults);
+        // A refused first deposit returns a vault to unfunded, and its next deposit starts the
+        // wait again.
         for (const vault of v.vaults)
           if (vault.status === "submitted") pendingSince.current[vault.id] ??= Date.now();
+          else delete pendingSince.current[vault.id];
         setResendable(new Set(v.resendable ?? []));
         setStray(v.strayPayments ?? []);
         setJobs(j.jobs);

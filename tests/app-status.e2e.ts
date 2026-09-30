@@ -71,10 +71,12 @@ test("status follows the server switches and vault rows only offer what can happ
   // A funded vault is checked too: that's where the server flags a payment outside its deposit.
   await expect(page.locator(".vault-row", { hasText: "Savings" })).toContainText("reached this vault outside its one deposit");
   // A deposit that has only just turned pending isn't checked: a first submission may still
-  // be in flight. Once it has been pending for two minutes, it's checked without a click.
+  // be in flight. Once it has been pending for five minutes, it's checked without a click.
   expect(await page.evaluate(() => (window as any).apiCalls)).not.toContain(PENDING);
   await expect(pending).not.toContainText("last checked");
   await page.clock.fastForward("02:05");
+  expect(await page.evaluate(() => (window as any).apiCalls)).not.toContain(PENDING);
+  await page.clock.fastForward("03:05");
   await expect(pending).toContainText("last checked");
   expect(await page.evaluate(() => (window as any).apiCalls)).toContain(PENDING);
   await expect(page.getByText("Savings: your withdrawal is ready to authorize.")).toBeVisible();
@@ -126,11 +128,34 @@ test("two tabs share one chain check a minute and its result", async ({ page }) 
     await expect(tab.locator(".vault-row", { hasText: "Travel fund" })).toBeVisible();
   }
   // Both tabs are due to check the pending deposit; only one does, and both show the result.
-  await page.context().clock.fastForward("02:05");
+  await page.context().clock.fastForward("05:05");
   await expect.poll(pendingChecks).toBe(1);
   // The next refresh, well inside the minute, reads the shared result without checking again.
   await page.context().clock.fastForward("00:16");
   for (const tab of [page, second])
     await expect(tab.locator(".vault-row", { hasText: "Travel fund" })).toContainText("last checked");
   expect(await pendingChecks()).toBe(1);
+});
+
+test("a deposit made again after a refusal waits the full time before it's checked", async ({ page }) => {
+  await page.clock.install();
+  await mount(page, { operationsEnabled: true, exactSubmitEnabled: true });
+  const pendingChecks = () => page.evaluate((path) => ((window as any).apiCalls as string[]).filter((p) => p === path).length, PENDING);
+  const setStatus = (status: string) =>
+    page.evaluate((status) => { (window as any).appFixture.vaults[1].status = status; }, status);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connect Xverse", exact: true }).click();
+  await page.clock.fastForward("05:05");
+  await expect.poll(pendingChecks).toBe(1);
+  // MARA refuses the first deposit: the vault is unfunded again, then the user deposits again.
+  await setStatus("unfunded");
+  await page.clock.fastForward("00:16");
+  await expect(page.locator(".vault-row", { hasText: "Travel fund" })).toContainText("Not funded");
+  await setStatus("submitted");
+  await page.clock.fastForward("00:16");
+  await expect(page.locator(".vault-row", { hasText: "Travel fund" })).toContainText("Deposit pending");
+  await page.clock.fastForward("01:05");
+  expect(await pendingChecks()).toBe(1);
+  await page.clock.fastForward("04:05");
+  await expect.poll(pendingChecks).toBe(2);
 });

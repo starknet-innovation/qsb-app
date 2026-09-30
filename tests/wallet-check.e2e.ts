@@ -78,4 +78,6 @@ test("a failed check stops the run, and the remaining checks can be continued", 
   await expect(results).toContainText("Helper synthetic signing passed");
   await expect(results).toContainText("Check did not pass: User declined");
   expect(await page.evaluate(() => (window as any).walletCheckCalls.length)).toBe(3);
+  // Nothing is left to continue, so no second round of prompts is offered.
+  await expect(section.getByRole("button", { name: "Continue with the remaining checks" })).toHaveCount(0);
 });
