@@ -140,3 +140,40 @@ export function attachedApiErrorCode(error: unknown): ApiErrorCode | undefined {
     ? attached.get(error)
     : undefined;
 }
+
+/**
+ * The status app.onError gives an error carrying one of these attached codes, whatever its
+ * class, unless onError maps the class first. Each marks a failure that no error class
+ * identifies. Other attached codes keep their class's status. Only the response changes: the
+ * error keeps its class and message, so no catch or instanceof check behaves differently.
+ */
+export const attachedCodeStatus = {
+  // The chain provider gave no answer (DNS, refused connection, timeout, broken body). Chain
+  // reads have no side effects, so a retry later is safe.
+  chain_unavailable: 503,
+  // The provider answered, but the answer doesn't parse. It's the provider's fault, not the caller's.
+  chain_error: 502,
+  // The caller's outpoint is past its transaction's outputs, like the other input_* codes.
+  input_not_found: 409,
+  // The miner credential couldn't be read, like a refused credential. It's read before any
+  // intent is recorded or any POST, so this request sent nothing.
+  miner_unavailable: 503,
+  // No usable answer from the miner: no response, an error status or a malformed body. Not
+  // 503: an earlier send of the same bytes may have reached the miner, so the outcome may be unknown.
+  miner_request_failed: 502,
+} as const satisfies Partial<Record<ApiErrorCode, ContentfulStatusCode>>;
+/** The status attachedCodeStatus sets for `code`, if it sets one. */
+export function attachedCodeStatusOf(
+  code: ApiErrorCode | undefined,
+): ContentfulStatusCode | undefined {
+  return code !== undefined && code in attachedCodeStatus
+    ? attachedCodeStatus[code as keyof typeof attachedCodeStatus]
+    : undefined;
+}
+/**
+ * The status app.onError gives a ChainError with this code: 409, except chain_unavailable
+ * (the chain provider's error status), which has the same status as an unanswered request.
+ */
+export function chainErrorStatus(code: ApiErrorCode): ContentfulStatusCode {
+  return code === "chain_unavailable" ? attachedCodeStatus.chain_unavailable : 409;
+}

@@ -13,6 +13,7 @@ import { loopbackTestSigner, type PendingDeposit } from "../sdk";
 import { runCli } from "../sdk/cli";
 import { API, createdVault, fundedVault, localQsb, solvedWithdrawal, wallet, world } from "./sdk-fixture";
 import { QsbClient } from "../sdk";
+import { Slipstream, type MinerCredential } from "../server/providers";
 
 beforeEach(() => vi.stubEnv("SOLVER_RELEASE_ID", awsRelease.id));
 afterEach(() => vi.unstubAllEnvs());
@@ -145,6 +146,145 @@ describe("withdrawals.submit", () => {
     const result = await c.run("withdraw", "submit", "--signed", "signed.json", "--approve-txid", txid);
     expect(JSON.parse(result.out)).toEqual({ txid, status: "uncertain" });
     expect(result.code).toBe(1);
+  }, 120000);
+});
+
+// The API answers a failed chain or miner request with a 502 or 503 (docs/API.md). On the
+// submission routes that is never a refusal: an earlier attempt may have reached the miner.
+const providerFailures = [
+  [502, { error: "Unable to complete the request. Please retry.", code: "miner_request_failed" }],
+  [503, { error: "Unable to complete the request. Please retry.", code: "miner_unavailable" }],
+  [503, { error: "Miner API credential is unavailable. Contact the service operator.", code: "miner_unavailable" }],
+  [503, { error: "Unable to complete the request. Please retry.", code: "chain_unavailable" }],
+  [503, { error: "Chain lookup failed (500). Retry before signing.", code: "chain_unavailable" }],
+  [502, { error: "Unable to complete the request. Please retry.", code: "chain_error" }],
+] as const;
+/** The miner's credential store is down: Slipstream.credential() rejects with miner_unavailable. */
+const unreadableCredential = () =>
+  new Slipstream("https://slipstream.mara.com", async () => {
+    throw new Error("secret store down");
+  }).credential();
+/** The error `promise` rejects with; a resolved promise fails the test. */
+const rejection = (promise: Promise<unknown>): Promise<Error> =>
+  promise.then(
+    (value) => {
+      throw new Error(`Expected a failure, got ${JSON.stringify(value)}`);
+    },
+    (error: Error) => error,
+  );
+/** Record the status of each response whose URL ends with `suffix`. */
+function recordStatuses(suffix: string, statuses: number[]) {
+  return (next: typeof fetch) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const response = await next(input, init);
+    if (String(input).endsWith(suffix)) statuses.push(response.status);
+    return response;
+  }) as typeof fetch;
+}
+
+describe("provider failures on submission stay uncertain", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("reports every provider-failure 502 and 503 from jobs/:id/submit as uncertain", async () => {
+    let answer: (typeof providerFailures)[number] | undefined;
+    const s = await solvedWithdrawal(passphrase, (next) => (async (input: RequestInfo | URL, init?: RequestInit) =>
+      answer !== undefined && String(input).endsWith("/submit")
+        ? new Response(JSON.stringify(answer[1]), { status: answer[0] })
+        : next(input, init)) as typeof fetch);
+    const signed = await s.client.withdrawals.assemble(s.job.id, { backup: s.backups[1], passphrase, saveBackup: s.keep });
+    for (const failure of providerFailures) {
+      answer = failure;
+      const error = await rejection(s.client.withdrawals.submit(signed, { approve: (review) => review.txid }));
+      expect(error.message, JSON.stringify(failure)).toContain("outcome is uncertain");
+      expect(error.message, JSON.stringify(failure)).not.toContain("Submission is disabled");
+    }
+  }, 120000);
+
+  it("keeps the deposit pending on every provider-failure 502 and 503 from fund/submit", async () => {
+    const pending = new Map<string, PendingDeposit>();
+    let answer: (typeof providerFailures)[number] | undefined;
+    const v = await createdVault(passphrase, {
+      wrap: (next) => (async (input: RequestInfo | URL, init?: RequestInit) =>
+        answer !== undefined && String(input).endsWith("/fund/submit")
+          ? new Response(JSON.stringify(answer[1]), { status: answer[0] })
+          : next(input, init)) as typeof fetch,
+      options: {
+        pendingDeposits: {
+          get: async (id) => pending.get(id),
+          set: async (id, deposit) => void pending.set(id, deposit),
+          delete: async (id) => void pending.delete(id),
+        },
+      },
+    });
+    const prepared = await v.client.deposits.prepare(v.vault.id, {
+      backup: v.backups[0], passphrase, amount: 200000n, feeRate: "2", utxos: [{ txid: v.owner.fundingTxid, vout: 0 }],
+    });
+    const signed = await v.signer.signPsbt(v.signer.address, prepared.psbt, prepared.signInputs);
+    for (const failure of providerFailures) {
+      answer = failure;
+      const error = await rejection(v.client.deposits.submit(prepared, signed, { costAccepted: true }));
+      expect(error.message, JSON.stringify(failure)).toContain("isn't confirmed");
+      expect(error.message, JSON.stringify(failure)).not.toContain("The deployment refused");
+      expect(pending.get(v.vault.id), JSON.stringify(failure)).toBeDefined();
+    }
+  }, 120000);
+
+  it("keeps a deposit pending through the server's real 503 and 502 miner failures, then resends only its bytes", async () => {
+    const pending = new Map<string, PendingDeposit>();
+    const statuses: number[] = [];
+    const v = await createdVault(passphrase, {
+      wrap: recordStatuses("/fund/submit", statuses),
+      options: {
+        pendingDeposits: {
+          get: async (id) => pending.get(id),
+          set: async (id, deposit) => void pending.set(id, deposit),
+          delete: async (id) => void pending.delete(id),
+        },
+      },
+    });
+    const miner = v.w.miner as unknown as Record<string, unknown>;
+    const { credential, seen } = miner;
+    const prepared = await v.client.deposits.prepare(v.vault.id, {
+      backup: v.backups[0], passphrase, amount: 200000n, feeRate: "2", utxos: [{ txid: v.owner.fundingTxid, vout: 0 }],
+    });
+    const signed = await v.signer.signPsbt(v.signer.address, prepared.psbt, prepared.signInputs);
+    // The credential can't be read: 503 miner_unavailable, before anything is recorded or sent.
+    miner.credential = unreadableCredential;
+    await expect(v.client.deposits.submit(prepared, signed, { costAccepted: true })).rejects.toThrow("isn't confirmed");
+    expect(statuses).toEqual([503]);
+    expect(pending.get(v.vault.id)).toBeDefined();
+    expect(v.w.minerSubmissions).toEqual([]);
+    // MARA's answer to the POST is lost: recorded, still pending.
+    miner.credential = credential;
+    v.w.lost.deposit = true;
+    expect((await v.client.deposits.resubmit(v.vault.id)).submission).toBe("uncertain");
+    expect(pending.get(v.vault.id)).toBeDefined();
+    // The resend's check with MARA fails: 502 miner_request_failed, and no second POST.
+    v.w.lost.deposit = false;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+    const mara = new Slipstream("https://slipstream.mara.com", async () => undefined);
+    miner.seen = (id: string, held: MinerCredential) => mara.seen(id, held);
+    await expect(v.client.deposits.resubmit(v.vault.id)).rejects.toThrow("isn't confirmed");
+    expect(statuses).toEqual([503, 201, 502]);
+    expect(pending.get(v.vault.id)).toBeDefined();
+    expect(v.w.minerSubmissions).toEqual([]);
+    // Once MARA answers, the same bytes go out once.
+    miner.seen = seen;
+    const { txid } = pending.get(v.vault.id)!;
+    expect((await v.client.deposits.resubmit(v.vault.id)).submission).toBe("submitted");
+    expect(pending.get(v.vault.id)).toBeUndefined();
+    expect(v.w.minerSubmissions).toHaveLength(1);
+    expect(btc.Transaction.fromRaw(Buffer.from(v.w.minerSubmissions[0], "hex"), opts).id).toBe(txid);
+  }, 120000);
+
+  it("reports the server's real 503 on jobs/:id/submit as uncertain, with no intent recorded", async () => {
+    const statuses: number[] = [];
+    const s = await solvedWithdrawal(passphrase, recordStatuses(`/submit`, statuses));
+    const signed = await s.client.withdrawals.assemble(s.job.id, { backup: s.backups[1], passphrase, saveBackup: s.keep });
+    const before = statuses.length;
+    (s.w.miner as unknown as Record<string, unknown>).credential = unreadableCredential;
+    await expect(s.client.withdrawals.submit(signed, { approve: (review) => review.txid })).rejects.toThrow("outcome is uncertain");
+    expect(statuses.slice(before)).toEqual([503]);
+    expect(await s.w.store.list(`OWNER#${s.owner.address}`, "TX#")).toEqual([]);
+    expect(s.w.minerSubmissions).toHaveLength(1); // the deposit only
   }, 120000);
 });
 
