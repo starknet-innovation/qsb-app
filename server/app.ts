@@ -102,6 +102,7 @@ import {
   type Delivery,
 } from "./webhooks";
 import { httpsTransport, systemResolver } from "./webhook-transport";
+import { kmsWebhookSecrets } from "./webhook-secrets";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -150,7 +151,10 @@ export function createApp(
     inProcessHandoff?: boolean;
     /** Injected chain reads for supervised admission. Never the process-wide client by default. */
     fundingLedger?: FundingLedger;
-    /** Webhook HTTP and DNS. Defaults to the network; tests inject fakes. */
+    /**
+     * Webhook HTTP, DNS and secret sealing. Default to the network and, when the deployment sets
+     * QSB_WEBHOOK_SECRET_KEY_ARN, KMS; tests inject fakes. `secrets: undefined` stores plaintext.
+     */
     webhooks?: Partial<Delivery>;
     /** Tests only: false builds an app that records no owner events, to compare against. */
     recordEvents?: false;
@@ -189,6 +193,11 @@ export function createApp(
   const delivery: Delivery = {
     transport: dependencies.webhooks?.transport ?? httpsTransport,
     resolve: dependencies.webhooks?.resolve ?? systemResolver,
+    // The KMS switch: new secrets are stored sealed, and the API opens them to sign.
+    secrets:
+      dependencies.webhooks && "secrets" in dependencies.webhooks
+        ? dependencies.webhooks.secrets
+        : kmsWebhookSecrets(),
   };
   const ledger = dependencies.chain || chain,
     miner = dependencies.miner || slipstream;
@@ -493,7 +502,10 @@ export function createApp(
     c.header("Cache-Control", "no-store");
     try {
       // The signing secret is in this response only.
-      return c.json(await registerWebhook(records, c.get("owner"), body, delivery.resolve), 201);
+      return c.json(
+        await registerWebhook(records, c.get("owner"), body, delivery.resolve, delivery.secrets),
+        201,
+      );
     } catch (e) {
       if (e instanceof WebhookUrlError)
         return e.code === "webhook_url_forbidden"

@@ -79,6 +79,8 @@ export async function handler(
   } finally {
     const remaining = context?.getRemainingTimeInMillis?.() ?? Infinity;
     await store.settle({
+      // No `secrets`: the coordinator role has no KMS grant, so its funds-path work never waits on
+      // KMS. It signs webhooks whose secret is in plaintext; sealed ones stay queued for the API.
       delivery: { transport: httpsTransport, resolve: systemResolver },
       owners: [event.owner],
       limitMs: Math.min(TICK_SETTLE_LIMIT_MS, remaining - TIMEOUT_MARGIN_MS),

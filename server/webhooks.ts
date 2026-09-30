@@ -46,14 +46,42 @@ export type Resolver = (
   hostname: string,
   timeoutMs: number,
 ) => Promise<{ address: string; family: number }[]>;
-export type Delivery = { transport: WebhookTransport; resolve: Resolver };
+/** What a sealed signing secret is bound to: it opens only for this owner's webhook with this id. */
+export type SecretContext = { owner: string; webhook: string };
+/**
+ * Seals and opens webhook signing secrets: KMS in a deployment (webhook-secrets.ts), a fake in
+ * tests. `signal` is aborted when a call runs out of time.
+ */
+export type SecretBox = {
+  seal(plaintext: string, context: SecretContext, signal: AbortSignal): Promise<string>;
+  open(ciphertext: string, context: SecretContext, signal: AbortSignal): Promise<string>;
+};
+export type Delivery = {
+  transport: WebhookTransport;
+  resolve: Resolver;
+  /**
+   * Opens sealed secrets to sign with. A path without it (the coordinator) still signs webhooks
+   * whose secret is in plaintext, and leaves sealed ones queued for a path that has it.
+   */
+  secrets?: SecretBox;
+};
 
 type Hook = {
   id: string;
   url: string;
   events?: EventType[];
-  /** Kept to sign deliveries. Returned once, at registration; never logged or listed. */
-  secret: string;
+  /**
+   * The signing secret in plaintext: registered while the KMS switch was off. Returned once, at
+   * registration; never logged or listed. Once the switch is on, the first round that signs with
+   * it replaces it with signingCiphertext.
+   */
+  secret?: string;
+  /**
+   * The signing secret sealed under the webhook-secrets KMS key, bound to the owner and this id.
+   * Not credential material on its own: only a role the key policy names can open it, and only
+   * for this row. Never listed.
+   */
+  signingCiphertext?: string;
   createdAt: string;
   status: "active" | "failing";
   failures: number;
@@ -174,6 +202,36 @@ async function pinAddress(url: URL, resolve: Resolver, timeoutMs: number) {
   return { hostname: host, address: pinned.address, family: isIP(pinned.address) as 4 | 6 };
 }
 
+/** `work` with a signal that is aborted once it settles or after `ms`, whichever comes first. */
+async function cancellable<T>(work: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
+  const cancel = new AbortController();
+  try {
+    return await within(work(cancel.signal), ms);
+  } finally {
+    cancel.abort();
+  }
+}
+
+function logSecretError(stage: string, error: unknown) {
+  // Error class only: never a secret, ciphertext, owner or URL.
+  console.error(JSON.stringify({ webhookSecrets: stage, error: (error as Error)?.name ?? "Error" }));
+}
+
+/** Whether this delivery path can sign for `hook`: a sealed secret needs `secrets` to open it. */
+const signable = (hook: Hook, delivery: Delivery) =>
+  hook.signingCiphertext !== undefined ? delivery.secrets !== undefined : hook.secret !== undefined;
+
+/** The plaintext secret to sign one round with. It lives only as long as that round. */
+async function signingSecret(owner: string, hook: Hook, secrets: SecretBox | undefined, timeoutMs: number) {
+  const sealed = hook.signingCiphertext;
+  if (sealed === undefined) {
+    if (hook.secret === undefined) throw new Error("NoSigningSecret");
+    return hook.secret;
+  }
+  if (!secrets) throw new Error("NoSecretBox");
+  return cancellable((signal) => secrets.open(sealed, { owner, webhook: hook.id }, signal), timeoutMs);
+}
+
 export function webhookSignature(secret: string, timestamp: number, body: string) {
   const digest = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
   return `t=${timestamp},v1=${digest}`;
@@ -217,19 +275,35 @@ function publicHook(hook: Hook, pending: Pending[]) {
   };
 }
 
+/**
+ * With `secrets` (the KMS switch on), only the sealed secret is stored, and a secret that can't be
+ * sealed is never stored at all: the registration fails. Without it, the secret is stored in
+ * plaintext, as before the switch. Either way the plaintext is returned once, here.
+ */
 export async function registerWebhook(
   store: Pick<Store, "get" | "put">,
   owner: string,
   input: { url: string; events?: EventType[] },
   resolve: Resolver,
+  secrets?: SecretBox,
 ) {
   const url = parseWebhookUrl(input.url);
   await pinAddress(url, resolve, REQUEST_TIMEOUT_MS);
+  const id = `wh_${randomBytes(12).toString("hex")}`;
+  const secret = `whsec_${randomBytes(32).toString("base64url")}`;
+  const stored = secrets
+    ? {
+        signingCiphertext: await cancellable(
+          (signal) => secrets.seal(secret, { owner, webhook: id }, signal),
+          REQUEST_TIMEOUT_MS,
+        ),
+      }
+    : { secret };
   const hook: Hook = {
-    id: `wh_${randomBytes(12).toString("hex")}`,
+    id,
     url: url.href,
     ...(input.events ? { events: [...new Set(input.events)] } : {}),
-    secret: `whsec_${randomBytes(32).toString("base64url")}`,
+    ...stored,
     createdAt: new Date().toISOString(),
     status: "active",
     failures: 0,
@@ -241,7 +315,7 @@ export async function registerWebhook(
     next.hooks.push(hook);
     return next;
   });
-  return { webhook: publicHook(hook, row!.pending), secret: hook.secret };
+  return { webhook: publicHook(hook, row!.pending), secret };
 }
 
 export async function listWebhooks(store: Pick<Store, "get">, owner: string) {
@@ -286,8 +360,9 @@ export async function enqueueDeliveries(
 
 type Outcome = { hook: string; eventId: string; result: "ok" | "failed" | "skipped"; reason?: string };
 
-/** One round for one webhook: resolve and check the host once, then send in parallel. */
+/** One round for one webhook: open its secret, resolve and check the host once, then send in parallel. */
 async function round(
+  owner: string,
   hook: Hook,
   due: Pending[],
   delivery: Delivery,
@@ -297,6 +372,15 @@ async function round(
   const skipped = (reason?: string) =>
     due.map((p) => ({ hook: hook.id, eventId: p.event.id, result: "skipped" as const, reason }));
   if (deadline - Date.now() <= 0) return skipped();
+  let secret: string;
+  try {
+    secret = await signingSecret(owner, hook, delivery.secrets, Math.min(requestTimeoutMs, deadline - Date.now()));
+  } catch (error) {
+    // KMS unavailable, slow, or refusing a ciphertext that isn't this row's: nothing is sent and
+    // nothing counts against the webhook. The deliveries stay queued for a later round.
+    logSecretError("open_failed", error);
+    return skipped("secret_unavailable");
+  }
   let target: Awaited<ReturnType<typeof pinAddress>>;
   try {
     target = await pinAddress(parseWebhookUrl(hook.url), delivery.resolve, Math.min(requestTimeoutMs, deadline - Date.now()));
@@ -319,7 +403,7 @@ async function round(
               "content-type": "application/json",
               "user-agent": "qsb-webhooks/1",
               "qsb-event-id": p.event.id,
-              "qsb-signature": webhookSignature(hook.secret, timestamp, body),
+              "qsb-signature": webhookSignature(secret, timestamp, body),
             },
             body,
             timeoutMs,
@@ -344,6 +428,11 @@ async function round(
  *   example frozen with its Lambda) counts no failures, only successes.
  * - A webhook's failed round backs it off; after FAILING_AFTER in a row it is marked failing
  *   and gets no more deliveries.
+ * - Only webhooks this path can sign for are claimed: without `secrets`, sealed ones are left
+ *   queued. A secret that can't be opened skips its round, counting nothing.
+ * - Re-encrypt on first use: with `secrets`, a claimed webhook whose secret is still in plaintext
+ *   has it sealed during the round, and the write-back swaps the plaintext for the ciphertext. The
+ *   secret is the same, so receivers keep verifying. If sealing fails the plaintext stays.
  */
 export async function deliverDue(
   store: Pick<Store, "get" | "put">,
@@ -358,7 +447,9 @@ export async function deliverDue(
     claimed = [];
     if (!row?.pending.length) return false;
     const ready = new Set(
-      row.hooks.filter((h) => h.status === "active" && (h.retryAt ?? 0) <= now).map((h) => h.id),
+      row.hooks
+        .filter((h) => h.status === "active" && (h.retryAt ?? 0) <= now && signable(h, delivery))
+        .map((h) => h.id),
     );
     claimed = row.pending.filter((p) => ready.has(p.hook) && p.nextAt <= now).slice(0, ROUND_LIMIT);
     if (!claimed.length) return false;
@@ -366,14 +457,18 @@ export async function deliverDue(
     return row;
   });
   if (!row || !claimed.length) return;
-  const outcomes = (
-    await Promise.all(
+  const plaintext = delivery.secrets
+    ? row.hooks.filter((h) => h.secret !== undefined && h.signingCiphertext === undefined && claimed.some((p) => p.hook === h.id))
+    : [];
+  const [outcomes, sealed] = await Promise.all([
+    Promise.all(
       row.hooks.map((hook) => {
         const due = claimed.filter((p) => p.hook === hook.id);
-        return due.length ? round(hook, due, delivery, deadline, requestTimeoutMs) : [];
+        return due.length ? round(owner, hook, due, delivery, deadline, requestTimeoutMs) : [];
       }),
-    )
-  ).flat();
+    ).then((rounds) => rounds.flat()),
+    sealPlaintext(owner, plaintext, delivery.secrets, deadline, requestTimeoutMs),
+  ]);
   const at = new Date().toISOString();
   const expired = Date.now() > now + LEASE_MS;
   await update(store, owner, (row) => {
@@ -381,7 +476,15 @@ export async function deliverDue(
     const held = (o: Outcome) =>
       row.pending.some((p) => p.hook === o.hook && p.event.id === o.eventId && p.claim === claim);
     const applied = outcomes.filter(held);
-    if (!applied.length) return false;
+    let resealed = false;
+    for (const hook of row.hooks) {
+      const seal = sealed.get(hook.id);
+      if (!seal || hook.secret !== seal.secret || hook.signingCiphertext !== undefined) continue;
+      hook.signingCiphertext = seal.ciphertext;
+      delete hook.secret;
+      resealed = true;
+    }
+    if (!applied.length && !resealed) return false;
     for (const hook of row.hooks) {
       const mine = applied.filter((o) => o.hook === hook.id);
       if (mine.some((o) => o.result === "ok")) {
@@ -411,9 +514,36 @@ export async function deliverDue(
   });
 }
 
+/** Seal plaintext secrets for re-encryption on first use. A failure leaves that one as it is. */
+async function sealPlaintext(
+  owner: string,
+  hooks: Hook[],
+  secrets: SecretBox | undefined,
+  deadline: number,
+  requestTimeoutMs: number,
+) {
+  const sealed = new Map<string, { secret: string; ciphertext: string }>();
+  if (!secrets) return sealed;
+  await Promise.all(
+    hooks.map(async ({ id, secret }) => {
+      const timeoutMs = Math.min(requestTimeoutMs, deadline - Date.now());
+      if (secret === undefined || timeoutMs <= 0) return;
+      try {
+        const ciphertext = await cancellable((signal) => secrets.seal(secret, { owner, webhook: id }, signal), timeoutMs);
+        sealed.set(id, { secret, ciphertext });
+      } catch (error) {
+        logSecretError("seal_failed", error);
+      }
+    }),
+  );
+  return sealed;
+}
+
 /**
- * Rows with webhook signing secrets removed, for a storage inventory or export. Everything
- * else is left as it is, so the usual credential check still applies to it.
+ * Rows with plaintext webhook signing secrets removed, for a storage inventory or export.
+ * Everything else is left as it is, so the usual credential check still applies to it. A sealed
+ * secret (signingCiphertext) stays: it isn't credential material without a KMS Decrypt that only
+ * the roles the key policy names can make, for that row.
  */
 export function withoutWebhookSecrets<T>(rows: T): T {
   if (!Array.isArray(rows)) return rows;
