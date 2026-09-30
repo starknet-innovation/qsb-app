@@ -46,6 +46,10 @@ run "baseline" {
     network = "mainnet"
   }
   assert {
+    condition     = aws_cloudwatch_log_metric_filter.stray_payments.log_group_name == aws_cloudwatch_log_group.lambda["api"].name && aws_cloudwatch_log_metric_filter.stray_payments.pattern == "strayPayment" && aws_cloudwatch_metric_alarm.stray_payments.metric_name == "StrayPayments" && aws_cloudwatch_metric_alarm.stray_payments.namespace == "QSB/${var.name}" && aws_cloudwatch_metric_alarm.stray_payments.threshold == 1
+    error_message = "The API's strayPayment log lines must raise the stray-payments alarm (server/stray-outputs.ts)."
+  }
+  assert {
     condition     = output.transactions_enabled == false && output.compute_configured == false
     error_message = "Baseline must not activate transactions or configure paid compute."
   }
