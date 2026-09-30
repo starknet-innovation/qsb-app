@@ -140,7 +140,7 @@ export type QsbClientOptions = {
   /** A session token from an earlier login by the same address. */
   token?: string;
   /**
-   * An API key (`qsb_<network>_…`) minted by this owner, sent instead of a session. Its scopes
+   * An API key (`qsb_mainnet_…`) minted by this owner, sent instead of a session. Its scopes
    * decide what it can do; minting, listing and revoking keys still need a wallet session.
    */
   apiKey?: string;
