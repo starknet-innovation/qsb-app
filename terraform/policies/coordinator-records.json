@@ -15,7 +15,8 @@
     "Condition": {
       "ForAllValues:StringLike": {
         "dynamodb:LeadingKeys": [
-          "OWNER#*"
+          "OWNER#*",
+          "WEBHOOK#*"
         ]
       },
       "Null": {

@@ -67,27 +67,27 @@ resource "aws_dynamodb_table" "records" {
     type = "S"
   }
   # The due-delivery index the webhook dispatcher queries (server/webhooks.ts). Sparse: only WEBHOOKS rows with a
-  # delivery due carry its keys. Keys only, so a query of it returns no hook, secret or event.
-  dynamic "attribute" {
-    for_each = var.webhook_dispatcher_enabled ? { webhookQueue = "S", webhookDueAt = "N" } : {}
-    content {
-      name = attribute.key
-      type = attribute.value
-    }
+  # delivery due carry its keys. Keys only, so a query of it returns no hook, secret or event. It doesn't depend on
+  # webhook_dispatcher_enabled: this provider keeps an index whose block is removed (the blocks are Optional and
+  # Computed), so switching it off couldn't take the index away cleanly, and on its own it costs next to nothing.
+  attribute {
+    name = "webhookQueue"
+    type = "S"
   }
-  dynamic "global_secondary_index" {
-    for_each = var.webhook_dispatcher_enabled ? [local.webhook_due_index] : []
-    content {
-      name            = global_secondary_index.value
-      projection_type = "KEYS_ONLY"
-      key_schema {
-        attribute_name = "webhookQueue"
-        key_type       = "HASH"
-      }
-      key_schema {
-        attribute_name = "webhookDueAt"
-        key_type       = "RANGE"
-      }
+  attribute {
+    name = "webhookDueAt"
+    type = "N"
+  }
+  global_secondary_index {
+    name            = local.webhook_due_index
+    projection_type = "KEYS_ONLY"
+    key_schema {
+      attribute_name = "webhookQueue"
+      key_type       = "HASH"
+    }
+    key_schema {
+      attribute_name = "webhookDueAt"
+      key_type       = "RANGE"
     }
   }
   ttl {

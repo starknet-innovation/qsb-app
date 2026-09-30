@@ -27,7 +27,7 @@ ALLOWED = {
     'aws_apigatewayv2_api', 'aws_apigatewayv2_integration',
     'aws_apigatewayv2_route', 'aws_apigatewayv2_stage',
     'aws_cloudfront_origin_access_control', 'aws_cloudfront_response_headers_policy',
-    'aws_cloudfront_distribution', 'aws_scheduler_schedule',
+    'aws_cloudfront_distribution', 'aws_scheduler_schedule', 'aws_lambda_function_event_invoke_config',
 }
 EXPECTED = {
     'aws_dynamodb_table': {'records'},
@@ -38,18 +38,21 @@ EXPECTED = {
 
 
 # The scheduled webhook dispatcher (webhooks.tf), present only with webhook_dispatcher_enabled. Its resources come
-# as a set: the function, its records policy, the schedule and the schedule's role and policy.
+# as a set: the function, its async-invoke settings, its records policy, the schedule and the schedule's role and
+# policy. The due-delivery index is on the table either way (data.tf).
 DISPATCHER_FUNCTION = 'webhooks'
 DISPATCHER_POLICIES = {'webhook_records', 'webhook_schedule'}
 DISPATCHER_ROLE = 'webhook_schedule'
 DISPATCHER_ENV = {'TABLE_NAME'}
 DUE_INDEX = 'webhook-due'
-# What the dispatcher's records policy may grant: Query on the due-delivery index, GetItem and PutItem on OWNER#
-# rows, and PutItem only of a WEBHOOKS row's attributes (server/webhooks.ts WEBHOOK_ROW_ATTRIBUTES).
-DISPATCHER_ACTIONS = {'FindDueOwners': ['dynamodb:Query'], 'ReadOwnerRows': ['dynamodb:GetItem'],
-                      'WriteWebhookRows': ['dynamodb:PutItem']}
-OWNER_KEYS = {'ForAllValues:StringLike': {'dynamodb:LeadingKeys': ['OWNER#*']}}
-WEBHOOK_ROW_ATTRIBUTES = ['pk', 'sk', 'version', 'hooks', 'pending', 'webhookQueue', 'webhookDueAt']
+DUE_INDEX_KEYS = [['webhookQueue', 'HASH'], ['webhookDueAt', 'RANGE']]
+# What the dispatcher's records policy may grant: Query on the due-delivery index, and GetItem and PutItem on the
+# owners' webhook partitions (server/webhooks.ts WEBHOOK_PARTITION), which hold nothing but WEBHOOKS rows.
+DISPATCHER_ACTIONS = {'FindDueOwners': ['dynamodb:Query'], 'ReadWriteWebhookRows': ['dynamodb:GetItem', 'dynamodb:PutItem']}
+WEBHOOK_KEYS = {'ForAllValues:StringLike': {'dynamodb:LeadingKeys': ['WEBHOOK#*']}, 'Null': {'dynamodb:LeadingKeys': 'false'}}
+# Schedule target settings that would send something other than an empty invoke, or send it elsewhere.
+SCHEDULE_TARGET_BLOCKS = ('dead_letter_config', 'ecs_parameters', 'eventbridge_parameters', 'kinesis_parameters',
+                          'sagemaker_pipeline_parameters', 'sqs_parameters')
 
 
 def require(condition, message):
@@ -105,29 +108,56 @@ def workflow_rules(rows):
             'NeedsOperatorAttention must stay a Fail state, so the execution fails and the alarm fires')
 
 
+def due_index_rules(rows):
+    """The table's one secondary index is the keys-only due-delivery index, whatever the switch."""
+    table = next(r for r in rows if r['type'] == 'aws_dynamodb_table').get('values', {})
+    indexes = table.get('global_secondary_index') or []
+    require(len(indexes) == 1 and indexes[0].get('name') == DUE_INDEX and indexes[0].get('projection_type') == 'KEYS_ONLY'
+            and not indexes[0].get('non_key_attributes')
+            and ([[k.get('attribute_name'), k.get('key_type')] for k in indexes[0].get('key_schema') or []]
+                 or [[indexes[0].get('hash_key'), 'HASH'], [indexes[0].get('range_key'), 'RANGE']]) == DUE_INDEX_KEYS
+            and not (table.get('local_secondary_index') or []),
+            'The table\'s only secondary index must be the keys-only due-delivery index, so a query of it returns no '
+            'hook, secret or event')
+
+
 def dispatcher_rules(rows, dispatcher):
     """The scheduled webhook dispatcher: all of it or none of it, each grant exactly scoped."""
     by_type = lambda kind, names: [r for r in rows if r['type'] == kind and r['name'] in names]
     schedules = [r for r in rows if r['type'] == 'aws_scheduler_schedule']
+    invoke_configs = [r for r in rows if r['type'] == 'aws_lambda_function_event_invoke_config']
     policies = {r['name']: r for r in by_type('aws_iam_role_policy', DISPATCHER_POLICIES)}
     schedule_roles = by_type('aws_iam_role', {DISPATCHER_ROLE})
     table = next(r for r in rows if r['type'] == 'aws_dynamodb_table').get('values', {})
-    indexes = table.get('global_secondary_index') or []
     if not dispatcher:
-        require(not schedules and not policies and not schedule_roles and not indexes,
-                'The webhook schedule, its roles and the due-delivery index come only with the webhook dispatcher')
+        require(not schedules and not invoke_configs and not policies and not schedule_roles,
+                'The webhook schedule, its roles and invoke settings come only with the webhook dispatcher')
         return
     require(len(schedules) == 1 and schedules[0]['name'] == DISPATCHER_FUNCTION and set(policies) == DISPATCHER_POLICIES
-            and len(schedule_roles) == 1, 'The webhook dispatcher needs exactly its schedule, schedule role and two policies')
+            and len(schedule_roles) == 1 and len(invoke_configs) == 1 and invoke_configs[0]['name'] == DISPATCHER_FUNCTION,
+            'The webhook dispatcher needs exactly its schedule, schedule role, two policies and invoke settings')
     function = next(r for r in rows if r['type'] == 'aws_lambda_function' and r['name'] == DISPATCHER_FUNCTION)['values']
+    invoke = invoke_configs[0].get('values', {})
+    require(invoke.get('function_name') == function.get('function_name') and invoke.get('qualifier') in (None, '')
+            and invoke.get('maximum_retry_attempts') == 0 and not invoke.get('destination_config'),
+            'Lambda must not retry the webhook dispatcher or send its results anywhere')
     schedule = schedules[0].get('values', {})
     rate = re.fullmatch(r'rate\((\d+) minutes?\)', str(schedule.get('schedule_expression')))
     require(rate and int(rate.group(1)) >= 1, 'The webhook schedule must be a rate of at least one minute')
+    require(schedule.get('group_name') in (None, 'default'), 'The webhook schedule must be in the default group')
     target = (schedule.get('target') or [{}])[0]
     function_arn = target.get('arn')
     target_arn = re.fullmatch(r'arn:aws[a-z-]*:lambda:[a-z0-9-]+:([0-9]{12}):function:([A-Za-z0-9_-]+)', str(function_arn))
     require(target_arn is not None and target_arn.group(2) == function.get('function_name'),
             'The webhook schedule must invoke the webhook dispatcher and nothing else')
+    retry = target.get('retry_policy') or [{}]
+    require(target.get('input') in (None, '') and not any(target.get(block) for block in SCHEDULE_TARGET_BLOCKS)
+            and len(retry) == 1 and retry[0].get('maximum_retry_attempts') == 0,
+            'The webhook schedule must send an empty invoke with no retry, dead-letter queue or target parameters')
+    # The role Scheduler assumes. Unknown until the role exists; then it must be the schedule role.
+    role_arn, schedule_role_arn = target.get('role_arn'), schedule_roles[0].get('values', {}).get('arn')
+    require(role_arn is None or (isinstance(schedule_role_arn, str) and role_arn == schedule_role_arn),
+            'The webhook schedule must run with its own schedule role')
     # The stack's own account, from the dispatcher's ARN: the schedule role trusts Scheduler for this account only.
     account = target_arn.group(1)
     trust = json.loads(schedule_roles[0].get('values', {}).get('assume_role_policy') or '{}').get('Statement')
@@ -145,26 +175,15 @@ def dispatcher_rules(rows, dispatcher):
     records = {s.get('Sid'): s for s in documents['webhook_records']}
     require(len(records) == len(documents['webhook_records']) and set(records) == set(DISPATCHER_ACTIONS)
             and all(s.get('Effect') == 'Allow' and s.get('Action') == DISPATCHER_ACTIONS[sid] for sid, s in records.items()),
-            'The webhook dispatcher may only Query the due-delivery index and GetItem/PutItem records')
-    table_arn = records['ReadOwnerRows'].get('Resource')
+            'The webhook dispatcher may only Query the due-delivery index and GetItem/PutItem webhook rows')
+    table_arn = records['ReadWriteWebhookRows'].get('Resource')
     require(isinstance(table_arn, str) and table_arn.endswith(f':{account}:table/' + str(table.get('name')))
-            and records['WriteWebhookRows'].get('Resource') == table_arn
             and records['FindDueOwners'].get('Resource') == f'{table_arn}/index/{DUE_INDEX}'
             and 'Condition' not in records['FindDueOwners'],
             'The webhook dispatcher reaches only the records table and its due-delivery index')
-    for sid in ('ReadOwnerRows', 'WriteWebhookRows'):
-        condition = records[sid].get('Condition', {})
-        require(condition.get('ForAllValues:StringLike') == OWNER_KEYS['ForAllValues:StringLike']
-                and condition.get('Null', {}).get('dynamodb:LeadingKeys') == 'false',
-                'The webhook dispatcher may only read and write present OWNER# keys')
-    write = records['WriteWebhookRows']['Condition']
-    require(write.get('ForAllValues:StringEquals') == {'dynamodb:Attributes': WEBHOOK_ROW_ATTRIBUTES}
-            and write.get('Null', {}).get('dynamodb:Attributes') == 'false'
-            and set(write) == {'ForAllValues:StringLike', 'ForAllValues:StringEquals', 'Null'},
-            'The webhook dispatcher may only write items made of a WEBHOOKS row\'s attributes')
-    require(len(indexes) == 1 and indexes[0].get('name') == DUE_INDEX and indexes[0].get('projection_type') == 'KEYS_ONLY'
-            and not indexes[0].get('non_key_attributes'),
-            'The due-delivery index must be the one keys-only index, so a query of it returns no hook or secret')
+    require(records['ReadWriteWebhookRows'].get('Condition') == WEBHOOK_KEYS,
+            'The webhook dispatcher may only read and write present WEBHOOK# keys: no job, vault, intent, event or '
+            'reservation row')
     # Known after the first apply: each dispatcher policy belongs to its own role, and the dispatcher role has no other.
     dispatcher_role = next((r.get('values', {}).get('name') for r in rows if r['type'] == 'aws_iam_role'
                             and r['name'] == 'lambda' and r.get('index') == DISPATCHER_FUNCTION), None)
@@ -183,14 +202,24 @@ def static_dispatcher_rules(root):
     """Source rules for the webhook dispatcher's two roles, which hold even while role names are unknown at plan."""
     allowed = {'aws_iam_role.lambda["webhooks"]': {('aws_iam_role_policy', 'webhook_records'), ('aws_lambda_function', 'webhooks')},
                'aws_iam_role.webhook_schedule': {('aws_iam_role_policy', 'webhook_schedule'), ('aws_scheduler_schedule', 'webhooks')}}
+    scheduled = False
     for path in sorted(root.glob('*.tf')):
         text = path.read_text()
         blocks = list(resource_blocks(text))
+        for kind, name, start, end in blocks:
+            if (kind, name) == ('aws_scheduler_schedule', 'webhooks'):
+                body = text[start:end]
+                scheduled = True
+                require(re.search(r'\brole_arn\s*=\s*aws_iam_role\.webhook_schedule\[0\]\.arn\s*$', body, re.M)
+                        and re.search(r'^\s*arn\s*=\s*local\.webhook_function_arn\s*$', body, re.M),
+                        f'{path.name}: aws_scheduler_schedule.webhooks must invoke local.webhook_function_arn with '
+                        'aws_iam_role.webhook_schedule[0].arn')
         for reference, owners in allowed.items():
             for match in re.finditer(re.escape(reference), text):
                 inside = [(kind, name) for kind, name, start, end in blocks if start <= match.start() < end]
                 require(inside and inside[-1] in owners,
                         f'{path.name}: only {sorted(f"{k}.{n}" for k, n in owners)} may use {reference}')
+    require(scheduled, 'aws_scheduler_schedule.webhooks is missing from the source')
 
 
 def reads_secrets(action):
@@ -313,6 +342,7 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
             'dispatcher, its schedule role')
     if expanded:
         workflow_rules(rows)
+        due_index_rules(rows)
         dispatcher_rules(rows, dispatcher)
         funcs = {r['name']: r for r in rows if r['type'] == 'aws_lambda_function'}
         envs = {name: dict((row.get('values', {}).get('environment') or [{}])[0].get('variables', {}) or {})

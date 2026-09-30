@@ -6,6 +6,8 @@ import {
   ROUND_LIMIT,
   WEBHOOK_DUE_INDEX,
   WEBHOOK_DUE_QUEUE,
+  WEBHOOK_PARTITION,
+  deferDue,
   deliverDue,
   type Delivery,
 } from "./webhooks";
@@ -13,9 +15,10 @@ import {
 /**
  * The scheduled webhook dispatcher (terraform/webhooks.tf). It sends queued deliveries whose
  * retry has come due, so they don't wait for the owner's next API request or coordinator tick.
- * It only runs deliverDue: it reads and writes WEBHOOKS rows and queries the due-delivery
- * index, and never touches jobs, vaults, intents, reservations or the coordinator. Its role
- * allows no more (terraform/policies/webhook-dispatcher-records.json).
+ * It only runs deliverDue: it reads and writes WEBHOOK# rows and queries the due-delivery index,
+ * and never runs coordinator, payment or reconcile code. Its role
+ * (terraform/policies/webhook-dispatcher-records.json) reaches only WEBHOOK# partitions and the
+ * index, so it can't read or write a job, vault, intent, event or reservation row.
  */
 
 /** Owners with due deliveries, most overdue first. */
@@ -31,6 +34,8 @@ export const DISPATCH_CONCURRENCY = 4;
 export const OWNER_ROUNDS = 5;
 /** One round: a lookup and its requests, each at most REQUEST_TIMEOUT_MS. Well inside LEASE_MS. */
 export const ROUND_MS = 8_000;
+/** How far a due row whose round claimed nothing is pushed back in the index (deferDue). */
+export const DISPATCH_DEFER_MS = 3600_000;
 /** No round starts with less than this left. */
 const MIN_ROUND_MS = 2_000;
 const TIMEOUT_MARGIN_MS = 15_000;
@@ -56,20 +61,22 @@ export function indexedDueOwners(table: string): DueOwners {
       }),
     );
     return (page.Items ?? []).flatMap((item) =>
-      typeof item.pk === "string" && item.pk.startsWith("OWNER#") && item.sk === "WEBHOOKS"
-        ? [item.pk.slice("OWNER#".length)]
+      typeof item.pk === "string" && item.pk.startsWith(WEBHOOK_PARTITION) && item.sk === "WEBHOOKS"
+        ? [item.pk.slice(WEBHOOK_PARTITION.length)]
         : [],
     );
   };
 }
 
-export type DispatchResult = { owners: number; served: number; rounds: number; failed: number };
+export type DispatchResult = { owners: number; served: number; rounds: number; deferred: number; failed: number };
 
 /**
  * One run: take up to `maxOwners` due owners from the index and send their due deliveries
  * with deliverDue, within `budgetMs`. An owner gets further rounds while each claims a full
  * ROUND_LIMIT, up to OWNER_ROUNDS. The index is read without a consistent read, so an owner
- * it lists may have nothing due by now; deliverDue then claims and writes nothing.
+ * it lists may have nothing due by now; deliverDue then claims and writes nothing. An owner still
+ * due on a consistent read whose first round claims nothing (it has deliveries this path can't
+ * send) is deferred by DISPATCH_DEFER_MS, so such owners can't hold the head of every run's query.
  */
 export async function dispatchWebhooks(
   store: Pick<Store, "get" | "put">,
@@ -79,7 +86,7 @@ export async function dispatchWebhooks(
 ): Promise<DispatchResult> {
   const until = Date.now() + budgetMs;
   const owners = [...new Set(await dueOwners(Date.now(), maxOwners))].slice(0, maxOwners);
-  const result: DispatchResult = { owners: owners.length, served: 0, rounds: 0, failed: 0 };
+  const result: DispatchResult = { owners: owners.length, served: 0, rounds: 0, deferred: 0, failed: 0 };
   let next = 0;
   const left = () => until - Date.now();
   async function serve() {
@@ -90,6 +97,10 @@ export async function dispatchWebhooks(
         let claimed: number;
         try {
           claimed = await deliverDue(store, owner, delivery, { deadline: Date.now() + Math.min(ROUND_MS, left()) });
+          if (round === 0 && claimed === 0) {
+            const now = Date.now();
+            if (await deferDue(store, owner, now, now + DISPATCH_DEFER_MS)) result.deferred++;
+          }
         } catch (error) {
           result.failed++;
           logDispatchError("delivery_failed", error);
@@ -115,6 +126,9 @@ export async function handler(_event: unknown, context?: { getRemainingTimeInMil
   const result = await dispatchWebhooks(
     records,
     indexedDueOwners(table),
+    // Webhook secrets sealed with KMS (ops/webhook-secret-kms) need its SecretBox here, and this
+    // role needs decrypt on that key. Without them the dispatcher can't sign those webhooks: their
+    // rows are deferred hourly and only the API sends them.
     { transport: httpsTransport, resolve: systemResolver },
     { budgetMs: Math.min(DISPATCH_BUDGET_MS, remaining - TIMEOUT_MARGIN_MS) },
   );

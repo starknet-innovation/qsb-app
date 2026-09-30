@@ -105,7 +105,7 @@ variable "api_keys_enabled" {
   default     = false
 }
 variable "webhook_dispatcher_enabled" {
-  description = "Scheduled webhook dispatcher: the records table's due-delivery index, a dispatcher Lambda and an EventBridge Scheduler schedule every 5 minutes, each with its own role (webhooks.tf). It sends queued webhook retries that would otherwise wait for the owner's next API request or coordinator tick. Keep false until the AWS administrator has installed the reviewed deploy-policy update (ops/github-aws/update_installed.py): before that the scoped roles can't create the schedule. Does not enable mainnet, deposits, withdrawals or submission."
+  description = "Scheduled webhook dispatcher: a dispatcher Lambda and an EventBridge Scheduler schedule every 5 minutes, each with its own role (webhooks.tf); the due-delivery index it queries is on the table either way. It sends queued webhook retries that would otherwise wait for the owner's next API request or coordinator tick. Keep false until the AWS administrator has installed the reviewed deploy-policy update (ops/github-aws/update_installed.py): before that the scoped roles can't create the schedule. Does not enable mainnet, deposits, withdrawals or submission."
   type        = bool
   default     = false
 }

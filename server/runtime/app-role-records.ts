@@ -14,9 +14,13 @@ export const coordinatorPathWrites = {
     { prefix: "SESSION#", actions: ["PutItem"] },
     { prefix: "APIKEY#", actions: ["PutItem"] },
     { prefix: "OWNER#", actions: ["PutItem"] },
+    { prefix: "WEBHOOK#", actions: ["PutItem"] },
     { prefix: "OUTPOINT#", actions: ["PutItem"] },
   ],
-  coordinator: [{ prefix: "OWNER#", actions: ["PutItem"] }],
+  coordinator: [
+    { prefix: "OWNER#", actions: ["PutItem"] },
+    { prefix: "WEBHOOK#", actions: ["PutItem"] },
+  ],
 } as const;
 
 export type AppRole = keyof typeof coordinatorPathWrites;

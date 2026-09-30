@@ -114,6 +114,17 @@ class SinglePipelinePolicies(unittest.TestCase):
             with self.subTest(action=action):
                 self.assertFalse(grants(action, arn('scheduler', 'schedule/default/qsb-app-webhooks')))
 
+    def test_deployer_can_manage_the_dispatchers_async_invoke_settings(self):
+        # terraform/webhooks.tf turns Lambda's async retries off for the dispatcher (aws_lambda_function_event_invoke_config).
+        function = 'arn:aws:lambda:eu-west-1:123456789012:function:qsb-app-webhooks'
+        lambdas = self.statement('deploy', 'LambdaQsb')
+        for action in ('lambda:PutFunctionEventInvokeConfig', 'lambda:GetFunctionEventInvokeConfig',
+                       'lambda:UpdateFunctionEventInvokeConfig', 'lambda:DeleteFunctionEventInvokeConfig'):
+            with self.subTest(action=action):
+                self.assertTrue(any(fnmatch.fnmatchcase(action, a) for a in lambdas['Action']))
+                self.assertTrue(any(fnmatch.fnmatchcase(function, r) for r in lambdas['Resource']))
+        self.assertNotIn('Condition', lambdas)
+
     def test_boundary_already_covers_the_webhook_dispatcher_and_its_schedule(self):
         # The dispatcher's Query reaches the due-delivery index, a sub-resource of the table; the schedule's role
         # invokes the dispatcher; both write their Lambda logs. The boundary needs no new statement for any of them.
@@ -122,6 +133,7 @@ class SinglePipelinePolicies(unittest.TestCase):
             any(fnmatch.fnmatchcase(action, a) for a in s['Action']) and any(fnmatch.fnmatchcase(resource, r) for r in s['Resource'])
             and 'Condition' not in s for s in allowed)
         arn = 'arn:aws:{}:eu-west-1:123456789012:{}'.format
+        # The dispatcher's item grant is limited to WEBHOOK# keys by its own policy; the boundary is table-wide.
         for action, resource in (('dynamodb:Query', arn('dynamodb', 'table/qsb-app-records/index/webhook-due')),
                                  ('dynamodb:GetItem', arn('dynamodb', 'table/qsb-app-records')),
                                  ('dynamodb:PutItem', arn('dynamodb', 'table/qsb-app-records')),

@@ -38,8 +38,15 @@ def workflow(retry=None, catch=None, fail=None):
     return json.dumps({'StartAt': 'CoordinateSearch', 'States': states})
 
 
+DUE_INDEX = {'name': 'webhook-due', 'projection_type': 'KEYS_ONLY', 'non_key_attributes': None,
+             'key_schema': [{'attribute_name': 'webhookQueue', 'key_type': 'HASH'},
+                            {'attribute_name': 'webhookDueAt', 'key_type': 'RANGE'}]}
+
+
 def plan():
-    rows = [{'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed', 'values': {'name': 'qsb-app-records'}},
+    # The table always carries the keys-only due-delivery index (terraform/data.tf).
+    rows = [{'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed',
+             'values': {'name': 'qsb-app-records', 'global_secondary_index': [dict(DUE_INDEX)]}},
             {'type': 'aws_s3_bucket', 'name': 'frontend', 'mode': 'managed', 'values': {}},
             {'type': 'aws_sfn_state_machine', 'name': 'withdrawal', 'mode': 'managed', 'values': {'definition': workflow()}}]
     # Like the real stack: api and coordinator read the table; the reference Lambda has no environment.
@@ -57,7 +64,7 @@ def plan():
 
 TABLE_ARN = 'arn:aws:dynamodb:eu-west-1:123456789012:table/qsb-app-records'
 DISPATCHER_ARN = 'arn:aws:lambda:eu-west-1:123456789012:function:qsb-app-webhooks'
-OWNER_KEYS = {'ForAllValues:StringLike': {'dynamodb:LeadingKeys': ['OWNER#*']}, 'Null': {'dynamodb:LeadingKeys': 'false'}}
+SCHEDULE_ROLE_ARN = 'arn:aws:iam::123456789012:role/qsb/runtime/qsb-app-webhook-schedule'
 
 
 def dispatcher_records():
@@ -66,16 +73,15 @@ def dispatcher_records():
     return [dict(s, Resource=f'{TABLE_ARN}/index/webhook-due' if s['Sid'] == 'FindDueOwners' else TABLE_ARN) for s in source]
 
 
-def with_dispatcher(doc=None, records=None, invoke=None, env=None, index=None, expression='rate(5 minutes)', trust=None):
-    """A plan with webhook_dispatcher_enabled: its function, two roles, two policies, schedule and index."""
+def with_dispatcher(doc=None, records=None, invoke=None, env=None, expression='rate(5 minutes)', trust=None,
+                    target=None, retries=None):
+    """A plan with webhook_dispatcher_enabled: its function, invoke settings, two roles, two policies and schedule."""
     doc = doc or plan()
     rows = doc['planned_values']['root_module']['resources']
-    table = next(r for r in rows if r['type'] == 'aws_dynamodb_table')
-    table['values']['global_secondary_index'] = [index or {'name': 'webhook-due', 'projection_type': 'KEYS_ONLY',
-                                                           'non_key_attributes': None}]
     policy = lambda name, statements: {'type': 'aws_iam_role_policy', 'name': name, 'mode': 'managed',
                                        'values': {'policy': json.dumps({'Version': '2012-10-17', 'Statement': statements})}}
     schedule_role = role('webhook_schedule')
+    schedule_role['values']['arn'] = SCHEDULE_ROLE_ARN
     schedule_role['values']['assume_role_policy'] = json.dumps({'Statement': trust or [{
         'Effect': 'Allow', 'Principal': {'Service': 'scheduler.amazonaws.com'}, 'Action': 'sts:AssumeRole',
         'Condition': {'StringEquals': {'aws:SourceAccount': '123456789012'}}}]})
@@ -85,8 +91,16 @@ def with_dispatcher(doc=None, records=None, invoke=None, env=None, index=None, e
              role('lambda'), schedule_role,
              policy('webhook_records', records or dispatcher_records()),
              policy('webhook_schedule', invoke or [{'Effect': 'Allow', 'Action': 'lambda:InvokeFunction', 'Resource': DISPATCHER_ARN}]),
+             {'type': 'aws_lambda_function_event_invoke_config', 'name': 'webhooks', 'mode': 'managed',
+              'values': dict({'function_name': 'qsb-app-webhooks', 'qualifier': None, 'maximum_retry_attempts': 0,
+                              'maximum_event_age_in_seconds': 300, 'destination_config': []}, **(retries or {}))},
+             # As a first plan shows it: role_arn is unknown until the role exists, so it's absent here.
              {'type': 'aws_scheduler_schedule', 'name': 'webhooks', 'mode': 'managed',
-              'values': {'schedule_expression': expression, 'target': [{'arn': DISPATCHER_ARN}]}}]
+              'values': {'schedule_expression': expression, 'target': [dict({
+                  'arn': DISPATCHER_ARN, 'input': None, 'dead_letter_config': [], 'ecs_parameters': [],
+                  'eventbridge_parameters': [], 'kinesis_parameters': [], 'sagemaker_pipeline_parameters': [],
+                  'sqs_parameters': [], 'retry_policy': [{'maximum_event_age_in_seconds': 300, 'maximum_retry_attempts': 0}],
+              }, **(target or {}))]}}]
     return doc
 
 
@@ -336,7 +350,7 @@ class DeployChecks(unittest.TestCase):
 
     def test_the_webhook_dispatcher_comes_whole_or_not_at_all(self):
         for kind, name in (('aws_scheduler_schedule', 'webhooks'), ('aws_iam_role_policy', 'webhook_records'),
-                           ('aws_iam_role_policy', 'webhook_schedule')):
+                           ('aws_iam_role_policy', 'webhook_schedule'), ('aws_lambda_function_event_invoke_config', 'webhooks')):
             doc = with_dispatcher()
             rows = doc['planned_values']['root_module']['resources']
             rows.remove(next(r for r in rows if r['type'] == kind and r['name'] == name))
@@ -348,30 +362,53 @@ class DeployChecks(unittest.TestCase):
         rows.remove(next(r for r in rows if r['type'] == 'aws_iam_role' and r['name'] == 'lambda'))
         rows.remove(next(r for r in rows if r['type'] == 'aws_iam_role' and r['name'] == 'webhook_schedule'))
         self.refused(doc, 'come only with the webhook dispatcher')
-        doc = plan()
-        next(r for r in doc['planned_values']['root_module']['resources']
-             if r['type'] == 'aws_dynamodb_table')['values']['global_secondary_index'] = [{'name': 'webhook-due'}]
-        self.refused(doc, 'come only with the webhook dispatcher')
 
     def test_the_dispatcher_records_grant_is_exactly_scoped(self):
-        wider = [dict(s, Action=s['Action'] + ['dynamodb:DeleteItem']) if s['Sid'] == 'WriteWebhookRows' else s
-                 for s in dispatcher_records()]
+        rows_grant = lambda **change: [dict(s, **change) if s['Sid'] == 'ReadWriteWebhookRows' else s for s in dispatcher_records()]
+        condition = lambda keys: {'ForAllValues:StringLike': {'dynamodb:LeadingKeys': keys}, 'Null': {'dynamodb:LeadingKeys': 'false'}}
+        wider = rows_grant(Action=['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem'])
         scan = [dict(s, Action=['dynamodb:Scan']) if s['Sid'] == 'FindDueOwners' else s for s in dispatcher_records()]
         table_query = [dict(s, Resource=TABLE_ARN) if s['Sid'] == 'FindDueOwners' else s for s in dispatcher_records()]
-        any_key = [{k: v for k, v in s.items() if k != 'Condition'} if s['Sid'] == 'ReadOwnerRows' else s
-                   for s in dispatcher_records()]
-        system = [dict(s, Condition=dict(s['Condition'], **{'ForAllValues:StringLike': {'dynamodb:LeadingKeys': ['SYSTEM#*']}}))
-                  if s['Sid'] == 'WriteWebhookRows' else s for s in dispatcher_records()]
-        job_rows = [dict(s, Condition=dict(s['Condition'], **{'ForAllValues:StringEquals': {
-            'dynamodb:Attributes': ['pk', 'sk', 'version', 'job']}})) if s['Sid'] == 'WriteWebhookRows' else s
-            for s in dispatcher_records()]
         extra = dispatcher_records() + [{'Sid': 'Extra', 'Effect': 'Allow', 'Action': ['dynamodb:GetItem'], 'Resource': TABLE_ARN}]
+        any_key = [{k: v for k, v in s.items() if k != 'Condition'} if s['Sid'] == 'ReadWriteWebhookRows' else s
+                   for s in dispatcher_records()]
         for records, message in ((wider, 'may only Query'), (scan, 'may only Query'), (extra, 'may only Query'),
                                  (table_query, 'reaches only the records table'),
-                                 (any_key, 'present OWNER# keys'), (system, 'present OWNER# keys'),
-                                 (job_rows, "a WEBHOOKS row's attributes")):
-            with self.subTest(message=message):
+                                 (any_key, 'present WEBHOOK# keys'),
+                                 # The owner's partition holds its jobs, vaults, intents and events.
+                                 (rows_grant(Condition=condition(['OWNER#*'])), 'present WEBHOOK# keys'),
+                                 (rows_grant(Condition=condition(['WEBHOOK#*', 'OWNER#*'])), 'present WEBHOOK# keys'),
+                                 (rows_grant(Condition=condition(['SYSTEM#*'])), 'present WEBHOOK# keys'),
+                                 (rows_grant(Condition=condition(['*'])), 'present WEBHOOK# keys'),
+                                 (rows_grant(Condition={'ForAllValues:StringLike': {'dynamodb:LeadingKeys': ['WEBHOOK#*']}}),
+                                  'present WEBHOOK# keys')):
+            with self.subTest(message=message, records=records):
                 self.refused(with_dispatcher(records=records), message)
+
+    def test_the_dispatcher_does_not_retry_or_forward_its_runs(self):
+        for retries in ({'maximum_retry_attempts': 2}, {'maximum_retry_attempts': None}, {'qualifier': '$LATEST'},
+                        {'function_name': 'qsb-app-coordinator'},
+                        {'destination_config': [{'on_failure': [{'destination': 'arn:aws:sqs:eu-west-1:123456789012:q'}]}]}):
+            with self.subTest(retries=retries):
+                self.refused(with_dispatcher(retries=retries), 'must not retry the webhook dispatcher')
+
+    def test_the_schedule_sends_only_an_empty_invoke_with_its_own_role(self):
+        other_role = SCHEDULE_ROLE_ARN.replace('webhook-schedule', 'coordinator')
+        self.assertEqual(self.run_check(with_dispatcher(target={'role_arn': SCHEDULE_ROLE_ARN}), '--deploy')[0], 0)
+        self.refused(with_dispatcher(target={'role_arn': other_role}), 'run with its own schedule role')
+        doc = with_dispatcher(target={'role_arn': SCHEDULE_ROLE_ARN})
+        next(r for r in doc['planned_values']['root_module']['resources']
+             if r['type'] == 'aws_iam_role' and r['name'] == 'webhook_schedule')['values'].pop('arn')
+        self.refused(doc, 'run with its own schedule role')
+        for target in ({'input': '{"owners": ["x"]}'}, {'dead_letter_config': [{'arn': 'arn:aws:sqs:eu-west-1:123456789012:q'}]},
+                       {'sqs_parameters': [{'message_group_id': 'x'}]}, {'ecs_parameters': [{'task_count': 1}]},
+                       {'retry_policy': [{'maximum_retry_attempts': 3}]}, {'retry_policy': []}):
+            with self.subTest(target=target):
+                self.refused(with_dispatcher(target=target), 'empty invoke with no retry')
+        doc = with_dispatcher()
+        next(r for r in doc['planned_values']['root_module']['resources']
+             if r['type'] == 'aws_scheduler_schedule')['values']['group_name'] = 'qsb-other'
+        self.refused(doc, 'in the default group')
 
     def test_the_schedule_only_invokes_the_dispatcher(self):
         self.refused(with_dispatcher(invoke=[{'Effect': 'Allow', 'Action': 'lambda:InvokeFunction',
@@ -411,12 +448,21 @@ class DeployChecks(unittest.TestCase):
         self.refused(with_dispatcher(env={'TABLE_NAME': 'qsb-app-records', 'AWS_BATCH_JOB_QUEUE': 'x'}), 'Only coordinator')
         self.refused(with_dispatcher(env={'TABLE_NAME': 'qsb-app-records', 'SLIPSTREAM_SECRET_ARN': MINER}), 'Only the API')
 
-    def test_the_due_index_returns_keys_only(self):
-        for index in ({'name': 'webhook-due', 'projection_type': 'ALL'},
-                      {'name': 'webhook-due', 'projection_type': 'INCLUDE', 'non_key_attributes': ['hooks']},
-                      {'name': 'other', 'projection_type': 'KEYS_ONLY'}):
-            with self.subTest(index=index):
-                self.refused(with_dispatcher(index=index), 'one keys-only index')
+    def test_the_due_index_is_the_tables_only_index_and_returns_keys_only(self):
+        # It is there whether or not the dispatcher is: the plain plan has it too.
+        for index in (None, dict(DUE_INDEX, projection_type='ALL'),
+                      dict(DUE_INDEX, projection_type='INCLUDE', non_key_attributes=['hooks']),
+                      dict(DUE_INDEX, name='other'),
+                      dict(DUE_INDEX, key_schema=[{'attribute_name': 'pk', 'key_type': 'HASH'}])):
+            for doc in (plan(), with_dispatcher()):
+                table = next(r for r in doc['planned_values']['root_module']['resources'] if r['type'] == 'aws_dynamodb_table')
+                table['values']['global_secondary_index'] = [index] if index else []
+                with self.subTest(index=index):
+                    self.refused(doc, 'only secondary index must be the keys-only due-delivery index')
+        doc = plan()
+        table = next(r for r in doc['planned_values']['root_module']['resources'] if r['type'] == 'aws_dynamodb_table')
+        table['values']['global_secondary_index'].append(dict(DUE_INDEX, name='second'))
+        self.refused(doc, 'only secondary index must be')
 
     def test_dispatcher_policies_stay_on_their_roles_once_known(self):
         doc = with_dispatcher()
@@ -522,6 +568,10 @@ class SourceRules(unittest.TestCase):
                      'may use aws_iam_role.lambda["webhooks"]')
         self.refused(('webhooks.tf', None, '\nresource "aws_iam_role_policy" "extra" {\n  role   = aws_iam_role.webhook_schedule[0].id\n  policy = "{}"\n}\n'),
                      'may use aws_iam_role.webhook_schedule')
+        self.refused(('webhooks.tf', 'role_arn = aws_iam_role.webhook_schedule[0].arn', 'role_arn = aws_iam_role.lambda["api"].arn'),
+                     'must invoke local.webhook_function_arn with aws_iam_role.webhook_schedule[0].arn')
+        self.refused(('webhooks.tf', 'arn      = local.webhook_function_arn', 'arn      = aws_lambda_function.coordinator.arn'),
+                     'must invoke local.webhook_function_arn')
 
     def test_only_the_api_receives_the_secret_reference(self):
         self.refused(('compute.tf', 'REFERENCE_FUNCTION = aws_lambda_function.reference.function_name',

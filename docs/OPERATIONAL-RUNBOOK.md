@@ -95,7 +95,7 @@ integer, or the literal `off` when that variable is null (check `ownerLimits.max
 in uncached `GET /api/config`); see [Per-owner limits](#per-owner-limits). Missing or malformed
 values refuse before application imports. Both modes validate the required values before application imports,
 credentials, or database/provider reads and writes. The CLI needs GetItem on job/vault records, transactional PutItem
-on the job, `RECONCILIATION#` and `RECONCILIATION_REQUEST#` audit rows (and, when a `--provider-id` decision claims an owner's withdrawal slot, Query on the owner's `JOB#` rows and PutItem on its `LIMIT#ACTIVE_JOBS` row) and the owner's `EVENT#` row, GetItem and PutItem on the owner's `WEBHOOKS` row (to queue webhooks, never to send them), Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. The CLI never submits or cancels Batch jobs and does not broadcast; the `qsb-operator` session itself has broader deployment and data permissions.
+on the job, `RECONCILIATION#` and `RECONCILIATION_REQUEST#` audit rows (and, when a `--provider-id` decision claims an owner's withdrawal slot, Query on the owner's `JOB#` rows and PutItem on its `LIMIT#ACTIVE_JOBS` row) and the owner's `EVENT#` row, GetItem and PutItem on the owner's `WEBHOOK#<owner>` / `WEBHOOKS` row (to queue webhooks, never to send them), Batch DescribeJobs/ListJobs/DescribeJobQueues, S3 GetObject on the configured outputs prefix, and StartExecution on the configured workflow. The CLI never submits or cancels Batch jobs and does not broadcast; the `qsb-operator` session itself has broader deployment and data permissions.
 
 To attach a known provider ID from AWS Batch's console and matching operator logs:
 
@@ -450,7 +450,7 @@ replacement bytes for the vault.
    This command records a conditional observation of the existing original
    intent. It performs chain/miner GETs and OWNER-row database writes only:
    transactional PutItem on the `TX#` and `JOB#` rows and the owner's `EVENT#`
-   row, then GetItem and PutItem on the owner's `WEBHOOKS` row to queue
+   row, then GetItem and PutItem on the owner's `WEBHOOK#<owner>` / `WEBHOOKS` row to queue
    webhooks (they are sent by the API or coordinator, never from the operator's
    machine).
    It takes no transaction bytes, new signature, provider ID, retry or submit
@@ -485,13 +485,14 @@ retry the POST or reset its durable intent.
 
 ## Webhook signing secrets
 
-Each owner's `OWNER#<address>` / `WEBHOOKS` row holds the signing secret of each
+Each owner's `WEBHOOK#<address>` / `WEBHOOKS` row holds the signing secret of each
 registered webhook in plaintext, because HMAC signing needs it (see
-[API.md](API.md)). Handle it as a credential:
+[API.md](API.md)). The row has its own partition, apart from the owner's `OWNER#`
+rows, so a role can be granted webhook rows alone. Handle it as a credential:
 
 - Readers: the API role, the coordinator role (its GetItem is not
   prefix-restricted), the webhook dispatcher's role when it is enabled (GetItem on
-  `OWNER#` keys; see [Scheduled webhook dispatcher](#scheduled-webhook-dispatcher))
+  `WEBHOOK#` keys only; see [Scheduled webhook dispatcher](#scheduled-webhook-dispatcher))
   and any operator session with table read access. The due-delivery index is keys
   only, so a query of it returns no secret.
 - Backups: point-in-time recovery is on for the table, so a secret stays in its
@@ -504,8 +505,12 @@ registered webhook in plaintext, because HMAC signing needs it (see
 - Rotation: the owner deletes the webhook and registers it again.
 - Follow-up, not built: envelope encryption with KMS or a Secrets Manager key
   would keep plaintext secrets out of the table and its backups. It needs new IAM
-  grants for the API and coordinator roles, so it needs the AWS admin's heads-up
-  first.
+  grants for every role that signs or seals: the API, the coordinator, and the
+  [webhook dispatcher](#scheduled-webhook-dispatcher) (decrypt to sign, encrypt to
+  re-seal, a key-policy entry, and the key's `SecretBox` wired into the dispatcher's
+  delivery). So it needs the AWS admin's heads-up first. Without the dispatcher's
+  part, the dispatcher can't sign sealed webhooks: it defers their rows hourly in
+  the index, and only the API sends them.
 
 ## Scheduled webhook dispatcher
 
@@ -521,20 +526,40 @@ have a delivery due and runs the same delivery round as the API and coordinator
   records table on `webhookQueue` and `webhookDueAt`. Every write of a `WEBHOOKS`
   row sets those two attributes from the row's own queue, in the same PutItem, so
   the index adds no request and can't disagree with the row. A row written by older
-  code is corrected on its owner's next delivery round.
+  code is corrected on its owner's next delivery round. The index is on the table
+  whatever the switch: the provider keeps an index whose block is removed, so it
+  couldn't be switched off cleanly, and unused it costs next to nothing.
 - **Bounds.** One run takes at most 50 owners, most overdue first, serves 4 at a
   time with up to 5 rounds of 10 deliveries each, and stops starting rounds after
-  40 seconds. The Lambda times out at 60 seconds, runs one at a time (reserved
-  concurrency 1, taken from the account's unreserved pool) and isn't retried: the
-  next run finds the same due deliveries.
+  40 seconds. The Lambda times out at 60 seconds and runs one at a time (reserved
+  concurrency 1, taken from the account's unreserved pool). Neither Scheduler nor
+  Lambda retries a failed run (`maximum_retry_attempts = 0` on both), since the
+  next run finds the same due deliveries; one failure counts one error.
+- **Stuck owners.** If an owner's row is still due on a consistent read but its
+  first round claims nothing, because it holds deliveries the dispatcher can't
+  send, the dispatcher pushes the row back an hour in the index
+  (`webhookDeferredUntil`). Such owners can't hold the head of every run's query
+  and starve the others. Only the index moves; the API and coordinator still send
+  the row's deliveries.
 - **Isolation.** It runs no coordinator, API, payment or reconcile code, and its
   bundle contains none (a test checks the bundle's inputs). Its role may query the
-  index, GetItem `OWNER#` rows and PutItem `OWNER#` items made only of a
-  `WEBHOOKS` row's attributes, so it can't write a job, vault, intent,
-  reservation or system row. IAM can't limit a key to its sort key, so it can read
-  other `OWNER#` rows; it never does. The schedule's role may only invoke it.
+  index and GetItem and PutItem on `WEBHOOK#` keys only, the owners' webhook
+  partitions. So it can't read or write a job, vault, intent, event, reservation or
+  system row. The schedule's role may only invoke it.
 - **Switch.** `webhook_dispatcher_enabled`, default `false`. Off, Terraform plans
-  no index, Lambda, role or schedule, and deliveries behave as before.
+  no dispatcher Lambda, invoke settings, role or schedule, and deliveries behave as
+  before.
+
+**What any apply of this version changes, switch on or off.** The table gains the
+`webhook-due` index (an in-place update that backfills it). The coordinator's
+record policy (`terraform/policies/coordinator-records.json`) also lets it PutItem
+`WEBHOOK#` keys, because `settle()` now queues and delivers through the owner's
+`WEBHOOK#` row. Webhooks weren't deployed anywhere before this, so no row moves.
+
+**The dormant reconcile role.** The scoped reconcile role
+(`operator-reconcile-records.json`) still allows only `OWNER#` keys. Reconciliation
+through it records the owner event but can't queue its webhooks; the enqueue is
+best-effort and logged. Reconciliation runs as `qsb-operator`, which can.
 
 **Admin steps, before the first enable.** The switch needs an IAM update that only
 the AWS administrator can install:
@@ -551,23 +576,21 @@ the AWS administrator can install:
 2. Review it, then `--apply` as the administrator, confirmed or with
    `--yes --plan-hash`.
 3. Run `verify.py --role-arn` against `qsb-github-deploy`; it includes the new
-   schedule and PassRole cases.
+   schedule, PassRole, tagging and invoke-settings cases.
 
 **Enable.** Then, as `qsb-operator`, set `webhook_dispatcher_enabled = true` and
-plan. The plan adds the index to the table (an in-place update that backfills it),
-one Lambda with its log group and error alarm, the two roles, three role policies
-and the schedule, and changes nothing else. Run
-`check-single-pipeline.py --deploy` on it, then apply.
+plan. The plan adds one Lambda with its log group, error alarm and async-invoke
+settings, the two roles, three role policies and the schedule, and changes nothing
+else. Run `check-single-pipeline.py --deploy` on it, then apply.
 
 **Check.** Within 10 minutes the dispatcher's log group shows one
 `{"webhookDispatch": {...}}` line of counts per run and no errors, and the
-`<name>-webhooks-errors` alarm stays quiet. An `AccessDeniedException` on its
-PutItem means AWS doesn't apply the `dynamodb:Attributes` condition as expected:
-turn the switch off and report it; don't widen the grant without review.
+`<name>-webhooks-errors` alarm stays quiet.
 
 **Back out.** Set the switch to `false` and apply. That removes the schedule,
-Lambda, roles and index. Rows keep the two index attributes, which do nothing
-without the index; deliveries go back to requests and ticks only.
+Lambda, its invoke settings and the two roles. The index and the rows' index
+attributes stay and do nothing on their own; deliveries go back to requests and
+ticks only.
 
 ## Deploy-time mainnet and submit switches
 

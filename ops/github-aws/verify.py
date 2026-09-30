@@ -38,6 +38,7 @@ cases=[
  ('schedule tags','scheduler:TagResource',f'arn:aws:scheduler:{region}:{account}:schedule/default/qsb-research-webhooks',False,[]),
  ('tag webhook dispatcher','lambda:TagResource',f'arn:aws:lambda:{region}:{account}:function:qsb-research-webhooks',True,[]),
  ('tag webhook schedule role','iam:TagRole',f'arn:aws:iam::{account}:role/qsb/runtime/qsb-research-webhook-schedule',True,[]),
+ ('webhook dispatcher retries','lambda:PutFunctionEventInvokeConfig',f'arn:aws:lambda:{region}:{account}:function:qsb-research-webhooks',True,[]),
  ('qsb function','lambda:UpdateFunctionCode',f'arn:aws:lambda:{region}:{account}:function:qsb-research-api',True,[]),
  ('other function','lambda:UpdateFunctionCode',f'arn:aws:lambda:{region}:{account}:function:unrelated-api',False,[]),
  ('qsb table','dynamodb:CreateTable',f'arn:aws:dynamodb:{region}:{account}:table/qsb-research-records',True,[]),

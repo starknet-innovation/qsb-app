@@ -31,6 +31,12 @@ export const LEASE_MS = 30_000;
 export const ROUND_LIMIT = 10;
 
 /**
+ * An owner's webhooks live in their own partition, WEBHOOK#<owner> / WEBHOOKS, apart from the
+ * owner's OWNER# rows (jobs, vaults, intents, events), so a role can be granted webhook rows and
+ * nothing else by partition key. Nothing was deployed under the old OWNER#<owner> / WEBHOOKS key.
+ */
+export const WEBHOOK_PARTITION = "WEBHOOK#";
+/**
  * The due-delivery index: a sparse, keys-only global secondary index of the WEBHOOKS rows
  * (terraform/data.tf). A row is in it, under WEBHOOK_DUE_QUEUE and sorted by webhookDueAt,
  * exactly while it holds a delivery an active webhook can send. update() sets both attributes
@@ -39,8 +45,6 @@ export const ROUND_LIMIT = 10;
  */
 export const WEBHOOK_DUE_INDEX = "webhook-due";
 export const WEBHOOK_DUE_QUEUE = "due";
-/** Every top-level attribute a WEBHOOKS row may have; the dispatcher's PutItem grant allows only these. */
-export const WEBHOOK_ROW_ATTRIBUTES = ["pk", "sk", "version", "hooks", "pending", "webhookQueue", "webhookDueAt"] as const;
 
 export type WebhookRequest = {
   url: string;
@@ -88,6 +92,8 @@ type WebhookRow = Row & {
   /** The due-delivery index keys; both present or both absent. */
   webhookQueue?: typeof WEBHOOK_DUE_QUEUE;
   webhookDueAt?: number;
+  /** Set by deferDue: the index lists the row no earlier than this, while it has anything queued. */
+  webhookDeferredUntil?: number;
 };
 
 export type WebhookUrlCode = Extract<
@@ -197,7 +203,7 @@ export function webhookSignature(secret: string, timestamp: number, body: string
   return `t=${timestamp},v1=${digest}`;
 }
 
-const rowKey = (owner: string) => ({ pk: `OWNER#${owner}`, sk: "WEBHOOKS" });
+const rowKey = (owner: string) => ({ pk: `${WEBHOOK_PARTITION}${owner}`, sk: "WEBHOOKS" });
 
 /**
  * When deliverDue could next claim one of the row's deliveries: the earliest queued delivery
@@ -215,15 +221,22 @@ function nextDueAt(row: { hooks: Hook[]; pending: Pending[] }): number | undefin
   return due;
 }
 
-/** The row with its index attributes set from its own queue. */
+/** The row with its index attributes set from its own queue, no earlier than a deferral still ahead. */
 function indexed(row: WebhookRow): WebhookRow {
-  const { webhookQueue: _queue, webhookDueAt: _at, ...rest } = row;
+  const { webhookQueue: _queue, webhookDueAt: _at, webhookDeferredUntil: deferred, ...rest } = row;
   const dueAt = nextDueAt(rest);
-  return dueAt === undefined ? rest : { ...rest, webhookQueue: WEBHOOK_DUE_QUEUE, webhookDueAt: dueAt };
+  if (dueAt === undefined) return rest;
+  return deferred !== undefined && deferred > dueAt
+    ? { ...rest, webhookQueue: WEBHOOK_DUE_QUEUE, webhookDueAt: deferred, webhookDeferredUntil: deferred }
+    : { ...rest, webhookQueue: WEBHOOK_DUE_QUEUE, webhookDueAt: dueAt };
 }
 const staleIndex = (row: WebhookRow) => {
   const want = indexed(row);
-  return want.webhookQueue !== row.webhookQueue || want.webhookDueAt !== row.webhookDueAt;
+  return (
+    want.webhookQueue !== row.webhookQueue ||
+    want.webhookDueAt !== row.webhookDueAt ||
+    want.webhookDeferredUntil !== row.webhookDeferredUntil
+  );
 };
 
 /**
@@ -467,6 +480,25 @@ export async function deliverDue(
 }
 
 /**
+ * For the dispatcher: a round it ran for an owner the index listed as due claimed nothing, although
+ * the row, read consistently, is still due by `now`. That happens when the dispatcher can't send
+ * what's queued (for example a webhook it can't sign), so push the row's place in the index back to
+ * `until` instead of letting it hold the head of every run. Other paths still send the row's
+ * deliveries meanwhile; the deferral only moves the index. Returns whether it wrote.
+ */
+export async function deferDue(store: Pick<Store, "get" | "put">, owner: string, now: number, until: number) {
+  let deferred = false;
+  await update(store, owner, (row) => {
+    deferred = false;
+    if (row?.webhookDueAt === undefined || row.webhookDueAt > now) return false;
+    row.webhookDeferredUntil = until;
+    deferred = true;
+    return row;
+  });
+  return deferred;
+}
+
+/**
  * Rows with webhook signing secrets removed, for a storage inventory or export. Everything
  * else is left as it is, so the usual credential check still applies to it.
  */
@@ -474,7 +506,7 @@ export function withoutWebhookSecrets<T>(rows: T): T {
   if (!Array.isArray(rows)) return rows;
   return rows.map((row) => {
     const r = row as Partial<WebhookRow> | null;
-    if (!r || r.sk !== "WEBHOOKS" || !r.pk?.startsWith("OWNER#") || !Array.isArray(r.hooks))
+    if (!r || r.sk !== "WEBHOOKS" || !r.pk?.startsWith(WEBHOOK_PARTITION) || !Array.isArray(r.hooks))
       return row;
     return { ...r, hooks: r.hooks.map(({ secret: _secret, ...hook }) => hook) };
   }) as T;

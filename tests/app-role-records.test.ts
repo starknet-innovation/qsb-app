@@ -11,10 +11,12 @@ describe("app role record access", () => {
       "SESSION#",
       "APIKEY#",
       "OWNER#",
+      "WEBHOOK#",
       "OUTPOINT#",
     ]);
     expect(coordinatorPathWrites.coordinator).toEqual([
       { prefix: "OWNER#", actions: ["PutItem"] },
+      { prefix: "WEBHOOK#", actions: ["PutItem"] },
     ]);
     expect(
       coordinatorPathWrites.api.find((entry) => entry.prefix === "OUTPOINT#")
@@ -78,11 +80,16 @@ it("restricts coordinator writes including mixed and empty keys", () => {
   expect(
     decideAppRoleAccess("dynamodb:PutItem", ["OWNER#wallet"], "coordinator"),
   ).toBe("allow");
+  // The owner's webhook row, which settle() queues and delivers after a tick.
+  expect(
+    decideAppRoleAccess("dynamodb:PutItem", ["WEBHOOK#wallet"], "coordinator"),
+  ).toBe("allow");
   for (const keys of [
     [],
     ["OUTPOINT#x"],
     ["SYSTEM#x"],
     ["OWNER#wallet", "OUTPOINT#x"],
+    ["WEBHOOK#wallet", "SYSTEM#x"],
   ])
     expect(decideAppRoleAccess("dynamodb:PutItem", keys, "coordinator")).toBe(
       "deny",

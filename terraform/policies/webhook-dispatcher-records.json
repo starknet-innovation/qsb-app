@@ -7,48 +7,20 @@
     ]
   },
   {
-    "Sid": "ReadOwnerRows",
+    "Sid": "ReadWriteWebhookRows",
     "Effect": "Allow",
     "Action": [
-      "dynamodb:GetItem"
-    ],
-    "Condition": {
-      "ForAllValues:StringLike": {
-        "dynamodb:LeadingKeys": [
-          "OWNER#*"
-        ]
-      },
-      "Null": {
-        "dynamodb:LeadingKeys": "false"
-      }
-    }
-  },
-  {
-    "Sid": "WriteWebhookRows",
-    "Effect": "Allow",
-    "Action": [
+      "dynamodb:GetItem",
       "dynamodb:PutItem"
     ],
     "Condition": {
       "ForAllValues:StringLike": {
         "dynamodb:LeadingKeys": [
-          "OWNER#*"
-        ]
-      },
-      "ForAllValues:StringEquals": {
-        "dynamodb:Attributes": [
-          "pk",
-          "sk",
-          "version",
-          "hooks",
-          "pending",
-          "webhookQueue",
-          "webhookDueAt"
+          "WEBHOOK#*"
         ]
       },
       "Null": {
-        "dynamodb:LeadingKeys": "false",
-        "dynamodb:Attributes": "false"
+        "dynamodb:LeadingKeys": "false"
       }
     }
   }
