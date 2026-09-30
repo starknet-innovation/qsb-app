@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { loadPyodide } from "pyodide";
 import { startQsbRuntime, type QsbMethod } from "../src/lib/qsb-runtime";
-import { qsbOperations } from "../src/lib/qsb";
+import { qsbOperations } from "../src/lib/qsb-operations";
 
-/** The local QSB operations the SDK needs; the same shape as src/lib/qsb.ts in the browser. */
+/** The local QSB operations the SDK needs; the same operations src/lib/qsb.ts runs in the browser. */
 export type LocalQsb = ReturnType<typeof qsbOperations> & { lockQsb(): void };
 
 // The vendored generator sources the browser serves from /qsb/, checked against the same manifest.

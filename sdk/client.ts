@@ -50,7 +50,7 @@ import {
   coordinatorSignedResultSchema,
   type CoordinatorSignedResult,
 } from "../src/mainnet/coordinatorResult";
-import { persistentGuard } from "../src/mainnet/guard";
+import { persistentGuard } from "../src/mainnet/persistentGuard";
 // The request bodies the server's handlers parse, so a request can't drift from the API.
 import { fundResubmitRequest, fundSubmitRequest, submitRequest } from "../server/api-schemas";
 import type { Wallet } from "../src/lib/wallet";
