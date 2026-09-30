@@ -24,9 +24,11 @@ import {
  * interrupted copy is safe: destination rows are overwritten by the source rows with the same key, and a
  * destination row whose key isn't in the source stops the copy.
  *
- * Sign-in challenges and sessions (the rows with a TTL, `expiresAt`) are neither copied nor compared.
- * DynamoDB deletes them asynchronously on its own, which would make any comparison unstable, and everyone
- * signs in again at the new stack anyway. Any other row with a TTL stops the copy.
+ * Two kinds of row are neither copied nor compared:
+ * - sign-in challenges and sessions, since everyone signs in again at the new stack;
+ * - any row whose TTL (`expiresAt`) has passed or passes within the hour. DynamoDB may delete those on its
+ *   own at any moment, which would make the comparison unstable, and they're about to go anyway.
+ * Other rows with a TTL (owner events, API keys, idempotency records) are copied like any other row.
  */
 export type Item = Record<string, AttributeValue>;
 type Command = ScanCommand | BatchWriteItemCommand;
@@ -35,13 +37,15 @@ export interface TableClient {
 }
 type Put = { PutRequest: { Item: Item } };
 
-/** Sign-in challenges and sessions: the only rows with a TTL, which DynamoDB may delete at any time. */
-const EPHEMERAL = ["CHALLENGE#", "SESSION#"];
-export function ephemeral(item: Item) {
-  if (!("expiresAt" in item)) return false;
-  if (EPHEMERAL.some((prefix) => item.pk?.S?.startsWith(prefix))) return true;
-  // Any other row with a TTL is unexpected: stop rather than silently leave it behind.
-  throw new Error(`A ${(item.pk?.S ?? "?").split("#")[0]} row has a TTL, which only challenges and sessions should. Nothing was copied.`);
+/** Sign-in state that the new stack doesn't need: everyone signs in again there. */
+const DISPOSABLE = ["CHALLENGE#", "SESSION#"];
+/** A row expiring within this margin may be deleted by DynamoDB's TTL during the copy. */
+export const TTL_MARGIN_SECONDS = 3600;
+/** Whether the copy leaves this row out: disposable sign-in state, or a TTL that has passed or soon will. */
+export function skipped(item: Item, now: number) {
+  if (DISPOSABLE.some((prefix) => item.pk?.S?.startsWith(prefix))) return true;
+  const ttl = item.expiresAt?.N;
+  return ttl !== undefined && Number(ttl) <= now + TTL_MARGIN_SECONDS;
 }
 
 export async function scanAll(client: TableClient, table: string): Promise<Item[]> {
@@ -99,12 +103,15 @@ export async function copyRecords(
   destTable: string,
   apply: boolean,
   pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now = Math.floor(Date.now() / 1000),
 ) {
+  // One cut-off for the whole run, so every scan leaves out the same rows.
+  const kept = (item: Item) => !skipped(item, now);
   const all = await scanAll(source, sourceTable);
-  const items = all.filter((item) => !ephemeral(item));
+  const items = all.filter(kept);
   const summary = {
     items: items.length,
-    skippedEphemeral: all.length - items.length,
+    skipped: all.length - items.length,
     prefixes: prefixCounts(items),
     digest: digest(items),
   };
@@ -112,7 +119,7 @@ export async function copyRecords(
   // Only an earlier copy may be present. Its rows are overwritten by the current source rows with the same
   // key (even if the source row changed since); a row whose key isn't in the source stops the copy.
   const keys = new Set(items.map(key));
-  const strays = (await scanAll(dest, destTable)).filter((item) => !ephemeral(item) && !keys.has(key(item)));
+  const strays = (await scanAll(dest, destTable)).filter((item) => kept(item) && !keys.has(key(item)));
   if (strays.length)
     throw new Error(
       `The destination holds ${strays.length} rows whose keys aren't in the source (${Object.keys(prefixCounts(strays)).join(", ")}). ` +
@@ -130,10 +137,10 @@ export async function copyRecords(
       pending = out.UnprocessedItems?.[destTable] ?? [];
     }
   }
-  const after = digest((await scanAll(source, sourceTable)).filter((item) => !ephemeral(item)));
+  const after = digest((await scanAll(source, sourceTable)).filter(kept));
   if (after !== summary.digest)
     throw new Error("The source changed during the copy. Is the old stack still switched on? Re-run once it's frozen.");
-  const copied = (await scanAll(dest, destTable)).filter((item) => !ephemeral(item));
+  const copied = (await scanAll(dest, destTable)).filter(kept);
   if (copied.length !== items.length || digest(copied) !== summary.digest)
     throw new Error(
       `Verification failed: the destination has ${copied.length} items, the source ${items.length}. Don't switch the new stack on.`,

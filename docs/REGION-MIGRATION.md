@@ -155,8 +155,8 @@ Nothing live changes in this phase.
       longer than any application function's timeout (the API's 120 seconds is the longest). Then re-check that the
       state machine has no running executions and the GPU queue is empty.
     - Confirm the freeze: `curl -s -o /dev/null -w '%{http_code}' <old URL>/api/config` returns a throttling error
-      (429 or 5xx), not 200. From here only DynamoDB's own TTL deletes of challenges and sessions touch the old table,
-      and the copy ignores those rows.
+      (429 or 5xx), not 200. From here only DynamoDB's own TTL deletes of expired rows touch the old table. The copy
+      leaves out rows that have expired or expire within the hour.
     - Then take an on-demand backup of the old records table
       (`aws dynamodb create-backup --region eu-west-1 --table-name <name>-records --backup-name qsb-pre-move`).
 11. **Copy the data** (operator, both accounts).
@@ -174,9 +174,12 @@ Nothing live changes in this phase.
         `aws sso login`.
     - **Copy:** `npx tsx scripts/copy-records.ts --from eu-west-1:<old>-records --from-profile qsb-copy-from --to eu-west-2:<new>-records --to-profile qsb-copy-to`.
       It counts first; add `--apply` to copy.
-    - It copies every item unchanged, overwrites any row an earlier interrupted copy left under the same key,
-      refuses a destination row whose key isn't in the source, fails if the source changes during the copy, and
-      verifies both tables item by item.
+    - It copies every item unchanged, including rows with a TTL such as owner events, API keys and idempotency
+      records. It leaves out sign-in challenges and sessions, since everyone signs in again at the new URL, and any
+      row that has expired or expires within the hour, since DynamoDB may delete those mid-copy. It overwrites any
+      row an earlier interrupted copy left under the same key, refuses a destination row whose key isn't in the
+      source, fails if the source changes during the copy, and verifies both tables item by item. The copy must
+      finish within that hour, which a table this size does easily.
     - **Keep the new stack frozen** after the copy, and note the copy's output (item count and digest) for the
       rollback check.
     - It prints only counts and a digest. The data passes through the operator's machine, not any AI tool.

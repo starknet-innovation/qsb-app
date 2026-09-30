@@ -124,27 +124,41 @@ describe("copyRecords", () => {
 });
 
 describe("TTL rows", () => {
-  it("skips sessions and challenges, which DynamoDB may delete on its own at any time", async () => {
+  const NOW = 1_900_000_000;
+
+  it("skips sessions and challenges, which the new stack doesn't need", async () => {
     const { source, dest } = tables(10);
-    source.items.push({ pk: { S: "SESSION#s" }, sk: { S: "x" }, expiresAt: { N: "1" } });
-    dest.items.push({ pk: { S: "CHALLENGE#c" }, sk: { S: "y" }, expiresAt: { N: "2" } });
+    source.items.push({ pk: { S: "SESSION#s" }, sk: { S: "x" }, expiresAt: { N: String(NOW + 86400) } });
+    dest.items.push({ pk: { S: "CHALLENGE#c" }, sk: { S: "y" }, expiresAt: { N: String(NOW + 300) } });
+    const result = await copyRecords(source, "old", dest, "new", true, noPause, NOW);
+    expect(result).toMatchObject({ items: 10, skipped: 1, copied: true });
+    expect(dest.items.filter((item) => item.pk?.S?.startsWith("SESSION#"))).toHaveLength(0);
+  });
+
+  it("copies other rows with a TTL, such as owner events and API keys", async () => {
+    const { source, dest } = tables(5);
+    const event = { pk: { S: "OWNER#placeholder" }, sk: { S: "EVENT#1" }, expiresAt: { N: String(NOW + 30 * 86400) } };
+    const key = { pk: { S: "APIKEY#placeholder" }, sk: { S: "KEY" }, expiresAt: { N: String(NOW + 90 * 86400) } };
+    source.items.push(event, key);
+    const result = await copyRecords(source, "old", dest, "new", true, noPause, NOW);
+    expect(result).toMatchObject({ items: 7, skipped: 0, copied: true });
+    expect(dest.items).toContainEqual(event);
+    expect(dest.items).toContainEqual(key);
+  });
+
+  it("leaves out rows DynamoDB may delete mid-copy, so a TTL delete can't fail it", async () => {
+    const { source, dest } = tables(10);
+    // Already expired but not yet deleted, and expiring within the margin.
+    source.items.push({ pk: { S: "OWNER#placeholder" }, sk: { S: "EVENT#old" }, expiresAt: { N: String(NOW - 60) } });
+    source.items.push({ pk: { S: "OWNER#placeholder" }, sk: { S: "EVENT#soon" }, expiresAt: { N: String(NOW + 600) } });
     let scans = 0;
     // A TTL delete in the source between scans must not fail the copy.
     source.onScan = () => {
-      if (++scans === 3) source.items = source.items.filter((item) => !item.expiresAt);
+      if (++scans === 3) source.items = source.items.filter((item) => item.sk?.S !== "EVENT#old");
     };
-    const result = await copyRecords(source, "old", dest, "new", true, noPause);
-    expect(result).toMatchObject({ items: 10, skippedEphemeral: 1, copied: true });
-    expect(dest.items.filter((item) => item.pk?.S?.startsWith("SESSION#"))).toHaveLength(0);
-  });
-});
-
-describe("unexpected TTL rows", () => {
-  it("stops instead of skipping a durable row that carries a TTL", async () => {
-    const { source, dest } = tables(5);
-    source.items.push({ pk: { S: "OWNER#placeholder" }, sk: { S: "VAULT#x" }, expiresAt: { N: "9" } });
-    await expect(copyRecords(source, "old", dest, "new", false, noPause)).rejects.toThrow("OWNER row has a TTL");
-    expect(dest.writes).toBe(0);
+    const result = await copyRecords(source, "old", dest, "new", true, noPause, NOW);
+    expect(result).toMatchObject({ items: 10, skipped: 2, copied: true });
+    expect(dest.items.filter((item) => item.sk?.S?.startsWith("EVENT#"))).toHaveLength(0);
   });
 });
 
