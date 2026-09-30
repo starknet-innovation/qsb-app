@@ -22,25 +22,18 @@ test("synthetic signing requires opt-in, verifies both responses and makes no br
     if (r.method() !== "GET") writes.push(r.url());
   });
   await expect(
-    section.getByRole("button", { name: "Check funding signature" }),
+    section.getByRole("button", { name: "Run wallet check" }),
   ).toBeDisabled();
   expect(
     await page.evaluate(() => (window as any).walletCheckCalls.length),
   ).toBe(0);
   await section.getByRole("checkbox").check();
-  await section
-    .getByRole("button", { name: "Check funding signature" })
-    .click();
-  await expect(section.getByRole("status")).toContainText(
-    "Funding synthetic signing passed",
-  );
-  await section.getByRole("button", { name: "Check helper signature" }).click();
-  await expect(section.getByRole("status")).toContainText(
-    "Helper synthetic signing passed",
-  );
-  await section.getByRole("button", { name: "Check complete-stack signing" }).click();
-  await expect(section.getByRole("status")).toContainText("Complete-stack format check passed");
-  await expect(section.getByRole("status")).toContainText("Real withdrawal signing remains unverified");
+  await section.getByRole("button", { name: "Run wallet check" }).click();
+  const results = section.getByRole("status");
+  await expect(results).toContainText("Complete-stack format check passed");
+  await expect(results).toContainText("Funding synthetic signing passed");
+  await expect(results).toContainText("Helper synthetic signing passed");
+  await expect(section).toContainText("real withdrawal signing remains unverified");
   expect(
     await page.evaluate(() =>
       (window as any).walletCheckCalls.map((c: any) => c.indices),

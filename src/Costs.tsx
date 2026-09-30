@@ -6,7 +6,7 @@ import type { Job } from "./lib/model";
 export function CostDisclosure({ feeBtc, job }: { feeBtc?: string; job?: Job }) {
   return <section className="cost-disclosure" aria-label="Itemized costs">
     <h3>Know what you would pay</h3>
-    <p><strong>Customer billing is not enabled.</strong> This app cannot collect a compute payment, enforce a customer spending limit, or issue a refund yet. Mainnet transactions remain gated.</p>
+    <p><strong>Customer billing is not enabled.</strong> This app cannot collect a compute payment, enforce a customer spending limit, or issue a refund yet.</p>
     <dl className="cost-lines">
       <div><dt>Bitcoin miner fee</dt><dd>{feeBtc ? `${feeBtc} BTC · transaction amount, not a paid receipt` : "Not specified"}</dd></div>
       <div><dt>GPU search</dt><dd>Final cost unknown · no fixed-price quote</dd></div>
@@ -27,9 +27,6 @@ export default function Costs() {
   const [checked, setChecked] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [rate, setRate] = useState("");
-  const [hours, setHours] = useState("");
-  const [size, setSize] = useState("");
   async function refresh() {
     setLoading(true); setError(""); setRates(undefined); setChecked("");
     try {
@@ -40,11 +37,17 @@ export default function Costs() {
     finally { setLoading(false); }
   }
   useEffect(() => { void refresh(); }, []);
-  const positive = (s: string) => s.trim() !== "" && Number.isFinite(Number(s)) && Number(s) > 0;
-  const compute = positive(rate) && positive(hours) ? Number(rate) * Number(hours) : undefined;
-  const miner = rates && positive(size) && Number.isSafeInteger(Number(size)) ? Math.ceil(Number(size) * rates.effective_rate) : undefined;
   return <div className="cost-page">
     <CostDisclosure />
+    <section className="panel">
+      <h2>Bitcoin fees today</h2>
+      <p>The deposit and withdrawal dialogs work out each transaction's miner fee from its size and the rate you choose. These are MARA's current rates.</p>
+      {error && <p role="alert">{error}</p>}
+      {rates && <p>MARA effective rate: <strong>{rates.effective_rate} sat/vB</strong>. Minimum accepted now: {minerMinimumRate(rates)} sat/vB. Retrieved {checked}; this rate is not locked and can change immediately. Admission does not guarantee mining.</p>}
+      <button className="secondary" disabled={loading} onClick={() => void refresh()}>{loading ? "Checking MARA rates…" : "Refresh MARA rates"}</button>
+      <p>A fee change during search may require waiting or recomputing a newly authorized transaction. We will not silently change your payout or reuse one-time signing material.</p>
+      <p><a href="https://slipstream.mara.com/docs/" target="_blank" rel="noreferrer">MARA documentation</a></p>
+    </section>
     <section className="panel">
       <h2>How charging will work</h2>
       <ol>
@@ -54,28 +57,7 @@ export default function Costs() {
         <li>Pause before exceeding the authorization. Preserve search progress and request an explicit top-up; a paused search is not a completed withdrawal.</li>
         <li>Receive an itemized usage receipt and unused-credit refund. Costs caused by our bugs, duplicate submissions and development testing will be absorbed by us.</li>
       </ol>
-      <div className="cost-planned"><h3>Spending protection · not available yet</h3>
-        <label>Maximum compute spend (USD)<input disabled placeholder="Available when budget enforcement is connected" /></label>
-        <button disabled className="secondary">Authorize compute budget — coming later</button>
-        <p>Payment authorization, in-flight budget reservations, provider billing reconciliation and refunds are not connected. There is no active customer spending cap. This preview does not authorize unlimited charges.</p>
-      </div>
-    </section>
-    <section className="panel">
-      <h2>Explore costs · illustration only</h2>
-      <p>These inputs do not start a search, set a spending limit or change a transaction. A GPU-hour means one GPU running for one hour; eight GPUs for one hour is eight GPU-hours.</p>
-      <div className="cost-inputs">
-        <label>Assumed provider rate (USD / GPU-hour)<input inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} placeholder="Enter a provider quote" /></label>
-        <label>Total billable GPU-hours<input inputMode="decimal" value={hours} onChange={e => setHours(e.target.value)} placeholder="Include startup and idle time" /></label>
-      </div>
-      <p role="status">Illustrative compute subtotal: <strong>{compute !== undefined && Number.isFinite(compute) ? `$${compute.toFixed(2)}` : "Enter a positive rate and duration"}</strong>. Excludes other charges; duration is an assumption, not an ETA.</p>
-      <h3>Bitcoin fee reference</h3>
-      <button className="secondary" disabled={loading} onClick={() => void refresh()}>{loading ? "Checking MARA rates…" : "Refresh MARA rates"}</button>
-      {error && <p role="alert">{error}</p>}
-      {rates && <p>MARA effective rate: <strong>{rates.effective_rate} sat/vB</strong>. Minimum accepted now: {minerMinimumRate(rates)} sat/vB. Retrieved {checked}; this rate is not locked and can change immediately. Admission does not guarantee mining.</p>}
-      <label>Assumed transaction virtual size (vB)<input inputMode="numeric" value={size} onChange={e => setSize(e.target.value)} placeholder="Not the locking-script size" /></label>
-      <p role="status">Illustrative miner fee: <strong>{miner !== undefined && Number.isSafeInteger(miner) ? `${miner.toLocaleString()} sats` : "Requires a rate and a positive whole-number size"}</strong>. Calculate funding and withdrawal separately; verify the final signed transaction's weight.</p>
-      <p>A fee change during search may require waiting or recomputing a newly authorized transaction. We will not silently change your payout or reuse one-time signing material.</p>
-      <p><a href="https://aws.amazon.com/ec2/pricing/on-demand/" target="_blank" rel="noreferrer">AWS EC2 pricing</a> · <a href="https://slipstream.mara.com/docs/" target="_blank" rel="noreferrer">MARA documentation</a></p>
+      <p>None of this is connected yet: there is no payment authorization and no customer spending cap, and nothing here authorizes unlimited charges.</p>
     </section>
   </div>;
 }

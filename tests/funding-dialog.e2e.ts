@@ -73,12 +73,12 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
     await dialog.getByRole("button", { name: "Verify backup locally" }).click();
     await expect(dialog).toContainText("Recovery backup verified");
     await dialog.locator("fieldset").getByRole("checkbox").check();
-    await dialog
-      .getByLabel("I have reviewed the itemized costs", { exact: false })
-      .check();
     await dialog.getByLabel("Deposit amount (BTC)").fill("0.0005");
     await dialog.getByLabel("Miner fee rate (sat/vB)").fill("2");
     await expect(dialog).toContainText(/Estimated size \d+ vB · miner fee \d+ sats/);
+    await dialog.getByRole("button", { name: "Review deposit", exact: true }).click();
+    await expect(dialog).toContainText("Leaves your wallet");
+    await dialog.getByLabel("I have read these statements and accept them").check();
     // Change another device/tab's state only after this dialog has opened.
     await page.evaluate((scenario) => {
       const w = window as any, vault = w.fundingFixture.vault;

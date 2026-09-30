@@ -8,25 +8,23 @@ test("working surface, navigation, wallet absence and readiness", async ({
   const config = page.waitForResponse((r) => new URL(r.url()).pathname === "/v1/config");
   await page.goto("/");
   expect(await (await config).json()).toMatchObject({ network: "mainnet" });
-  await expect(
-    page.getByRole("heading", {
-      name: "Your Bitcoin. A new layer of protection.",
-    }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "My vaults" })).toBeVisible();
   await page
     .getByRole("button", { name: "Connect Xverse", exact: true })
     .click();
   await expect(page.getByRole("alert")).toContainText("Install or unlock");
-  await page.getByRole("button", { name: "View readiness" }).click();
+  // The header status reads the server's switches; the local API has them off.
+  await page.getByRole("button", { name: "Deposits and withdrawals off" }).click();
   await expect(page.getByRole("dialog")).toContainText(
     "Full withdrawal consensus validation",
   );
-  await page.getByRole("button", { name: "Got it" }).click();
-  await page.getByRole("button", { name: "Recovery", exact: true }).click();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("link", { name: "Recovery", exact: true }).click();
+  expect(new URL(page.url()).hash).toBe("#/recovery");
   await expect(
     page.getByRole("heading", { name: "Restore a recovery file" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "My vaults", exact: true }).click();
+  await page.getByRole("link", { name: "My vaults", exact: true }).click();
   await page.evaluate(() => scrollTo(0, 0));
   await page.screenshot({
     path: "test-results/qsb-desktop.png",
@@ -34,7 +32,7 @@ test("working surface, navigation, wallet absence and readiness", async ({
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(
-    page.getByRole("button", { name: "Create vault", exact: true }),
+    page.getByRole("button", { name: "Connect Xverse to begin" }),
   ).toBeVisible();
   expect(
     await page.evaluate(
@@ -139,8 +137,6 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
   }, address);
   vault = fixture.vault;
   const dialog = page.getByRole("dialog");
-  await expect(dialog.getByLabel("Solver release")).toHaveValue("browser-served-test");
-  await expect(dialog.getByLabel("Solver release")).toHaveAttribute("readonly", "");
   await dialog
     .getByLabel("Recovery backup", { exact: true })
     .setInputFiles({
@@ -162,11 +158,13 @@ test("withdrawal dialog restores locally and saves the exact encrypted payout be
   const estimate = (await dialog.locator(".fee-estimate").textContent()) ?? "";
   const fee = Number(/miner fee ([\d,]+) sats/.exec(estimate)?.[1].replace(/,/g, ""));
   expect(fee).toBeGreaterThan(0);
-  await expect(dialog).toContainText("Payout: ");
+  await expect(dialog).toContainText("You receive");
+  await dialog.getByRole("button", { name: "Review withdrawal" }).click();
+  await expect(dialog).toContainText(`qsb-recovery-${vault.id}-withdrawal.json`);
   await dialog.getByRole("checkbox").check();
   const downloaded = page.waitForEvent("download");
   await dialog
-    .getByRole("button", { name: "Save intent and start search" })
+    .getByRole("button", { name: "Save backup and start search" })
     .click();
   const download = await downloaded;
   await expect(dialog).toContainText("Keep the updated withdrawal backup");

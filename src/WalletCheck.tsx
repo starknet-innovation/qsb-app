@@ -8,6 +8,26 @@ import {
 } from "./lib/wallet-check";
 import type { PublicVault } from "./lib/model";
 
+const kinds: { kind: WalletCheckKind; label: string; passed: string }[] = [
+  {
+    kind: "funding",
+    label: "Funding signature",
+    passed: "Funding synthetic signing passed: valid signature, transaction unchanged.",
+  },
+  {
+    kind: "helper",
+    label: "Helper signature",
+    passed: "Helper synthetic signing passed: valid signature, transaction unchanged.",
+  },
+  {
+    kind: "full-stack",
+    label: "Complete-stack signing",
+    passed:
+      "Complete-stack format check passed: Xverse signature verified and the full QSB-shaped payload preserved.",
+  },
+];
+type Outcome = { kind: WalletCheckKind; ok: boolean; text: string };
+
 export default function WalletCheck({
   wallet,
   vaults,
@@ -16,33 +36,41 @@ export default function WalletCheck({
   vaults: PublicVault[];
 }) {
   const [selected, setSelected] = useState(""),
-    [busy, setBusy] = useState(false),
-    [result, setResult] = useState(""),
+    [running, setRunning] = useState<WalletCheckKind>(),
+    [outcomes, setOutcomes] = useState<Outcome[]>([]),
     [accepted, setAccepted] = useState(false);
   const vault = vaults.find((v) => v.id === selected) || vaults[0];
-  async function run(kind: WalletCheckKind) {
+  const busy = running !== undefined;
+  // Runs the three synthetic signing requests in order and stops at the first that fails.
+  async function run() {
     if (!wallet || !vault || !accepted) return;
-    setBusy(true);
-    setResult("");
+    setOutcomes([]);
     try {
-      const fixture = walletCheckFixture(wallet, vault.scriptHex, kind);
-      const returned = await signPsbt(
-        wallet.address,
-        base64.encode(fixture.transaction.toPSBT()),
-        [0],
-      );
-      verifyWalletCheck(fixture, base64.decode(returned), wallet);
-      setResult(
-        kind === "full-stack"
-          ? "Complete-stack format check passed: Xverse signature verified and the full QSB-shaped payload preserved. The payload is disposable, not a solved authorization. Real withdrawal signing remains unverified."
-          : `${kind === "funding" ? "Funding" : "Helper"} synthetic signing passed: valid signature, transaction unchanged. This does not verify a real deposit or withdrawal.`,
-      );
-    } catch (e) {
-      setResult(
-        `Check did not pass: ${e instanceof Error ? e.message : "Wallet request failed"}. A wallet may reject synthetic inputs; this alone does not prove real transactions are unsupported.`,
-      );
+      for (const { kind, passed } of kinds) {
+        setRunning(kind);
+        try {
+          const fixture = walletCheckFixture(wallet, vault.scriptHex, kind);
+          const returned = await signPsbt(
+            wallet.address,
+            base64.encode(fixture.transaction.toPSBT()),
+            [0],
+          );
+          verifyWalletCheck(fixture, base64.decode(returned), wallet);
+          setOutcomes((o) => [...o, { kind, ok: true, text: passed }]);
+        } catch (e) {
+          setOutcomes((o) => [
+            ...o,
+            {
+              kind,
+              ok: false,
+              text: `Check did not pass: ${e instanceof Error ? e.message : "Wallet request failed"}. A wallet may reject synthetic inputs; this alone does not prove real transactions are unsupported.`,
+            },
+          ]);
+          return;
+        }
+      }
     } finally {
-      setBusy(false);
+      setRunning(undefined);
     }
   }
   return (
@@ -52,20 +80,14 @@ export default function WalletCheck({
     >
       <h2 id="wallet-check-title">Wallet compatibility check</h2>
       <p>
-        These synthetic transactions use no real Bitcoin. Their parent
-        transaction cannot be mined, and broadcasting is disabled. Signing
-        results stay in this browser and are discarded after checking.
+        Checks that Xverse can sign the kinds of transaction a QSB vault uses.
+        Xverse asks you to sign three synthetic transactions with example
+        amounts. They use no real Bitcoin, can't be mined, and nothing is
+        broadcast; the signatures are discarded after checking.
       </p>
       <p>
-        Xverse will show example amounts and fees. This checks a bare QSB
-        funding output and a helper signature with placeholder authorization.
-        Full withdrawal validation is separate.
-      </p>
-      <p>
-        The complete-stack check includes every Config A stack field using
-        disposable data. It tests whether Xverse preserves the larger payload
-        before we pay for a fresh proof bound to your wallet. It cannot prove
-        that a solved withdrawal is valid or will be accepted.
+        Passing doesn't prove that a solved withdrawal is valid or will be
+        accepted: real withdrawal signing remains unverified.
       </p>
       {!wallet || !vault ? (
         <p>Connect Xverse and create an unfunded vault first.</p>
@@ -99,29 +121,34 @@ export default function WalletCheck({
             <button
               className="secondary"
               disabled={busy || !accepted}
-              onClick={() => run("funding")}
+              onClick={() => void run()}
             >
-              Check funding signature
-            </button>
-            <button
-              className="secondary"
-              disabled={busy || !accepted}
-              onClick={() => run("helper")}
-            >
-              Check helper signature
-            </button>
-            <button
-              className="secondary"
-              disabled={busy || !accepted}
-              onClick={() => run("full-stack")}
-            >
-              Check complete-stack signing
+              Run wallet check
             </button>
           </div>
         </>
       )}
-      {busy && <p role="status">Waiting for Xverse…</p>}
-      {result && <p role="status">{result}</p>}
+      {(busy || outcomes.length > 0) && (
+        <ul className="wallet-check-results" role="status">
+          {kinds.map(({ kind, label }) => {
+            const outcome = outcomes.find((o) => o.kind === kind);
+            return (
+              <li key={kind} className={outcome ? (outcome.ok ? "ok" : "bad") : ""}>
+                <strong>{label}</strong>
+                <span>
+                  {outcome
+                    ? outcome.text
+                    : running === kind
+                      ? "Waiting for Xverse…"
+                      : busy
+                        ? "Waiting"
+                        : "Not run"}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }

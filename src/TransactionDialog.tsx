@@ -2,6 +2,7 @@ import {fingerprint} from './lib/provenance';
 import {readSessionEpoch} from './lib/api';
 import { operationsAllowed } from "./lib/readiness";
 import { useEffect, useRef, useState } from "react";
+import { AlertCircle, Check, X } from "lucide-react";
 import "./styles.css";
 import { CostDisclosure } from "./Costs";
 import { base64, hex } from "@scure/base";
@@ -27,6 +28,7 @@ import {
   decryptRecovery,
   encryptRecovery,
   downloadBackup,
+  recoveryBackupFilename,
   assertRecoveryAuthorization,
   bindRecoveryAssembly,
   assertRecoveryAssembly,
@@ -100,7 +102,8 @@ export default function TransactionDialog({
     // The exact bytes the server last confirmed it holds as this vault's intent.
     [confirmedRaw, setConfirmedRaw] = useState<string>(),
     [destination, setDestination] = useState(wallet.address),
-    [solverId, setSolverId] = useState<string | null>(null),
+    // The deployment's solver release: undefined while loading, null if none is served.
+    [solverId, setSolverId] = useState<string | null>(),
     [accepted, setAccepted] = useState(false),
     [file, setFile] = useState(""),
     [pass, setPass] = useState(""),
@@ -119,7 +122,12 @@ export default function TransactionDialog({
   const [signedReview, setSignedReview] = useState<{rawTxHex: string; txid: string; manifest: Withdrawal; generation: number; epoch: number}>();
   const [signedDownload, setSignedDownload] = useState<string>();
   const [submitAllowed, setSubmitAllowed] = useState(false);
+  const [copyNotice, setCopyNotice] = useState("");
   const submitAttempted = useRef(false);
+  // Unlock the backup, choose the details, then review. An authorization, or a deposit that
+  // is already signed, has nothing to choose and goes straight to review.
+  const [stage, setStage] = useState<"unlock" | "details" | "review">("unlock");
+  const feeTouched = useRef(false);
   async function reviewSigned(rawTxHex: string, txid: string, check: () => void) {
     if (!job) throw Error("Withdrawal job is missing.");
     check();
@@ -257,6 +265,13 @@ export default function TransactionDialog({
       lockQsb();
     };
   }, [fundingKey]);
+  // Start from a rate MARA accepts: its current minimum for a deposit, and half as much again
+  // for a withdrawal, whose search can take hours. Typing a rate replaces it.
+  const suggestedRate =
+    typeof minerFloor === "number" ? Math.max(1, Math.ceil(minerFloor * (deposit ? 1 : 1.5))) : undefined;
+  useEffect(() => {
+    if (!job && !feeTouched.current && suggestedRate !== undefined) setFeeRate(String(suggestedRate));
+  }, [suggestedRate]);
   const key = (p: Point) => `${p.txid}:${p.vout}`;
   const manualReady = !!pendingFunding?.rawTxHex && confirmedRaw === pendingFunding.rawTxHex.toLowerCase();
   // MARA refuses a rate below its current minimum. It's re-read right before a fee is fixed,
@@ -344,6 +359,7 @@ export default function TransactionDialog({
       check();
       setUnlocked(r);
       setAssemblyVerified(!!r.authorization?.assembly);
+      setStage(job || (deposit && pendingFunding) ? "review" : "details");
     });
   }
   async function input(p: Point): Promise<FundingInput> {
@@ -378,7 +394,7 @@ export default function TransactionDialog({
       return;
     }
     await navigator.clipboard?.writeText(rawTxHex).then(
-      () => setResult("Copied the signed deposit."),
+      () => setCopyNotice("Copied the signed deposit."),
       () => setError("Couldn't copy. Select the text and copy it yourself."),
     );
   }
@@ -739,19 +755,108 @@ export default function TransactionDialog({
       setAssemblyVerified(true);
     });
   }
-  const payoutPreview = (() => {
-    if (deposit || job || !vault.funding) return undefined;
+  const short = (s: string) => `${s.slice(0, 7)}…${s.slice(-6)}`;
+  const btc = (n: bigint | string) => `${formatBtc(n)} BTC`;
+  const sats = (n: bigint) => `${n.toLocaleString()} sats (${btc(n)})`;
+  const selected = points.filter((p) => selection.includes(key(p)));
+  const payout = (() => {
+    if (deposit || job || !vault.funding || !selected[0] || typeof withdrawalQuote !== "object") return undefined;
     try {
-      const helper = points.find((p) => selection.includes(key(p)));
-      if (!helper) return undefined;
-      if (typeof withdrawalQuote !== "object") return undefined;
-      const value =
-        BigInt(vault.funding.value) + BigInt(helper.value) - withdrawalQuote.fee;
-      return value > 0n ? formatBtc(value.toString()) : undefined;
+      return BigInt(vault.funding.value) + BigInt(selected[0].value) - withdrawalQuote.fee;
     } catch {
       return undefined;
     }
   })();
+  // What the transaction moves, from the same quote the signing step recomputes.
+  const summary = ((): [string, string][] | undefined => {
+    try {
+      if (job)
+        return [
+          ["Destination", job.manifest.destination],
+          ["Payout", btc(job.manifest.outputValue)],
+          ["Miner fee", btc(job.manifest.fee)],
+        ];
+      if (typeof feeQuote !== "object") return undefined;
+      if (deposit) {
+        const amountSats = parseBtc(amount);
+        const change = selected.reduce((n, p) => n + BigInt(p.value), 0n) - amountSats - feeQuote.fee;
+        return [
+          ["Deposit to the vault", btc(amountSats)],
+          ["Miner fee", sats(feeQuote.fee)],
+          [
+            "Change back to your wallet",
+            "change" in feeQuote && feeQuote.change
+              ? btc(change)
+              : "None: it would be below the dust limit, so it goes to the fee",
+          ],
+          ["Leaves your wallet", btc(amountSats + feeQuote.fee)],
+        ];
+      }
+      if (!vault.funding || !selected[0] || payout === undefined) return undefined;
+      return [
+        ["Vault balance", btc(vault.funding.value)],
+        ["Helper output", `+ ${btc(selected[0].value)}`],
+        ["Miner fee", `− ${sats(feeQuote.fee)}`],
+        ["You receive", payout > 0n ? `${btc(payout)} at ${short(destination)}` : "Nothing: the fee is larger than the amount"],
+      ];
+    } catch {
+      return undefined;
+    }
+  })();
+  const summaryTable = summary && (
+    <dl className="summary">
+      {summary.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+  // Why "Review" is disabled, shown next to it.
+  const detailsBlocker = deposit
+    ? typeof depositQuote === "object"
+      ? ""
+      : depositQuote ?? "Select payment outputs, then enter an amount and a fee rate."
+    : solverId === null
+      ? "No solver is available on this server, so a withdrawal can't start."
+      : solverId === undefined
+        ? "Checking the server's solver…"
+        : selection.length !== 1
+          ? "Choose one helper output."
+          : typeof withdrawalQuote !== "object"
+            ? withdrawalQuote ?? "Enter a fee rate."
+            : payout === undefined || payout <= 0n
+              ? "The miner fee is larger than the amount."
+              : "";
+  const stages = job ? (["unlock", "review"] as const) : (["unlock", "details", "review"] as const);
+  const stageIndex = (stages as readonly string[]).indexOf(stage) + 1;
+  const stageName = {
+    unlock: "Unlock your backup",
+    details: deposit ? "Choose the amount" : "Choose where it goes",
+    review: "Review",
+  }[stage];
+  const feeBtc = job
+    ? formatBtc(job.manifest.fee)
+    : typeof feeQuote === "object"
+      ? formatBtc(feeQuote.fee)
+      : undefined;
+  const blocked = !!job && !!intentBackup && !assemblyVerified;
+  const blocker = !accepted
+    ? "Tick the box above to continue."
+    : blocked
+      ? "Select the signing backup you just saved to continue."
+      : "";
+  const errorLine = error && (
+    <p role="alert" className="error-message">
+      {error}
+    </p>
+  );
+  const verifiedLine = (
+    <p className="verified">
+      <Check size={15} /> Recovery backup verified on this device.
+    </p>
+  );
   return (
     <dialog
       ref={dialog}
@@ -762,13 +867,20 @@ export default function TransactionDialog({
     >
       <div className="dialog-content transaction-dialog">
         <button
-          className="close-dialog"
+          className="close"
           disabled={!!busy}
           onClick={onClose}
           aria-label="Close transaction"
         >
-          ×
+          <X size={20} />
         </button>
+        <div className="eyebrow">
+          {result
+            ? signedReview
+              ? "LAST STEP · APPROVE AND SUBMIT"
+              : "RESULT"
+            : `STEP ${stageIndex} OF ${stages.length} · ${stageName.toUpperCase()}`}
+        </div>
         <h2>
           {job
             ? "Authorize withdrawal"
@@ -776,197 +888,249 @@ export default function TransactionDialog({
               ? "Deposit into vault"
               : "Prepare withdrawal"}
         </h2>
-        <p>{vault.name}</p>
-        {job && solvedResult !== undefined && (
-          <p>
-            The solved result is public. Xverse signs the helper on this
-            device. The recovery backup stays in this browser. Signing does not
-            broadcast; submission requires your separate approval.
-          </p>
-        )}
+        <p className="dialog-vault">{vault.name}</p>
+        <div className="steps">
+          {stages.map((s, i) => (
+            <span key={s} className={result || i < stageIndex ? "done" : ""} />
+          ))}
+        </div>
         {result ? (
           <>
-            <p role="status">{result}</p>
-            {signedReview && <section aria-label="Exact transaction approval">
-              <p>Transaction ID: {signedReview.txid}<br />
-                Destination: {signedReview.manifest.destination}<br />
-                Payout: {formatBtc(signedReview.manifest.outputValue)} BTC<br />
-                Miner fee: {formatBtc(signedReview.manifest.fee)} BTC<br />
-                {(() => {
-                  try {
-                    const vsize = transactionVsize(signedReview.rawTxHex);
-                    return `Signed size: ${vsize.toLocaleString()} vB · about ${(Number(signedReview.manifest.fee) / vsize).toFixed(2)} sat/vB`;
-                  } catch {
-                    return "Signed size unavailable.";
-                  }
-                })()}</p>
-              {signedDownload && job && <button className="secondary" onClick={() => downloadPublicResult(signedDownload, job.id)}>Download signed result again</button>}
-              <button disabled={!!busy || !submitAllowed || submitAttempted.current || signedReview.generation !== generation.current || signedReview.epoch !== readSessionEpoch()} onClick={approveSigned}>Approve exact transaction and submit</button>
-              <button className="secondary" disabled={!!busy} onClick={onClose}>Cancel submission</button>
-            </section>}
-
+            <p role="status" className="result-message">{result}</p>
+            {signedReview && (
+              <section aria-label="Exact transaction approval">
+                <dl className="summary">
+                  <div><dt>Transaction ID</dt><dd>{signedReview.txid}</dd></div>
+                  <div><dt>Destination</dt><dd>{signedReview.manifest.destination}</dd></div>
+                  <div><dt>Payout</dt><dd>{formatBtc(signedReview.manifest.outputValue)} BTC</dd></div>
+                  <div><dt>Miner fee</dt><dd>{formatBtc(signedReview.manifest.fee)} BTC</dd></div>
+                  <div>
+                    <dt>Signed size</dt>
+                    <dd>
+                      {(() => {
+                        try {
+                          const vsize = transactionVsize(signedReview.rawTxHex);
+                          return `${vsize.toLocaleString()} vB · about ${(Number(signedReview.manifest.fee) / vsize).toFixed(2)} sat/vB`;
+                        } catch {
+                          return "Unavailable";
+                        }
+                      })()}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="dialog-actions">
+                  <button className="secondary" disabled={!!busy} onClick={onClose}>Cancel submission</button>
+                  {signedDownload && job && <button className="secondary" onClick={() => downloadPublicResult(signedDownload, job.id)}>Download signed result again</button>}
+                  <button className="primary" disabled={!!busy || !submitAllowed || submitAttempted.current || signedReview.generation !== generation.current || signedReview.epoch !== readSessionEpoch()} onClick={approveSigned}>Approve exact transaction and submit</button>
+                </div>
+              </section>
+            )}
             {intentBackup && (
               <button
                 className="secondary"
                 onClick={() =>
-                  downloadBackup(intentBackup, `${vault.id}-withdrawal`)
+                  downloadBackup(intentBackup, `${vault.id}-${job ? "signing" : "withdrawal"}`)
                 }
               >
-                Download withdrawal backup again
+                Download {job ? "signing" : "withdrawal"} backup again
               </button>
             )}
+            {errorLine}
+            {!signedReview && (
+              <div className="dialog-actions">
+                <button className="secondary" disabled={!!busy} onClick={onClose}>
+                  Close
+                </button>
+                {!deposit && !job && (
+                  <a className="primary" href="#/activity" onClick={onClose}>
+                    Go to Activity
+                  </a>
+                )}
+              </div>
+            )}
           </>
-        ) : (
+        ) : stage === "unlock" || !unlocked ? (
           <>
-            {!unlocked ? (
+            <p>
+              Select this vault's recovery backup and enter its passphrase.
+              It's checked on this device; neither the file nor the passphrase
+              is uploaded.
+            </p>
+            <label>
+              Recovery backup
+              <input
+                type="file"
+                accept="application/json"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (f) {
+                    if (f.size > 260000) {
+                      setError("Recovery file is too large.");
+                      return;
+                    }
+                    setFile(await f.text());
+                  }
+                }}
+              />
+            </label>
+            <label>
+              Backup passphrase
+              <input
+                type="password"
+                autoComplete="off"
+                value={pass}
+                onChange={(e) => setPass(e.target.value)}
+              />
+            </label>
+            {errorLine}
+            <div className="dialog-actions">
+              <button
+                className="primary"
+                disabled={!!busy || !file || !pass}
+                onClick={restore}
+              >
+                Verify backup locally
+              </button>
+            </div>
+          </>
+        ) : stage === "details" ? (
+          <>
+            {verifiedLine}
+            <fieldset>
+              <legend>
+                {deposit
+                  ? "Pay from (choose up to eight outputs)"
+                  : "Helper output (choose one)"}
+              </legend>
+              {!deposit && (
+                <p className="hint">
+                  A small output from your wallet that the withdrawal also
+                  spends. Its value is added to your payout.
+                </p>
+              )}
+              {points.length === 0 && (
+                <p>No confirmed payment outputs available.</p>
+              )}
+              {points.map((p) => (
+                <label key={key(p)}>
+                  <input
+                    type={deposit ? "checkbox" : "radio"}
+                    name="payment-output"
+                    checked={selection.includes(key(p))}
+                    onChange={(e) =>
+                      setSelection(
+                        deposit
+                          ? e.target.checked
+                            ? [...selection, key(p)]
+                            : selection.filter((x) => x !== key(p))
+                          : [key(p)],
+                      )
+                    }
+                  />
+                  <span>
+                    {formatBtc(p.value)} BTC{" "}
+                    <span className="muted">
+                      · {p.txid.slice(0, 12)}…:{p.vout}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+            {deposit ? (
+              <label>
+                Deposit amount (BTC)
+                <input
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
+              </label>
+            ) : (
+              <label>
+                Withdrawal destination
+                <input
+                  value={destination}
+                  onChange={(e) => setDestination(e.target.value)}
+                />
+              </label>
+            )}
+            {typeof feeQuote === "object" && "saved" in feeQuote ? (
+              <p className="fee-estimate">
+                Miner fee {feeQuote.fee.toLocaleString()} sats ({formatBtc(feeQuote.fee)} BTC), fixed by the saved intent.
+              </p>
+            ) : (
               <>
                 <label>
-                  Recovery backup
+                  Miner fee rate (sat/vB)
                   <input
-                    type="file"
-                    accept="application/json"
-                    onChange={async (e) => {
-                      const f = e.target.files?.[0];
-                      if (f) {
-                        if (f.size > 260000) {
-                          setError("Recovery file is too large.");
-                          return;
-                        }
-                        setFile(await f.text());
-                      }
+                    inputMode="decimal"
+                    aria-describedby="fee-estimate"
+                    value={feeRate}
+                    onChange={(e) => {
+                      feeTouched.current = true;
+                      setFeeRate(e.target.value);
                     }}
                   />
                 </label>
-                <label>
-                  Backup passphrase
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    value={pass}
-                    onChange={(e) => setPass(e.target.value)}
-                  />
-                </label>
-                <button
-                  className="secondary"
-                  disabled={!!busy || !file || !pass}
-                  onClick={restore}
-                >
-                  Verify backup locally
-                </button>
-              </>
-            ) : (
-              <p>Recovery backup verified on this device.</p>
-            )}
-            {job ? (
-              <div className="info-note">
-                <p>
-                  Destination: {job.manifest.destination}
-                  <br />
-                  Payout: {formatBtc(job.manifest.outputValue)} BTC
-                  <br />
-                  Miner fee: {formatBtc(job.manifest.fee)} BTC
+                <p className="fee-estimate" id="fee-estimate">
+                  {typeof feeQuote === "object"
+                    ? `${deposit ? "Estimated size" : "Size at most"} ${feeQuote.vsize.toLocaleString()} vB · miner fee ${feeQuote.fee.toLocaleString()} sats (${formatBtc(feeQuote.fee)} BTC)` +
+                      ("change" in feeQuote && !feeQuote.change
+                        ? ` · no change output: the change would be below the dust limit, so the leftover goes to the fee, about ${(Number(feeQuote.fee) / feeQuote.vsize).toFixed(2)} sat/vB`
+                        : "")
+                    : feeQuote ??
+                      (deposit
+                        ? "Select payment outputs and enter an amount and a fee rate to see the miner fee."
+                        : "Enter a fee rate to see the miner fee. It's fixed when you save the intent, before the search.")}
                 </p>
-              </div>
-            ) : (
-              <>
-                <fieldset>
-                  <legend>
-                    {deposit
-                      ? "Payment outputs (choose up to eight)"
-                      : "Helper output (choose one)"}
-                  </legend>
-                  {points.length === 0 && (
-                    <p>No confirmed payment outputs available.</p>
-                  )}
-                  {points.map((p) => (
-                    <label key={key(p)}>
-                      <input
-                        type={deposit ? "checkbox" : "radio"}
-                        name="payment-output"
-                        checked={selection.includes(key(p))}
-                        onChange={(e) =>
-                          setSelection(
-                            deposit
-                              ? e.target.checked
-                                ? [...selection, key(p)]
-                                : selection.filter((x) => x !== key(p))
-                              : [key(p)],
-                          )
-                        }
-                      />
-                      {formatBtc(p.value)} BTC · {p.txid.slice(0, 12)}…:{p.vout}
-                    </label>
-                  ))}
-                </fieldset>
-                {deposit ? (
-                  <label>
-                    Deposit amount (BTC)
-                    <input
-                      inputMode="decimal"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                    />
-                  </label>
-                ) : (
-                  <label>
-                    Withdrawal destination
-                    <input
-                      value={destination}
-                      onChange={(e) => setDestination(e.target.value)}
-                    />
-                  </label>
-                )}
-                {!deposit && (
-                  <label>
-                    Solver release
-                    <input value={solverId || "No runnable solver is configured"} readOnly />
-                  </label>
-                )}
-                {typeof feeQuote === "object" && "saved" in feeQuote ? (
-                  <p className="fee-estimate">
-                    Miner fee {feeQuote.fee.toLocaleString()} sats ({formatBtc(feeQuote.fee)} BTC), fixed by the saved intent.
-                  </p>
-                ) : (
-                  <>
-                    <label>
-                      Miner fee rate (sat/vB)
-                      <input
-                        inputMode="decimal"
-                        aria-describedby="fee-estimate"
-                        value={feeRate}
-                        onChange={(e) => setFeeRate(e.target.value)}
-                      />
-                    </label>
-                    <p className="fee-estimate" id="fee-estimate">
-                      {typeof feeQuote === "object"
-                        ? `${deposit ? "Estimated size" : "Size at most"} ${feeQuote.vsize.toLocaleString()} vB · miner fee ${feeQuote.fee.toLocaleString()} sats (${formatBtc(feeQuote.fee)} BTC)` +
-                          ("change" in feeQuote && !feeQuote.change
-                            ? ` · no change output: the change would be below the dust limit, so the leftover goes to the fee, about ${(Number(feeQuote.fee) / feeQuote.vsize).toFixed(2)} sat/vB`
-                            : "")
-                        : feeQuote ??
-                          (deposit
-                            ? "Select payment outputs and enter an amount and a fee rate to see the miner fee."
-                            : "Enter a fee rate to see the miner fee. It's fixed when you save the intent, before the search.")}
-                      {minerFloor === null
-                        ? " MARA's minimum rate is unavailable right now; nothing can be submitted until it is."
-                        : minerFloor !== undefined
-                          ? ` MARA's current minimum: ${minerFloor} sat/vB.` +
-                            (() => {
-                              try {
-                                return feeRate.trim() && belowMinerFloor(parseFeeRate(feeRate), minerFloor)
-                                  ? " This rate is below it."
-                                  : "";
-                              } catch {
-                                return "";
-                              }
-                            })() +
-                            (deposit ? "" : " Leave a margin: the search can take hours before the withdrawal is submitted.")
-                          : ""}
-                    </p>
-                  </>
-                )}
+                <p className="hint">
+                  {minerFloor === null
+                    ? "MARA's minimum rate is unavailable right now; nothing can be submitted until it is."
+                    : minerFloor !== undefined
+                      ? `MARA's current minimum: ${minerFloor} sat/vB.` +
+                        (() => {
+                          try {
+                            return feeRate.trim() && belowMinerFloor(parseFeeRate(feeRate), minerFloor)
+                              ? " This rate is below it."
+                              : "";
+                          } catch {
+                            return "";
+                          }
+                        })() +
+                        (deposit ? "" : " Leave a margin: the search can take hours before the withdrawal is submitted.")
+                      : "Checking MARA's minimum rate…"}
+                </p>
               </>
             )}
+            {summaryTable}
+            {errorLine}
+            <div className="dialog-actions">
+              <button
+                className="primary"
+                disabled={!!detailsBlocker}
+                onClick={() => {
+                  // The reviewed rate is final: a later change of MARA's minimum never rewrites it.
+                  feeTouched.current = true;
+                  setError("");
+                  setStage("review");
+                }}
+              >
+                {deposit ? "Review deposit" : "Review withdrawal"}
+              </button>
+            </div>
+            {detailsBlocker && <p className="blocker">{detailsBlocker}</p>}
+          </>
+        ) : (
+          <>
+            {job && solvedResult !== undefined && (
+              <p>
+                The solved result is public. Xverse signs the helper on this
+                device. The recovery backup stays in this browser. Signing does not
+                broadcast; submission requires your separate approval.
+              </p>
+            )}
+            {verifiedLine}
+            {!(deposit && pendingFunding) && summaryTable}
             {deposit && pendingFunding && (
               <p role="status">
                 {pendingFunding.rawTxHex
@@ -976,7 +1140,7 @@ export default function TransactionDialog({
               </p>
             )}
             {deposit && pendingFunding?.rawTxHex && !(manualReady && submissionOpen) && (
-              <p className="fee-estimate">
+              <p className="hint">
                 Manual submission on MARA Slipstream becomes available once the app has recorded this signed deposit and
                 deposits are switched on. Press "Submit deposit again" first.
               </p>
@@ -997,40 +1161,56 @@ export default function TransactionDialog({
                 <button type="button" className="secondary" onClick={() => void copyRecorded(pendingFunding.rawTxHex!)}>
                   Copy transaction
                 </button>
+                {copyNotice && <p className="hint">{copyNotice}</p>}
               </details>
             )}
-            <CostDisclosure
-              feeBtc={
-                job
-                  ? formatBtc(job.manifest.fee)
-                  : typeof feeQuote === "object"
-                    ? formatBtc(feeQuote.fee)
-                    : undefined
-              }
-              job={job}
-            />
-            {payoutPreview && (
-              <p role="status">
-                Payout: {payoutPreview} BTC to {destination}. The selected
-                helper output is included in this amount.
+            {!(deposit && pendingFunding) && (
+              <div className="cost-summary">
+                <p>
+                  {!summary && <><strong>Miner fee: {feeBtc ? `${feeBtc} BTC` : "not set yet"}.</strong>{" "}</>}
+                  GPU compute, service and processing fees aren't billed yet.
+                </p>
+                <details>
+                  <summary>See itemized costs</summary>
+                  <CostDisclosure feeBtc={feeBtc} job={job} />
+                </details>
+              </div>
+            )}
+            {deposit && !pendingFunding && (
+              <div className="info-note compact warning">
+                <AlertCircle size={17} />
+                <p>
+                  QSB is experimental: a research construction, not a
+                  guarantee. Lost recovery material can mean permanently lost
+                  Bitcoin, and there is no service-held recovery key.
+                </p>
+              </div>
+            )}
+            {!deposit && !job && (
+              <p className="hint">
+                Starting the search downloads{" "}
+                <code>{recoveryBackupFilename(`${vault.id}-withdrawal`)}</code>.
+                Keep it: you need it to authorize this withdrawal, and it
+                includes everything in your earlier backup.
               </p>
             )}
-            {job && intentBackup && !assemblyVerified && (
+            {job && !assemblyVerified && !intentBackup && (
+              <p className="hint">
+                Saving downloads{" "}
+                <code>{recoveryBackupFilename(`${vault.id}-signing`)}</code>,
+                which binds this exact solution. You then select that file here
+                so it's checked before Xverse signs.
+              </p>
+            )}
+            {blocked && (
               <div className="info-note">
                 <div>
                   <p>
-                    Your signing backup binds the exact QSB solution. Keep this
-                    newest file and re-upload it before sending authorization to
-                    Xverse.
+                    Select the file you just saved,{" "}
+                    <code>{recoveryBackupFilename(`${vault.id}-signing`)}</code>,
+                    to check it. Keep this newest backup: it includes everything
+                    in the earlier ones.
                   </p>
-                  <button
-                    className="secondary"
-                    onClick={() =>
-                      downloadBackup(intentBackup, `${vault.id}-signing`)
-                    }
-                  >
-                    Download signing backup again
-                  </button>
                   <label>
                     Verify updated signing backup
                     <input
@@ -1042,50 +1222,83 @@ export default function TransactionDialog({
                       }
                     />
                   </label>
+                  <button
+                    className="text-button"
+                    onClick={() =>
+                      downloadBackup(intentBackup, `${vault.id}-signing`)
+                    }
+                  >
+                    Download signing backup again
+                  </button>
                 </div>
               </div>
             )}
-            <label>
-              <input
-                type="checkbox"
-                checked={accepted}
-                onChange={(e) => setAccepted(e.target.checked)}
-              />
-              I have reviewed the itemized costs and experimental loss risk. Customer compute billing is not enabled; this is not authorization for unlimited charges. I authorize the stated Bitcoin fee only when signing the transaction in Xverse. A withdrawal may take a long time.
-              Recovery keys are one-time; the payout cannot be changed after
-              authorization.
-            </label>
-            <button
-              className="primary"
-              disabled={
-                !!busy ||
-                !unlocked ||
-                !accepted ||
-                (!!job && !!intentBackup && !assemblyVerified)
-              }
-              onClick={
-                job ? authorize : deposit ? depositFunds : beginWithdrawal
-              }
-            >
-              {busy ||
-                (job
-                  ? assemblyVerified
-                    ? "Authorize and sign"
-                    : "Save signing backup"
-                  : deposit
-                    ? pendingFunding
-                      ? pendingFunding.rawTxHex
-                        ? "Submit deposit again"
-                        : "Record deposit"
-                      : "Review deposit in Xverse"
-                    : "Save intent and start search")}
-            </button>
+            <div className="consent">
+              <ul>
+                <li>
+                  <strong>
+                    Recovery keys are one-time; the payout cannot be changed
+                    after authorization.
+                  </strong>
+                </li>
+                <li>I have reviewed the itemized costs and experimental loss risk.</li>
+                <li>
+                  Customer compute billing is not enabled; this is not
+                  authorization for unlimited charges.
+                </li>
+                <li>
+                  I authorize the stated Bitcoin fee only when signing the
+                  transaction in Xverse.
+                </li>
+                <li>A withdrawal may take a long time.</li>
+              </ul>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={accepted}
+                  onChange={(e) => setAccepted(e.target.checked)}
+                />
+                I have read these statements and accept them.
+              </label>
+            </div>
+            {errorLine}
+            <div className="dialog-actions">
+              {!job && !pendingFunding && (
+                <button
+                  className="secondary"
+                  disabled={!!busy}
+                  onClick={() => {
+                    setError("");
+                    setAccepted(false);
+                    setStage("details");
+                  }}
+                >
+                  Back
+                </button>
+              )}
+              <button
+                className="primary"
+                disabled={!!busy || !unlocked || !accepted || blocked}
+                onClick={
+                  job ? authorize : deposit ? depositFunds : beginWithdrawal
+                }
+              >
+                {busy ||
+                  (job
+                    ? assemblyVerified
+                      ? "Authorize and sign"
+                      : "Save signing backup"
+                    : deposit
+                      ? pendingFunding
+                        ? pendingFunding.rawTxHex
+                          ? "Submit deposit again"
+                          : "Record deposit"
+                        : "Review deposit in Xverse"
+                      : "Save backup and start search")}
+              </button>
+            </div>
+            {blocker && !busy && <p className="blocker">{blocker}</p>}
           </>
-        )}
-        {error && (
-          <p role="alert" className="error-message">
-            {error}
-          </p>
         )}
       </div>
     </dialog>
