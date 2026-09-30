@@ -115,8 +115,10 @@ jobs:
           # Each AWS CLI and Terraform process asks the helper for credentials; nothing stores or prints them.
           printf '[profile qsb-deploy]\ncredential_process = python3 %s/terraform/scripts/github_deploy.py credential-process\n' \
             "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/aws-config"
-          { echo "AWS_CONFIG_FILE=$RUNNER_TEMP/aws-config"; echo "AWS_PROFILE=qsb-deploy"; } >> "$GITHUB_ENV"
-          AWS_CONFIG_FILE="$RUNNER_TEMP/aws-config" AWS_PROFILE=qsb-deploy \
+          # Terraform's provider drops a credential_process's stderr, so the helper also notes failures privately.
+          { echo "AWS_CONFIG_FILE=$RUNNER_TEMP/aws-config"; echo "AWS_PROFILE=qsb-deploy"
+            echo "QSB_CREDENTIAL_LOG=$LOGS/credentials.log"; } >> "$GITHUB_ENV"
+          AWS_CONFIG_FILE="$RUNNER_TEMP/aws-config" AWS_PROFILE=qsb-deploy QSB_CREDENTIAL_LOG="$LOGS/credentials.log" \
             aws sts get-caller-identity --query Arn --output text > "$RUNNER_TEMP/caller" 2>&1 \
             || { python3 terraform/scripts/github_deploy.py redact < "$RUNNER_TEMP/caller"; exit 1; }
           grep -q ':assumed-role/qsb-github-deploy/' "$RUNNER_TEMP/caller" || { echo "That isn't qsb-github-deploy."; exit 1; }
@@ -226,8 +228,10 @@ jobs:
           # Each AWS CLI and Terraform process asks the helper for credentials; nothing stores or prints them.
           printf '[profile qsb-deploy]\ncredential_process = python3 %s/terraform/scripts/github_deploy.py credential-process\n' \
             "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/aws-config"
-          { echo "AWS_CONFIG_FILE=$RUNNER_TEMP/aws-config"; echo "AWS_PROFILE=qsb-deploy"; } >> "$GITHUB_ENV"
-          AWS_CONFIG_FILE="$RUNNER_TEMP/aws-config" AWS_PROFILE=qsb-deploy \
+          # Terraform's provider drops a credential_process's stderr, so the helper also notes failures privately.
+          { echo "AWS_CONFIG_FILE=$RUNNER_TEMP/aws-config"; echo "AWS_PROFILE=qsb-deploy"
+            echo "QSB_CREDENTIAL_LOG=$LOGS/credentials.log"; } >> "$GITHUB_ENV"
+          AWS_CONFIG_FILE="$RUNNER_TEMP/aws-config" AWS_PROFILE=qsb-deploy QSB_CREDENTIAL_LOG="$LOGS/credentials.log" \
             aws sts get-caller-identity --query Arn --output text > "$RUNNER_TEMP/caller" 2>&1 \
             || { python3 terraform/scripts/github_deploy.py redact < "$RUNNER_TEMP/caller"; exit 1; }
           grep -q ':assumed-role/qsb-github-deploy/' "$RUNNER_TEMP/caller" || { echo "That isn't qsb-github-deploy."; exit 1; }

@@ -13,6 +13,7 @@ through redact(): the raw output goes to a private log file, which the workflow 
   require-approver                 fail unless the qsb-deploy environment requires a reviewer
 """
 import json
+import io
 import os
 import re
 import signal
@@ -27,6 +28,10 @@ from collections import Counter
 from pathlib import Path
 
 PATTERNS = [
+    # credential_process output, should an SDK ever quote it in an error.
+    (re.compile(r'("(?:AccessKeyId|SecretAccessKey|SessionToken)"\s*:\s*)"[^"]*"'), r'\1"<redacted>"'),
+    (re.compile(r'((?:aws_secret_access_key|aws_session_token|SecretAccessKey|SessionToken)\s*[=:]\s*)\S+', re.I),
+     r'\1<redacted>'),
     (re.compile(r'arn:aws[^\s"\'`,\]\)}>]*'), '<arn>'),
     (re.compile(r'\b(?:AKIA|ASIA)[A-Z0-9]{16}\b'), '<access-key>'),
     (re.compile(r'(?<!\d)\d{12}(?!\d)'), '<account>'),
@@ -38,8 +43,9 @@ PATTERNS = [
     (re.compile(r'\[id=[^\]]*\]'), '[id=<redacted>]'),
     (re.compile(r'\bARO[A-Z0-9]{17,}\b'), '<role-id>'),
     # Provider errors name the resource in parentheses: "reading API Gateway v2 API (a1b2c3d4e5)".
-    (re.compile(r'(\b(?:reading|creating|updating|deleting|waiting for|describing|listing|tagging|modifying|putting|'
-                r'setting)\b[^()\n]{0,80}?)\([^)\s]{6,}\)', re.I), r'\1(<id>)'),
+    (re.compile(r'(\b(?:reading|creating|updating|deleting|waiting for|describing|listing|(?:un)?tagging|modifying|'
+                r'putting|setting|flattening|expanding|importing|finding|refreshing)\b[^()\n]{0,80}?)\([^)\s]{6,}\)', re.I),
+     r'\1(<id>)'),
     (re.compile(r's3://[^\s/"\']+'), 's3://<bucket>'),
 ]
 # Values of these variables are shown in the summary; they're public (the app's /api/config serves them).
@@ -115,8 +121,9 @@ def run(log, ok, cmd):
         out.flush()
         start = out.tell()
         child = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT)
-        # A cancelled job interrupts the whole process group. Terraform then stops cleanly and saves its state;
-        # this wrapper keeps waiting rather than killing it, as subprocess.run would.
+        # If an interrupt reaches Terraform, it stops cleanly and saves its state; this wrapper keeps waiting rather
+        # than killing it, as subprocess.run would. A cancelled job may still kill the tree before that: don't
+        # cancel mid-apply.
         previous = {sig: signal.signal(sig, lambda *_: None) for sig in (signal.SIGINT, signal.SIGTERM)}
         try:
             code = child.wait()
@@ -132,18 +139,28 @@ def run(log, ok, cmd):
     return code
 
 
-def request(req, attempts=3):
-    for attempt in range(attempts):
+# STS reports these as HTTP 400, but they're transient.
+TRANSIENT_STS = ('IDPCommunicationError', 'InvalidIdentityToken', 'Throttling')
+
+
+def request(req, deadline):
+    """The response body, retrying transient failures until the monotonic deadline."""
+    attempt = 0
+    while True:
+        remaining = deadline - time.monotonic()
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=max(1, min(10, remaining))) as response:
                 return response.read()
         except urllib.error.HTTPError as e:
-            if e.code < 500 or attempt == attempts - 1:
+            body = e.read()
+            transient = e.code >= 500 or e.code == 429 or any(c.encode() in body for c in TRANSIENT_STS)
+            if not transient or remaining < 5:
+                raise urllib.error.HTTPError(e.url, e.code, e.reason, e.headers, io.BytesIO(body)) from None
+        except (urllib.error.URLError, TimeoutError):
+            if remaining < 5:
                 raise
-        except urllib.error.URLError:
-            if attempt == attempts - 1:
-                raise
-        time.sleep(2 ** attempt)
+        time.sleep(min(2 ** attempt, 4))
+        attempt += 1
 
 
 def sts_credentials(body):
@@ -155,32 +172,47 @@ def sts_credentials(body):
         name: field('AssumedRoleUser', name) for name in ('Arn', 'AssumedRoleId')}
 
 
+def credential_failure(message):
+    """Report on stderr, and in the private log too: Terraform's provider drops a credential_process's stderr."""
+    sys.stderr.write(message + '\n')
+    path = os.environ.get('QSB_CREDENTIAL_LOG')
+    if path:
+        with open(path, 'a') as f:
+            f.write(f'{time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())} {message}\n')
+    return 1
+
+
 def credential_process():
     """The deploy role's credentials in credential_process form, for the AWS CLI, Terraform and its S3 backend.
 
     The workflow names this in an AWS config profile, so each SDK asks for credentials when it needs them. They go
     to the SDK over a pipe; nothing stores or logs them, and the SDKs refresh them before they expire. A fresh
     OIDC token each time means no token outlives its use. Reads QSB_ROLE_ARN, QSB_ACCOUNT_ID, QSB_SESSION and
-    AWS_REGION, and refuses a role outside that account, as configure-aws-credentials' allowed-account-ids does."""
+    AWS_REGION, and refuses a role outside that account, as configure-aws-credentials' allowed-account-ids does.
+    Everything, retries included, finishes within the SDKs' one-minute limit on a credential_process."""
     role, account = os.environ['QSB_ROLE_ARN'], os.environ['QSB_ACCOUNT_ID']
     region, session = os.environ['AWS_REGION'], os.environ['QSB_SESSION']
-    oidc = json.loads(request(urllib.request.Request(
-        os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=sts.amazonaws.com',
-        headers={'Authorization': f'Bearer {os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]}'})))['value']
+    deadline = time.monotonic() + 50
+    try:
+        oidc = json.loads(request(urllib.request.Request(
+            os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=sts.amazonaws.com',
+            headers={'Authorization': f'Bearer {os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]}'}), deadline))['value']
+    except (urllib.error.URLError, TimeoutError, ValueError, KeyError) as e:
+        return credential_failure(f'GitHub OIDC token request failed: {redact(str(e), [role, account])}')
     body = urllib.parse.urlencode({'Action': 'AssumeRoleWithWebIdentity', 'Version': '2011-06-15', 'RoleArn': role,
                                    'RoleSessionName': session, 'WebIdentityToken': oidc,
                                    'DurationSeconds': '3600'}).encode()
     try:
         c = sts_credentials(request(urllib.request.Request(
             f'https://sts.{region}.amazonaws.com/', data=body,
-            headers={'Content-Type': 'application/x-www-form-urlencoded'})))
+            headers={'Content-Type': 'application/x-www-form-urlencoded'}), deadline))
     except urllib.error.HTTPError as e:
-        sys.stderr.write(f'AssumeRoleWithWebIdentity failed with HTTP {e.code}: '
-                         f'{redact(e.read().decode(errors="replace"), [role, account])[:2000]}\n')
-        return 1
+        return credential_failure(f'AssumeRoleWithWebIdentity failed with HTTP {e.code}: '
+                                  f'{redact(e.read().decode(errors="replace"), [role, account])[:2000]}')
+    except (urllib.error.URLError, TimeoutError, ET.ParseError, AttributeError) as e:
+        return credential_failure(f'AssumeRoleWithWebIdentity failed: {redact(str(e), [role, account])}')
     if c['Arn'].split(':')[4] != account:
-        sys.stderr.write('The role is not in the account QSB_AWS_ACCOUNT_ID names.\n')
-        return 1
+        return credential_failure('The role is not in the account QSB_AWS_ACCOUNT_ID names.')
     json.dump({'Version': 1, 'AccessKeyId': c['AccessKeyId'], 'SecretAccessKey': c['SecretAccessKey'],
                'SessionToken': c['SessionToken'], 'Expiration': c['Expiration']}, sys.stdout)
     return 0

@@ -82,6 +82,41 @@ class Redaction(unittest.TestCase):
         self.assertEqual(set(recorded), masked)
 
 
+class Retries(unittest.TestCase):
+    def fail_then(self, *errors):
+        responses = list(errors)
+
+        def urlopen(req, timeout):
+            self.assertLessEqual(timeout, 10)
+            item = responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return mock.MagicMock(__enter__=lambda s: mock.MagicMock(read=lambda: item), __exit__=lambda *a: None)
+        return urlopen
+
+    def http(self, code, body=b''):
+        return gd.urllib.error.HTTPError('https://sts.example/', code, 'x', {}, io.BytesIO(body))
+
+    def test_sts_transient_400s_timeouts_and_5xx_are_retried(self):
+        opener = self.fail_then(self.http(400, b'<Code>IDPCommunicationError</Code>'), TimeoutError(),
+                                self.http(503), b'ok')
+        with mock.patch.object(gd.urllib.request, 'urlopen', opener), mock.patch.object(gd.time, 'sleep'):
+            self.assertEqual(gd.request(object(), gd.time.monotonic() + 50), b'ok')
+
+    def test_a_real_refusal_is_not_retried_and_keeps_its_body(self):
+        opener = self.fail_then(self.http(403, b'<Code>AccessDenied</Code>'), b'never')
+        with mock.patch.object(gd.urllib.request, 'urlopen', opener), mock.patch.object(gd.time, 'sleep'):
+            with self.assertRaises(gd.urllib.error.HTTPError) as caught:
+                gd.request(object(), gd.time.monotonic() + 50)
+        self.assertEqual(caught.exception.read(), b'<Code>AccessDenied</Code>')
+
+    def test_retries_stop_at_the_deadline(self):
+        opener = self.fail_then(*[TimeoutError()] * 50)
+        with mock.patch.object(gd.urllib.request, 'urlopen', opener), mock.patch.object(gd.time, 'sleep'):
+            with self.assertRaises(TimeoutError):
+                gd.request(object(), gd.time.monotonic() + 3)
+
+
 class ProviderErrors(unittest.TestCase):
     def test_ids_the_provider_names_in_parentheses_are_redacted(self):
         out = gd.redact('│ Error: reading API Gateway v2 API (a1b2c3d4e5): operation error ApiGatewayV2: GetApi\n'
@@ -90,6 +125,18 @@ class ProviderErrors(unittest.TestCase):
         for leak in ('a1b2c3d4e5', 'EXAMPLEDIST123', 'qsb-app-api'):
             self.assertNotIn(leak, out)
         self.assertIn('reading API Gateway v2 API (<id>)', out)
+
+    def test_credential_values_never_survive_an_sdk_error(self):
+        out = gd.redact('failed to parse credential_process output: {"Version": 1, "AccessKeyId": "ASIAEXAMPLEEXAMPLE12", '
+                        '"SecretAccessKey": "secret/example+key", "SessionToken": "session-token-example"}\n'
+                        'aws_secret_access_key = abc/def aws_session_token=ghi', [])
+        for leak in ('ASIAEXAMPLEEXAMPLE12', 'secret/example+key', 'session-token-example', 'abc/def', 'ghi'):
+            self.assertNotIn(leak, out)
+
+    def test_untagging_and_other_provider_verbs_are_covered(self):
+        out = gd.redact('Error: untagging API Gateway v2 Route (abc123x) and flattening Stage (def456y)', [])
+        self.assertNotIn('abc123x', out)
+        self.assertNotIn('def456y', out)
 
     def test_the_deploy_checks_own_hints_survive(self):
         text = 'role qsb-app-api must carry qsb-runtime-boundary (iam_permissions_boundary_arn)'
@@ -120,7 +167,7 @@ class CredentialProcess(unittest.TestCase):
     def assume(self, account=ACCOUNT):
         calls = []
 
-        def fake_request(req, attempts=3):
+        def fake_request(req, deadline):
             calls.append(req)
             return json.dumps({'value': 'oidc-token-example'}).encode() if len(calls) == 1 else STS_RESPONSE
 
@@ -144,6 +191,14 @@ class CredentialProcess(unittest.TestCase):
         self.assertEqual(json.loads(out), {
             'Version': 1, 'AccessKeyId': 'ASIAEXAMPLEEXAMPLE12', 'SecretAccessKey': 'secret/example',
             'SessionToken': 'session-token-example', 'Expiration': '2026-01-01T00:00:00Z'})
+
+    def test_failures_reach_the_private_log_because_terraform_drops_stderr(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d, 'credentials.log')
+            with mock.patch.dict(os.environ, {'QSB_CREDENTIAL_LOG': str(log)}):
+                code, out, err, _ = self.assume(account='210987654321')
+            self.assertEqual((code, out), (1, ''))
+            self.assertIn('The role is not in the account QSB_AWS_ACCOUNT_ID names.', log.read_text())
 
     def test_a_role_in_another_account_is_refused(self):
         code, out, err, _ = self.assume(account='210987654321')
