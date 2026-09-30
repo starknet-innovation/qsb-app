@@ -40,5 +40,7 @@ These stay out of Git, like the other deployment settings and records (see the [
 
 ## Not confirmed here
 
+Both items are tracked under Open in [STATUS.md](STATUS.md#open).
+
 - **Image pull by digest:** that Batch pulled the solver image by digest. It would come from this run's Batch job record.
 - **Legal:** whether the redistribution approval covers `combined-aws-sm86-v0.2.0`, the combined image now served. It is still open and needs legal review.
