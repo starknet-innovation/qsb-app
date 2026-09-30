@@ -8,7 +8,7 @@ import path from 'node:path';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 process.chdir(root);
 const network = process.argv.find(x=>x.startsWith('--network='))?.split('=')[1];
-if (network !== 'mainnet' && network !== 'testnet4') throw Error('Set --network=mainnet or --network=testnet4');
+if (network !== 'mainnet') throw Error('Set --network=mainnet');
 const solverId = process.argv.find(x=>x.startsWith('--solver-release='))?.slice('--solver-release='.length) || '';
 const commit = execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
 const clean = !execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim();

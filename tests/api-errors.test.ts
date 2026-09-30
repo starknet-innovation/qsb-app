@@ -291,7 +291,8 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
   ["submit_disabled", 503, (f) => f.call("POST", `/vaults/${vaultId}/fund/submit`, {}, { app: { exactSubmit: false } })],
   ["vault_not_found", 404, (f) => f.call("GET", `/vaults/${other}/funding`)],
   ["network_mismatch", 409, async (f) => {
-    await f.putVault({ network: "testnet4" });
+    // A stored row recorded for another network.
+    await f.putVault({ network: "testnet4" as never });
     return f.call("GET", `/vaults/${vaultId}/funding`);
   }],
   ["vault_not_funded", 409, async (f) => {

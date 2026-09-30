@@ -8,26 +8,22 @@ afterEach(() => {
   vi.resetModules();
 });
 
-// The base path is fixed when the modules load, so load a fresh copy per network.
-async function load(network: "mainnet" | "testnet4") {
+// The base path is fixed when the modules load, so load a fresh copy.
+async function load() {
   vi.resetModules();
   vi.stubEnv("VITE_QSB_NETWORK", undefined);
   delete process.env.VITE_QSB_NETWORK;
-  vi.stubEnv("QSB_NETWORK", network);
+  vi.stubEnv("QSB_NETWORK", "mainnet");
   return {
     network: await import("../src/lib/network"),
     session: await import("../src/lib/session"),
   };
 }
 
-// Mainnet's API serves /v1; a testnet4 build keeps /api (QSB deploys on mainnet only).
-it.each([
-  ["mainnet", "/v1"],
-  ["testnet4", "/api"],
-] as const)("the %s webapp calls the API under %s", async (network, base) => {
-  const m = await load(network);
+it("the webapp calls the API under /v1", async () => {
+  const network = "mainnet", base = "/v1";
+  const m = await load();
   expect(m.network.NETWORK_ID).toBe(network);
-  expect(m.network.apiBasePath(network)).toBe(base);
   expect(m.network.API_BASE_PATH).toBe(base);
   const urls: string[] = [];
   const fetcher = (async (url: string) => {

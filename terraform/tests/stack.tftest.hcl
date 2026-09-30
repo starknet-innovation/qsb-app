@@ -54,7 +54,7 @@ run "baseline" {
     error_message = "Durable records require deletion protection and PITR."
   }
   assert {
-    condition     = !contains(keys(aws_lambda_function.api.environment[0].variables), "RUNPOD_SECRET_ARN") && aws_lambda_function.api.environment[0].variables.QSB_REHEARSAL_ENABLED == "false"
+    condition     = !contains(keys(aws_lambda_function.api.environment[0].variables), "RUNPOD_SECRET_ARN") && !contains(keys(aws_lambda_function.api.environment[0].variables), "QSB_REHEARSAL_ENABLED")
     error_message = "The API must not receive the provider secret or enable rehearsal."
   }
   assert {
@@ -126,7 +126,7 @@ run "frontend_index_uploaded_on_its_own" {
 run "reject_network_mismatch" {
   command = plan
   variables { network = "testnet4" }
-  expect_failures = [terraform_data.release]
+  expect_failures = [var.network]
 }
 run "reject_partial_compute_config" {
   command = plan
@@ -410,15 +410,6 @@ run "api_keys_explicit_switch" {
     error_message = "The API key switch reaches only the API Lambda and changes no mainnet switch."
   }
 }
-run "exact_submit_reject_testnet" {
-  command = plan
-  variables {
-    network              = "testnet4"
-    exact_submit_enabled = true
-  }
-  expect_failures = [var.exact_submit_enabled, terraform_data.release]
-}
-
 run "reject_solver_release_not_selected_by_build" {
   command = plan
   variables {
@@ -476,15 +467,6 @@ run "mainnet_and_submit_on" {
     error_message = "Both switches can be configured explicitly from the same release package."
   }
 }
-run "mainnet_reject_testnet" {
-  command = plan
-  variables {
-    mainnet_enabled = true
-    network         = "testnet4"
-  }
-  expect_failures = [var.mainnet_enabled, terraform_data.release]
-}
-
 run "owner_limits_default_off" {
   command = plan
   variables { network = "mainnet" }

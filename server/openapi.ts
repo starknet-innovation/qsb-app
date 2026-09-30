@@ -1143,7 +1143,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: apiKeyResponse.extend({
           key: describe(
             z.string(),
-            "The API key, `qsb_<network>_<43 base64url characters>`, for `Authorization: Bearer <key>`. Shown only here.",
+            "The API key, `qsb_mainnet_<43 base64url characters>`, for `Authorization: Bearer <key>`. Shown only here.",
           ),
         }),
       },
@@ -1511,10 +1511,6 @@ function operation(route: ApiRoute) {
 
 /** The OpenAPI 3.1 document for the mainnet API. */
 export function openApiDocument() {
-  if (NETWORK_ID !== "mainnet")
-    throw new Error(
-      "The OpenAPI document describes the mainnet API. Set QSB_NETWORK=mainnet.",
-    );
   const paths: Record<string, Record<string, unknown>> = {};
   const sorted = [...apiRoutes].sort(
     (a, b) =>
@@ -1603,7 +1599,7 @@ export function openApiDocument() {
           type: "http",
           scheme: "bearer",
           description: [
-            `An API key minted with a session (\`POST ${pathOf("createApiKey")}\`). It acts for the same owner. Send \`Authorization: Bearer qsb_<network>_<43 base64url characters>\`.`,
+            `An API key minted with a session (\`POST ${pathOf("createApiKey")}\`). It acts for the same owner. Send \`Authorization: Bearer qsb_mainnet_<43 base64url characters>\`.`,
             "",
             "An operation that accepts a key lists the one scope the key needs (`ApiKeyScope`). The key-management routes take a session only.",
             "",

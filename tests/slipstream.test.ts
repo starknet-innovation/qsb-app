@@ -127,17 +127,15 @@ it("reports provider authorization failures without retrying the request", async
     .fn()
     .mockResolvedValue(new Response("{}", { status: 401 }));
   vi.stubGlobal("fetch", fetchMock);
-  await expect(new Slipstream().test("00")).rejects.toThrow(
+  await expect(new Slipstream().rates()).rejects.toThrow(
     "Miner API authorization is unavailable",
   );
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 it("uses the operator-specified authorization scheme only on MARA and forbids redirects", async () => {
-  const fetchMock = vi.fn().mockResolvedValue(new Response("[]"));
+  const fetchMock = vi.fn().mockResolvedValue(Response.json({ market_rate: 1, multiplier: 1, multiplier_discount_percent: 0, discounted_multiplier: 1, submit_fee_rate: 1, slipstream_rate: 1, effective_rate: 1 }));
   vi.stubGlobal("fetch", fetchMock);
-  await new Slipstream(undefined, async () => "ExampleScheme test-only").test(
-    "00",
-  );
+  await new Slipstream(undefined, async () => "ExampleScheme test-only").rates();
   const options = fetchMock.mock.calls[0][1];
   expect(options.headers.get("Authorization")).toBe("ExampleScheme test-only");
   expect(options.redirect).toBe("error");
@@ -145,7 +143,7 @@ it("uses the operator-specified authorization scheme only on MARA and forbids re
     new Slipstream(
       "https://example.com",
       async () => "ExampleScheme test-only",
-    ).test("00"),
+    ).rates(),
   ).rejects.toThrow("destination");
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });

@@ -78,13 +78,6 @@ async function setup(reject = false) {
   tx.sign(key);
   tx.finalize();
   const rawTxHex = hex.encode(tx.extract());
-  const test = vi.spyOn(miner, "test").mockResolvedValue([
-    {
-      txid: tx.id,
-      allowed: !reject,
-      "reject-reason": reject ? "nonstandard" : undefined,
-    },
-  ]);
   const submit = vi.spyOn(miner, "submit").mockImplementation(async () => {
     const row = await store.get("OWNER#" + address, "TX#" + tx.id);
     expect(row?.status).toBe("submitting");
@@ -111,7 +104,6 @@ async function setup(reject = false) {
     tx,
     token,
     submit,
-    test,
     raw,
     unspent,
     body: {
@@ -151,7 +143,6 @@ it("rejects a requester-supplied exact spend and does not fund", async () => {
     error: "Invalid request",
   });
   expect(f.submit).not.toHaveBeenCalled();
-  expect(f.test).not.toHaveBeenCalled();
   expect(f.raw).not.toHaveBeenCalled();
   expect(f.unspent).not.toHaveBeenCalled();
   expect(
@@ -190,7 +181,6 @@ it("does not preflight or broadcast a raw funding transaction", async () => {
     error: "Invalid request",
   });
   expect(f.submit).not.toHaveBeenCalled();
-  expect(f.test).not.toHaveBeenCalled();
   expect(f.raw).not.toHaveBeenCalled();
   expect(f.unspent).not.toHaveBeenCalled();
   expect(
@@ -212,7 +202,6 @@ it("does not treat a rewritten caller fee as an exact spend", async () => {
   expect(response.status).toBe(400);
   expect(await response.json()).toMatchObject({ error: "Invalid request" });
   expect(f.submit).not.toHaveBeenCalled();
-  expect(f.test).not.toHaveBeenCalled();
   expect(f.raw).not.toHaveBeenCalled();
 });
 it("does not submit a withdrawal without an exact spend record", async () => {
@@ -261,7 +250,6 @@ it("does not submit a withdrawal without an exact spend record", async () => {
     code: "exact_spend_mismatch",
   });
   expect(f.submit).not.toHaveBeenCalled();
-  expect(f.test).not.toHaveBeenCalled();
   expect(f.raw).not.toHaveBeenCalled();
   expect(f.unspent).not.toHaveBeenCalled();
 });
@@ -298,7 +286,6 @@ it("does not save a withdrawal intent before the transport refusal", async () =>
     error: "Invalid request",
   });
   expect(f.submit).not.toHaveBeenCalled();
-  expect(f.test).not.toHaveBeenCalled();
   expect(f.raw).not.toHaveBeenCalled();
   expect(f.unspent).not.toHaveBeenCalled();
   expect(
@@ -318,7 +305,6 @@ it("does not consult a rejecting mainnet miner while transport stays closed", as
     error: "Invalid request",
   });
   expect(f.submit).not.toHaveBeenCalled();
-  expect(f.test).not.toHaveBeenCalled();
   expect(f.raw).not.toHaveBeenCalled();
   expect(f.unspent).not.toHaveBeenCalled();
   expect(

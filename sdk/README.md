@@ -55,7 +55,7 @@ await qsb.withdrawals.submit(tx, { approve: async (review) => (await askUser(rev
 
 `QsbClient` options: `baseUrl`, `signer`, and optionally `basePath` (`/v1`, the default, or the `/api` compatibility alias), `appOrigin` (the origin the server's challenge names, its `APP_ORIGIN`; default `baseUrl`'s origin), `fetch`, `qsb` (the local runtime, default Pyodide in-process), `pendingDeposits` (where a signed deposit waits until MARA has it), `authorizations` (this device's one intent and one assembly per vault), `token` (a cached session), `apiKey` and `timeoutMs`.
 
-`apiKey` is an API key the owner minted with a wallet session ([docs/API.md](../docs/API.md#api-keys)). The SDK sends it as `Authorization: Bearer qsb_<network>_…` instead of signing in; its scopes decide what it can do. Minting, listing and revoking keys still need a wallet session, and the SDK doesn't wrap those routes. The key goes only in that header: never in a URL, body, error or log. The signer is still needed for the PSBTs. `pendingDeposits` and `authorizations` default to memory; the CLI keeps both under `~/.qsb`. `QSB_NETWORK` (`mainnet` or `testnet4`) must be set when the SDK is imported; it refuses a server on another network.
+`apiKey` is an API key the owner minted with a wallet session ([docs/API.md](../docs/API.md#api-keys)). The SDK sends it as `Authorization: Bearer qsb_mainnet_…` instead of signing in; its scopes decide what it can do. Minting, listing and revoking keys still need a wallet session, and the SDK doesn't wrap those routes. The key goes only in that header: never in a URL, body, error or log. The signer is still needed for the PSBTs. `pendingDeposits` and `authorizations` default to memory; the CLI keeps both under `~/.qsb`. `QSB_NETWORK=mainnet` must be set when the SDK is imported; it refuses a server on another network.
 
 The routes below are shown under `/api`; the SDK, like the mainnet webapp, calls them under `/v1` unless `basePath` is `/api`.
 
@@ -136,6 +136,5 @@ Publishing needs two decisions first: a licence for this code (the package stays
   - the `Idempotency-Key` header, which it doesn't send. `withdrawals.create` relies on the manifest's `idempotencyKey`, and `deposits.resubmit` resends only the same bytes.
 - The SDK is written by hand. It isn't generated from [`docs/api/openapi.json`](../docs/api/openapi.json), and no test checks it against that spec.
 - Phase 3 of #85 (billing, terms of use, WAF and rate limits) isn't done: `/config` reports `billing: "not_configured"`.
-- Withdrawal assembly uses the Step Functions coordinator's solved result, which the server delivers on mainnet only, so `withdrawals.assemble` and `withdrawals.submit` refuse on testnet4.
 - The tests can't run a GPU search. [`tests/sdk-e2e.test.ts`](../tests/sdk-e2e.test.ts) drives the CLI against `createApp` with the in-memory store, a fake chain and a fake miner; it stands in for the coordinator's solution and for the Python assembler, which refuses anything but a real hit ([`tests/sdk-runtime.test.ts`](../tests/sdk-runtime.test.ts)).
 - No licence has been chosen for the application code, including this SDK (see the top-level README).

@@ -316,13 +316,11 @@ describe("API key authorization", () => {
       return [r.status, (await r.json()).code];
     };
     const body = randomBytes(32).toString("base64url");
-    expect(await code(`qsb_testnet4_${body}`)).toEqual([
-      401,
-      "network_mismatch",
-    ]);
     expect(await code(`qsb_mainnet_${body}`)).toEqual([401, "api_key_invalid"]);
+    // Keys exist only for mainnet, so another network's prefix isn't a key.
     for (const malformed of [
       `qsb_mainnet_${body.slice(1)}`,
+      `qsb_testnet4_${body}`,
       `qsb_regtest_${body}`,
       `qsb_mainnet_${body}=`,
       `QSB_mainnet_${body}`,
@@ -602,7 +600,7 @@ describe("API key switch", () => {
     expect(minted.status).toBe(503);
     expect(minted.body.code).toBe("api_keys_disabled");
     expect(store.rows.size).toBe(rows);
-    const other = `qsb_testnet4_${randomBytes(32).toString("base64url")}`;
+    const other = `qsb_mainnet_${randomBytes(32).toString("base64url")}`;
     for (const bearer of [key, other]) {
       const r = await off.call("GET", "/api/vaults", bearer);
       expect(r.status).toBe(503);

@@ -29,7 +29,6 @@ As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete
 ## Open
 
 - **Legal:** confirm that the redistribution approval covers the served image `combined-aws-sm86-v0.2.0`. The earlier approval covered `aws-v0.1.0`. This needs legal review.
-- **testnet4 code** remains in `terraform/scripts/build.mjs`, the Terraform `network` variable, the SDK and the frontend, but the API Lambda refuses to start on any network but mainnet (`server/lambda.ts`).
 - **Legacy supervised jobs.** Persisted jobs marked `execution.kind: "qsb-supervised-service-v1"` stay rejected by exact submission and by the solved-result, pause, resume and status routes, and the UI hides their pause and resume controls. These guards stay until the production inventory is complete and any matching rows are reconciled or quarantined; removing the old UI doesn't show the table holds none.
 - **#24:** build-generated identities in place of in-repo self-hash pinning.
 - **#27:** record each deposit's QSB version as data.
