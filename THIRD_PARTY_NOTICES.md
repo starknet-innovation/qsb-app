@@ -6,10 +6,4 @@
 
 No new project-wide license is implied for original application code. A maintainer must select one before advertising this project as broadly reusable open-source software.
 
-CUDA redistribution notices and source licenses now accompany the solver in https://github.com/starknet-innovation/qsb-solver. Historical research evidence in this repository is retained as evidence, not current solver source.
-
-The split retains the MIT notices in `public/qsb/LICENSE` and `worker/cpu/LICENSE`.
-GPLv3 candidate implementations and the Apache-2.0 optimized derivative moved with
-the GPU source, so their COPYING/LICENSE/NOTICE files must accompany those sources
-and solver images in qsb-solver. Maintainer redistribution clearance does not waive
-these license obligations. The app does not redistribute a CUDA solver binary.
+CUDA sources, their redistribution notices and their licenses live in https://github.com/starknet-innovation/qsb-solver. The GPLv3 candidate implementations and the Apache-2.0 optimized derivative are there, so their COPYING/LICENSE/NOTICE files must accompany those sources and the solver images. Maintainer redistribution clearance does not waive these license obligations. This app does not redistribute a CUDA solver binary.

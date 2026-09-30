@@ -1,110 +1,34 @@
-# App-role IAM validation (#12 / PR #38)
+# App-role IAM validation
 
-Status: **live regional DynamoDB checks NOT RUN; merge hold remains** until
-Adrien confirms the results. Policy simulation cannot settle transactional
-per-item authorization. Do not use production tables or roles for this procedure.
+The API role's reservation writes depend on how AWS authorizes each item of a mixed DynamoDB transaction, which policy simulation can't settle. These checks establish it against the committed `terraform/policies/app-records.json`, without touching production tables or roles.
 
-## 1. Repeat the read-only simulator
+**Status.** Steps 2 and 3 passed live on 25 September 2026 in the earlier account (`ops/iam-sandbox/run.py` at `5c0e74f`: outcome `passed`, 10 of 10 checks). They cover the API role only. The coordinator's two-item `OWNER#` transaction for `owner_max_gpu_seconds` has not been run; run it before that variable is ever set ([runbook](OPERATIONAL-RUNBOOK.md#per-owner-limits)).
 
-With an AWS CLI profile allowed to call `iam:SimulateCustomPolicy`, run from the
-repository root:
+## 1. Policy simulation (read-only)
+
+With an AWS CLI profile allowed to call `iam:SimulateCustomPolicy`, from the repository root:
 
 ```sh
 python3 scripts/simulate-app-role-iam.py
 ```
 
-This reproduces `APP-ROLE-IAM-SIMULATION.json`: both exact policy files, a dummy
-ARN, six actions (`GetItem`, `PutItem`, `DeleteItem`, `ConditionCheckItem`,
-`UpdateItem`, `BatchWriteItem`) and five contexts (owner, outpoint, system,
-mixed owner/system, missing key). No role is assumed or changed and no table is
-accessed. The output records source policy hashes and actual simulator decisions.
+This writes `APP-ROLE-IAM-SIMULATION.json` next to this doc: both policy files, a dummy table ARN, six actions (`GetItem`, `PutItem`, `DeleteItem`, `ConditionCheckItem`, `UpdateItem`, `BatchWriteItem`) and five key contexts (owner, outpoint, system, mixed owner/system, missing key). No role is assumed or changed and no table is accessed. The output records each source policy's hash and the simulator's decisions. Run it after changing either policy and commit its output with that change.
 
-## 2. Regional transaction checks (operator)
+## 2–3. Live transaction and batch checks
 
-**Automated runner:** `ops/iam-sandbox/run.py`, run as `qsb-operator`, performs steps 2 and 3 below from a throwaway Lambda that uses the test role. The human access roles can't assume that role by design. It records the evidence and cleans up; see [its README](../ops/iam-sandbox/README.md). The manual procedure below remains the specification it follows.
+The human access roles can't assume a test role by design, so [`ops/iam-sandbox/run.py`](../ops/iam-sandbox/README.md) runs these as `qsb-operator` from a throwaway Lambda whose role has only `app-records.json`, scoped to a disposable table. Expected results:
 
-Prerequisites: a dedicated disposable sandbox table with string `pk` and `sk`,
-and an API test role whose only DynamoDB identity policy is the current
-`terraform/policies/app-records.json` statements, each scoped to that table ARN
-(and its index ARN for Query). Do not add broad DynamoDB permissions. Record
-role policy hash, table ARN, region, commit, boundaries/SCPs and resource policy;
-those may affect actual authorization. Provision from committed/pushed source.
-Use AWS CLI profiles for the test role (`qsb-iam-test`) and sandbox administrator
-(`qsb-iam-admin`); never export or publish credential values.
+| Step | Expected |
+| --- | --- |
+| Control: a plain `OWNER#` Put | succeeds, which proves the role works (the row is then removed) |
+| Transaction: `OWNER#` Put + `SYSTEM#` Put | denied; neither row written |
+| Transaction: `OWNER#` Put + `OUTPOINT#` Put + `SYSTEM#` ConditionCheck (the reservation shape) | succeeds; owner and outpoint written, system not |
+| Conditional re-create of the outpoint | `ConditionalCheckFailedException` |
+| Delete the outpoint | denied; the reservation remains |
+| After deleting the owner row: BatchWriteItem `OWNER#` + `SYSTEM#` | denied; neither row written, no partial success or `UnprocessedItems` |
 
-Set `QSB_IAM_TABLE` to this sandbox table and `AWS_REGION` explicitly. Generate
-inert, unique test rows and request files in a new scratch directory:
+Rows are read back with consistent reads between steps. A denial counts only when AWS attributes it to the role's own identity policy: a denial from the permissions boundary or an SCP fails the check, because it wouldn't be testing `app-records.json`.
 
-```sh
-mkdir qsb-iam-sandbox-requests
-cd qsb-iam-sandbox-requests
-python3 - <<'PY'
-import json, os, uuid
-from pathlib import Path
-name = os.environ['QSB_IAM_TABLE']
-suffix = uuid.uuid4().hex
-keys = {label: {'pk': {'S': prefix + suffix}, 'sk': {'S': 'IAM_TEST'}}
-        for label, prefix in [('owner', 'OWNER#'), ('system', 'SYSTEM#'), ('outpoint', 'OUTPOINT#')]}
-def save(name, value):
-    Path(name + '.json').write_text(json.dumps(value, indent=2))
-for label, key in keys.items():
-    save(label + '-key', key)
-    save(label + '-put', {'TableName': name, 'Item': key,
-                         'ConditionExpression': 'attribute_not_exists(pk)'})
-put = lambda label: {'Put': {'TableName': name, 'Item': keys[label],
-                            'ConditionExpression': 'attribute_not_exists(pk)'}}
-save('denied-transaction', {'TransactItems': [put('owner'), put('system')]})
-save('allowed-transaction', {'TransactItems': [put('owner'), put('outpoint'),
-    {'ConditionCheck': {'TableName': name, 'Key': keys['system'],
-                        'ConditionExpression': 'attribute_not_exists(pk)'}}]})
-save('denied-batch', {'RequestItems': {name: [{'PutRequest': {'Item': keys['owner']}},
-                                           {'PutRequest': {'Item': keys['system']}}]}})
-PY
-aws --profile qsb-iam-test dynamodb transact-write-items --cli-input-json file://denied-transaction.json
-```
+On any mismatch, stop; don't loosen the policy to make the test pass. This is not a production rollout or a mainnet authorization.
 
-Expected: authorization denial, nonzero exit, **neither row written**. Record the
-actual error name and whether `CancellationReasons` is returned (do not invent
-it if CLI output omits it). With the administrator profile, use consistent reads
-for both keys; absent `Item` confirms no write:
-
-```sh
-aws --profile qsb-iam-admin dynamodb get-item --table-name "$QSB_IAM_TABLE" --key file://owner-key.json --consistent-read
-aws --profile qsb-iam-admin dynamodb get-item --table-name "$QSB_IAM_TABLE" --key file://system-key.json --consistent-read
-aws --profile qsb-iam-test dynamodb transact-write-items --cli-input-json file://allowed-transaction.json
-```
-
-Expected: success. The owner and outpoint rows exist; the system row remains
-absent. This is the important allowed-write plus `SYSTEM#` ConditionCheck case,
-matching reservation creation. Read all three with the administrator profile.
-Retry `outpoint-put.json` using test-role `put-item --cli-input-json`: expect
-`ConditionalCheckFailedException`, showing the conditional creation guard.
-Test-role `delete-item --table-name "$QSB_IAM_TABLE" --key file://outpoint-key.json`
-must be denied and the reservation must remain.
-
-## 3. Mixed BatchWriteItem (operator)
-
-After step 2, delete only the inert owner test row using the administrator
-profile (keep the outpoint row until cleanup). Then:
-
-```sh
-aws --profile qsb-iam-admin dynamodb delete-item --table-name "$QSB_IAM_TABLE" --key file://owner-key.json
-aws --profile qsb-iam-test dynamodb batch-write-item --cli-input-json file://denied-batch.json
-```
-
-Expected: authorization denial and both owner/system rows absent on consistent
-administrator reads. The API policy has no BatchWriteItem allow; SYSTEM also
-matches an explicit deny. No partial owner write or UnprocessedItems success is
-acceptable. Capture observed response and post-state, not just exit status.
-
-On any mismatch stop; do not loosen policy to make the test pass. Save sanitized
-commands, policy hashes, error names, optional cancellation reasons and before/
-after row presence. Remove only these scratch rows and the dedicated test
-resources after evidence capture. Have Adrien confirm steps 2 and 3 on the PR.
-This is not a production rollout, fresh withdrawal, or mainnet authorization.
-
-[AWS transactional IAM documentation](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis-iam.html)
-maps Put/Update/Delete to their ordinary item actions and ConditionCheck to
-ConditionCheckItem. TransactWriteItems is an API operation, not an IAM action.
-The permission model's runtime/operator entries remain parked conceptual
-constraints, not deployed roles or permission-complete operator policies.
+[AWS transactional IAM documentation](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis-iam.html) maps Put, Update and Delete to their ordinary item actions and ConditionCheck to ConditionCheckItem. TransactWriteItems is an API operation, not an IAM action.

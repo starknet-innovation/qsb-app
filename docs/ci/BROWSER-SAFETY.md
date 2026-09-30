@@ -19,10 +19,9 @@ Failures retain an HTML report, screenshots and traces for seven days in the
 `browser-safety-failure` artifact. Fixtures use disposable synthetic recovery
 material; never run this suite with real wallet backups or credentials.
 
-Repository owner action: add **browser-safety** to the required status checks
-alongside **typecheck**, **unit-tests**, **terraform** and
-**terraform-selected-solver** in the `main` branch protection/ruleset. This PR
-does not change repository settings.
+None of the pull-request checks (**typecheck**, **unit-tests**, **terraform**,
+**terraform-selected-solver** and **browser-safety**) is a required status check on
+`main` today; making them required is a repository setting for the owner.
 
 Local reproduction:
 
@@ -35,14 +34,3 @@ CI=1 npm run test:e2e
 
 Use a free localhost port 5173. The outbound firewall is a Linux CI safeguard;
 local reproduction also has the browser proxy guard and the tests' stubs.
-
-## Mutation evidence (2026-09-25)
-
-All 28 specs passed locally in 30.7 seconds. A temporary mutation added a second
-identical `/jobs/:id/submit` API call immediately after the approved POST in
-`TransactionDialog.approveSigned`. Running just `explicit exact approval submits
-once even with same-tick double click` failed at its request-count assertion:
-**Expected: 1, Received: 2**. Playwright produced a trace, screenshot and report.
-The mutation was removed; the same test then passed. No mutated application code
-is included in this change, and both POSTs in the negative experiment were
-intercepted by the test stub.

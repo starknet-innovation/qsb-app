@@ -1,10 +1,8 @@
 # Terraform deployment (AWS application, AWS Batch GPUs)
 
-This folder deploys the **single Step Functions application pipeline** into a fresh AWS account. GPUs run on an existing AWS Batch serverless endpoint. Mainnet job creation follows API Lambda → Step Functions → coordinator Lambda → AWS Batch, with CPU re-checks in the reference Lambda. See [mainnet pipeline](../docs/MAINNET-PIPELINE.md).
+This folder deploys the **single Step Functions application pipeline**: API Lambda → Step Functions → coordinator Lambda → AWS Batch, with CPU re-checks in the reference Lambda ([how a withdrawal runs](../README.md#how-a-withdrawal-runs)). GPU searches run on the separate AWS Batch stack in [`gpu/`](gpu/README.md). The GitHub OIDC deploy identity and the state bucket come from the [administrator bootstrap](../ops/github-aws/README.md).
 
-There is no supervised host, VPC/NAT, EBS/Backup, dispatch queue/DLQ, evidence bucket/table, watchdog, runtime installer or ECR repository in this application stack. Supervised source was removed under #23. GitHub OIDC deployment bootstrap remains separate and supported. Applying Terraform is not mainnet activation, wallet compatibility certification, or permission to spend funds. See [mainnet readiness](../docs/MAINNET-READINESS.md).
-
-Recorded local evidence: [single-pipeline mock plan inventory](../docs/SINGLE-PIPELINE-PLAN.json). The configured plan has 43 infrastructure resources plus 21 frontend objects for this build, three Lambda functions, four service roles, one MFA-required reconciliation role and one table. Counts of frontend objects vary with the build. This is not a live regional plan or deployment.
+Applying Terraform doesn't turn mainnet on and doesn't authorize a spend: the deploy-time switches do the first ([runbook](../docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches)), and every withdrawal needs the user's approval.
 
 ## Resources
 
@@ -16,10 +14,10 @@ Recorded local evidence: [single-pipeline mock plan inventory](../docs/SINGLE-PI
 | Search control | Node.js 22 coordinator, Standard Step Functions loop and continuation; no generic retry around paid work (only a throttled coordinator invoke is retried) |
 | CPU checks | Python 3.13 ARM64 reference Lambda; public inputs only |
 | Operations | Separate service roles, resource-scoped data/compute grants, 30-day log retention and failure alarms |
-| External | Existing AWS Batch endpoint and an optional administrator-created `qsb/slipstream` secret (the API's MARA Slipstream credential); no secret values in Terraform |
+| External | The GPU stack's AWS Batch queue, job definition and bucket, and an optional administrator-created `qsb/slipstream` secret (the API's MARA Slipstream credential); no secret values in Terraform |
 | Webhook retries (off by default) | A keys-only `webhook-due` index on the table, always; with `webhook_dispatcher_enabled`, a Node.js 22 dispatcher Lambda that Lambda doesn't retry and an EventBridge Scheduler schedule every 5 minutes, each with its own bounded role (`webhooks.tf`); see [Scheduled webhook dispatcher](../docs/OPERATIONAL-RUNBOOK.md#scheduled-webhook-dispatcher) |
 
-The `provision_runtime`, `runtime_*` and cleanup-endpoint settings have been removed. No EC2 GPUs, custom DNS or certificates are needed for the default CloudFront hostname. AWS-managed public networking reaches AWS Batch. Custom domains, WAF/rate policy beyond API throttling and regional IAM/cutover review remain separate work. This is the first-deploy layout for a new account, not a migration or teardown procedure. Do not apply it to an existing supervised state: removed resources would be scheduled for destruction. Preserve any old state and infrastructure until a separately reviewed migration and teardown is authorized.
+No custom DNS or certificates are needed for the default CloudFront hostname. Custom domains, and WAF or rate policy beyond API throttling, aren't set up.
 
 ## Prerequisites
 
@@ -27,9 +25,7 @@ The `provision_runtime`, `runtime_*` and cleanup-endpoint settings have been rem
 - An AWS account and an authenticated local AWS profile/session with deployment permissions. No access keys in `.tfvars`.
 - A clean, committed and pushed checkout. The provider account allowlist prevents accidental account targeting.
 - Enough regional Lambda reserved-concurrency quota for three functions (default two each), plus one for the webhook dispatcher when `webhook_dispatcher_enabled` is set.
-- Existing AWS Batch setup only if you need provider diagnostics/isolated operator validation. Omit both compute settings for a frontend/API preview.
-
-The historical registry location in this public snapshot is deliberately a placeholder. You must build and review a compatible worker/release binding before an operator search; supplying an arbitrary leaderboard or optimized image to this historical coordinator is unsupported. Infrastructure provisioning does not repair or activate that binding.
+- For a stack that searches, the GPU stack's outputs and an enrolled solver release ([serving a release](../docs/SOLVER-REPOSITORY.md#serving-a-release)). Leave all three Batch settings empty for a frontend/API preview.
 
 ## Build, plan, deploy
 
@@ -71,21 +67,21 @@ State is kept in the bootstrap state bucket under `qsb/main/terraform.tfstate`, 
 | `iam_permissions_boundary_arn` | the `qsb-runtime-boundary` ARN (`/qsb/bootstrap/`) | they can create or change runtime roles only with that boundary |
 | `operator_principal_arns` | the `qsb-operator` role ARN | reconcile runs as `qsb-operator`; the reconcile role stays dormant |
 | `solver_release_id`, `batch_job_queue`, `batch_job_definition`, `batch_job_bucket` | the enrolled release and the `terraform/gpu` outputs | the served solver and the GPU backend |
-| `mainnet_enabled`, `exact_submit_enabled` | `false` | turned on only under #22 with explicit approval |
+| `mainnet_enabled`, `exact_submit_enabled` | `false` by default | changed only with the user's explicit approval; see the [switch matrix](../docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches) |
 | `api_keys_enabled` | `false` | scoped API keys ([docs/API.md](../docs/API.md)); turned on only with the maintainer's explicit approval of third-party access |
 | `slipstream_secret_arn` | empty, or the `qsb/slipstream` secret's ARN | the API's optional MARA Slipstream credential; see [MARA Slipstream credential](#mara-slipstream-credential) |
-| `webhook_dispatcher_enabled` | `false` until the AWS administrator has installed the deploy-policy update | the scoped roles can create the schedule and pass its role to Scheduler only after that; see [Scheduled webhook dispatcher](../docs/OPERATIONAL-RUNBOOK.md#scheduled-webhook-dispatcher) |
+| `webhook_dispatcher_enabled` | `false` by default | the scoped roles need the installed Scheduler grants first; see [Scheduled webhook dispatcher](../docs/OPERATIONAL-RUNBOOK.md#scheduled-webhook-dispatcher) |
 
 Getting the role path wrong on the first apply means replacing the roles later, which needs an administrator again. `check-single-pipeline.py --deploy` refuses a plan that breaks the name, path, boundary or reconcile-principal rule.
 
-**First apply in an account.** It runs once as an administrator, today the account root, as a recorded exception to "no Terraform as root". The deploy role and `qsb-operator` can manage only CloudFront and API Gateway resources whose IDs are registered in the private inventory, and this stack creates new ones. Steps:
+**First apply in an account.** It runs once as an administrator: in the current account, a temporary admin role for the day. The deploy role and `qsb-operator` can manage only CloudFront and API Gateway resources whose IDs are registered in the private inventory, and this stack creates new ones. Steps:
 1. Use `qsb-viewonly` to check that nothing named `<name>-*` exists yet. IAM role names are unique across the account.
 2. Check that the state key is empty, so `plan` must be create-only, then run `check-single-pipeline.py --deploy --first-apply`.
 3. Start the apply with a fresh session. CloudFront can take over 15 minutes, and exported credentials last at most an hour. If they expire mid-apply, Terraform writes `errored.tfstate`. In that case:
    - run `terraform force-unlock` first if a lock remains, because `state push` takes the lock, then `terraform state push errored.tfstate`;
    - then plan again;
    - never re-apply blind.
-4. Register the new IDs. Take them from the outputs `cloudfront_distribution_id`, `origin_access_control_id`, `response_headers_policy_id` and `api_id`, and put them in the inventory keys `distributions`, `origin_access_controls`, `response_headers_policies` and `apis`. Put them *in place of* the parked legacy stacks' IDs: those stacks are admin-only until they're torn down, and swapping keeps the rendered policies the same size.
+4. Register the new IDs. Take them from the outputs `cloudfront_distribution_id`, `origin_access_control_id`, `response_headers_policy_id` and `api_id`, and put them in the inventory keys `distributions`, `origin_access_controls`, `response_headers_policies` and `apis`. Until then the rendered deploy and operator policies name an `UNREGISTERED` placeholder, so registering the real IDs keeps the policies the same shape.
 5. Run `ops/github-aws/update_installed.py`:
    - plan mode as `qsb-viewonly`;
    - review it;
@@ -98,9 +94,7 @@ Replacing any registered resource later (the distribution, origin access control
 
 Terraform can't prompt for MFA or read an `aws login` session. Export the CLI session instead, as described in `ops/github-aws/README.md`.
 
-`build.mjs` runs pinned upstream preparation, typecheck/frontend build, bundles the three Node Lambda entry points, API, coordinator and webhook dispatcher (including SDK dependencies), creates deterministic Lambda ZIPs and records file SHA256s/network/commit. The build is done **before** Terraform parses `fileset`/file hashes. It does not deploy anything. The build packages only frontend assets, API, coordinator, CPU reference and the webhook dispatcher (`webhooks.zip`, deployed only with `webhook_dispatcher_enabled`); it does not build a supervised dispatcher or host archive. Pass `--network=mainnet` or `--network=testnet4`; an omitted network is refused. The Terraform `network` variable has no default, and `terraform.tfvars.example` sets `mainnet`. The normal builder refuses a dirty tree; `--allow-dirty` permits local inspection only and records `clean:false`, which the Terraform deployment gate rejects.
-
-Choose `--network=testnet4` and `network="testnet4"` together for a Testnet4-identity preview. Both mainnet operations and Testnet4 rehearsal remain disabled; this does not assert that the installed Xverse supports Testnet4. There is intentionally no `enable_mainnet` or rehearsal activation variable.
+`build.mjs` runs pinned upstream preparation, typecheck/frontend build, bundles the three Node Lambda entry points, API, coordinator and webhook dispatcher (including SDK dependencies), creates deterministic Lambda ZIPs and records file SHA256s/network/commit. The build is done **before** Terraform parses `fileset`/file hashes. It does not deploy anything. It packages the frontend assets, API, coordinator, CPU reference and the webhook dispatcher (`webhooks.zip`, deployed only with `webhook_dispatcher_enabled`). Pass `--network=mainnet`; an omitted network is refused. The Terraform `network` variable has no default, and `terraform.tfvars.example` sets `mainnet`. Both still accept `testnet4`, but the API Lambda refuses to start on any network but mainnet (`server/lambda.ts`). The normal builder refuses a dirty tree; `--allow-dirty` permits local inspection only and records `clean:false`, which the Terraform deployment gate rejects.
 
 Artifacts must remain in `terraform/.build` through plan/apply. Terraform rejects mismatched commit/network, dirty builds, changed artifact hashes, changed frontend file membership and incomplete AWS Batch configuration. These checks are local consistency controls, not cryptographic provenance of a developer-controlled manifest. The operator must verify the commit is pushed before every apply. Never apply a stale saved plan after changing the checkout/configuration/artifacts.
 
@@ -132,13 +126,13 @@ Runs are one at a time. A newer push waits for the current run, and replaces any
 
 ### AWS Batch credentials
 
-Supply all three `batch_job_queue`, `batch_job_definition` (revisioned ARN), and `batch_job_bucket` from the independently deployed [`gpu/`](gpu/README.md) stack, or leave all three empty. Only the coordinator can submit paid jobs. The MFA reconciliation operator can inspect jobs and read output artifacts but cannot submit them. No AWS Batch API key or Secrets Manager secret is used by this pipeline. Select the matching enrolled schema-v3 `solver_release_id`. Configuring compute does not enable mainnet or exact submission.
+Supply all three `batch_job_queue`, `batch_job_definition` (revisioned ARN), and `batch_job_bucket` from the independently deployed [`gpu/`](gpu/README.md) stack, or leave all three empty. Only the coordinator can submit paid jobs; the reconcile CLI can inspect jobs and read output artifacts but never submits. No AWS Batch API key or Secrets Manager secret is used. Select the matching enrolled schema-v3 `solver_release_id`. Configuring compute doesn't enable mainnet or exact submission.
 
-The coordinator Lambda environment and `gpu_limits` output publish `workersMax` (GPUs per withdrawal, 1–16; the GPU stack sizes `max_vcpus` to 4 × `workersMax`; see "Parallel GPU search" in `docs/OPERATIONAL-RUNBOOK.md`), `workersMin=0`, and `executionTimeoutMs=900000` from `server/gpu-spend.json`, plus `MAX_JOB_GPU_SECONDS=14745600` (4,096 GPU-hours per job). Before each paid submission the coordinator verifies the AWS Batch job definition and compute environment limits and does not submit unless they match. It atomically reserves the execution timeout before every paid POST and pauses if the cumulative time reservation would exceed that budget. Failed, cancelled, timed-out and uncertain submissions remain charged; stage changes and resume requests cannot reset it; it does not credit a 64-hit output as a finished range. Applying Terraform does not call AWS Batch, start a workflow, or authorize spend. `release.mainnetEnabled` and `broadcastAuthorized` stay false. AWS Lambda concurrency is **not** a GPU spending cap. The experimental GPU USD ceiling stays unevaluated. IAM-authorized direct validation invocations can use paid compute even while public transaction routes are gated: restrict operator access accordingly.
+The coordinator Lambda environment and `gpu_limits` output publish `workersMax`, `workersMin` and `executionTimeoutMs` from `server/gpu-spend.json`, plus `MAX_JOB_GPU_SECONDS` (4,096 GPU-hours per job). Terraform doesn't duplicate those literals. Before each paid submission the coordinator verifies the AWS Batch job definition and compute environment limits and doesn't submit unless they match. The spend rules are in the runbook's [GPU capacity and spend](../docs/OPERATIONAL-RUNBOOK.md#gpu-capacity-and-spend). Applying Terraform doesn't call AWS Batch or start a workflow.
 
 ### State and configuration
 
-For GitHub OIDC, follow [the separate administrator bootstrap](../ops/github-aws/README.md). Its identity trust and authentication-only workflow remain unchanged. The bounded deployment role cannot create CDN/API resources, so an administrator runs the first apply and registers the resulting IDs (see "First apply in an account" above).
+For GitHub OIDC, follow [the separate administrator bootstrap](../ops/github-aws/README.md). The bounded deployment role cannot create CDN/API resources, so an administrator runs the first apply and registers the resulting IDs (see "First apply in an account" above).
 
 State lives in the separately bootstrapped, encrypted and locked S3 backend described above; this stack never manages that bucket. Plans and any local `errored.tfstate` may contain operational metadata: keep them private and outside Git. `.gitignore` excludes state, plans, local tfvars and artifacts. No backend credentials belong in source. Commit `.terraform.lock.hcl`.
 
@@ -166,7 +160,7 @@ Terraform takes a removed file's `create_before_destroy` from state. So the firs
 
 **Never apply a plan that replaces a frontend object or the bucket's public access block.** Under `create_before_destroy`, Terraform writes the replacement and then deletes the old object under the same key. The provider deletes every version of that key, so the new upload goes too. For the access block, the bucket is left with none. Such a plan comes from `-replace`, a tainted instance or a future ForceNew attribute; ordinary deploys never replace these. To re-upload a file, delete its S3 object and let the next apply create it again. `check-single-pipeline.py --deploy` refuses such a plan. Every mode of it refuses a plan that both creates and deletes one frontend object key. Applying a pre-split commit directly produces such a plan, but that commit's checker predates the rule, so a rollback relies on the runbook's plan check (see the rollback link below).
 
-For rollback, rebuild an approved prior clean pushed commit and review its plan against the current state. A commit from before the `index.html` split has no `aws_s3_object.index`. Never apply one directly: follow [Rolling back past the index.html split](../docs/OPERATIONAL-RUNBOOK.md#rolling-back-past-the-indexhtml-split). It moves the object's state address first, and its plan check is required, not optional. Do not roll back reservation semantics, restore conflicting legacy writers or replay old workflows without a migration/reconciliation decision. Bucket/table protection intentionally makes `terraform destroy` insufficient to discard durable data; removal is a separate explicit operator action. Logs have a 30-day retention policy. Alarm notifications require existing SNS topic ARNs in `alarm_actions`; empty means alarms exist without notifications.
+For rollback, rebuild an approved prior clean pushed commit and review its plan against the current state. A commit from before the `index.html` split has no `aws_s3_object.index`. Never apply one directly: follow [Rolling back past the index.html split](../docs/OPERATIONAL-RUNBOOK.md#rolling-back-past-the-indexhtml-split). It moves the object's state address first, and its plan check is required, not optional. Don't roll back reservation semantics or replay old workflows without a reviewed reconciliation decision ([runbook](../docs/OPERATIONAL-RUNBOOK.md#rollback)). Bucket/table protection intentionally makes `terraform destroy` insufficient to discard durable data; removal is a separate explicit operator action. Logs have a 30-day retention policy. Alarm notifications require existing SNS topic ARNs in `alarm_actions`; empty means alarms exist without notifications.
 
 ## Validation without AWS changes
 
@@ -181,52 +175,22 @@ terraform -chdir=terraform test -json -verbose > /tmp/qsb-terraform-tests.jsonl
 python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-tests.jsonl
 ```
 
-The tests use a mocked AWS provider and never call AWS. They only plan, except `tests/frontend_migration.tftest.hcl`, which also applies against the mock provider to seed state for its migration and rollback checks. `check-single-pipeline.py` checks the expanded mocked plans (unconfigured preview, configured AWS Batch, configured miner credential, and the enabled webhook dispatcher) or a saved real plan: exactly three application Lambdas and four service roles (four Lambdas and six service roles with the webhook dispatcher), one MFA-required reconciliation role, one table, one state machine and one frontend bucket, with no supervised infrastructure or secret-value resources. The table's only secondary index must be the keys-only `webhook-due` index. With the webhook dispatcher it also requires its whole set (the Lambda, its no-retry invoke settings, schedule, schedule role and both policies); that the schedule sends an empty invoke to the dispatcher with its own role and no retry; that the dispatcher's grants are exactly its index query and GetItem/PutItem on `WEBHOOK#` keys; and that its environment has only `TABLE_NAME`. Counts exclude frontend objects and the separately bootstrapped GitHub OIDC/state infrastructure. They check disabled activation, persistence protection, that the only secret grant is the API's read of the `qsb/slipstream` miner credential, no generic paid-work retry (the coordinator task retries only `Lambda.TooManyRequestsException`, and every other catchable error ends in `NeedsOperatorAttention`), and rejection of network/commit/partial-provider mismatches. They do not call AWS or AWS Batch and do not certify a real deployment. Live regional IAM/service behavior, browser serving, provider compatibility and all mainnet acceptance gates still need actual validation.
+The tests use a mocked AWS provider and never call AWS. They only plan, except `tests/frontend_migration.tftest.hcl`, which also applies against the mock provider to seed state for its migration and rollback checks. `check-single-pipeline.py` checks the expanded mocked plans (unconfigured preview, configured AWS Batch, configured miner credential, and the enabled webhook dispatcher) or a saved real plan: exactly three application Lambdas and four service roles (four Lambdas and six service roles with the webhook dispatcher), one MFA-required reconciliation role, one table, one state machine and one frontend bucket, with no supervised infrastructure or secret-value resources. The table's only secondary index must be the keys-only `webhook-due` index. With the webhook dispatcher it also requires its whole set (the Lambda, its no-retry invoke settings, schedule, schedule role and both policies); that the schedule sends an empty invoke to the dispatcher with its own role and no retry; that the dispatcher's grants are exactly its index query and GetItem/PutItem on `WEBHOOK#` keys; and that its environment has only `TABLE_NAME`. Counts exclude frontend objects and the separately bootstrapped GitHub OIDC/state infrastructure. They check persistence protection, that the only secret grant is the API's read of the `qsb/slipstream` miner credential, no generic paid-work retry (the coordinator task retries only `Lambda.TooManyRequestsException`, and every other catchable error ends in `NeedsOperatorAttention`), and rejection of network/commit/partial-provider mismatches. They don't call AWS or AWS Batch and don't certify a real deployment: live regional IAM and service behaviour and browser serving need real checks.
 
 References: [Lambda + HTTP API](https://developer.hashicorp.com/terraform/tutorials/aws/lambda-api-gateway), [fileset build-time semantics](https://developer.hashicorp.com/terraform/language/functions/fileset), [provider resource documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs).
 
-The coordinator AWS Batch credential must have permission to **update the configured
-endpoint** as well as submit/status/cancel jobs. The control-plane PATCH happens
-before a paid attempt is journaled. A failed check produces a resumable pause
-without consuming a submission; successful confirmation yields a single-use POST.
-The JSON file is the source of the reported limits; Terraform does not duplicate
-its attempt/timeout literals. The bundled application schema validates its bounds.
-See the operational runbook for sizing, worst-case execution allowance and limits
-of cost estimates. The 90-second coordinator timeout includes the CPU export,
-limits preflight, POST and database persistence. Applying this configuration does
-not establish a strict physical startup-worker bound: extra INITIALIZING provider
-records and idle/storage billing require separate operational observation.
-
 ### Reconciliation operator role
 
-For the bootstrap human-access flow, run reconciliation directly as the
-MFA-backed `qsb-operator`; follow [Reconciliation with the bootstrap operator
-profile](../docs/OPERATIONAL-RUNBOOK.md#reconciliation-with-the-bootstrap-operator-profile).
-That session has broader deployment and QSB data privileges, not merely the
-CLI's exact-record scope. Do not configure a second assume-role hop: the bootstrap
-user and its roles explicitly deny role chaining.
+Reconciliation runs as `qsb-operator` ([operator session](../docs/OPERATIONAL-RUNBOOK.md#operator-session)). Terraform still declares a separately scoped reconcile role (output `operator_reconcile_role_arn`) that trusts `operator_principal_arns`, which is required with no default: set it to the exact `qsb-operator` role ARN. `NoRoleChaining` keeps that principal from assuming the role, so it stays dormant. Account-root delegation and wildcards are rejected. The role uses the configured IAM path and permissions boundary and requires MFA; don't weaken those conditions.
 
-Terraform still declares the separately scoped `operator_reconcile_role_arn`.
-`operator_principal_arns` is required with no default; for this bootstrap flow,
-supply the exact `qsb-operator` role ARN in private tfvars. `NoRoleChaining` keeps
-that principal from assuming the runtime reconcile role, so this role stays
-dormant for the bootstrap identity. Account-root delegation and wildcards are
-rejected. The role uses the configured IAM path and permissions boundary, and
-requires MFA; do not weaken those conditions to bypass the bootstrap design.
-
-Its inline policy remains distinct from the broader `qsb-operator` policy:
-GetItem/PutItem on present OWNER partitions, StartExecution on the one workflow,
-and, when Batch is configured, regional Batch DescribeJobs/ListJobs/DescribeJobQueues
-plus GetObject on the configured outputs prefix. It has no provider-secret or
-KMS decrypt grant. The administrator-managed boundary must also permit those
-actions; this stack does not change its policy.
+Its inline policy is narrower than `qsb-operator`'s: GetItem/PutItem on present `OWNER#` partitions, StartExecution on the one workflow, and, when Batch is configured, regional Batch DescribeJobs/ListJobs/DescribeJobQueues plus GetObject on the configured outputs prefix. It has no provider-secret or KMS decrypt grant.
 
 ### MARA Slipstream credential
 
 By default the API calls MARA Slipstream without credentials. To use MARA's privileged submission (a client code) or an API key, in this order:
 
-1. **Boundary.** An administrator brings `qsb-runtime-boundary` in line with `main` using `ops/github-aws/update_installed.py` (plan, then `--apply`). Its `MinerCredential` statement allows `secretsmanager:GetSecretValue` on `qsb/slipstream` only, and only to runtime roles named `qsb-*-api`. Until then the API can't read the secret, whatever its own grant says.
-2. **Secret.** Neither scoped role can call Secrets Manager, so the key holder creates the secret as the administrator (today the account root). Create `qsb/slipstream` in this stack's account and region, encrypted with the default `aws/secretsmanager` key (runtime roles have no KMS grants). Its value is a JSON object with one or both of these fields, and no others:
+1. **Boundary.** The installed `qsb-runtime-boundary` must match `main`: check with `ops/github-aws/update_installed.py` in plan mode, and an administrator applies any difference. Its `MinerCredential` statement allows `secretsmanager:GetSecretValue` on `qsb/slipstream` only, and only to runtime roles named `qsb-*-api`. Until then the API can't read the secret, whatever its own grant says.
+2. **Secret.** Neither scoped role can call Secrets Manager, so the key holder creates the secret as the administrator. Create `qsb/slipstream` in this stack's account and region, encrypted with the default `aws/secretsmanager` key (runtime roles have no KMS grants). Its value is a JSON object with one or both of these fields, and no others:
    - `client_code`: the client code MARA issued for privileged submission (1–256 visible ASCII characters). The API adds it to the body of transaction submissions only, as MARA specifies: `{"client_code": "…", "tx_hex": "…"}`.
    - `authorization`: an `Authorization` header value, if MARA issues one (printable ASCII). The API sends it on every Slipstream request.
 
@@ -234,7 +198,7 @@ By default the API calls MARA Slipstream without credentials. To use MARA's priv
 3. **Wire it.** Set `slipstream_secret_arn` to the secret's full ARN in the private tfvars, then plan and apply as `qsb-operator` while no deposit or withdrawal is in flight. The plan adds `aws_iam_role_policy.miner_credential` and the API's `SLIPSTREAM_SECRET_ARN`, and nothing else. The variable refuses any other secret, account or region. `check-single-pipeline.py` refuses any other Secrets Manager grant, `NotAction`, wildcard action, module, JSON Terraform file, unreviewed data source or file input in the source, and checks the planned grant against the API's reference. It's a review aid against ordinary mistakes, not a sandbox: the boundary is what limits the secret to API roles.
 4. **Check.** Straight after the apply, `GET /api/rates` through the app should still return MARA's rates. If it doesn't, back out (below). This shows the API can read and parse the secret. It can't show that MARA accepts the credential: rates is a public read, and the client code is only sent with a submission. The first deposit or withdrawal is the first live test.
 
-**Adding `client_code` to an existing secret.** Older API code accepts only `authorization`, and refuses a secret with any other field, which stops every MARA call. So deploy an API version that supports `client_code` before putting it in the secret, and don't roll the API back past that version while the secret holds it. Change the secret first back to `{"authorization": …}`, or clear `slipstream_secret_arn`.
+**Rolling back.** API code before `d0a1732` (#78) accepts only `authorization` and refuses a secret with any other field, which stops every MARA call. Never roll the API back past that commit while the secret holds `client_code`: first change the secret back to `{"authorization": …}`, or clear `slipstream_secret_arn`.
 
 **Who can read the key.** Only API roles can read it at runtime. But anyone who can deploy runtime code can read it through such a role: `qsb-operator`, a workflow trusted by `qsb-github-deploy`, and the administrator. Share the key on that basis.
 
@@ -246,17 +210,6 @@ To back out, set `slipstream_secret_arn = ""` and apply; the secret itself is le
 
 ### Served solver release
 
-Build with `node terraform/scripts/build.mjs --network=mainnet --solver-release=RELEASE_ID`, using the enrolled schema-v3 producer descriptor. The existing generated `.build/manifest.json` records its canonical image digest, solver repository commit and descriptor hash alongside the actual CPU `reference.zip` digest and app commit. These are two repository commits after the solver split; they are not claimed to be one source tree. Without `--solver-release`, the generated selection is null and no solver is served.
+Build with `node terraform/scripts/build.mjs --network=mainnet --solver-release=RELEASE_ID` and set `solver_release_id` to the same enrolled schema-v3 ID; Terraform rejects a selection different from the build and verifies the CPU artifact identity. The generated `.build/manifest.json` records the image digest, solver repository commit and descriptor hash alongside the CPU `reference.zip` digest and app commit (two repositories' commits, not one source tree). Without `--solver-release`, no solver is served and new withdrawals are refused before any reservation. See [serving a release](../docs/SOLVER-REPOSITORY.md#serving-a-release).
 
-Set `solver_release_id` to that exact generated ID (or leave it empty for an unconfigured build). Terraform rejects a selection different from the build and verifies the CPU artifact identity. It reads the same generated `SOLVER_RELEASE_ID` for API
-and coordinator. Empty, unsupported, unbound or mismatched releases refuse new
-job admission before outpoint reservations. Omitted request IDs select this
-deployment release, not the archived placeholder. The coordinator rechecks the
-selection before paid work and still verifies the endpoint image before each POST.
-Do not change the served release while pinned jobs remain active. Existing
-historical descriptors remain available for inspection. Publication/enrollment
-and live endpoint-response verification remain prerequisites before #22.
-
-Mainnet funding/search is controlled by `mainnet_enabled` (default false), wired identically to API and coordinator. Exact submission additionally needs `exact_submit_enabled` (default false). Enablement requires explicit issue #22 approval; no source toggle or frontend rebuild is needed. See [switch matrix and deployment checks](../docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches).
-
-`owner_allowlist`, `owner_max_active_jobs` and `owner_max_gpu_seconds` (default: off) set the partner-phase [per-owner limits](../docs/OPERATIONAL-RUNBOOK.md#per-owner-limits) on the API and coordinator. They add no IAM grant and enable nothing.
+`mainnet_enabled` and `exact_submit_enabled` are the [deploy-time switches](../docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches). `owner_allowlist`, `owner_max_active_jobs` and `owner_max_gpu_seconds` (default: off) set the [per-owner limits](../docs/OPERATIONAL-RUNBOOK.md#per-owner-limits) on the API and coordinator; they add no IAM grant and enable nothing.
