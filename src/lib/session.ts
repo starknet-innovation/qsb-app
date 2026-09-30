@@ -1,4 +1,4 @@
-import { API_BASE_PATH } from "./network";
+import { API_BASE_PATH, type ApiBasePath } from "./network";
 
 /**
  * A non-OK API response, for the webapp and the SDK. `code` is the API's machine-readable
@@ -12,7 +12,7 @@ export class ApiRequestError extends Error {
 }
 const sessionToken = /^[A-Za-z0-9_-]{43}$/;
 /** `basePath` prefixes every route: the webapp's own (`API_BASE_PATH`), or the SDK's choice. */
-export function createSessionClient(fetcher: typeof fetch = fetch, basePath: string = API_BASE_PATH) {
+export function createSessionClient(fetcher: typeof fetch = fetch, basePath: ApiBasePath = API_BASE_PATH) {
 let token: string | undefined;
 let epoch = 0;
 function clearSession() {

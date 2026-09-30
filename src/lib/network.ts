@@ -12,11 +12,10 @@ export function parseNetwork(value: string | undefined): NetworkId {
 const configured = import.meta.env?.VITE_QSB_NETWORK ??
   (typeof process !== "undefined" ? process.env.QSB_NETWORK : undefined);
 export const NETWORK_ID = parseNetwork(configured);
-/**
- * The prefix of every webapp API call: `/v1`, the stable prefix. The API also keeps `/api`
- * for bundles cached before this move (docs/API.md).
- */
-export const API_BASE_PATH = "/v1";
+/** The API's prefixes: `/v1`, the stable one, and the `/api` compatibility alias (docs/API.md). */
+export type ApiBasePath = "/v1" | "/api";
+/** The prefix of every webapp API call. */
+export const API_BASE_PATH: ApiBasePath = "/v1";
 export const BITCOIN_NETWORK = btc.NETWORK;
 export const NETWORK_CONFIG = {
   label: "Bitcoin mainnet",
