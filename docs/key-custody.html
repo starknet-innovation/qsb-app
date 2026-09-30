@@ -151,7 +151,7 @@
   <!-- WALLET LANE -->
   <div class="lane-label wallet">
     <h2>Bitcoin wallet</h2>
-    <p>Xverse in the web app, or any BIP-322 and PSBT signer through the SDK (hardware wallet, Sparrow, HSM)</p>
+    <p>Xverse in the web app; SDK signers must support BIP-322 and PSBT signing with a compressed public key deriving the supplied P2WPKH or P2SH-P2WPKH payment address. Other address types are not supported by this flow</p>
     <div class="holds"><span class="chip secret">wallet private key</span></div>
   </div>
   <div class="cell wallet">
@@ -187,7 +187,7 @@
   <div class="cell browser">
     <div class="step">Generates <b>2 × 150 one-time HORS secrets</b> and their hash commitments, then builds the vault script.<br><span class="chip secret">HORS secrets</span></div>
     <div class="step">Encrypts them with your passphrase (PBKDF2-SHA256, 600k rounds, then AES-256-GCM). Use a strong, unique passphrase: the 14-character minimum does not measure strength, and copied backups allow offline guessing.<br><span class="chip secret">passphrase, 14+ characters</span></div>
-    <div class="step">You download the backup and re-open it to prove it works. Then the app shuts the worker down and drops the secrets.<br><span class="chip enc">qsb-recovery-&lt;id&gt;.json</span></div>
+    <div class="step"><b>Web app:</b> download and reopen the saved file before registration, then shut down the worker. <b>SDK:</b> calls saveBackup and validates the encrypted string in memory, not the saved file; locks its runtime in finally. The CLI writes a private file. SDK/CLI callers must separately verify saved-file recovery.<br><span class="chip enc">qsb-recovery-&lt;id&gt;.json</span></div>
   </div>
   <div class="cell browser">
     <div class="step">Unlocks the backup locally to check it still opens. Nothing secret is sent.</div>
@@ -195,12 +195,12 @@
   </div>
   <div class="cell browser">
     <div class="step">Unlocks the backup; you choose a destination, helper output and fee rate. Payout = full funding value + helper value − fee; no independent amount choice.</div>
-    <div class="step">Saves a <b>-withdrawal</b> backup that binds that backup copy to this intent. The localStorage reminder is device-local; earlier unbound backups remain unbound and must not be reused for a different withdrawal, especially on another device.<br><span class="chip enc">-withdrawal backup</span></div>
+    <div class="step">Saves a <b>-withdrawal</b> backup that binds that backup copy to this intent. The web app uses device-local localStorage reminders. SDK authorization reminders default to an in-memory map, lost on process exit unless the caller supplies persistent authorizations storage. Neither reminder binds earlier unbound backup copies; do not reuse those for another withdrawal or on another device.<br><span class="chip enc">-withdrawal backup</span></div>
   </div>
   <div class="cell browser lane-end">
     <div class="step">Unlocks the backup and assembles the transaction locally, revealing only the <b>15 of 300</b> secrets the solution selects (vault input 1).</div>
     <div class="step">Saves a <b>-signing</b> backup binding the solution and assembled withdrawal hash <b>before</b> wallet signing. Final signed bytes are a separate signed-result download.<br><span class="chip enc">-signing backup</span></div>
-    <div class="step">HORS state remains in memory through signed-transaction review while the dialog is open. Dialog effect cleanup calls lockQsb() to drop the worker state; signing does not immediately lock it. Never reuse the one-time keys.</div>
+    <div class="step">Browser only: HORS state remains in memory through signed-transaction review until dialog effect cleanup calls lockQsb(). SDK/CLI: a finally block locks the QSB runtime before signer.signPsbt runs. Locking drops runtime references, not a guarantee of memory zeroization. Never reuse the one-time keys.</div>
   </div>
 
   <!-- TRUST BOUNDARY -->
