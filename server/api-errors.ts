@@ -66,7 +66,6 @@ export const apiErrorCodes = {
   reconcile_required:
     "An unknown compute submission must be reconciled before the job can resume.",
   operator_review_required: "The job's failure needs operator review.",
-  coverage_stopped: "The job's stopped search coverage can't resume on this account.",
   intent_not_found: "No recorded transaction intent with this id.",
   intent_conflict:
     "A different transaction intent already exists for this job. Reconcile it.",

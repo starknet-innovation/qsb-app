@@ -10,7 +10,6 @@ import { chain } from "./chain";
 import { store as records, type Store } from "./store";
 import { recordOwnerEvents } from "./owner-events";
 import { httpsTransport, systemResolver } from "./webhook-transport";
-import { validationTick } from "./validation-search";
 import { configuredCompute, computeConfigured } from "./compute-provider";
 import { release, type Job, type PublicVault } from "../src/lib/model";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
@@ -28,7 +27,7 @@ import {
 import {
   HOST_HIT_CAPACITY,
   publishedHitRecords,
-} from "./coverage-ledger";
+} from "./hit-capacity";
 const cpuClient = new LambdaClient({ region: process.env.AWS_REGION });
 type Event = { owner: string; jobId: string; revision: number; polls?: number };
 async function cpu(payload: unknown) {
@@ -94,24 +93,6 @@ async function coordinate(event: Event, store: Store) {
   if (!row) throw new Error("JobNotFound");
   const job = row.job as Job;
   if (event.revision !== job.revision) return { ...event, done: true };
-  if (event.owner.startsWith("regtest:") && row.validation) {
-    const legacyState = row.validation as {
-      active?: { id?: string }[];
-      cancel?: string[];
-    };
-    if (
-      job.computeProvider !== "aws-batch" &&
-      (legacyState.active?.some((x) => x.id) || legacyState.cancel?.length)
-    ) {
-      job.status = "paused";
-      job.error =
-        "Legacy provider job requires reconciliation before AWS migration.";
-      await store.put({ ...row, version: row.version + 1, job }, row.version);
-      return { ...event, done: true };
-    }
-    job.computeProvider = "aws-batch";
-    return validationTick(event, row, store, await configuredCompute(), cpu);
-  }
   // More than one GPU per withdrawal, or a job already carrying parallel slots.
   if (gpuSpendLimits.workersMax > 1 || job.parallelSlots)
     return parallelTick(event, row, store, cpu);

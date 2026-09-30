@@ -1118,7 +1118,6 @@ export const apiRoutes: readonly ApiRoute[] = [
       409: [
         "job_unsupported",
         "job_state_invalid",
-        "coverage_stopped",
         "reconcile_required",
         "operator_review_required",
       ],

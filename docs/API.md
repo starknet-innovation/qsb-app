@@ -50,7 +50,7 @@ Errors produced in front of the app have no `code`. That includes errors from th
 | Idempotency | `idempotency_conflict`, `idempotency_in_progress` |
 | Owner limits | `owner_not_allowlisted`, `owner_active_withdrawal_limit`, `owner_gpu_budget_reached`, `owner_limits_invalid` |
 | Vaults and deposits | `vault_invalid`, `vault_not_found`, `vault_not_funded`, `vault_not_confirmed`, `funding_intent_exists`, `funding_transaction_invalid`, `signed_deposit_not_found` |
-| Withdrawal jobs | `job_not_found`, `job_unsupported`, `job_state_invalid`, `withdrawal_invalid`, `solver_not_served`, `solved_result_unavailable`, `reconcile_required`, `operator_review_required`, `coverage_stopped` |
+| Withdrawal jobs | `job_not_found`, `job_unsupported`, `job_state_invalid`, `withdrawal_invalid`, `solver_not_served`, `solved_result_unavailable`, `reconcile_required`, `operator_review_required` |
 | Withdrawal submission | `intent_not_found`, `intent_conflict`, `exact_spend_mismatch`, `consensus_rejected`, `inclusion_check_failed` |
 | Inputs | `input_not_found`, `input_mismatch`, `input_unconfirmed`, `input_spent` |
 | Chain and miner | `chain_transaction_not_found`, `chain_unavailable`, `chain_error`, `miner_unavailable`, `miner_request_failed`, `miner_rate_unavailable` |

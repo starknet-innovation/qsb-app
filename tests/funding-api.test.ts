@@ -119,15 +119,6 @@ async function setup(reject = false) {
       amount: "50000",
       fee: "10000",
       costAccepted: true as const,
-      spentFixtureRefs: [
-        {
-          label: "historical-xverse-regtest-withdrawal",
-          chain: "regtest" as const,
-          txid: "ff".repeat(32),
-          vout: 0,
-          spent: true as const,
-        },
-      ],
     },
   };
 }
@@ -298,7 +289,6 @@ it("does not save a withdrawal intent before the transport refusal", async () =>
           directMainnetDecision: "explicit",
           inputs: [{ txid: "ab".repeat(32), vout: 0, valueSats: "100000" }],
         },
-        spentFixtureRefs: f.body.spentFixtureRefs,
       },
       f.token,
     ),

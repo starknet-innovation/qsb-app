@@ -14,7 +14,7 @@ import {
   solverReleases,
 } from "../src/lib/provenance";
 const vault = () => ({
-  network: "regtest",
+  network: "mainnet",
   config: "A",
   scriptHex: "51",
   scriptHash: createHash("sha256")
@@ -56,7 +56,7 @@ describe("immutable vault and solver provenance", () => {
   it("rejects changed network", () => {
     const v = vault();
     const p = pinSolver(v);
-    v.network = "mainnet";
+    v.network = "testnet4";
     expect(() => assertSolverPin(p, v)).toThrow("SolverVaultMismatch");
   });
   it("rejects modified flags even with retained release id", () => {

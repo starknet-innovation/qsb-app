@@ -74,7 +74,6 @@
   "app.ts | POST /api/jobs/:id/resume | 404 | job_not_found | Job not found",
   "app.ts | POST /api/jobs/:id/resume | 409 | job_unsupported | Supervised jobs are not controlled by this route.",
   "app.ts | POST /api/jobs/:id/resume | 409 | job_state_invalid | Only a paused job can be resumed.",
-  "app.ts | POST /api/jobs/:id/resume | 409 | coverage_stopped | Stopped coverage cannot be resumed on this account.",
   "app.ts | POST /api/jobs/:id/resume | 409 | reconcile_required | Reconcile the unknown compute provider submission before retrying.",
   "app.ts | POST /api/jobs/:id/resume | 409 | operator_review_required | This failure needs operator review.",
   "app.ts | POST /api/jobs/:id/resume | 429 | owner_active_withdrawal_limit | activeWithdrawalLimitMessage(maxActiveJobs)",
