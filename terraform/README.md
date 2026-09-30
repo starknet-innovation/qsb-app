@@ -26,7 +26,7 @@ The `provision_runtime`, `runtime_*` and cleanup-endpoint settings have been rem
 - Terraform 1.11+ (less than 2; S3 state lockfiles need 1.11), Node.js 22+, npm, Python 3 and curl.
 - An AWS account and an authenticated local AWS profile/session with deployment permissions. No access keys in `.tfvars`.
 - A clean, committed and pushed checkout. The provider account allowlist prevents accidental account targeting.
-- Enough regional Lambda reserved-concurrency quota for three functions (default two each).
+- Enough regional Lambda reserved-concurrency quota for three functions (default two each), plus one for the webhook dispatcher when `webhook_dispatcher_enabled` is set.
 - Existing AWS Batch setup only if you need provider diagnostics/isolated operator validation. Omit both compute settings for a frontend/API preview.
 
 The historical registry location in this public snapshot is deliberately a placeholder. You must build and review a compatible worker/release binding before an operator search; supplying an arbitrary leaderboard or optimized image to this historical coordinator is unsupported. Infrastructure provisioning does not repair or activate that binding.
