@@ -100,6 +100,28 @@ run "baseline" {
     error_message = "/api/* and /v1/* must both reach the API origin uncached, with the same policies."
   }
 }
+run "frontend_index_uploaded_on_its_own" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition     = aws_s3_object.index.key == "index.html" && !contains(keys(aws_s3_object.frontend), "index.html") && toset(concat(keys(aws_s3_object.frontend), [aws_s3_object.index.key])) == toset(local.build.frontend_files)
+    error_message = "index.html is uploaded on its own; every other built file is an aws_s3_object.frontend object."
+  }
+  assert {
+    # index.html waits for aws_s3_object.frontend, so every asset it names must be one of those objects, and no
+    # other page may name a hashed asset.
+    condition = length(regexall("\"/(assets/[^\"]+)\"", file("${local.artifacts}/frontend/index.html"))) > 0 && alltrue([
+      for match in regexall("\"/(assets/[^\"]+)\"", file("${local.artifacts}/frontend/index.html")) : contains(keys(aws_s3_object.frontend), match[0])
+      ]) && alltrue([
+      for name in local.build.frontend_files : name == "index.html" || !endswith(name, ".html") || length(regexall("/assets/", file("${local.artifacts}/frontend/${name}"))) == 0
+    ])
+    error_message = "Only index.html may name hashed assets, and each one it names must be uploaded before it."
+  }
+  assert {
+    condition     = aws_s3_object.index.cache_control == "no-cache,max-age=0,must-revalidate" && aws_s3_object.index.content_type == "text/html; charset=utf-8" && alltrue([for name, object in aws_s3_object.frontend : object.cache_control == (startswith(name, "assets/") ? "public,max-age=31536000,immutable" : "no-cache,max-age=0,must-revalidate")])
+    error_message = "index.html revalidates on every request; only content-hashed assets/* are cached as immutable."
+  }
+}
 run "reject_network_mismatch" {
   command = plan
   variables { network = "testnet4" }

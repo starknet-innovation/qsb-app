@@ -120,8 +120,13 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
     apply_server_side_encryption_by_default { sse_algorithm = "AES256" }
   }
 }
+# Upload order. index.html is the only file that names the content-hashed assets/*, so it is uploaded on its own,
+# after every other file. Those use create_before_destroy: a file dropped from the build (the previous bundle's
+# hashed assets) is then deleted after the new index.html is uploaded, not at the start of the apply, where
+# Terraform otherwise puts it. A removed instance takes that flag from state, so this holds from the second apply
+# on. check-single-pipeline.py keeps this shape.
 resource "aws_s3_object" "frontend" {
-  for_each      = fileset("${local.artifacts}/frontend", "**")
+  for_each      = setsubtract(fileset("${local.artifacts}/frontend", "**"), ["index.html"])
   bucket        = aws_s3_bucket.frontend.id
   key           = each.value
   source        = "${local.artifacts}/frontend/${each.value}"
@@ -129,4 +134,20 @@ resource "aws_s3_object" "frontend" {
   content_type  = lookup(local.mime, reverse(split(".", each.value))[0], "application/octet-stream")
   cache_control = startswith(each.value, "assets/") ? "public,max-age=31536000,immutable" : "no-cache,max-age=0,must-revalidate"
   depends_on    = [terraform_data.release, aws_s3_bucket_public_access_block.frontend]
+  lifecycle { create_before_destroy = true }
+}
+resource "aws_s3_object" "index" {
+  bucket        = aws_s3_bucket.frontend.id
+  key           = "index.html"
+  source        = "${local.artifacts}/frontend/index.html"
+  source_hash   = filesha256("${local.artifacts}/frontend/index.html")
+  content_type  = local.mime.html
+  cache_control = "no-cache,max-age=0,must-revalidate"
+  depends_on    = [terraform_data.release, aws_s3_bucket_public_access_block.frontend, aws_s3_object.frontend]
+}
+# The same S3 object, so the first apply moves it in state instead of deleting and re-creating index.html.
+# check-single-pipeline.py requires this mapping; tests/frontend_migration.tftest.hcl plans it against the old state.
+moved {
+  from = aws_s3_object.frontend["index.html"]
+  to   = aws_s3_object.index
 }

@@ -4,6 +4,8 @@
 No argument checks declarations; a JSON plan from `terraform show -json` checks
 expanded planned resources, including nested modules. Terraform test -json -verbose
 JSONL checks the baseline and configured-provider mock plans. Bootstrap is separate.
+Every mode first checks the source rules: secret access and the frontend upload order. Every plan is refused if it
+both creates and deletes one frontend object key; --deploy also refuses replacing a frontend object or access block.
 
 For a real deployment plan add --deploy: every role must sit under /qsb/runtime/ with the
 administrator-owned qsb-runtime-boundary, the stack name must be qsb-* (not qsb-gpu*), and
@@ -296,6 +298,61 @@ def static_secret_rules(root):
                     f'policies/{path.name}: Secrets Manager access is not allowed')
 
 
+def frontend_order_rules(root):
+    """The upload order that keeps the served index.html naming only objects that exist (see terraform/data.tf).
+
+    index.html alone names the hashed assets, so aws_s3_object.index waits for every other frontend object, and
+    those use create_before_destroy, so a file dropped from the build is deleted only after the new index.html is
+    uploaded. The existing index.html object must move to aws_s3_object.index rather than be destroyed and created
+    again, which a plan without prior state can't show. Plans show neither lifecycle nor depends_on either, so this
+    reads the source."""
+    blocks, moves = {}, []
+    for path in sorted(root.glob('*.tf')):
+        text = path.read_text()
+        blocks.update({name: text[start:end] for kind, name, start, end in resource_blocks(text) if kind == 'aws_s3_object'})
+        for match in re.finditer(r'^\s*moved\s*\{', text, re.M):
+            depth, end = 1, match.end()
+            while depth and end < len(text):
+                depth += {'{': 1, '}': -1}.get(text[end], 0)
+                end += 1
+            body = text[match.end():end - 1]
+            side = lambda name: next(iter(re.findall(rf'^\s*{name}\s*=\s*(\S+)\s*$', body, re.M)), None)
+            moves.append((side('from'), side('to')))
+    require([m for m in moves if any('aws_s3_object.' in str(side) for side in m)]
+            == [('aws_s3_object.frontend["index.html"]', 'aws_s3_object.index')],
+            'exactly one moved { from = aws_s3_object.frontend["index.html"], to = aws_s3_object.index } must keep the '
+            'existing index.html object')
+    require(set(blocks) == {'frontend', 'index'}, 'the frontend is uploaded as aws_s3_object.frontend and aws_s3_object.index only')
+    require(re.search(r'\bfor_each\s*=\s*setsubtract\([^\n]*,\s*\[\s*"index\.html"\s*\]\s*\)', blocks['frontend']),
+            'aws_s3_object.frontend must leave index.html to aws_s3_object.index')
+    require(re.search(r'\blifecycle\s*\{[^}]*\bcreate_before_destroy\s*=\s*true\b', blocks['frontend']),
+            'aws_s3_object.frontend needs create_before_destroy, so removed files are deleted after the new index.html')
+    require(re.search(r'\bkey\s*=\s*"index\.html"', blocks['index'])
+            and re.search(r'\bdepends_on\s*=\s*\[[^\]]*\baws_s3_object\.frontend\b', blocks['index']),
+            'aws_s3_object.index must upload index.html after every aws_s3_object.frontend object')
+
+
+def frontend_key_rules(changes):
+    """No plan may both create and delete the same frontend object key.
+
+    Every aws_s3_object in this stack is in the frontend bucket, and S3 holds one object per key. Creating a key at
+    one address and deleting it at another leaves it missing for part of the apply (a pre-split commit applied over
+    post-split state deletes index.html, then uploads it again). Replacing one in place with create_before_destroy
+    deletes the upload itself: the provider removes every version of the key."""
+    created, deleted = set(), set()
+    for row in changes:
+        if row.get('type') != 'aws_s3_object' or row.get('mode', 'managed') != 'managed':
+            continue
+        change = row.get('change', {})
+        if 'create' in change.get('actions', []):
+            created.add((change.get('after') or {}).get('key'))
+        if 'delete' in change.get('actions', []):
+            deleted.add((change.get('before') or {}).get('key'))
+    both = sorted(str(key) for key in created & deleted)
+    require(not both, f'the plan both creates and deletes frontend object key(s) {both}; for a commit from before the '
+                      'index.html split, follow "Rolling back past the index.html split" in docs/OPERATIONAL-RUNBOOK.md')
+
+
 def secret_grants(rows):
     """(policy row, statement) for every known planned role-policy statement that could read a secret."""
     grants = []
@@ -428,6 +485,13 @@ def deploy_checks(plan, first_apply):
                                                          else [s['Principal']['AWS']])]
     require(principals and all(p.endswith(':role/qsb/bootstrap/qsb-operator') for p in principals),
             'operator_principal_arns must be exactly the qsb-operator role ARN')
+    # Frontend objects and, through them, the access block are create_before_destroy: a replacement writes the new
+    # one and then deletes it (the same S3 key, or the bucket's only access block).
+    for r in plan.get('resource_changes', []):
+        actions = r.get('change', {}).get('actions', [])
+        require(not (r.get('type') in ('aws_s3_object', 'aws_s3_bucket_public_access_block')
+                     and 'create' in actions and 'delete' in actions),
+                f"{r.get('address')} must not be replaced; see \"Upload order\" in terraform/README.md")
     if first_apply:
         actions = {tuple(r['change']['actions']) for r in plan.get('resource_changes', []) if r.get('mode') == 'managed'}
         require(actions <= {('create',)}, 'first apply must be create-only: the state key must be empty and no '
@@ -472,6 +536,7 @@ def main():
     root = Path(__file__).resolve().parents[1]
     static_secret_rules(root)
     static_dispatcher_rules(root)
+    frontend_order_rules(root)
     if len(sys.argv) == 1:
         rows = [{'type': kind, 'name': name}
                 for file in root.glob('*.tf')
@@ -496,6 +561,9 @@ def main():
             result = {'evidence': 'mock-provider-plan-inventory', 'runs': {}}
             for event in events:
                 name = event.get('@testrun')
+                if event.get('type') == 'test_plan':
+                    # Every planned run, including the migration runs that plan against seeded state.
+                    frontend_key_rules(event['test_plan'].get('resource_changes', []))
                 if event.get('type') == 'test_plan' and name in MOCK_RUNS:
                     rows = [dict(row, values=row['change']['after'])
                             for row in event['test_plan']['resource_changes']
@@ -505,6 +573,7 @@ def main():
             require(set(result['runs']) == MOCK_RUNS,
                     'The baseline, configured-provider, miner-credential and webhook-dispatcher plans are all required')
         else:
+            frontend_key_rules(plan.get('resource_changes', []))
             result = validate(module_resources(plan['planned_values']['root_module']), True, plan.get('configuration'),
                               unknown_lambda_env(plan.get('resource_changes', [])))
             result['evidence'] = 'saved-plan-inventory'
