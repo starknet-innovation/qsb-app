@@ -5,7 +5,7 @@ The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts
 ## Prefixes
 
 - `/v1` is the stable prefix, for integrators and the mainnet webapp. The webapp builds every API URL from `API_BASE_PATH` in [`src/lib/network.ts`](../src/lib/network.ts) (#85).
-- `/api` serves the same routes and stays for compatibility: a browser may still run a bundle cached from before the move. QSB deploys on mainnet only; a testnet4 build of the webapp keeps calling `/api`.
+- `/api` serves the same routes and stays for compatibility: a browser may still run a bundle cached from before the move. The webapp calls `/v1`; QSB runs on mainnet only.
 
 Both prefixes reach the same handlers and middleware: secure headers, CORS, the body limit, sign-in and error mapping. With `versionedAlias`, `createApp` rewrites a leading `/v1` segment to `/api` before routing, so a route is defined once. Only the coordinator API opts in: the mainnet Lambda (`server/lambda.ts`) and the local server (`server/local.ts`). CloudFront forwards `/v1/*` and `/api/*` to the API with the same uncached behaviour (`terraform/web.tf`), and `npm run dev`'s Vite proxy forwards both to the local server.
 
@@ -198,9 +198,9 @@ revoke keys. They don't take `Idempotency-Key`: its records keep the response
 body, and a minted key must never be stored. If a mint's response is lost, mint
 again and revoke the key you didn't receive.
 
-Send a key as `Authorization: Bearer qsb_<network>_<43 base64url characters>`.
-It works only on the network in its prefix. Expiry is required: 30 days by
-default, 90 at most. An owner can have at most 10 active keys.
+Send a key as `Authorization: Bearer qsb_mainnet_<43 base64url characters>`.
+A bearer with any other prefix isn't a key, so the request is unauthenticated
+(401 `auth_required`). Expiry is required: 30 days by default, 90 at most. An owner can have at most 10 active keys.
 
 ### Scopes
 
@@ -217,7 +217,8 @@ naming its scope, derived from the same table.
 
 ### Refusals
 
-Key refusals use the API keys codes in the table above: unknown or expired,
-revoked and wrong-network keys are 401 (`network_mismatch` for the network),
+Key refusals use the API keys codes in the table above: unknown, expired and
+revoked keys are 401, and so is a key whose stored record names another
+network (`network_mismatch`),
 session-only or unmapped routes and missing scopes are 403, the active-key cap
 is 409, revoking an unknown key is 404, and keys switched off are 503.

@@ -138,13 +138,9 @@ export class Slipstream {
    * intent, so a failure here has sent nothing, and pass it to the POST so it can't fail later.
    */
   async credential(): Promise<MinerCredential> {
-    // Teststream is intentionally credential-free. Never resolve or forward the
-    // production miner credential to a rehearsal or custom destination.
+    // Never forward the production miner credential to a custom destination (below).
     // A failed read keeps its error and reports miner_unavailable, like MinerAuthenticationError.
-    const resolved =
-      this.base === "https://teststream.mara.com"
-        ? undefined
-        : await withApiErrorCode("miner_unavailable", () => this.secret());
+    const resolved = await withApiErrorCode("miner_unavailable", () => this.secret());
     const secret: MinerSecret = typeof resolved === "string" ? { authorization: resolved } : (resolved ?? {});
     if ((secret.authorization || secret.clientCode) && this.base !== "https://slipstream.mara.com")
       throw new MinerAuthenticationError(
@@ -257,24 +253,6 @@ export class Slipstream {
         throw new MinerRejection(error.detail ?? "The miner refused the transaction.");
       throw error;
     }
-  }
-  private async assertNetwork() {
-    if (this.base !== "https://teststream.mara.com") return;
-    const system = z
-      .object({ chain: z.string() })
-      .parse(await this.request("/api/system"));
-    if (system.chain !== "testnet4")
-      throw new Error(
-        "Miner is not serving Bitcoin testnet4. Submission is blocked.",
-      );
-  }
-  async test(hex: string) {
-    await this.assertNetwork();
-    return this.request("/api/mempool/tests", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tx_hexes: [hex] }),
-    });
   }
   /** Submit a signed withdrawal. Without a live exact permit nothing reaches the network. */
   async submit(hex: string, permit: unknown, credential?: MinerCredential) {

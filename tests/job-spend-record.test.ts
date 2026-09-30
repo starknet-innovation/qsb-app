@@ -299,7 +299,6 @@ describe("submit route binds the stored spend", () => {
       .mockResolvedValue({ previousTxHex: "", confirmations: 1 });
     const raw = vi.spyOn(chain, "raw");
     const submit = vi.spyOn(miner, "submit");
-    const test = vi.spyOn(miner, "test");
     const vault = {
       id: stored.vaultId,
       name: "Vault",
@@ -373,7 +372,6 @@ describe("submit route binds the stored spend", () => {
       unspent,
       raw,
       submit,
-      test,
       store,
       owner,
     };
@@ -403,7 +401,6 @@ describe("submit route binds the stored spend", () => {
       expect(result.status).toBe(409);
       expect(result.body).toMatchObject({ error: "ExactSpendMismatch" });
       expect(result.submit).not.toHaveBeenCalled();
-      expect(result.test).not.toHaveBeenCalled();
       expect(result.raw).not.toHaveBeenCalled();
       expect(result.unspent).not.toHaveBeenCalled();
       expect(
@@ -428,7 +425,6 @@ describe("submit route binds the stored spend", () => {
       error: "Offline Bitcoin Core consensus verification failed.",
     });
     expect(result.submit).not.toHaveBeenCalled();
-    expect(result.test).not.toHaveBeenCalled();
     expect(result.raw).not.toHaveBeenCalled();
     expect(result.unspent).toHaveBeenCalledTimes(2);
     expect(

@@ -1,6 +1,5 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { formatBtc, parseBtc } from "../src/lib/model";
 import { ApiRequestError, QsbClient, preparedDepositSchema, publicApi, type WithdrawalReview } from "./client";
@@ -28,7 +27,7 @@ import { loopbackTestSigner } from "./test-signer";
 
 const usage = `qsb: non-custodial QSB client. Keys, recovery state and passphrases stay on this machine.
 
-Usage: npm run qsb -- <command> [options]      (QSB_NETWORK must be mainnet or testnet4)
+Usage: npm run qsb -- <command> [options]      (QSB_NETWORK must be mainnet)
 
 Account
   login                         BIP-322 sign-in; caches the 1-hour session token (owner-only file)
@@ -449,18 +448,4 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
   } finally {
     prompts.close();
   }
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  runCli(process.argv.slice(2), {
-    env: process.env,
-    stdin: process.stdin,
-    stdout: process.stdout,
-    stderr: process.stderr,
-    interactive: Boolean(process.stdin.isTTY),
-    // npm runs scripts from the package root; paths are relative to where `npm run qsb` was typed.
-    cwd: process.env.INIT_CWD ?? process.cwd(),
-  }).then((code) => {
-    process.exitCode = code;
-  });
 }

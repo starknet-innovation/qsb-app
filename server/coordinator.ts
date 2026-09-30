@@ -5,7 +5,7 @@ import {
   solverRelease,
 } from "../src/lib/provenance";
 import { NETWORK_ID } from "../src/lib/network";
-import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
+import { transactionsEnabled } from "./network";
 import { chain } from "./chain";
 import { store as records, type Store } from "./store";
 import { recordOwnerEvents } from "./owner-events";
@@ -106,7 +106,6 @@ async function coordinate(event: Event, store: Store) {
     return { ...event, done: true };
   if (
     !transactionsEnabled ||
-    !rehearsalAddressAllowed(event.owner) ||
     !ownerAllowed(event.owner)
   ) {
     // Capture an uncertain POST before replacing the searching status marker.
@@ -120,7 +119,7 @@ async function coordinate(event: Event, store: Store) {
     // Preserve all IDs, attempt markers, reservations and earlier blocking errors.
     job.status = "paused";
     const disabledReason = !transactionsEnabled
-      ? `${NETWORK_ID === "mainnet" ? "Mainnet" : "Network"} disabled by deployment.`
+      ? "Mainnet disabled by deployment."
       : "Wallet is not allowed by deployment configuration.";
     if (!job.error?.includes(disabledReason))
       job.error = `${disabledReason}${job.error ? ` ${job.error}` : ""}`;

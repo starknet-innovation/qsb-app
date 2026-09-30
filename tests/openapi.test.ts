@@ -104,7 +104,7 @@ describe("OpenAPI document", () => {
   it("documents exactly the routes the mainnet Lambda serves", () => {
     // Hono's own test for middleware: a handler that takes `next`. An app.all
     // route stays in as ALL, which no documented operation matches.
-    const served = inspectRoutes(deployedApiApp("mainnet", new MemoryStore()))
+    const served = inspectRoutes(deployedApiApp(new MemoryStore()))
       .filter((r) => !r.isMiddleware && r.method !== "OPTIONS");
     // Every route is registered once, under /api; /v1 is a rewrite and adds none.
     for (const r of served) expect(r.path).toMatch(/^\/api\//);
@@ -119,7 +119,7 @@ describe("OpenAPI document", () => {
   });
 
   it("serves every documented operation under each server", async () => {
-    const app = deployedApiApp("mainnet", new MemoryStore());
+    const app = deployedApiApp(new MemoryStore());
     expect(document.servers.map((s: Json) => s.url)).toEqual(["/v1", "/api"]);
     for (const { path, method } of operations)
       for (const { url } of document.servers as Json[]) {

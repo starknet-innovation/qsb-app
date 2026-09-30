@@ -72,7 +72,7 @@ import { coordinatorPublicSolvedResult } from "../src/mainnet/coordinatorResult"
 import { outputScript } from "../src/lib/transactions";
 import { hex } from "@scure/base";
 import { NETWORK_ID } from "../src/lib/network";
-import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
+import { transactionsEnabled } from "./network";
 import {
   OwnerGpuBudget,
   OwnerLimitsInvalid,
@@ -339,7 +339,7 @@ export function createApp(
     return c.json({
       ...release,
       network: NETWORK_ID,
-      mainnetEnabled: NETWORK_ID === "mainnet" && enabled,
+      mainnetEnabled: enabled,
       operationsEnabled: enabled,
       solverReleaseId: deployedSolverId(),
       exactSubmitEnabled: dependencies.exactSubmit ?? exactSubmitEnabled(),
@@ -614,7 +614,7 @@ export function createApp(
     return c.json({ vault }, 201);
   });
   app.post("/api/vaults/:id/fund", async (c) => {
-    if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
+    if (!enabled)
       return apiError(
         c,
         503,
@@ -668,7 +668,7 @@ export function createApp(
   // Deposits pay a bare, non-standard QSB script that public relay refuses, so the signed
   // deposit is submitted to MARA Slipstream. The intent is recorded before the POST.
   app.post("/api/vaults/:id/fund/submit", async (c) => {
-    if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
+    if (!enabled)
       return apiError(
         c,
         503,
@@ -697,7 +697,7 @@ export function createApp(
   // so it works while the chain API is down. It's offered only while deposits are switched on,
   // so disabling submission during an incident also stops the manual path.
   app.get("/api/vaults/:id/fund/signed", async (c) => {
-    if (!enabled || !rehearsalAddressAllowed(c.get("owner")) || !(dependencies.exactSubmit ?? exactSubmitEnabled()))
+    if (!enabled || !(dependencies.exactSubmit ?? exactSubmitEnabled()))
       return apiError(
         c,
         503,
@@ -724,7 +724,7 @@ export function createApp(
   // Resend a stored Slipstream deposit, exactly the same bytes, e.g. after an unknown
   // outcome and a reload. It can only confirm once; a second deposit is never created.
   app.post("/api/vaults/:id/fund/resubmit", async (c) => {
-    if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
+    if (!enabled)
       return apiError(
         c,
         503,
@@ -907,13 +907,6 @@ export function createApp(
   );
   app.get("/api/jobs/:id/solved-result", async (c) => {
     c.header("Cache-Control", "no-store");
-    if (NETWORK_ID !== "mainnet")
-      return apiError(
-        c,
-        404,
-        "solved_result_unavailable",
-        "Solved results are delivered on Bitcoin mainnet.",
-      );
     const row = await store.get(
       `OWNER#${c.get("owner")}`,
       `JOB#${c.req.param("id")}`,
@@ -944,7 +937,7 @@ export function createApp(
     const manifest = lowercaseOutpoints(
       withdrawalSchema.parse(await jsonBody(c)),
     );
-    if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
+    if (!enabled)
       return apiError(
         c,
         503,
@@ -1156,7 +1149,7 @@ export function createApp(
     return c.json({ job });
   });
   app.post("/api/jobs/:id/resume", async (c) => {
-    if (!enabled || !rehearsalAddressAllowed(c.get("owner")))
+    if (!enabled)
       return apiError(
         c,
         503,

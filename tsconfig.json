@@ -20,5 +20,6 @@
     "tests",
     "vite.config.ts",
     "playwright.config.ts"
-  ]
+  ],
+  "exclude": ["sdk/dist", "sdk/public"]
 }
