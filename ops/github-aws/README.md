@@ -77,17 +77,21 @@ A migration/import plan is required before Terraform takes ownership.
 Repository variables:
 
 - `QSB_AWS_ROLE_ARN`, `QSB_AWS_ACCOUNT_ID`, `QSB_AWS_REGION`
-- `QSB_TERRAFORM_STATE_BUCKET`, `QSB_IAM_RUNTIME_BOUNDARY_ARN`
-- `QSB_AWS_DEPLOY_ENABLED=false` while the application remains suspended
+- `QSB_TERRAFORM_STATE_BUCKET`
+- `QSB_SOLVER_RELEASE_ID`: the enrolled solver release the app is built with
+- `QSB_AWS_DEPLOY_ENABLED`: `deploy.yml` does nothing unless it's `true`
+- `QSB_IAM_RUNTIME_BOUNDARY_ARN` isn't used: the private tfvars set the boundary, and
+  `check-single-pipeline.py --deploy` refuses a plan with any other
 
 `aws-auth.yml` is a manual authentication-only check, runnable on `main` after
-review/merge. It cannot deploy or resume the app. Add the same credential step
-and `id-token: write` permission to a reviewed Terraform workflow. Pass
-`iam_role_path=/qsb/runtime/` and `iam_permissions_boundary_arn` from the
-repository variable. Keep application apply gated on explicit reactivation;
-the deployment-enabled variable is a convention that the future workflow must
-check, not an IAM enforcement mechanism. It does not restrict direct AWS API
-calls made by another authorized workflow on `main`.
+review/merge. It cannot deploy or resume the app.
+
+`deploy.yml` is the reviewed Terraform workflow for the app stack: it plans each
+push to `main`, and applies that plan once a reviewer approves the `qsb-deploy`
+environment. See "Deploy from GitHub" in [`terraform/README.md`](../../terraform/README.md).
+The approval and `QSB_AWS_DEPLOY_ENABLED` are conventions the workflow checks,
+not IAM enforcement: they don't restrict direct AWS API calls made by another
+workflow on `main`.
 
 See [GitHub's AWS OIDC guidance](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws).
 
