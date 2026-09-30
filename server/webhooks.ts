@@ -203,7 +203,7 @@ const rowKey = (owner: string) => ({ pk: `OWNER#${owner}`, sk: "WEBHOOKS" });
  * When deliverDue could next claim one of the row's deliveries: the earliest queued delivery
  * of an active webhook, once its webhook's backoff has passed. Undefined when there's none.
  */
-export function nextDueAt(row: { hooks: Hook[]; pending: Pending[] }): number | undefined {
+function nextDueAt(row: { hooks: Hook[]; pending: Pending[] }): number | undefined {
   const retryAt = new Map(row.hooks.filter((h) => h.status === "active").map((h) => [h.id, h.retryAt ?? 0]));
   let due: number | undefined;
   for (const p of row.pending) {

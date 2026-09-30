@@ -51,7 +51,7 @@
   "format": "qsb-source-release-manifest-v1",
   "identities": {
     "components": {
-      "api": "24fbb7d55a4c0aca8e3b247e6a9f19c02df58bf20637c587aaf00cac2b956c0a",
+      "api": "9e121c51b2b08289ec88b43ef77f5879bc3bc3f72864e4a1a6b8951fb0af8d16",
       "build-metadata": "473856897f432e05aba905984679781b962bd278f9b285dfa96e43cb5f4b0735",
       "cpu-verifier": "cf1cada32135a43065eb8d5d1fc7365395832db0a5c562928b7248793c7fa7c5",
       "dispatcher": "083a5937e1db165578b408ad201d47132dd6283229819d19f56b3bbd173f58b5",
@@ -163,7 +163,7 @@
       "server/validation-search.ts": "0a9df44c9e0562f7fb7ba8614db96f2a72ae874017554fce9f4498500063bdba",
       "server/webhook-dispatcher.ts": "10ac4fe32690c5b60f06bc6b4259196e8d0f4f86bc30195b7655f012923c0369",
       "server/webhook-transport.ts": "d3eb7800b0782835213bdd485d47fce8a6d7fba92fb4292468f3d4770e707aeb",
-      "server/webhooks.ts": "86056923275ec56e5dad161b761a988ca8484ae45075ac5b16ff3ec389f6bd46",
+      "server/webhooks.ts": "4102cfb149951f002abd1eb0425a4193d336bc86fa2286c6dd60ef614e5c416e",
       "server/withdrawal-status.ts": "35c35fa0666985dbed95df056094f2a36dae2348723c4c2e0176146f59f0880a",
       "src/lib/api.ts": "b7d24b75c3305f5254ad7a9e9989bd390efd74a17b13862c39764d434854c22e",
       "src/lib/backup.ts": "bc8be06c10e970dad3ef335f9f2788bb58628c350490052155cf37a54840c572",
