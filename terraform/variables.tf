@@ -70,7 +70,7 @@ variable "batch_job_bucket" {
   }
 }
 variable "lambda_concurrency" {
-  description = "Reserved concurrency for each application function. 0 freezes the stack: every function is throttled, so nothing reads or writes the records table (the region-move freeze, docs/REGION-MIGRATION.md)."
+  description = "Reserved concurrency for each application function. 0 freezes the stack: every function is throttled, so nothing reads or writes the records table."
   type        = number
   default     = 2
   validation {
