@@ -5,7 +5,6 @@ import { release } from "../src/lib/model";
 import { NETWORK_CONFIG } from "../src/lib/network";
 import { testnet4Genesis } from "../server/network";
 import { Slipstream } from "../server/providers";
-import { HISTORICAL_XVERSE_REGTEST_WITHDRAWAL } from "../server/runtime/fresh-proof";
 import {
   EXTERNAL_MINER_CATALOG,
   HISTORICAL_REGTEST_FIXTURE_LABEL,
@@ -159,9 +158,6 @@ describe("external chain agreement", () => {
       NETWORK_CONFIG.genesisHash,
     );
     expect(EXTERNAL_MINER_CATALOG.testnet4.genesisHash).toBe(testnet4Genesis);
-    expect(HISTORICAL_REGTEST_FIXTURE_LABEL).toBe(
-      HISTORICAL_XVERSE_REGTEST_WITHDRAWAL.label,
-    );
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const mainnet = agreeExternalMinerChain(parties("mainnet"));

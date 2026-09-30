@@ -10,8 +10,10 @@ import { Esplora } from "../server/chain";
 import { Slipstream } from "../server/providers";
 import { fundingPsbt } from "../src/lib/transactions";
 import { release, type PublicVault } from "../src/lib/model";
-import { rawTransactionSha256 } from "../server/runtime/miner-inclusion";
-import { HISTORICAL_XVERSE_REGTEST_WITHDRAWAL } from "../server/runtime/fresh-proof";
+import {
+  HISTORICAL_REGTEST_FIXTURE_LABEL,
+  rawTransactionSha256,
+} from "../server/runtime/miner-inclusion";
 const key = new Uint8Array(32).fill(7),
   pub = secp256k1.getPublicKey(key),
   address = btc.p2wpkh(pub).address!;
@@ -123,7 +125,7 @@ async function setup(reject = false) {
       costAccepted: true as const,
       spentFixtureRefs: [
         {
-          label: HISTORICAL_XVERSE_REGTEST_WITHDRAWAL.label,
+          label: HISTORICAL_REGTEST_FIXTURE_LABEL,
           chain: "regtest" as const,
           txid: "ff".repeat(32),
           vout: 0,

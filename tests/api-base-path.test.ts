@@ -21,7 +21,7 @@ async function load(network: "mainnet" | "testnet4") {
   };
 }
 
-// Mainnet's API serves /v1; the testnet4 deployment (the parked supervised app) serves /api only.
+// Mainnet's API serves /v1; a testnet4 build keeps /api (QSB deploys on mainnet only).
 it.each([
   ["mainnet", "/v1"],
   ["testnet4", "/api"],

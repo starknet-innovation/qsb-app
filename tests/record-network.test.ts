@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
 import { createApp } from "../server/app";
 import { MemoryStore } from "../server/store";
-import { vaultConfiguration } from "../supervised/runtime/source/outputs/qsb-vault/src/lib/provenance";
+import { vaultConfiguration } from "../src/lib/provenance";
 
 const token = "b".repeat(43);
 const sessionPk = "SESSION#" + createHash("sha256").update(token).digest("hex");
@@ -74,7 +74,7 @@ it("rejects a challenge, session, and vault that omit network", async () => {
   });
 });
 
-it("the packaged runtime refuses a vault configuration with no network", () => {
+it("refuses a vault configuration with no network", () => {
   expect(() =>
     vaultConfiguration({
       config: "A",

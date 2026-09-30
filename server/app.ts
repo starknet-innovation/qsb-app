@@ -79,13 +79,11 @@ import {
   type OwnerLimits,
 } from "./owner-limits";
 import { gpuSpendLimits, nextGpuReservation } from "./gpu-spend";
-import type { FundingLedger } from "./runtime/dispatcher";
 import { canonicalReservationWrites } from "./runtime/storage-authority";
 import {
   coverageAccountStopped,
   coverageLedgerSchema,
 } from "./runtime/coverage-ledger";
-import { installSupervisedRoutes } from "./runtime/supervised-routes";
 import {
   MinerInclusionError,
   judgeInclusionEvidence,
@@ -118,7 +116,6 @@ function supervisedServiceJob(job: unknown): boolean {
 }
 type Env = { Variables: { owner: string } };
 export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
-export type AuthenticatedJobPostRoutes = Pick<Hono<Env>, "post">;
 /**
  * API Gateway gives up after 30 seconds. Webhook sending stops 25 s into a request, and all
  * event work (rows, queuing, sending) 28 s into it, so it can't turn a response into a 504.
@@ -137,18 +134,11 @@ export function createApp(
     mainnetUi?: MainnetUiOptions;
     // Trusted server wiring only; routes under /api/jobs inherit the auth middleware.
     installAuthenticatedJobRoutes?: (routes: AuthenticatedJobRoutes) => void;
-    installAuthenticatedJobPostRoutes?: (
-      routes: AuthenticatedJobPostRoutes,
-    ) => void;
-    /** Test-only in-process handoff. The default app does not admit jobs. */
-    inProcessHandoff?: boolean;
-    /** Injected chain reads for supervised admission. Never the process-wide client by default. */
-    fundingLedger?: FundingLedger;
     /** Webhook HTTP and DNS. Defaults to the network; tests inject fakes. */
     webhooks?: Partial<Delivery>;
     /** Tests only: false builds an app that records no owner events, to compare against. */
     recordEvents?: false;
-    /** Also serve every route under /v1. Only the coordinator API opts in; parked supervised apps don't. */
+    /** Also serve every route under /v1. The deployed API opts in; tests may leave it off. */
     versionedAlias?: boolean;
     /** Trusted test configuration; the deployment reads QSB_OWNER_* from the environment. */
     ownerLimits?: OwnerLimits;
@@ -1355,23 +1345,7 @@ export function createApp(
       return (app.get.bind(app) as (...a: any[]) => any)(path, ...handlers);
     }) as typeof app.get,
   };
-  const registeredPosts = new Set<string>();
-  const authenticatedPost = {
-    post: ((path: string, ...handlers: any[]) => {
-      registeredPosts.add(path);
-      if (path === "/api/jobs/supervised" && handlers.length > 0)
-        mainnetUiRoutes.creation = true;
-      return (app.post.bind(app) as (...a: any[]) => any)(path, ...handlers);
-    }) as typeof app.post,
-  };
   dependencies.installAuthenticatedJobRoutes?.(authenticatedGet);
-  dependencies.installAuthenticatedJobPostRoutes?.(authenticatedPost);
-  if (dependencies.inProcessHandoff === true) {
-    installSupervisedRoutes(authenticatedGet, authenticatedPost, records, {
-      post: !registeredPosts.has("/api/jobs/supervised"),
-      ledger: dependencies.fundingLedger,
-    });
-  }
   return app;
 }
 export const app = createApp(defaultStore, { versionedAlias: true });

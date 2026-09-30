@@ -14,8 +14,8 @@ export const NETWORK_ID = parseNetwork(configured);
 export type ApiBasePath = "/v1" | "/api";
 /**
  * The prefix of every webapp API call. Mainnet's coordinator API serves `/v1`, the stable
- * prefix, and keeps `/api` for bundles cached before this move (docs/API.md). The testnet4
- * deployment is the parked supervised app, which serves `/api` only, so it stays there.
+ * prefix, and keeps `/api` for bundles cached before this move (docs/API.md). QSB deploys on
+ * mainnet only (server/lambda.ts); a testnet4 build keeps `/api`.
  */
 export function apiBasePath(network: NetworkId): ApiBasePath {
   return network === "mainnet" ? "/v1" : "/api";

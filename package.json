@@ -10,17 +10,12 @@
     "test:e2e": "QSB_NETWORK=mainnet VITE_QSB_NETWORK=mainnet playwright test",
     "typecheck": "tsc --noEmit",
     "vendor": "python3 scripts/vendor.py",
-    "build:runtime": "node supervised/build.mjs && node supervised/runtime/build.mjs",
-    "test:runtime-build": "python3 supervised/runtime/test_build.py",
-    "package:release": "tsx scripts/package-release.ts",
     "inventory:storage": "tsx scripts/storage-inventory.ts",
     "qsb": "QSB_NETWORK=\"${QSB_NETWORK:?Set QSB_NETWORK to mainnet or testnet4}\" tsx sdk/cli.ts",
     "openapi": "QSB_NETWORK=mainnet tsx scripts/openapi.ts",
-    "harness:core": "bash scripts/test-core.sh",
     "prebuild": "node scripts/generate-solver-registry.mjs",
     "pretest": "node scripts/generate-solver-registry.mjs",
-    "pretypecheck": "node scripts/generate-solver-registry.mjs",
-    "prepackage:release": "node scripts/generate-solver-registry.mjs"
+    "pretypecheck": "node scripts/generate-solver-registry.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-batch": "^3.1135.0",
@@ -29,7 +24,6 @@
     "@aws-sdk/client-s3": "^3.1135.0",
     "@aws-sdk/client-secrets-manager": "^3.1135.0",
     "@aws-sdk/client-sfn": "^3.1000.0",
-    "@aws-sdk/client-sqs": "3.1135.0",
     "@aws-sdk/lib-dynamodb": "^3.1000.0",
     "@hono/node-server": "^1.19.0",
     "@noble/curves": "^2.4.0",

@@ -6,7 +6,6 @@ import { deployedApiApp } from "../server/lambda";
 import { MemoryStore } from "../server/store";
 import { chain as defaultChain, Esplora } from "../server/chain";
 import { Slipstream, slipstream as defaultMiner } from "../server/providers";
-import { createSupervisedCreationApp } from "../supervised/dispatch/routes";
 import { BITCOIN_NETWORK } from "../src/lib/network";
 
 const owner = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20) });
@@ -189,27 +188,14 @@ describe.each([
   });
 });
 
-describe("/v1 stays off the parked supervised apps", () => {
-  const post = (app: { request: (path: string, init: RequestInit) => Response | Promise<Response> }, path: string) =>
-    app.request(path, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: "{}" });
-
-  it("is opt-in on createApp", async () => {
+describe("/v1 is opt-in", () => {
+  it("is off on a plain createApp", async () => {
     const app = createApp(await seeded());
     expect((await app.request("/api/health")).status).toBe(200);
     expect((await app.request("/v1/health")).status).toBe(404);
   });
 
-  it.each([
-    ["createSupervisedCreationApp", async () => createSupervisedCreationApp(await seeded(), { enabled: true })],
-    ["the testnet4 deployment", async () => deployedApiApp("testnet4", await seeded())],
-    ["the in-process handoff", async () => createApp(await seeded(), { inProcessHandoff: true })],
-  ] as const)("%s answers 404 under /v1 and keeps /api", async (_name, build) => {
-    const app = await build();
-    expect((await app.request("/api/health")).status).toBe(200);
-    expect((await post(app, "/api/jobs/supervised")).status).not.toBe(404);
-    for (const path of ["/v1/health", "/v1/config", "/v1/vaults"])
-      expect((await app.request(path)).status).toBe(404);
-    expect((await post(app, "/v1/jobs/supervised")).status).toBe(404);
-    expect((await post(app, "/v1/vaults")).status).toBe(404);
+  it("isn't served for testnet4: the deployed API refuses any network but mainnet", () => {
+    expect(() => deployedApiApp("testnet4", new MemoryStore())).toThrow("mainnet only");
   });
 });
