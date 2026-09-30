@@ -1,6 +1,6 @@
 # API
 
-The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side. This page covers its prefixes, OpenAPI document, errors, per-owner limits, idempotency, API keys, and its event log and webhooks.
+The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side, except the HORS preimages a signed withdrawal reveals by design. This page covers its prefixes, OpenAPI document, errors, per-owner limits, idempotency, API keys, and its event log and webhooks.
 
 ## Prefixes
 
