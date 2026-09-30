@@ -19,8 +19,8 @@ import {
   creditedAttempts,
   emptyLedger,
   publishedHitRecords,
-} from "./runtime/coverage-ledger";
-import { readHoldSolverBinding } from "./runtime/solver-review";
+} from "./coverage-ledger";
+import { readHoldSolverBinding } from "./solver-review";
 const slot = z.object({
   attempt: z.number().int().nonnegative(),
   id: z.string().optional(),

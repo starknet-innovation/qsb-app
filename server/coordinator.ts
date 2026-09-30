@@ -28,7 +28,7 @@ import {
 import {
   HOST_HIT_CAPACITY,
   publishedHitRecords,
-} from "./runtime/coverage-ledger";
+} from "./coverage-ledger";
 const cpuClient = new LambdaClient({ region: process.env.AWS_REGION });
 type Event = { owner: string; jobId: string; revision: number; polls?: number };
 async function cpu(payload: unknown) {

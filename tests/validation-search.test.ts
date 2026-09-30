@@ -6,7 +6,7 @@ import { workRange } from "../server/search-ranges";
 import {
   coverageLedgerSchema,
   creditedAttempts,
-} from "../server/runtime/coverage-ledger";
+} from "../server/coverage-ledger";
 const event = { owner: "regtest:fixture", jobId: "proof", revision: 0 };
 let store: MemoryStore;
 let provider: any;

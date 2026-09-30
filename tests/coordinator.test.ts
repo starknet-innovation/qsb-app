@@ -78,7 +78,7 @@ import { release, type Job } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
 import { EVENT_SETTLE_MS, listOwnerEvents } from "../server/owner-events";
 import { registerWebhook } from "../server/webhooks";
-import { decideAppRoleAccess } from "../server/runtime/app-role-records";
+import { decideAppRoleAccess } from "./app-role-records";
 import {
   ACTIVE_JOBS_SK,
   GPU_SECONDS_SK,

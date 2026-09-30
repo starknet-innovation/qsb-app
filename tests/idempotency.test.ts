@@ -8,9 +8,9 @@ import { MemoryStore } from "../server/store";
 import { Esplora } from "../server/chain";
 import { Slipstream } from "../server/providers";
 import { leaseSeconds } from "../server/idempotency";
-import { transactionId } from "../server/runtime/miner-inclusion";
+import { transactionId } from "../server/miner-inclusion";
 import { buildStoredSpendRecord } from "../server/job-spend-record";
-import { inventoryRows } from "../server/runtime/storage-authority";
+import { assertNoCredentialMaterial } from "../server/credential-material";
 import { outputScript } from "../src/lib/transactions";
 import { BITCOIN_NETWORK } from "../src/lib/network";
 import type { Job, PublicVault, Withdrawal } from "../src/lib/model";
@@ -178,8 +178,8 @@ describe("Idempotency-Key", () => {
     const [row] = await f.keys();
     expect(row).toMatchObject({ pk: `OWNER#${owner}`, sk: `IDEMPOTENCY#/vaults/:id/fund/submit#${key}`, response: { status: 201, body } });
     expect(row.expiresAt).toBeGreaterThan(Date.now() / 1000 + 86400 - 60);
-    // An operational row with no credential-like fields.
-    expect(inventoryRows([row]).counts).toMatchObject({ operational: 1, unclassified: 0 });
+    // The stored replay carries no credential-like fields.
+    expect(() => assertNoCredentialMaterial(row)).not.toThrow();
   });
 
   it("replays a settled withdrawal submission without a second consensus check or POST", async () => {

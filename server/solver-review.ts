@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { HoldSolverBinding } from "./coverage-ledger";
-import holdSolverReceiptJson from "../../docs/source-build/20260924/solver-build-receipt.json";
+import holdSolverReceiptJson from "../docs/source-build/20260924/solver-build-receipt.json";
 
 // Historical coverage metadata only. CUDA review/build tooling moved to qsb-solver.
 const holdReceiptSchema = z

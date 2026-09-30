@@ -10,7 +10,7 @@ import { createApp } from "../server/app";
 import { SubmitDisabled } from "../server/submit-exact";
 import { MinerAuthenticationError, MinerHttpError, MinerRejection, Slipstream, MinerCredential, parseMinerSecret } from "../server/providers";
 import { issueExactSubmitPermit } from "../server/exact-submit-permit";
-import { transactionId } from "../server/runtime/miner-inclusion";
+import { transactionId } from "../server/miner-inclusion";
 import { BITCOIN_NETWORK } from "../src/lib/network";
 import type { PublicVault } from "../src/lib/model";
 /** A real, opaque credential for tests; the placeholder is not a real key. */

@@ -7,7 +7,7 @@ import {
   buildStoredSpendRecord,
 } from "./job-spend-record";
 import { checkWithdrawal } from "./transaction-checks";
-import { transactionId } from "./runtime/miner-inclusion";
+import { transactionId } from "./miner-inclusion";
 import type { MinerCredential } from "./providers";
 import {
   exactSubmitEnabled,

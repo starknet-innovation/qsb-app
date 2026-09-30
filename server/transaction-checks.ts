@@ -3,7 +3,7 @@ import { hex } from "@scure/base";
 import { withdrawalSchema, type PublicVault, type Job } from "../src/lib/model";
 import { outputScript } from "../src/lib/transactions";
 import { ChainError, type Esplora } from "./chain";
-import { MinerInclusionError } from "./runtime/miner-inclusion";
+import { MinerInclusionError } from "./miner-inclusion";
 
 const options = { allowUnknownInputs: true, allowUnknownOutputs: true };
 const HELPER_SEQUENCE = 0xfffffffe;

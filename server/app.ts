@@ -52,7 +52,12 @@ import {
   type PublicVault,
   outpoint,
 } from "../src/lib/model";
-import { Conflict, store as defaultStore, type Store } from "./store";
+import {
+  canonicalReservationWrites,
+  Conflict,
+  store as defaultStore,
+  type Store,
+} from "./store";
 import {
   apiKeyOwner,
   apiKeysEnabled,
@@ -79,16 +84,15 @@ import {
   type OwnerLimits,
 } from "./owner-limits";
 import { gpuSpendLimits, nextGpuReservation } from "./gpu-spend";
-import { canonicalReservationWrites } from "./runtime/storage-authority";
 import {
   coverageAccountStopped,
   coverageLedgerSchema,
-} from "./runtime/coverage-ledger";
+} from "./coverage-ledger";
 import {
   MinerInclusionError,
   judgeInclusionEvidence,
   reportEsploraInclusion,
-} from "./runtime/miner-inclusion";
+} from "./miner-inclusion";
 import {
   SETTLE_CAP_MS,
   eventQuery,

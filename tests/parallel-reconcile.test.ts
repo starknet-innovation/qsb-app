@@ -7,7 +7,6 @@ import {
   type ReconciliationDecision,
   type SubmissionLookup,
 } from "../server/reconcile-submission";
-import { preservationFailures } from "../server/runtime/storage-authority";
 
 const owner = "owner-1",
   jobId = "job-1",
@@ -101,12 +100,3 @@ it("refuses while other chunks still run, and when more than one chunk is unknow
     .rejects.toThrow("SingleUnknownSubmissionRequired");
 });
 
-it("the storage inventory treats every chunk's provider ID as paid work a rollback must keep", () => {
-  const row = (slots: SearchSlot[]) => ({ pk, sk, version: 0, job: { id: jobId, status: "searching", parallelSlots: slots } });
-  expect(preservationFailures([row([slot(0, "c0"), slot(1, "c1")])], [row([slot(0, "c0")])]))
-    .toContain("RollbackWouldDuplicatePaidWork");
-  expect(preservationFailures([row([slot(0, "c0"), slot(1)])], [row([slot(0, "c0")])]))
-    .toContain("RollbackWouldDuplicatePaidWork");
-  expect(preservationFailures([row([slot(0, "c0")])], [row([slot(0, "c0")])]))
-    .not.toContain("RollbackWouldDuplicatePaidWork");
-});

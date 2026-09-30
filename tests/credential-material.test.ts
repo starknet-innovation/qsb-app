@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertNoCredentialMaterial } from "../server/runtime/host-requirements";
+import { assertNoCredentialMaterial } from "../server/credential-material";
 
 // judgeInclusionEvidence runs this on inclusion evidence before recording it.
 describe("assertNoCredentialMaterial", () => {

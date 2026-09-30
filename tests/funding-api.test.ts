@@ -10,10 +10,6 @@ import { Esplora } from "../server/chain";
 import { Slipstream } from "../server/providers";
 import { fundingPsbt } from "../src/lib/transactions";
 import { release, type PublicVault } from "../src/lib/model";
-import {
-  HISTORICAL_REGTEST_FIXTURE_LABEL,
-  rawTransactionSha256,
-} from "../server/runtime/miner-inclusion";
 const key = new Uint8Array(32).fill(7),
   pub = secp256k1.getPublicKey(key),
   address = btc.p2wpkh(pub).address!;
@@ -125,7 +121,7 @@ async function setup(reject = false) {
       costAccepted: true as const,
       spentFixtureRefs: [
         {
-          label: HISTORICAL_REGTEST_FIXTURE_LABEL,
+          label: "historical-xverse-regtest-withdrawal",
           chain: "regtest" as const,
           txid: "ff".repeat(32),
           vout: 0,
@@ -147,7 +143,7 @@ it("rejects a requester-supplied exact spend and does not fund", async () => {
           format: "qsb-exact-spend-authorization-v1",
           chain: "mainnet",
           txid: f.tx.id,
-          rawTxSha256: rawTransactionSha256(f.body.rawTxHex),
+          rawTxSha256: createHash("sha256").update(Buffer.from(f.body.rawTxHex, "hex")).digest("hex"),
           amountSats: "50000",
           feeSats: "10000",
           inputs: [{ txid: "ab".repeat(32), vout: 0, valueSats: "100000" }],
