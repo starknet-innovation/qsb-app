@@ -16,7 +16,9 @@ terraform {
 provider "aws" {
   region              = var.region
   allowed_account_ids = [var.aws_account_id]
-  default_tags { tags = { Project = var.name, ManagedBy = "Terraform", SourceCommit = var.source_commit } }
+  # No commit tag: it would change every resource on every deploy. The deployed commit is terraform_data.release
+  # and the source_commit output, and data.tf refuses a build that doesn't match it.
+  default_tags { tags = { Project = var.name, ManagedBy = "Terraform" } }
 }
 data "aws_partition" "current" {}
 # Pins this state to its region. Changing var.region on an existing stack would otherwise plan a
