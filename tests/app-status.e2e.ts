@@ -94,6 +94,11 @@ test("status follows the server switches and vault rows only offer what can happ
   }, "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4");
   await pending.getByRole("button", { name: "Check now" }).click();
   await expect(pending.getByRole("alert")).toContainText("Another tab is checking the chain or has a transaction open");
+  // A transaction dialog doesn't open without the turn either: it says why and stays closed.
+  await page.locator(".vault-row", { hasText: "Emergency" }).getByRole("button", { name: /Deposit/ }).click();
+  await page.clock.fastForward("00:11");
+  await expect(page.getByRole("alert").first()).toContainText("a transaction is open in another tab");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.evaluate(() => (window as any).releaseTurn());
   await pending.getByRole("button", { name: "Check now" }).click();
   await expect(pending).toContainText("Still waiting for confirmation");

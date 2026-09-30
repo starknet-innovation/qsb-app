@@ -336,9 +336,9 @@ export default function App() {
   dialogOpen.current = !!transaction;
   // While a transaction dialog is open it holds the chain-check turn, so no tab checks the
   // chain for this wallet: a check of a pending deposit bumps the vault record (exportFunding),
-  // which would fence a deposit submission in flight. The dialog opens once it holds the turn,
-  // so it never overlaps a check already running. If another tab's dialog holds the turn (no
-  // check runs then), it opens after a few seconds and takes the turn when that one closes.
+  // which would fence a deposit submission in flight. The dialog opens only once it holds the
+  // turn, so it never overlaps a check. If the turn isn't free within a few seconds (a slow
+  // check, or a transaction open in another tab), the dialog stays closed and says why.
   const heldTurn = useRef<{ release: () => void; abort: AbortController } | undefined>(undefined);
   function releaseTurn() {
     heldTurn.current?.release();
@@ -362,7 +362,14 @@ export default function App() {
           .catch(() => {}); // Aborted before it was granted.
       });
       heldTurn.current = { release: () => release(), abort };
-      await Promise.race([granted, new Promise((wait) => setTimeout(wait, 3000))]);
+      const held = await Promise.race([
+        granted.then(() => true),
+        new Promise<boolean>((wait) => setTimeout(() => wait(false), 10000)),
+      ]);
+      if (!held) {
+        releaseTurn();
+        throw Error("A chain check is still running, or a transaction is open in another tab. Close it or try again in a moment.");
+      }
     }
     if (active !== generation.current) return releaseTurn();
     setTransaction(next);
@@ -551,7 +558,8 @@ export default function App() {
       return;
     }
     // A new deposit is submitted to MARA, so it needs submission on as well as operations.
-    if (v.status === "unfunded" ? submissionOn : operationsAllowed(config)) void openTransaction({ vault: v });
+    if (v.status === "unfunded" ? submissionOn : operationsAllowed(config))
+      void action("Waiting for the chain check to finish", () => openTransaction({ vault: v }));
     else setModal("readiness");
   }
   function depositNow() {

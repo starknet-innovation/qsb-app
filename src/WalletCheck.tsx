@@ -41,6 +41,8 @@ export default function WalletCheck({
     [accepted, setAccepted] = useState(false);
   const vault = vaults.find((v) => v.id === selected) || vaults[0];
   const busy = running !== undefined;
+  // Each check is built from one vault's script, so another vault starts with no results.
+  useEffect(() => setOutcomes([]), [vault?.id]);
   // Leaving the page, or disconnecting (which remounts this section), stops the checks.
   const mounted = useRef(true);
   useEffect(() => {
