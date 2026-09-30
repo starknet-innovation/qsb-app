@@ -13,13 +13,10 @@ export function reconciliationEnvironmentError(
   };
   for (const [name, reason] of Object.entries(required))
     if (!env[name]?.trim()) return reason;
-  if (!["mainnet", "testnet4"].includes(env.QSB_NETWORK!))
-    return "QsbNetworkInvalid";
-  if (env.QSB_NETWORK === "mainnet") {
-    if (!env.QSB_MAINNET_ENABLED?.trim()) return "QsbMainnetEnabledRequired";
-    if (!["true", "false"].includes(env.QSB_MAINNET_ENABLED))
-      return "QsbMainnetEnabledInvalid";
-  }
+  if (env.QSB_NETWORK !== "mainnet") return "QsbNetworkInvalid";
+  if (!env.QSB_MAINNET_ENABLED?.trim()) return "QsbMainnetEnabledRequired";
+  if (!["true", "false"].includes(env.QSB_MAINNET_ENABLED))
+    return "QsbMainnetEnabledInvalid";
   // A shell that lost the setting must not skip the deployment's slot limit.
   if (!env.QSB_OWNER_MAX_ACTIVE_JOBS?.trim()) return "OwnerMaxActiveJobsRequired";
   if (reconcileActiveJobLimit(env) === undefined) return "OwnerMaxActiveJobsInvalid";

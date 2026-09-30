@@ -41,7 +41,7 @@ async function seeded() {
 
 /** The deployed mainnet API, as server/lambda.ts builds it. Its switches keep their off defaults. */
 async function deployed() {
-  const app = deployedApiApp("mainnet", await seeded());
+  const app = deployedApiApp(await seeded());
   return { app, submit: vi.spyOn(defaultMiner, "submit"), submitFunding: vi.spyOn(defaultMiner, "submitFunding") };
 }
 
@@ -193,9 +193,5 @@ describe("/v1 is opt-in", () => {
     const app = createApp(await seeded());
     expect((await app.request("/api/health")).status).toBe(200);
     expect((await app.request("/v1/health")).status).toBe(404);
-  });
-
-  it("isn't served for testnet4: the deployed API refuses any network but mainnet", () => {
-    expect(() => deployedApiApp("testnet4", new MemoryStore())).toThrow("mainnet only");
   });
 });

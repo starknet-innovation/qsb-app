@@ -5768,7 +5768,7 @@
           },
           "key": {
             "type": "string",
-            "description": "The API key, `qsb_<network>_<43 base64url characters>`, for `Authorization: Bearer <key>`. Shown only here."
+            "description": "The API key, `qsb_mainnet_<43 base64url characters>`, for `Authorization: Bearer <key>`. Shown only here."
           }
         },
         "required": [
@@ -7269,7 +7269,7 @@
       "apiKey": {
         "type": "http",
         "scheme": "bearer",
-        "description": "An API key minted with a session (`POST /api-keys`). It acts for the same owner. Send `Authorization: Bearer qsb_<network>_<43 base64url characters>`.\n\nAn operation that accepts a key lists the one scope the key needs (`ApiKeyScope`). The key-management routes take a session only.\n\nA key works only on the network in its prefix, until it expires or is revoked. Keys are refused with `api_keys_disabled` unless the deployment switches them on (`apiKeysEnabled` in the configuration)."
+        "description": "An API key minted with a session (`POST /api-keys`). It acts for the same owner. Send `Authorization: Bearer qsb_mainnet_<43 base64url characters>`.\n\nAn operation that accepts a key lists the one scope the key needs (`ApiKeyScope`). The key-management routes take a session only.\n\nA key works only on the network in its prefix, until it expires or is revoked. Keys are refused with `api_keys_disabled` unless the deployment switches them on (`apiKeysEnabled` in the configuration)."
       }
     }
   }

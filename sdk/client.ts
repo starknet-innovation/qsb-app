@@ -140,7 +140,7 @@ export type QsbClientOptions = {
   /** A session token from an earlier login by the same address. */
   token?: string;
   /**
-   * An API key (`qsb_<network>_…`) minted by this owner, sent instead of a session. Its scopes
+   * An API key (`qsb_mainnet_…`) minted by this owner, sent instead of a session. Its scopes
    * decide what it can do; minting, listing and revoking keys still need a wallet session.
    */
   apiKey?: string;
@@ -216,10 +216,6 @@ function assertOwnerAllowed(config: ApiConfig) {
   if (config.ownerLimits?.allowlisted === false)
     throw new Error("This wallet isn't on this deployment's allowlist (owner_not_allowlisted). Nothing was changed.");
 }
-const mainnetOnly = () => {
-  if (NETWORK_ID !== "mainnet")
-    throw new Error("Withdrawals are assembled from the coordinator's solved result, which is delivered on Bitcoin mainnet only.");
-};
 function memoryPending(): PendingDeposits {
   const rows = new Map<string, PendingDeposit>();
   return {
@@ -239,7 +235,7 @@ function signInMessage(address: string, origin: string) {
 }
 
 /** The HTTP transport: one origin, no redirects, a timeout, and the webapp's session client. */
-const apiKeyFormat = /^qsb_(mainnet|testnet4)_[A-Za-z0-9_-]{43}$/;
+const apiKeyFormat = /^qsb_mainnet_[A-Za-z0-9_-]{43}$/;
 function transport(options: Pick<QsbClientOptions, "baseUrl" | "basePath" | "fetch" | "timeoutMs" | "apiKey">) {
   const apiKey = options.apiKey;
   // Never echo the key: it's a bearer credential.
@@ -818,7 +814,6 @@ export class QsbClient {
     jobId: string,
     input: { backup: string; passphrase: string; saveBackup?: SaveBackup },
   ): Promise<CoordinatorSignedResult> {
-    mainnetOnly();
     const { job } = await this.withdrawals.status(jobId);
     if (job.status !== "awaiting_authorization" || !job.solution)
       throw new Error(`The search has no solved result to authorize (status ${job.status}).`);
@@ -871,7 +866,6 @@ export class QsbClient {
   ): Promise<{ txid: string; status: string }> {
     if (typeof options?.approve !== "function")
       throw new Error("withdrawals.submit needs an approve callback. Nothing was submitted.");
-    mainnetOnly();
     const signed = coordinatorSignedResultSchema.parse(input);
     const config = await this.assertOperations();
     if (config.exactSubmitEnabled !== true)

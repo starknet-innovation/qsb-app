@@ -28,7 +28,6 @@ As of 30 September 2026. The plan of record is #8.
 ## Open
 
 - **#22:** write the first withdrawal's evidence record under `docs/` (its acceptance), then close it.
-- **testnet4 code** remains in `terraform/scripts/build.mjs`, the Terraform `network` variable, the SDK and the frontend, but the API Lambda refuses to start on any network but mainnet (`server/lambda.ts`).
 - **Legacy supervised jobs.** Persisted jobs marked `execution.kind: "qsb-supervised-service-v1"` stay rejected by exact submission and by the solved-result, pause, resume and status routes, and the UI hides their pause and resume controls. These guards stay until the production inventory is complete and any matching rows are reconciled or quarantined; removing the old UI doesn't show the table holds none.
 - **#24:** build-generated identities in place of in-repo self-hash pinning.
 - **#27:** record each deposit's QSB version as data.
