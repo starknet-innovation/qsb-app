@@ -109,8 +109,15 @@ function readChainSeen(address: string): Record<string, string> {
   }
 }
 // A settled vault is still checked now and then: the funding route is where the server flags a
-// payment that reached the vault's script outside its one deposit.
-const SETTLED_CHECK_MS = 10 * 60 * 1000;
+// payment that reached the vault's script outside its one deposit. At most a few a turn, so a
+// wallet with many vaults doesn't send a burst of provider requests.
+const SETTLED_CHECK_MS = 60 * 60 * 1000;
+const SETTLED_PER_TURN = 3;
+// For a deposit that isn't mined yet, the funding route exports its signed bytes, a versioned
+// write that stops a first submission still in flight from clearing a refused intent. So a
+// pending deposit is checked automatically only once this tab has seen it pending for longer
+// than a submission request can run (API Gateway ends requests at 30 seconds).
+const PENDING_SETTLE_MS = 2 * 60 * 1000;
 async function chainTurn(address: string, check: () => Promise<void>) {
   const key = chainTurnKey(address);
   const run = async () => {
@@ -158,6 +165,8 @@ export default function App() {
     [inline, setInline] = useState<Record<string, { kind: "error" | "notice"; text: string }>>({}),
     // When the chain was last checked for a pending deposit or withdrawal, by vault or job id.
     [checkedAt, setCheckedAt] = useState<Record<string, string>>({}),
+    // When an automatic check last failed, by vault or job id; cleared by the next success.
+    [checkFailed, setCheckFailed] = useState<Record<string, string>>({}),
     [modal, setModal] = useState<"create" | "readiness" | null>(null),
     [step, setStep] = useState(1),
     [name, setName] = useState("My first vault"),
@@ -174,7 +183,7 @@ export default function App() {
     [configState, setConfigState] = useState<"loading" | "ready" | "failed">("loading"),
     [notice, setNotice] = useState("");
   // Deposit submission to MARA, and so every manual Slipstream path, needs both switches on.
-  const submissionOn = operationsAllowed(config) && config?.exactSubmitEnabled === true;
+  const submissionOn = serviceStatus(config) === "on";
   const status: Status =
     configState === "loading" ? "checking" : configState === "failed" ? "unknown" : serviceStatus(config);
   const [transaction, setTransaction] = useState<{
@@ -205,7 +214,9 @@ export default function App() {
   const dialog = useRef<HTMLDialogElement>(null),
     walletMenuRef = useRef<HTMLDivElement>(null),
     generation = useRef(0),
-    dialogOpen = useRef(false);
+    dialogOpen = useRef(false),
+    // When this tab first saw each vault's deposit pending.
+    pendingSince = useRef<Record<string, number>>({});
   useEffect(() => {
     api("/config")
       .then((value) => {
@@ -279,6 +290,7 @@ export default function App() {
   function markChecked(id: string) {
     const at = new Date().toISOString();
     setCheckedAt((c) => ({ ...c, [id]: at }));
+    setCheckFailed(({ [id]: _, ...rest }) => rest);
     if (wallet)
       localStorage.setItem(
         chainSeenKey(wallet.address),
@@ -343,6 +355,8 @@ export default function App() {
         ]);
         if (disposed) return;
         setVaults(v.vaults);
+        for (const vault of v.vaults)
+          if (vault.status === "submitted") pendingSince.current[vault.id] ??= Date.now();
         setResendable(new Set(v.resendable ?? []));
         setStray(v.strayPayments ?? []);
         setJobs(j.jobs);
@@ -352,18 +366,21 @@ export default function App() {
         if (document.visibilityState !== "visible" || dialogOpen.current) return;
         await chainTurn(wallet.address, async () => {
           const seen = readChainSeen(wallet.address);
+          const failed = (id: string) => () => {
+            if (!disposed) setCheckFailed((f) => ({ ...f, [id]: new Date().toISOString() }));
+          };
           for (const vault of v.vaults)
-            if (
-              !disposed &&
-              vault.funding &&
-              (vault.status === "submitted" ||
-                !seen[vault.id] ||
-                Date.now() - Date.parse(seen[vault.id]) >= SETTLED_CHECK_MS)
-            )
-              await checkDeposit(vault, stale).catch(() => {});
+            if (!disposed && vault.status === "submitted" && vault.funding && Date.now() - pendingSince.current[vault.id] >= PENDING_SETTLE_MS)
+              await checkDeposit(vault, stale).catch(failed(vault.id));
+          const settled = v.vaults
+            .filter((vault) => vault.funding && vault.status !== "submitted")
+            .filter((vault) => !seen[vault.id] || Date.now() - Date.parse(seen[vault.id]) >= SETTLED_CHECK_MS)
+            .sort((a, b) => (seen[a.id] ?? "").localeCompare(seen[b.id] ?? ""))
+            .slice(0, SETTLED_PER_TURN);
+          for (const vault of settled) if (!disposed) await checkDeposit(vault, stale).catch(() => {});
           for (const job of j.jobs)
             if (!disposed && job.txid && job.status === "submitted") {
-              const observation = await checkWithdrawal(job, stale).catch(() => undefined);
+              const observation = await checkWithdrawal(job, stale).catch(failed(job.id));
               if (observation?.status === "conflict" && !disposed)
                 say(`job:${job.id}`, "error", conflictText(observation.alert));
             }
@@ -427,6 +444,8 @@ export default function App() {
     setStray([]);
     setInline({});
     setCheckedAt({});
+    setCheckFailed({});
+    pendingSince.current = {};
     setBusy("");
     setWallet(undefined);
     setVaults([]);
@@ -841,7 +860,7 @@ export default function App() {
                               <h3>{v.name}</h3>
                               <p>
                                 {v.status === "submitted"
-                                  ? `Deposit sent · ${checkedAt[v.id] ? `last checked ${clock(checkedAt[v.id])}` : "checking the chain"}`
+                                  ? `Deposit sent${checkFailed[v.id] ? ` · last check failed ${clock(checkFailed[v.id])}` : checkedAt[v.id] ? ` · last checked ${clock(checkedAt[v.id])}` : ""}`
                                   : v.status === "unfunded"
                                     ? `Created ${new Date(v.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`
                                     : v.status === "spent"
@@ -1028,7 +1047,9 @@ export default function App() {
                           </p>
                           <p className="job-id">
                             Request {short(j.id)}
-                            {checkedAt[j.id] && ` · last checked ${clock(checkedAt[j.id])}`}
+                            {checkFailed[j.id]
+                              ? ` · last check failed ${clock(checkFailed[j.id])}`
+                              : checkedAt[j.id] && ` · last checked ${clock(checkedAt[j.id])}`}
                           </p>
                         </div>
                         <span className={`status-label job-${j.status}`}>{jobLabel(j)}</span>

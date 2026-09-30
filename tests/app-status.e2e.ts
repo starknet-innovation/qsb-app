@@ -54,7 +54,9 @@ export async function signPsbt(){throw Error('No signing in this test');}`,
   );
 }
 
+const PENDING = "/vaults/bbbbbbbb-2222-4222-8222-222222222222/funding";
 test("status follows the server switches and vault rows only offer what can happen", async ({ page }) => {
+  await page.clock.install();
   await mount(page, { operationsEnabled: true, exactSubmitEnabled: true });
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Deposits and withdrawals on" })).toBeVisible();
@@ -65,14 +67,16 @@ test("status follows the server switches and vault rows only offer what can happ
   const pending = page.locator(".vault-row", { hasText: "Travel fund" });
   await expect(pending.getByRole("button", { name: "Waiting for confirmation" })).toBeDisabled();
   await expect(pending.getByRole("button", { name: /Withdraw/ })).toHaveCount(0);
-  // The pending deposit is checked on the chain without a click.
-  await expect(pending).toContainText("last checked");
-  expect(await page.evaluate(() => (window as any).apiCalls)).toContain(
-    "/vaults/bbbbbbbb-2222-4222-8222-222222222222/funding",
-  );
   await expect(page.locator(".vault-row", { hasText: "Emergency" }).getByRole("button", { name: /Deposit/ })).toBeEnabled();
   // A funded vault is checked too: that's where the server flags a payment outside its deposit.
   await expect(page.locator(".vault-row", { hasText: "Savings" })).toContainText("reached this vault outside its one deposit");
+  // A deposit that has only just turned pending isn't checked: a first submission may still
+  // be in flight. Once it has been pending for two minutes, it's checked without a click.
+  expect(await page.evaluate(() => (window as any).apiCalls)).not.toContain(PENDING);
+  await expect(pending).not.toContainText("last checked");
+  await page.clock.fastForward("02:05");
+  await expect(pending).toContainText("last checked");
+  expect(await page.evaluate(() => (window as any).apiCalls)).toContain(PENDING);
   await expect(page.getByText("Savings: your withdrawal is ready to authorize.")).toBeVisible();
   await expect(page.getByRole("link", { name: /^Activity.*1 ready to authorize/ })).toBeVisible();
 
@@ -109,18 +113,24 @@ for (const [switches, label] of [
   });
 
 test("two tabs share one chain check a minute and its result", async ({ page }) => {
+  await page.context().clock.install();
   const second = await page.context().newPage();
   for (const tab of [page, second]) await mount(tab, { operationsEnabled: true, exactSubmitEnabled: true });
-  const fundingCalls = async () =>
+  const pendingChecks = async () =>
     (await Promise.all([page, second].map((tab) => tab.evaluate(() => (window as any).apiCalls as string[]))))
       .flat()
-      .filter((path) => path === "/vaults/bbbbbbbb-2222-4222-8222-222222222222/funding").length;
-  await page.goto("/");
-  await page.getByRole("button", { name: "Connect Xverse", exact: true }).click();
-  await expect(page.locator(".vault-row", { hasText: "Travel fund" })).toContainText("last checked");
-  await second.goto("/");
-  await second.getByRole("button", { name: "Connect Xverse", exact: true }).click();
-  // The second tab shows the first tab's check instead of making its own.
-  await expect(second.locator(".vault-row", { hasText: "Travel fund" })).toContainText("last checked");
-  expect(await fundingCalls()).toBe(1);
+      .filter((path) => path === PENDING).length;
+  for (const tab of [page, second]) {
+    await tab.goto("/");
+    await tab.getByRole("button", { name: "Connect Xverse", exact: true }).click();
+    await expect(tab.locator(".vault-row", { hasText: "Travel fund" })).toBeVisible();
+  }
+  // Both tabs are due to check the pending deposit; only one does, and both show the result.
+  await page.context().clock.fastForward("02:05");
+  await expect.poll(pendingChecks).toBe(1);
+  // The next refresh, well inside the minute, reads the shared result without checking again.
+  await page.context().clock.fastForward("00:16");
+  for (const tab of [page, second])
+    await expect(tab.locator(".vault-row", { hasText: "Travel fund" })).toContainText("last checked");
+  expect(await pendingChecks()).toBe(1);
 });

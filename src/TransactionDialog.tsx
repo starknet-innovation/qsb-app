@@ -861,6 +861,15 @@ export default function TransactionDialog({
       {error}
     </p>
   );
+  // Shown from the first step, before the backup is unlocked: there's already a deposit.
+  const pendingNotice = deposit && pendingFunding && (
+    <p role="status">
+      {pendingFunding.rawTxHex
+        ? <>A signed deposit {pendingFunding.txid.slice(0, 12)}… is waiting for MARA Slipstream. Do not deposit again. Submit it again: it resends the same transaction, which can only confirm once.</>
+        : <>Xverse reported a broadcast {pendingFunding.txid ? pendingFunding.txid.slice(0, 12) + "…" : "without a valid txid"}. Do not deposit again. Record
+      the deposit once it is visible on the network; withdrawal waits for confirmation.</>}
+    </p>
+  );
   const verifiedLine = (
     <p className="verified">
       <Check size={15} /> Recovery backup verified on this device.
@@ -960,6 +969,7 @@ export default function TransactionDialog({
           </>
         ) : stage === "unlock" || !unlocked ? (
           <>
+            {pendingNotice}
             <p>
               Select this vault's recovery backup and enter its passphrase.
               It's checked on this device; neither the file nor the passphrase
@@ -1140,14 +1150,7 @@ export default function TransactionDialog({
             )}
             {verifiedLine}
             {!(deposit && pendingFunding) && summaryTable}
-            {deposit && pendingFunding && (
-              <p role="status">
-                {pendingFunding.rawTxHex
-                  ? <>A signed deposit {pendingFunding.txid.slice(0, 12)}… is waiting for MARA Slipstream. Do not deposit again. Submit it again: it resends the same transaction, which can only confirm once.</>
-                  : <>Xverse reported a broadcast {pendingFunding.txid ? pendingFunding.txid.slice(0, 12) + "…" : "without a valid txid"}. Do not deposit again. Record
-                the deposit once it is visible on the network; withdrawal waits for confirmation.</>}
-              </p>
-            )}
+            {pendingNotice}
             {deposit && pendingFunding?.rawTxHex && !(manualReady && submissionOpen) && (
               <p className="hint">
                 Manual submission on MARA Slipstream becomes available once the app has recorded this signed deposit and
