@@ -383,6 +383,14 @@ class SourceRules(unittest.TestCase):
         self.refused(('data.tf', 'aws_s3_bucket_public_access_block.frontend, aws_s3_object.frontend]',
                       'aws_s3_bucket_public_access_block.frontend]'), 'must upload index.html after')
 
+    def test_the_existing_index_html_object_is_moved_not_recreated(self):
+        moved = 'moved {\n  from = aws_s3_object.frontend["index.html"]\n  to   = aws_s3_object.index\n}\n'
+        message = 'moved { from = aws_s3_object.frontend["index.html"], to = aws_s3_object.index }'
+        self.refused(('data.tf', moved, ''), message)
+        self.refused(('data.tf', 'from = aws_s3_object.frontend["index.html"]', 'from = aws_s3_object.frontend["assets/index.html"]'), message)
+        self.refused(('data.tf', 'to   = aws_s3_object.index', 'to   = aws_s3_object.frontend["index.html"]'), message)
+        self.refused(('data.tf', None, '\nmoved {\n  from = aws_s3_object.index\n  to   = aws_s3_object.entrypoint\n}\n'), message)
+
     def test_frontend_objects_stay_in_the_two_reviewed_resources(self):
         self.refused(('data.tf', None, '\nresource "aws_s3_object" "extra" {\n  bucket = aws_s3_bucket.frontend.id\n}\n'),
                      'aws_s3_object.frontend and aws_s3_object.index only')

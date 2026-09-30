@@ -121,6 +121,7 @@ resource "aws_s3_object" "index" {
   depends_on    = [terraform_data.release, aws_s3_bucket_public_access_block.frontend, aws_s3_object.frontend]
 }
 # The same S3 object, so the first apply moves it in state instead of deleting and re-creating index.html.
+# check-single-pipeline.py requires this mapping; tests/frontend_migration.tftest.hcl plans it against the old state.
 moved {
   from = aws_s3_object.frontend["index.html"]
   to   = aws_s3_object.index

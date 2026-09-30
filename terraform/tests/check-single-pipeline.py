@@ -170,11 +170,25 @@ def frontend_order_rules(root):
 
     index.html alone names the hashed assets, so aws_s3_object.index waits for every other frontend object, and
     those use create_before_destroy, so a file dropped from the build is deleted only after the new index.html is
-    uploaded. Plans show neither lifecycle nor depends_on, so this reads the source."""
-    blocks = {}
+    uploaded. The existing index.html object must move to aws_s3_object.index rather than be destroyed and created
+    again, which a plan without prior state can't show. Plans show neither lifecycle nor depends_on either, so this
+    reads the source."""
+    blocks, moves = {}, []
     for path in sorted(root.glob('*.tf')):
         text = path.read_text()
         blocks.update({name: text[start:end] for kind, name, start, end in resource_blocks(text) if kind == 'aws_s3_object'})
+        for match in re.finditer(r'^\s*moved\s*\{', text, re.M):
+            depth, end = 1, match.end()
+            while depth and end < len(text):
+                depth += {'{': 1, '}': -1}.get(text[end], 0)
+                end += 1
+            body = text[match.end():end - 1]
+            side = lambda name: next(iter(re.findall(rf'^\s*{name}\s*=\s*(\S+)\s*$', body, re.M)), None)
+            moves.append((side('from'), side('to')))
+    require([m for m in moves if any('aws_s3_object.' in str(side) for side in m)]
+            == [('aws_s3_object.frontend["index.html"]', 'aws_s3_object.index')],
+            'exactly one moved { from = aws_s3_object.frontend["index.html"], to = aws_s3_object.index } must keep the '
+            'existing index.html object')
     require(set(blocks) == {'frontend', 'index'}, 'the frontend is uploaded as aws_s3_object.frontend and aws_s3_object.index only')
     require(re.search(r'\bfor_each\s*=\s*setsubtract\([^\n]*,\s*\[\s*"index\.html"\s*\]\s*\)', blocks['frontend']),
             'aws_s3_object.frontend must leave index.html to aws_s3_object.index')
