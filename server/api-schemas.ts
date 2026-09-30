@@ -36,7 +36,10 @@ export const submitRequest = z
   .strict();
 export const transactionIdParam = z.string().regex(/^[a-f0-9]{64}$/);
 
-/** Owner event types: a job status for `withdrawal.*`, a vault status for `deposit.*`. */
+/**
+ * Owner event types: a job status for `withdrawal.*`, a vault status for `deposit.*`, except
+ * `deposit.dropped` and `deposit.stray_payment`, which aren't vault statuses.
+ */
 export const EVENT_TYPES = [
   "withdrawal.queued",
   "withdrawal.searching",
@@ -49,6 +52,7 @@ export const EVENT_TYPES = [
   "deposit.confirmed",
   "deposit.spent",
   "deposit.dropped",
+  "deposit.stray_payment",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 export const eventType = z.enum(EVENT_TYPES);

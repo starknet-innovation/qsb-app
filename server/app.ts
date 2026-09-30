@@ -2,6 +2,7 @@ import { deployedSolver, deployedSolverId } from "./solver-deployment";
 import { observeWithdrawal } from "./withdrawal-status";
 import { submitExact, SubmitDisabled } from "./submit-exact";
 import { exportFunding, submitFunding, type FundingDependencies } from "./submit-funding";
+import { flagStrayOutputs, strayOutputsOf } from "./stray-outputs";
 import {
   CoreConsensus,
   ConsensusError,
@@ -27,11 +28,7 @@ import {
   verifyRequest,
   webhookRequest,
 } from "./api-schemas";
-import {
-  assertVaultConfiguration,
-  pinSolver,
-  vaultConfiguration,
-} from "../src/lib/provenance";
+import { assertVaultConfiguration, pinSolver } from "../src/lib/provenance";
 import { Hono } from "hono";
 import { getPath } from "hono/utils/url";
 import { cors } from "hono/cors";
@@ -170,6 +167,7 @@ export function createApp(
     reservationRows: () => records.reservationRows(),
     atomicPut: (writes) => records.atomicPut(writes),
     recordDropped: () => {},
+    recordStrayPayment: () => {},
     settle: async () => {},
   };
   const current = () => requestEvents.getStore() ?? unrecorded;
@@ -181,6 +179,7 @@ export function createApp(
     reservationRows: () => current().reservationRows(),
     atomicPut: (writes) => current().atomicPut(writes),
     recordDropped: (owner, vaultId) => current().recordDropped(owner, vaultId),
+    recordStrayPayment: (owner, vaultId) => current().recordStrayPayment(owner, vaultId),
     settle: (options) => current().settle(options),
   };
   const delivery: Delivery = {
@@ -551,6 +550,8 @@ export function createApp(
             (r.vault as PublicVault).status === "submitted",
         )
         .map((r) => (r.vault as PublicVault).id),
+      // Payments to a vault's script beyond its recorded deposit, as last checked. Never spent.
+      strayOutputs: rows.flatMap(strayOutputsOf),
     });
   });
   app.get("/api/payment-utxos", async (c) =>
@@ -583,7 +584,6 @@ export function createApp(
     try {
       validatePublicState(vault.publicStateJson);
       assertVaultConfiguration(vault);
-      vault.configuration ??= vaultConfiguration(vault);
       publicState = JSON.parse(vault.publicStateJson);
     } catch {
       return apiError(
@@ -872,20 +872,21 @@ export function createApp(
       fromChain = false;
       return { confirmed: false, confirmations: 0 };
     });
+    let current = row;
     // The fallback never changes the vault's durable status.
     if (vault.status !== "spent" && fromChain) {
       const next = status.confirmed ? "confirmed" : "submitted";
       if (next !== vault.status) {
         vault.status = next;
-        await store.put(
-          { ...row, vault, version: row.version + 1 },
-          row.version,
-        );
+        current = { ...row, vault, version: row.version + 1 };
+        await store.put(current, row.version);
       }
     }
+    const strayOutputs = await flagStrayOutputs(store, ledger, current);
     return c.json({
       vault,
       status,
+      strayOutputs,
       ...(stored ? { submission: row.fundingSubmission } : {}),
       ...(await ledger
         .raw(vault.funding.txid)

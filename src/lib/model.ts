@@ -52,13 +52,26 @@ export const publicVaultSchema = z
         scriptBytesHash: txid,
         publicStateHash: txid,
       })
-      .strict()
-      .optional(),
+      .strict(),
     funding: outpoint.optional(),
     status: z.enum(["unfunded", "submitted", "confirmed", "spent"]),
   })
   .strict();
 export type PublicVault = z.infer<typeof publicVaultSchema>;
+/**
+ * A confirmed payment to a vault's script other than its recorded `funding`. A vault takes
+ * one deposit: the server flags these, no withdrawal spends them, and the app can't recover them.
+ */
+export const strayOutputSchema = z
+  .object({
+    vaultId: z.string().uuid(),
+    txid,
+    vout: z.number().int().min(0).max(0xffffffff),
+    value: sats,
+    firstSeenAt: z.string().datetime(),
+  })
+  .strict();
+export type StrayOutput = z.infer<typeof strayOutputSchema>;
 export const recoverySchema = z
   .object({
     format: z.literal("qsb-recovery-v1"),

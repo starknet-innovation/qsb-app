@@ -83,12 +83,20 @@ To give an owner more GPU time, raise the variable and apply, then resume their 
 
 ## Alarms and incidents
 
-The app stack raises an alarm on any error of each Lambda (`<name>-api-errors`, `<name>-coordinator-errors`, `<name>-reference-errors`, and `<name>-webhooks-errors` when the dispatcher is on) and on any failed withdrawal execution (`<name>-workflow-failures`). They notify the SNS topics in `alarm_actions`; with none set, the alarms exist without notifications. The AWS administrator owns that routing and its delivery test. In the GPU stack, a watchdog Lambda runs every five minutes and terminates any `qsb-gpu` job older than 30 minutes, queue and startup time included; it never submits a replacement.
+The app stack raises an alarm on any error of each Lambda (`<name>-api-errors`, `<name>-coordinator-errors`, `<name>-reference-errors`, and `<name>-webhooks-errors` when the dispatcher is on), on any failed withdrawal execution (`<name>-workflow-failures`) and on a newly flagged stray payment (`<name>-stray-payments`). They notify the SNS topics in `alarm_actions`; with none set, the alarms exist without notifications. The AWS administrator owns that routing and its delivery test. In the GPU stack, a watchdog Lambda runs every five minutes and terminates any `qsb-gpu` job older than 30 minutes, queue and startup time included; it never submits a replacement.
 
 On an incident:
 1. Stop new work: turn the mainnet switches off (above), or pause the affected withdrawals.
 2. Preserve unknown paid outcomes and reconcile them from the provider record. Never retry blindly, and never treat the loss of a local process as proof that remote GPU work stopped.
 3. Keep backups, passphrases and credentials out of the incident record. Record public identifiers only.
+
+### Stray payments
+
+`<name>-stray-payments` fires when the API first flags a confirmed payment to a vault's script beyond its recorded deposit ([API](API.md#stray-payments)). A metric filter on the API's log group counts its `{"strayPayment": {"vaultId": …, "outputs": ["<txid>:<vout>"], "sats": …}}` lines (`terraform/workflow.tf`). The line names the vault, not the owner. The owner sees the payment in the vault list and gets a `deposit.stray_payment` event.
+
+- Don't try to spend it, and don't build a transaction that does. No withdrawal the app builds includes it. Spending it would reuse the vault's one-time material, and whether that could ever be safe is a question for the QSB author, outside the app.
+- The vault's own deposit is unaffected and withdraws as usual.
+- Record the vault id and outpoints in the incident record, and nothing else about the owner.
 
 ### Withdrawal workflow failures
 

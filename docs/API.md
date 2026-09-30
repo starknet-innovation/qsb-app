@@ -1,6 +1,6 @@
 # API
 
-The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side, except the HORS preimages a signed withdrawal reveals by design. This page covers its prefixes, OpenAPI document, errors, per-owner limits, idempotency, API keys, and its event log and webhooks.
+The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side, except the HORS preimages a signed withdrawal reveals by design. This page covers its prefixes, OpenAPI document, errors, per-owner limits, stray payments, idempotency, API keys, and its event log and webhooks.
 
 ## Prefixes
 
@@ -73,6 +73,16 @@ Sign-in, reads and pause stay open, and so does `POST /api/jobs/:id/submit`: it 
 
 `GET /api/config` reports `ownerLimits`: `allowlist` (whether one is set), `allowlisted` (the caller's standing, from its session or API key, or `null` without either or without an allowlist), `maxActiveJobs` and `maxGpuSeconds`. It never returns the list.
 
+## Stray payments
+
+A vault takes exactly one deposit, its recorded `funding`. Someone can still pay the vault's script from outside the app. `GET /api/vaults/:id/funding` looks up the script's unspent outputs on the chain API (Esplora's `/scripthash/<scriptHash>/utxo`; a vault's `scriptHash` is the SHA-256 of its script, which is what Esplora indexes it by). It records each confirmed output other than `funding` on the vault row, once ([`server/stray-outputs.ts`](../server/stray-outputs.ts)):
+
+- The response's `strayOutputs`, and `GET /api/vaults`'s `strayOutputs` for every vault, list them as `{ vaultId, txid, vout, value, firstSeenAt }`.
+- A `deposit.stray_payment` event goes to the owner's event log and webhooks.
+- The API logs a `strayPayment` line for the operator, which raises the `<name>-stray-payments` alarm ([runbook](OPERATIONAL-RUNBOOK.md#stray-payments)).
+
+A withdrawal never spends a stray output: `POST /api/jobs` accepts only the recorded `funding` as the vault input, and exact submission binds the transaction to it. The app offers no way to recover one. An unconfirmed payment is flagged once it confirms. A failed lookup returns the outputs already flagged, changes nothing and doesn't fail the request.
+
 ## Events and webhooks
 
 Withdrawals take hours. Instead of polling each job, read your account's event log, and optionally register webhooks that tell you when to read it. `GET /events` and `GET /webhooks` take a wallet session or an API key with the `read` scope. Registering and deleting a webhook take a wallet session only: registration returns the signing secret and decides where your notifications go.
@@ -91,6 +101,7 @@ Withdrawals take hours. Instead of polling each job, read your account's event l
 | `deposit.submitted` | A deposit is recorded as sent, and not yet confirmed. |
 | `deposit.confirmed` | The deposit is confirmed. |
 | `deposit.spent` | The vault's deposit was spent by its withdrawal. |
+| `deposit.stray_payment` | A confirmed payment reached the vault's script outside its one deposit ([stray payments](#stray-payments)). `status` is `stray_payment`. |
 | `deposit.dropped` | The miner doesn't have the deposit. Either it refused a new deposit (the vault is unfunded again), or a resend found it no longer had a submitted deposit and the resend wasn't accepted (the vault stays submitted; resend or contact the operator). |
 
 An event is thin: identifiers and statuses, never transaction bytes, scripts or anything secret.

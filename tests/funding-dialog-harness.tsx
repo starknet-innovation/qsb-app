@@ -6,6 +6,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import TransactionDialog from "../src/TransactionDialog";
 import { encryptRecovery } from "../src/lib/backup";
 import type { PublicVault } from "../src/lib/model";
+import { withVaultConfiguration } from "../src/lib/provenance";
 export async function mount() {
   const key = new Uint8Array(32).fill(7),
     pub = secp256k1.getPublicKey(key);
@@ -13,7 +14,7 @@ export async function mount() {
   const previous = new btc.Transaction();
   previous.addInput({ txid: "11".repeat(32), index: 0 });
   previous.addOutputAddress(address, 100000n);
-  const vault: PublicVault = {
+  const vault: PublicVault = withVaultConfiguration({
     id: "11111111-1111-4111-8111-111111111111",
     name: "Funding",
     createdAt: new Date().toISOString(),
@@ -24,7 +25,7 @@ export async function mount() {
     paymentAddress: address,
     publicStateJson: "{}",
     status: "unfunded",
-  };
+  });
   const password = "public browser test password";
   const backup = await encryptRecovery(
     { format: "qsb-recovery-v1", vault, stateJson: "{}" },

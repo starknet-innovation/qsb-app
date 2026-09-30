@@ -25,6 +25,7 @@ import {
   publicVaultSchema,
   release,
   sats,
+  strayOutputSchema,
   withdrawalSchema,
   type Job,
 } from "../src/lib/model";
@@ -103,6 +104,11 @@ component(
   "PublicVault",
   publicVaultSchema,
   "A vault's public record. It carries the public QSB state only; the secret state and the recovery backup stay with the owner.",
+);
+const strayOutput = component(
+  "StrayOutput",
+  strayOutputSchema,
+  "A confirmed payment to a vault's script other than its recorded deposit, flagged when the server first saw it. A vault takes one deposit: no withdrawal spends this output, and the app can't recover it.",
 );
 component(
   "Withdrawal",
@@ -433,11 +439,11 @@ const ownerEvent = component(
     id: describe(z.string(), "The event id. The same state change always has the same id: drop duplicates by it."),
     type: eventType,
     subjectId: describe(z.string(), "The job id for `withdrawal.*`, the vault id for `deposit.*`."),
-    status: describe(z.string(), "The job or vault status it moved to, or `dropped`."),
+    status: describe(z.string(), "The job or vault status it moved to, or `dropped` or `stray_payment`."),
     stage: describe(z.string().optional(), "Withdrawal events only: the search stage."),
     at: describe(z.string(), "When the status changed, ISO 8601."),
   }),
-  "A withdrawal or deposit status change. Identifiers and statuses only: no transaction bytes, scripts or secrets.",
+  "A withdrawal or deposit status change, or a flagged stray payment to a vault. Identifiers and statuses only: no transaction bytes, scripts or secrets.",
 );
 type _OwnerEvent = Assert<Same<z.infer<typeof ownerEvent>, OwnerEvent>>;
 const eventsResponse = z.object({
@@ -824,6 +830,10 @@ export const apiRoutes: readonly ApiRoute[] = [
             z.array(z.string()),
             "Ids of vaults whose unconfirmed deposit the server stored and can resend.",
           ),
+          strayOutputs: describe(
+            z.array(strayOutput),
+            "Every vault's flagged stray outputs, as last checked by `GET /api/vaults/{id}/funding`.",
+          ),
         }),
       },
     },
@@ -960,7 +970,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     operationId: "getVaultFunding",
     summary: "The deposit's chain status and transaction",
     description:
-      "Until a Slipstream deposit is mined the chain provider doesn't know it. Then the stored signed bytes stand in for `previousTxHex` and `status` is unconfirmed; they never count as confirmation.",
+      "Until a Slipstream deposit is mined the chain provider doesn't know it. Then the stored signed bytes stand in for `previousTxHex` and `status` is unconfirmed; they never count as confirmation. The check also looks up the vault script's confirmed outputs and flags any beyond the recorded deposit, with a `deposit.stray_payment` event.",
     auth: true,
     params: { id: vaultId },
     responses: {
@@ -969,6 +979,10 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: z.object({
           vault: publicVaultSchema,
           status: chainStatus,
+          strayOutputs: describe(
+            z.array(strayOutput),
+            "The vault's flagged stray outputs, including any this check found. A failed lookup returns the ones already flagged.",
+          ),
           submission: fundingSubmission.optional(),
           previousTxHex: z.string(),
         }),

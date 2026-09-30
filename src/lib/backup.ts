@@ -47,7 +47,7 @@ export async function assertRecoveryAuthorization(
   recovery: Recovery,
   expectedManifestHash?: string,
 ): Promise<void> {
-  if (recovery.vault.configuration) assertVaultConfiguration(recovery.vault);
+  assertVaultConfiguration(recovery.vault);
   const intent = recovery.authorization;
   if (!intent) return;
   if (intent.assembly)

@@ -31,6 +31,7 @@ import {
 import { BITCOIN_NETWORK, NETWORK_CONFIG } from "../src/lib/network";
 import { outputScript } from "../src/lib/transactions";
 import type { Job, PublicVault, Withdrawal } from "../src/lib/model";
+import { withVaultConfiguration } from "../src/lib/provenance";
 import { GPU_SECONDS_SK, type OwnerLimits } from "../server/owner-limits";
 import servedRelease from "../src/lib/releases/qsb-solver-aws-v0-1-0.json";
 
@@ -64,6 +65,7 @@ const solution = {
 };
 function vault(overrides: Partial<PublicVault> = {}): PublicVault {
   return {
+    ...withVaultConfiguration({
     id: vaultId,
     name: "cold",
     createdAt: "2026-09-24T00:00:00.000Z",
@@ -76,6 +78,7 @@ function vault(overrides: Partial<PublicVault> = {}): PublicVault {
     paymentAddress: owner,
     publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
     status: "unfunded",
+    }),
     ...overrides,
   };
 }

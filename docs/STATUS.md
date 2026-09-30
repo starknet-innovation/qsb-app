@@ -16,7 +16,7 @@ As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete
 - One pipeline: the Step Functions coordinator. QSB runs on mainnet only.
 - GPU work runs on AWS Batch. Runpod is neither the default nor a fallback.
 - No test chains: testing happens on mainnet with small deposits. Before submit, an offline consensus check runs Bitcoin Core's script interpreter on the exact signed transaction (#20).
-- One deposit per vault.
+- One deposit per vault. The server flags a payment to a vault's script beyond its deposit, and no withdrawal spends it ([API](API.md#stray-payments)).
 
 `AGENTS.md` lists these with the funds-safety invariants.
 
@@ -24,6 +24,7 @@ As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete
 
 - The first mainnet deposit and withdrawal, on the earlier eu-west-1 stack (#22). The on-chain record is in [FIRST-MAINNET-WITHDRAWAL.md](FIRST-MAINNET-WITHDRAWAL.md).
 - Phases 1 and 2 of the non-custodial API and SDK (#85): `/v1`, the OpenAPI spec, scoped API keys, per-owner limits, signed webhooks, and the TypeScript SDK and `qsb` CLI ([API](API.md)).
+- Each deposit's QSB version, deposit outpoint, status and flagged stray payments, in the vault list and an export (#27).
 - The move to the new eu-west-2 account (REGION-MIGRATION.md steps 1–10, and the GitHub part of step 12).
 
 ## Open
@@ -32,7 +33,7 @@ As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete
 - **Solver image pull by digest.** #22 asked that the first bounded run confirm AWS Batch pulled the enrolled solver image by digest. No run has confirmed it yet: the first withdrawal's record ([FIRST-MAINNET-WITHDRAWAL.md](FIRST-MAINNET-WITHDRAWAL.md)) doesn't include it. Check the image that withdrawal's Batch jobs ran in eu-west-1 while AWS still keeps their records, or on the first eu-west-2 withdrawal.
 - **Legacy supervised jobs.** Persisted jobs marked `execution.kind: "qsb-supervised-service-v1"` stay rejected by exact submission and by the solved-result, pause, resume and status routes, and the UI hides their pause and resume controls. These guards stay until the production inventory is complete and any matching rows are reconciled or quarantined; removing the old UI doesn't show the table holds none.
 - **#24:** build-generated identities in place of in-repo self-hash pinning.
-- **#27:** record each deposit's QSB version as data.
+- **#122:** support more than one QSB generator version, with the first generator change. Split from #27.
 - **#85 phase 3:** billing, terms of use, WAF and rate limits. This needs a separate decision.
 - **#119:** the QSB author's answers on the security figure, SHA-256 Config A, re-authorization and the single output.
 - **The old eu-west-1 stack** is still up. It is retired by REGION-MIGRATION.md step 11, then cleaned up.

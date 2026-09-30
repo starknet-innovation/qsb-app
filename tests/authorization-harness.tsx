@@ -6,6 +6,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import TransactionDialog from "../src/TransactionDialog";
 import { encryptRecovery, bindRecoveryAssembly } from "../src/lib/backup";
 import type { Recovery, Job, PublicVault, Withdrawal } from "../src/lib/model";
+import { withVaultConfiguration } from "../src/lib/provenance";
 import { coordinatorPublicSolvedResult } from "../src/mainnet/coordinatorResult";
 const password = "browser authorization passphrase";
 export async function mount(changedSolution = false, localSolved = false) {
@@ -20,7 +21,7 @@ export async function mount(changedSolution = false, localSolved = false) {
   previous.addOutputAddress(address, 20000n);
   previous.addOutput({ script: hex.decode("51".repeat(100)), amount: 100000n });
   const previousTxHex = hex.encode(previous.toBytes(true, true));
-  const vault: PublicVault = {
+  const vault: PublicVault = withVaultConfiguration({
     id: crypto.randomUUID(),
     name: "Authorization UI test",
     createdAt: new Date().toISOString(),
@@ -32,7 +33,7 @@ export async function mount(changedSolution = false, localSolved = false) {
     publicStateJson: "{}",
     status: "confirmed",
     funding: { txid: previous.id, vout: 1, value: "100000" },
-  };
+  });
   const manifest: Withdrawal = {
     vaultId: vault.id,
     funding: vault.funding!,

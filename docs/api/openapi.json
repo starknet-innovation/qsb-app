@@ -4770,7 +4770,7 @@
       "get": {
         "operationId": "getVaultFunding",
         "summary": "The deposit's chain status and transaction",
-        "description": "Until a Slipstream deposit is mined the chain provider doesn't know it. Then the stored signed bytes stand in for `previousTxHex` and `status` is unconfirmed; they never count as confirmation.",
+        "description": "Until a Slipstream deposit is mined the chain provider doesn't know it. Then the stored signed bytes stand in for `previousTxHex` and `status` is unconfirmed; they never count as confirmation. The check also looks up the vault script's confirmed outputs and flags any beyond the recorded deposit, with a `deposit.stray_payment` event.",
         "security": [
           {
             "session": []
@@ -5820,7 +5820,7 @@
           },
           "events": {
             "minItems": 1,
-            "maxItems": 11,
+            "maxItems": 12,
             "type": "array",
             "items": {
               "type": "string",
@@ -5835,7 +5835,8 @@
                 "deposit.submitted",
                 "deposit.confirmed",
                 "deposit.spent",
-                "deposit.dropped"
+                "deposit.dropped",
+                "deposit.stray_payment"
               ]
             }
           }
@@ -6331,6 +6332,13 @@
           "status": {
             "$ref": "#/components/schemas/ChainStatus"
           },
+          "strayOutputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StrayOutput"
+            },
+            "description": "The vault's flagged stray outputs, including any this check found. A failed lookup returns the ones already flagged."
+          },
           "submission": {
             "$ref": "#/components/schemas/FundingSubmission"
           },
@@ -6341,6 +6349,7 @@
         "required": [
           "vault",
           "status",
+          "strayOutputs",
           "previousTxHex"
         ],
         "additionalProperties": false
@@ -6566,11 +6575,19 @@
               "type": "string"
             },
             "description": "Ids of vaults whose unconfirmed deposit the server stored and can resend."
+          },
+          "strayOutputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StrayOutput"
+            },
+            "description": "Every vault's flagged stray outputs, as last checked by `GET /api/vaults/{id}/funding`."
           }
         },
         "required": [
           "vaults",
-          "resendable"
+          "resendable",
+          "strayOutputs"
         ],
         "additionalProperties": false
       },
@@ -6677,7 +6694,8 @@
               "deposit.submitted",
               "deposit.confirmed",
               "deposit.spent",
-              "deposit.dropped"
+              "deposit.dropped",
+              "deposit.stray_payment"
             ]
           },
           "subjectId": {
@@ -6686,7 +6704,7 @@
           },
           "status": {
             "type": "string",
-            "description": "The job or vault status it moved to, or `dropped`."
+            "description": "The job or vault status it moved to, or `dropped` or `stray_payment`."
           },
           "stage": {
             "description": "Withdrawal events only: the search stage.",
@@ -6705,7 +6723,7 @@
           "at"
         ],
         "additionalProperties": false,
-        "description": "A withdrawal or deposit status change. Identifiers and statuses only: no transaction bytes, scripts or secrets."
+        "description": "A withdrawal or deposit status change, or a flagged stray payment to a vault. Identifiers and statuses only: no transaction bytes, scripts or secrets."
       },
       "PublicVault": {
         "type": "object",
@@ -6816,6 +6834,7 @@
           "scriptHash",
           "paymentAddress",
           "publicStateJson",
+          "configuration",
           "status"
         ],
         "additionalProperties": false,
@@ -6974,6 +6993,42 @@
         "additionalProperties": false,
         "description": "The coordinator's public solved result: the approved manifest and the GPU solution. It carries no secret; the client assembles the withdrawal from it and its recovery backup."
       },
+      "StrayOutput": {
+        "type": "object",
+        "properties": {
+          "vaultId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "txid": {
+            "type": "string",
+            "pattern": "^[a-f0-9A-F]{64}$"
+          },
+          "vout": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "value": {
+            "$ref": "#/components/schemas/Sats"
+          },
+          "firstSeenAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "vaultId",
+          "txid",
+          "vout",
+          "value",
+          "firstSeenAt"
+        ],
+        "additionalProperties": false,
+        "description": "A confirmed payment to a vault's script other than its recorded deposit, flagged when the server first saw it. A vault takes one deposit: no withdrawal spends this output, and the app can't recover it."
+      },
       "SubmissionStatus": {
         "type": "string",
         "enum": [
@@ -7108,7 +7163,8 @@
                     "deposit.submitted",
                     "deposit.confirmed",
                     "deposit.spent",
-                    "deposit.dropped"
+                    "deposit.dropped",
+                    "deposit.stray_payment"
                   ]
                 }
               },

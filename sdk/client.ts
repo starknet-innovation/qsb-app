@@ -6,7 +6,7 @@ import { z } from "zod";
 import { ApiRequestError, createSessionClient } from "../src/lib/session";
 import { NETWORK_ID } from "../src/lib/network";
 import { operationsAllowed } from "../src/lib/readiness";
-import { assertVaultConfiguration, vaultConfiguration } from "../src/lib/provenance";
+import { assertVaultConfiguration, withVaultConfiguration } from "../src/lib/provenance";
 import {
   canonicalManifest,
   outpoint,
@@ -18,6 +18,7 @@ import {
   type Job,
   type PublicVault,
   type Recovery,
+  type StrayOutput,
   type Withdrawal,
 } from "../src/lib/model";
 import {
@@ -345,7 +346,10 @@ export class QsbClient {
      */
     create: (input: { name: string; passphrase: string; saveBackup: SaveBackup }) =>
       this.createVault(input),
-    list: () => this.session.api<{ vaults: PublicVault[]; resendable?: string[] }>("/vaults"),
+    list: () =>
+      this.session.api<{ vaults: PublicVault[]; resendable?: string[]; strayOutputs?: StrayOutput[] }>(
+        "/vaults",
+      ),
   };
   readonly deposits = {
     /** An unsigned deposit PSBT paying the vault, after checking the backup matches its script. */
@@ -491,7 +495,7 @@ export class QsbClient {
     try {
       const data = await this.qsb.generateQsb();
       validatePublicState(data.publicStateJson);
-      const vault: PublicVault = {
+      const vault = withVaultConfiguration({
         id: randomUUID(),
         name,
         createdAt: new Date().toISOString(),
@@ -502,8 +506,7 @@ export class QsbClient {
         publicStateJson: data.publicStateJson,
         paymentAddress: this.wallet.address,
         status: "unfunded",
-      };
-      vault.configuration = vaultConfiguration(vault);
+      });
       const backup = await encryptRecovery(
         { format: "qsb-recovery-v1", vault, stateJson: data.stateJson },
         input.passphrase,
@@ -695,6 +698,7 @@ export class QsbClient {
     const status = await this.session.api<{
       vault: PublicVault;
       status: { confirmed: boolean; confirmations?: number };
+      strayOutputs?: StrayOutput[];
       submission?: string;
       previousTxHex: string;
     }>(`/vaults/${id(vaultId, "vault")}/funding`);

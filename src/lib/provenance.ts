@@ -5,6 +5,7 @@ import publishedV2 from "./releases/qsb-solver-v0-1-0.json";
 import archived from "./releases/qsb-config-a-ranked-v2.json";
 import { z } from "zod";
 import externalDescriptors from "./releases/registry.generated";
+import type { PublicVault } from "./model";
 
 export const externalSolverDescriptorSchema = z
   .object({
@@ -110,6 +111,12 @@ export function vaultConfiguration(v: VaultInput) {
     ),
     publicStateHash: fingerprint(JSON.parse(v.publicStateJson)),
   };
+}
+/** A vault's public record with its configuration, which every vault carries. */
+export function withVaultConfiguration(
+  record: Omit<PublicVault, "configuration">,
+): PublicVault {
+  return { ...record, configuration: vaultConfiguration(record) };
 }
 export function assertVaultConfiguration(
   v: VaultInput & { configuration?: unknown },
