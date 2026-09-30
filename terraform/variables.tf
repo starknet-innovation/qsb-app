@@ -103,7 +103,7 @@ variable "operator_principal_arns" {
   }
 }
 variable "exact_submit_enabled" {
-  description = "Single exact-withdrawal submit switch. Keep false until explicit issue #22 transaction authorization. Does not enable wallet creation or search."
+  description = "Miner submission switch: relaying deposits and submitting withdrawals, each also needing mainnet_enabled. Changing it needs the user's explicit approval (AGENTS.md). Does not enable wallet creation or search."
   type        = bool
   default     = false
 }
@@ -139,7 +139,7 @@ variable "solver_release_id" {
   }
 }
 variable "mainnet_enabled" {
-  description = "Enable mainnet funding/search routes and coordinator. Requires explicit approval for issue #22; exact submission has a separate switch."
+  description = "Enable mainnet funding/search routes and coordinator. Changing it needs the user's explicit approval (AGENTS.md); miner submission has a separate switch, exact_submit_enabled."
   type        = bool
   default     = false
 }
