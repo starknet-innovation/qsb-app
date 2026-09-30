@@ -726,7 +726,7 @@ export default function App() {
                         View transaction
                       </a>
                     )}
-                    {j.status === "awaiting_authorization" && (
+                    {legacySearchControls(j).authorize && (
                       <button
                         className="primary"
                         onClick={() => {
