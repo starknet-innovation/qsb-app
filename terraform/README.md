@@ -104,6 +104,32 @@ Choose `--network=testnet4` and `network="testnet4"` together for a Testnet4-ide
 
 Artifacts must remain in `terraform/.build` through plan/apply. Terraform rejects mismatched commit/network, dirty builds, changed artifact hashes, changed frontend file membership and incomplete AWS Batch configuration. These checks are local consistency controls, not cryptographic provenance of a developer-controlled manifest. The operator must verify the commit is pushed before every apply. Never apply a stale saved plan after changing the checkout/configuration/artifacts.
 
+### Deploy from GitHub
+
+`.github/workflows/deploy.yml` runs the plan and apply above on GitHub as `qsb-github-deploy`. It runs on every push to `main` except docs-only ones, and on demand from the Actions tab:
+1. **build**, with no AWS credentials: the build above, with `--solver-release` set from the `QSB_SOLVER_RELEASE_ID` repository variable.
+2. **plan**: fetches the private tfvars, plans with `source_commit` set to the pushed commit, and writes a summary to the run page. Then it runs `check-single-pipeline.py --deploy` and keeps the saved plan in the state bucket.
+3. **approve**: waits for a reviewer on the `qsb-deploy` environment. Read the summary on the run page, then approve or reject.
+4. **apply**: applies that exact plan, checked by digest, with the build the plan used. Terraform refuses the plan if the state has changed since. Re-running a failed apply job reuses its approval and plan.
+
+Runs are one at a time. A newer push waits for the current run, and replaces any older run that's still waiting to start. Don't cancel a run while it's applying: GitHub may kill Terraform before it saves its state. If that happens, check for a leftover lock and `errored.tfstate` as in step 3 of "First apply in an account", then plan again. The workflow never runs a first apply, because `--deploy` needs existing state. It doesn't touch the GPU stack, and it can't change IAM beyond the runtime roles. Those stay with the administrator and the operator, as above.
+
+**Setup, once per account,** after the first apply and the ID registration:
+- **Tfvars.** As the operator, upload the tfvars to `qsb/main/app.tfvars.json` in the state bucket: `aws s3 cp app.tfvars.json s3://<state bucket>/qsb/main/app.tfvars.json --profile qsb-operator`. The workflow ignores its `source_commit`. To change a setting, such as a mainnet switch, `slipstream_secret_arn` or the Batch references, upload the new file and run the workflow from the Actions tab.
+- **Environment.** Create the `qsb-deploy` environment with yourself as a required reviewer, and limit it to `main` (Settings → Environments). The workflow refuses to run unless the environment requires a reviewer, because GitHub would otherwise create it with no protection.
+- **Secrets.** Set the repository secrets `QSB_AWS_ROLE_ARN` (the `qsb-github-deploy` role), `QSB_AWS_ACCOUNT_ID` and `QSB_TERRAFORM_STATE_BUCKET`. They're secrets rather than variables because GitHub prints each step's inputs and environment in the log, and masks only secrets.
+- **Variables.** Set the repository variables `QSB_AWS_REGION` and `QSB_SOLVER_RELEASE_ID`. `QSB_SOLVER_RELEASE_ID` must equal the tfvars' `solver_release_id`, or Terraform refuses the plan. Then set `QSB_AWS_DEPLOY_ENABLED` to `true`; while it's anything else, the workflow does nothing.
+
+**The logs are public.** This repository is public, so its Actions logs, step summaries and artifacts are too.
+- Terraform and AWS CLI output goes to private log files, kept with the saved plan under `qsb/github-deploy/<run>/` in the state bucket.
+- The role is used through an AWS profile whose `credential_process` is `github_deploy.py credential-process`, not `aws-actions/configure-aws-credentials`, because that action logs the role's unique ID. The AWS CLI, Terraform and its S3 backend each fetch fresh credentials from GitHub's OIDC token when they need them, so nothing stores or prints them, and a long apply doesn't outlast its session.
+- The tfvars' identifying values and every Terraform output are masked as soon as they're read.
+- The run page shows only redacted errors, and a summary of which resources and attributes change, without their values (`terraform/scripts/github_deploy.py`).
+- The build artifact is public, because it holds only what the public source builds.
+- If an apply fails and leaves `errored.tfstate`, that file is kept with the logs; push it as in step 3 of "First apply in an account". The deploy role can't delete these records. An administrator can add a lifecycle rule for the `qsb/github-deploy/` prefix.
+
+**What the approval is.** It's a process gate, not an IAM boundary. The deploy role trusts any job on `main`. It doesn't trust jobs bound to an environment, because those carry a different OIDC subject. So the approval job holds no credentials, and the apply is a separate job that runs after it. Anyone who can merge a workflow change into `main` could therefore deploy without an approval; branch protection on `main` is what limits that.
+
 ### AWS Batch credentials
 
 Supply all three `batch_job_queue`, `batch_job_definition` (revisioned ARN), and `batch_job_bucket` from the independently deployed [`gpu/`](gpu/README.md) stack, or leave all three empty. Only the coordinator can submit paid jobs. The MFA reconciliation operator can inspect jobs and read output artifacts but cannot submit them. No AWS Batch API key or Secrets Manager secret is used by this pipeline. Select the matching enrolled schema-v3 `solver_release_id`. Configuring compute does not enable mainnet or exact submission.

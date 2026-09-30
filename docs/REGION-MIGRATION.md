@@ -150,8 +150,9 @@ Nothing live changes in this phase.
     switch back on by mistake. Deleting the kept data still waits for the cleanup.
 12. **Point the tooling at the new account.** Rename the `qsb-new-operator` profile to `qsb-operator` once the old
     account's profile is no longer needed.
-    - Set the GitHub repository variables `QSB_AWS_ACCOUNT_ID`, `QSB_AWS_REGION` (eu-west-2) and
-      `QSB_AWS_ROLE_ARN` (the new `qsb-github-deploy`).
+    - Set the GitHub repository secrets `QSB_AWS_ACCOUNT_ID`, `QSB_AWS_ROLE_ARN` (the new `qsb-github-deploy`) and
+      `QSB_TERRAFORM_STATE_BUCKET`, and the variable `QSB_AWS_REGION` (eu-west-2). To deploy from GitHub, finish
+      the setup in "Deploy from GitHub" in `terraform/README.md`.
     - Point the local `qsb-view` and `qsb-operator` profiles at the new account's roles through Identity Center,
       with region eu-west-2.
 
