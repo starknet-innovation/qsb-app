@@ -2,10 +2,12 @@
 import { createRoot } from "react-dom/client";
 import * as btc from "@scure/btc-signer";
 import { base64, hex } from "@scure/base";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import TransactionDialog from "../src/TransactionDialog";
 import { encryptRecovery, bindRecoveryAssembly } from "../src/lib/backup";
 import type { Recovery, Job, PublicVault, Withdrawal } from "../src/lib/model";
+import { withVaultConfiguration } from "../src/lib/provenance";
 import { coordinatorPublicSolvedResult } from "../src/mainnet/coordinatorResult";
 const password = "browser authorization passphrase";
 export async function mount(changedSolution = false, localSolved = false) {
@@ -20,19 +22,19 @@ export async function mount(changedSolution = false, localSolved = false) {
   previous.addOutputAddress(address, 20000n);
   previous.addOutput({ script: hex.decode("51".repeat(100)), amount: 100000n });
   const previousTxHex = hex.encode(previous.toBytes(true, true));
-  const vault: PublicVault = {
+  const vault: PublicVault = withVaultConfiguration({
     id: crypto.randomUUID(),
     name: "Authorization UI test",
     createdAt: new Date().toISOString(),
     network: "mainnet",
     config: "A",
     scriptHex: "51".repeat(100),
-    scriptHash: "aa".repeat(32),
+    scriptHash: hex.encode(sha256(hex.decode("51".repeat(100)))),
     paymentAddress: address,
     publicStateJson: "{}",
     status: "confirmed",
     funding: { txid: previous.id, vout: 1, value: "100000" },
-  };
+  });
   const manifest: Withdrawal = {
     vaultId: vault.id,
     funding: vault.funding!,

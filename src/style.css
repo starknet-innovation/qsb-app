@@ -785,6 +785,9 @@ input::placeholder {
   color: #8d9a82;
   margin-top: 7px;
 }
+.vault-name p.vault-warning {
+  color: #a04739;
+}
 .vault-amount {
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;

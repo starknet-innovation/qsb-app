@@ -116,6 +116,8 @@ export type SettleOptions = {
 export type OwnerEventStore = Store & {
   /** A deposit the miner no longer has, found by the resend logic: not a status change. */
   recordDropped(owner: string, vaultId: string): void;
+  /** New stray outputs recorded on the vault row (server/stray-outputs.ts): not a status change. */
+  recordStrayPayment(owner: string, vaultId: string): void;
   settle(options?: SettleOptions): Promise<void>;
 };
 /** What a row's status was at each version. Facts, so it can be shared across requests. */
@@ -190,6 +192,21 @@ export function recordOwnerEvents(inner: Store, seen: StatusMemory = new Map()):
     }
     if (left.length) logEventError("record_dropped", new Error("EventNotRecorded"));
   }
+  /**
+   * A vault event that isn't a status change, for the vault row version this unit last wrote.
+   * The caller wrote the vault through this store; without that there's no decision.
+   */
+  function noteVaultEvent(owner: string, vaultId: string, status: "dropped" | "stray_payment") {
+    const pk = `OWNER#${owner}`,
+      sk = `VAULT#${vaultId}`;
+    const version = versions.get(`${pk}|${sk}`);
+    if (version === undefined) return;
+    const id = `evt_${createHash("sha256").update(`${pk}\n${sk}\n${version}\n${status}`).digest("hex").slice(0, 32)}`;
+    noted.push({
+      owner,
+      event: { id, type: `deposit.${status}`, subjectId: vaultId, status, at: new Date().toISOString() },
+    });
+  }
   return {
     async get(pk, sk) {
       const row = await inner.get(pk, sk);
@@ -223,16 +240,10 @@ export function recordOwnerEvents(inner: Store, seen: StatusMemory = new Map()):
       recorded.push(...items);
     },
     recordDropped(owner, vaultId) {
-      const pk = `OWNER#${owner}`,
-        sk = `VAULT#${vaultId}`;
-      const version = versions.get(`${pk}|${sk}`);
-      // The resend logic wrote the vault through this store; without that there's no decision.
-      if (version === undefined) return;
-      const id = `evt_${createHash("sha256").update(`${pk}\n${sk}\n${version}\ndropped`).digest("hex").slice(0, 32)}`;
-      noted.push({
-        owner,
-        event: { id, type: "deposit.dropped", subjectId: vaultId, status: "dropped", at: new Date().toISOString() },
-      });
+      noteVaultEvent(owner, vaultId, "dropped");
+    },
+    recordStrayPayment(owner, vaultId) {
+      noteVaultEvent(owner, vaultId, "stray_payment");
     },
     async settle(options: SettleOptions = {}) {
       const writes = noted.splice(0);
