@@ -1,5 +1,4 @@
 node_modules/
-release/dist/
 dist*/
 vendor/
 public/pyodide/
@@ -29,14 +28,5 @@ __pycache__/
 *signed-result*.json
 *signing-bundle*.json
 .DS_Store
-
-# Auditable service source archive; runtime work directories remain excluded.
-!supervised/archive/work/
-!supervised/archive/work/**
-
-# Reviewed operational source closure; build outputs remain ignored.
-!supervised/runtime/source/work/
-!supervised/runtime/source/work/**
-supervised/runtime/runtime.tar.gz
 
 /ops/aws-gpu-benchmark/.build/

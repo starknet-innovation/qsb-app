@@ -64,9 +64,8 @@ it("documents one mainnet pipeline through createApp, startWorkflow, and the coo
   const app = readFileSync("server/app.ts", "utf8");
   const workflow = readFileSync("terraform/workflow.tf", "utf8");
   const releaseGate = readFileSync("terraform/data.tf", "utf8");
-  expect(lambda).toContain('network === "mainnet"');
+  expect(lambda).toContain('if (network !== "mainnet") throw');
   expect(lambda).toContain("return createApp(records, { versionedAlias: true })");
-  expect(lambda).not.toContain("installSupervisedCreation(");
   expect(app).toContain("await startWorkflow(job)");
   expect(workflow).toContain("function:${var.name}-coordinator");
   // Three application Lambdas; the webhook dispatcher is added only by its own switch.
@@ -93,17 +92,10 @@ it("does not mount supervised job creation on the mainnet lambda", async () => {
   expect(config.network).toBe(NETWORK_ID);
 });
 
-it("keeps supervised creation off the mainnet lambda and available only on the other constructor", async () => {
-  const store = new MemoryStore();
-  const app = deployedApiApp("testnet4", store);
-  const token = await signIn(app);
-  const response = await app.request(
-    request("/api/jobs/supervised", {}, token),
+it("refuses to build the deployed API for any network but mainnet", () => {
+  expect(() => deployedApiApp("testnet4", new MemoryStore())).toThrow(
+    "The deployed API serves mainnet only.",
   );
-  expect(response.status).toBe(503);
-  expect(await response.json()).toEqual({
-    error: "Supervised job creation is disabled.",
-  });
 });
 
 it("refuses mainnet funding, job creation, resume, and submit while the flags are false", async () => {

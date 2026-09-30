@@ -38,7 +38,7 @@ npm run test:optimized-image
 npm run build:optimized:queue
 ```
 
-See [worker instructions](../../../worker/optimized/README.md) and [supervisor instructions](../../../supervised/runtime/README.md). Compilation does not require a GPU or Runpod credentials. Successful solver execution does require a compatible NVIDIA GPU/driver.
+See the worker instructions (`worker/optimized/README.md`, since moved to qsb-solver) and the supervisor instructions (`supervised/runtime/README.md`, removed under #23). Compilation does not require a GPU or Runpod credentials. Successful solver execution does require a compatible NVIDIA GPU/driver.
 
 ## Remaining boundaries
 

@@ -2,7 +2,7 @@
 
 This folder deploys the **single Step Functions application pipeline** into a fresh AWS account. GPUs run on an existing AWS Batch serverless endpoint. Mainnet job creation follows API Lambda → Step Functions → coordinator Lambda → AWS Batch, with CPU re-checks in the reference Lambda. See [mainnet pipeline](../docs/MAINNET-PIPELINE.md).
 
-There is no supervised host, VPC/NAT, EBS/Backup, dispatch queue/DLQ, evidence bucket/table, watchdog, runtime installer or ECR repository in this application stack. Supervised source remains parked for removal under #23. GitHub OIDC deployment bootstrap remains separate and supported. Applying Terraform is not mainnet activation, wallet compatibility certification, or permission to spend funds. See [mainnet readiness](../docs/MAINNET-READINESS.md).
+There is no supervised host, VPC/NAT, EBS/Backup, dispatch queue/DLQ, evidence bucket/table, watchdog, runtime installer or ECR repository in this application stack. Supervised source was removed under #23. GitHub OIDC deployment bootstrap remains separate and supported. Applying Terraform is not mainnet activation, wallet compatibility certification, or permission to spend funds. See [mainnet readiness](../docs/MAINNET-READINESS.md).
 
 Recorded local evidence: [single-pipeline mock plan inventory](../docs/SINGLE-PIPELINE-PLAN.json). The configured plan has 43 infrastructure resources plus 21 frontend objects for this build, three Lambda functions, four service roles, one MFA-required reconciliation role and one table. Counts of frontend objects vary with the build. This is not a live regional plan or deployment.
 

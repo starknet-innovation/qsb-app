@@ -4,12 +4,12 @@
 
 Publishing research source is not deployment or activation. Feature enablement is not authorization to spend. `release.mainnetEnabled` stays false. `broadcastAuthorized` is not set. No step below starts a worker, contacts a provider, or broadcasts a transaction.
 
-The checked-in capability limit is `providerGpuLimit: 1` in `server/mainnet-capability.json`. It governs the supervised runtime: until a later reviewed decision changes that file, that runtime's cap is one concurrent search and one GPU worker. The AWS Batch coordinator's GPUs per withdrawal are `workersMax` in `server/gpu-spend.json` instead (see [Parallel GPU search](#parallel-gpu-search)). The minimum idle worker count is zero. This is not a measured production capacity plan.
+The checked-in capability limit is `providerGpuLimit: 1` in `server/mainnet-capability.json`. It was the cap for the supervised runtime, which #23 removed. The AWS Batch coordinator's GPUs per withdrawal are `workersMax` in `server/gpu-spend.json` instead (see [Parallel GPU search](#parallel-gpu-search)). The minimum idle worker count is zero. This is not a measured production capacity plan.
 
 ## Concurrency and cost caps
 
 - `maxConcurrentSearches`: 1
-- `maxGpuWorkers`: 1 (supervised runtime; the coordinator uses `workersMax` below)
+- `maxGpuWorkers`: 1 (the removed supervised runtime's cap; the coordinator uses `workersMax` below)
 - `minIdleWorkers`: 0
 - The coordinator path uses `server/gpu-spend.json`: `workersMax` (1–16; see [Parallel GPU search](#parallel-gpu-search)), `workersMin` 0, `executionTimeoutMs` 900000, and `maxJobGpuSeconds` 14745600 (4,096 GPU-hours per job, reserved across retries and all stages). A 64-hit output is not credited as a finished range. These checks do not start a worker, evaluate the USD ceiling, or authorize a spend.
 - Optional per-owner limits (allowlist, active withdrawals, GPU seconds) are off by default; see [Per-owner limits](#per-owner-limits).
@@ -238,7 +238,7 @@ check. The documentation change has not exercised a live revision rollback.
 
 Never deploy code or infrastructure changes before committing them to Git. Verify that deployed source matches the recorded commit and contains no uncommitted changes. Push the commit to the project remote before deployment and report the commit or PR with the deployment target. Never commit secrets or ignored runtime configuration.
 
-Local builds and source flags are not live-configuration evidence. A clean pushed commit is necessary and is not itself a deployment. Record the source-manifest sha256, the configuration hash, and, once an image exists, the image config digest, the OCI index digest, and the registry manifest digest as separate `sha256:` values. Do not relabel a source hash as an image digest.
+Local builds and source flags are not live-configuration evidence. A clean pushed commit is necessary and is not itself a deployment. Record the build manifest's sha256 (`terraform/.build/manifest.json`), the configuration hash, and, once an image exists, the image config digest, the OCI index digest, and the registry manifest digest as separate `sha256:` values. Do not relabel a source hash as an image digest.
 
 ## Spend authorization
 

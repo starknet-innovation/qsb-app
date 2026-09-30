@@ -490,8 +490,10 @@ describe("deposits.submit", () => {
     });
     const tx = btc.Transaction.fromPSBT(base64.decode(d.signed), opts);
     tx.finalize();
-    // An earlier signing of the same deposit: the same txid, other witness bytes.
-    const earlier = { txid: tx.id, amount: d.prepared.amount, rawTxHex: `${tx.hex.slice(0, -10)}00${tx.hex.slice(-8)}` };
+    // An earlier signing of the same deposit: the same txid, other witness bytes. Flip the last
+    // witness byte (the random key's last byte); overwriting it with a constant can leave it unchanged.
+    const flipped = (parseInt(tx.hex.slice(-10, -8), 16) ^ 1).toString(16).padStart(2, "0");
+    const earlier = { txid: tx.id, amount: d.prepared.amount, rawTxHex: `${tx.hex.slice(0, -10)}${flipped}${tx.hex.slice(-8)}` };
     expect(earlier.rawTxHex).not.toBe(tx.hex);
     pending.set(d.vault.id, earlier);
     await expect(d.client.deposits.submit(d.prepared, d.signed, { costAccepted: true })).rejects.toThrow("already waiting");
