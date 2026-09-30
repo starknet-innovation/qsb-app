@@ -2,7 +2,7 @@ import { deployedSolver, deployedSolverId } from "./solver-deployment";
 import { observeWithdrawal } from "./withdrawal-status";
 import { submitExact, SubmitDisabled } from "./submit-exact";
 import { exportFunding, submitFunding, type FundingDependencies } from "./submit-funding";
-import { flagStrayOutputs, strayOutputsOf } from "./stray-outputs";
+import { flagStrayPayments, strayPaymentsOf } from "./stray-outputs";
 import {
   CoreConsensus,
   ConsensusError,
@@ -551,7 +551,7 @@ export function createApp(
         )
         .map((r) => (r.vault as PublicVault).id),
       // Payments to a vault's script beyond its recorded deposit, as last checked. Never spent.
-      strayOutputs: rows.flatMap(strayOutputsOf),
+      strayPayments: rows.flatMap((r) => strayPaymentsOf(r) ?? []),
     });
   });
   app.get("/api/payment-utxos", async (c) =>
@@ -882,11 +882,11 @@ export function createApp(
         await store.put(current, row.version);
       }
     }
-    const strayOutputs = await flagStrayOutputs(store, ledger, current);
+    const strayPayments = await flagStrayPayments(store, ledger, current);
     return c.json({
       vault,
       status,
-      strayOutputs,
+      strayPayments,
       ...(stored ? { submission: row.fundingSubmission } : {}),
       ...(await ledger
         .raw(vault.funding.txid)

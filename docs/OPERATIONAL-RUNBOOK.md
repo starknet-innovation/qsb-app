@@ -92,7 +92,7 @@ On an incident:
 
 ### Stray payments
 
-`<name>-stray-payments` fires when the API first flags a confirmed payment to a vault's script beyond its recorded deposit ([API](API.md#stray-payments)). A metric filter on the API's log group counts its `{"strayPayment": {"vaultId": …, "outputs": ["<txid>:<vout>"], "sats": …}}` lines (`terraform/workflow.tf`). The line names the vault, not the owner. The owner sees the payment in the vault list and gets a `deposit.stray_payment` event.
+`<name>-stray-payments` fires when the API flags more confirmed payments to a vault's script beyond its recorded deposit than it had recorded ([API](API.md#stray-payments)). A metric filter on the API's log group counts its `{"strayPayment": {"vaultId": …, "count": …, "newCount": …, "sats": …, "outputs": ["<txid>:<vout>"]}}` lines (`terraform/workflow.tf`). `count` and `sats` cover all the vault's stray outputs; `outputs` names those newly listed, and the record lists at most 20. The line names the vault, not the owner. The owner sees the payment in the vault list and gets a `deposit.stray_payment` event.
 
 - Don't try to spend it, and don't build a transaction that does. No withdrawal the app builds includes it. Spending it would reuse the vault's one-time material, and whether that could ever be safe is a question for the QSB author, outside the app.
 - The vault's own deposit is unaffected and withdraws as usual.

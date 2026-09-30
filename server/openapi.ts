@@ -25,7 +25,7 @@ import {
   publicVaultSchema,
   release,
   sats,
-  strayOutputSchema,
+  strayPaymentsSchema,
   withdrawalSchema,
   type Job,
 } from "../src/lib/model";
@@ -105,10 +105,10 @@ component(
   publicVaultSchema,
   "A vault's public record. It carries the public QSB state only; the secret state and the recovery backup stay with the owner.",
 );
-const strayOutput = component(
-  "StrayOutput",
-  strayOutputSchema,
-  "A confirmed payment to a vault's script other than its recorded deposit, flagged when the server first saw it. A vault takes one deposit: no withdrawal spends this output, and the app can't recover it.",
+const strayPayments = component(
+  "StrayPayments",
+  strayPaymentsSchema,
+  "Confirmed payments to a vault's script other than its recorded deposit, as the server last counted them. `count` and `sats` cover all of them; `outputs` lists the first 20 by when they were first seen. A vault takes one deposit: no withdrawal spends these outputs, and the app can't recover them.",
 );
 component(
   "Withdrawal",
@@ -830,9 +830,9 @@ export const apiRoutes: readonly ApiRoute[] = [
             z.array(z.string()),
             "Ids of vaults whose unconfirmed deposit the server stored and can resend.",
           ),
-          strayOutputs: describe(
-            z.array(strayOutput),
-            "Every vault's flagged stray outputs, as last checked by `GET /api/vaults/{id}/funding`.",
+          strayPayments: describe(
+            z.array(strayPayments),
+            "One record per vault with flagged stray payments, as last checked by `GET /api/vaults/{id}/funding`.",
           ),
         }),
       },
@@ -979,9 +979,9 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: z.object({
           vault: publicVaultSchema,
           status: chainStatus,
-          strayOutputs: describe(
-            z.array(strayOutput),
-            "The vault's flagged stray outputs, including any this check found. A failed lookup returns the ones already flagged.",
+          strayPayments: describe(
+            strayPayments.nullable(),
+            "The vault's flagged stray payments, including any this check found, or null. A failed lookup returns the record already flagged.",
           ),
           submission: fundingSubmission.optional(),
           previousTxHex: z.string(),

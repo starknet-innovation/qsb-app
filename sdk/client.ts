@@ -18,7 +18,7 @@ import {
   type Job,
   type PublicVault,
   type Recovery,
-  type StrayOutput,
+  type StrayPayments,
   type Withdrawal,
 } from "../src/lib/model";
 import {
@@ -347,7 +347,7 @@ export class QsbClient {
     create: (input: { name: string; passphrase: string; saveBackup: SaveBackup }) =>
       this.createVault(input),
     list: () =>
-      this.session.api<{ vaults: PublicVault[]; resendable?: string[]; strayOutputs?: StrayOutput[] }>(
+      this.session.api<{ vaults: PublicVault[]; resendable?: string[]; strayPayments?: StrayPayments[] }>(
         "/vaults",
       ),
   };
@@ -698,7 +698,7 @@ export class QsbClient {
     const status = await this.session.api<{
       vault: PublicVault;
       status: { confirmed: boolean; confirmations?: number };
-      strayOutputs?: StrayOutput[];
+      strayPayments?: StrayPayments | null;
       submission?: string;
       previousTxHex: string;
     }>(`/vaults/${id(vaultId, "vault")}/funding`);

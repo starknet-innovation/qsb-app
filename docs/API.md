@@ -75,13 +75,13 @@ Sign-in, reads and pause stay open, and so does `POST /api/jobs/:id/submit`: it 
 
 ## Stray payments
 
-A vault takes exactly one deposit, its recorded `funding`. Someone can still pay the vault's script from outside the app. `GET /api/vaults/:id/funding` looks up the script's unspent outputs on the chain API (Esplora's `/scripthash/<scriptHash>/utxo`; a vault's `scriptHash` is the SHA-256 of its script, which is what Esplora indexes it by). It records each confirmed output other than `funding` on the vault row, once ([`server/stray-outputs.ts`](../server/stray-outputs.ts)):
+A vault takes exactly one deposit, its recorded `funding`. Someone can still pay the vault's script from outside the app. `GET /api/vaults/:id/funding` looks up the script's unspent outputs on the chain API (Esplora's `/scripthash/<scriptHash>/utxo`; a vault's `scriptHash` is the SHA-256 of its script, which is what Esplora indexes it by). It counts the confirmed outputs other than `funding`, and each time that count grows it records it on the vault row ([`server/stray-outputs.ts`](../server/stray-outputs.ts)):
 
-- The response's `strayOutputs`, and `GET /api/vaults`'s `strayOutputs` for every vault, list them as `{ vaultId, txid, vout, value, firstSeenAt }`.
+- The response's `strayPayments`, and `GET /api/vaults`'s `strayPayments` (one per flagged vault), give `{ vaultId, count, sats, outputs }`. `count` and `sats` cover every such output; `outputs` lists the first 20 by when they were first seen, each as `{ txid, vout, value, firstSeenAt }`. Anyone can pay the script, so the record keeps a fixed size however many outputs arrive.
 - A `deposit.stray_payment` event, with status `stray_payment`, goes to the owner's event log and webhooks.
 - The API logs a `strayPayment` line for the operator, which raises the `<name>-stray-payments` alarm ([runbook](OPERATIONAL-RUNBOOK.md#stray-payments)).
 
-A withdrawal never spends a stray output: `POST /api/jobs` accepts only the recorded `funding` as the vault input, and exact submission binds the transaction to it. The app offers no way to recover one. An unconfirmed payment is flagged once it confirms. A failed lookup returns the outputs already flagged, changes nothing and doesn't fail the request.
+A withdrawal never spends a stray output: `POST /api/jobs` accepts only the recorded `funding` as the vault input, and exact submission binds the transaction to it. The app offers no way to recover one. An unconfirmed payment is flagged once it confirms. A failed lookup returns the record already flagged (or `null`), changes nothing and doesn't fail the request.
 
 ## Events and webhooks
 

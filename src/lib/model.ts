@@ -58,13 +58,10 @@ export const publicVaultSchema = z
   })
   .strict();
 export type PublicVault = z.infer<typeof publicVaultSchema>;
-/**
- * A confirmed payment to a vault's script other than its recorded `funding`. A vault takes
- * one deposit: the server flags these, no withdrawal spends them, and the app can't recover them.
- */
+/** How many stray outputs a vault's record lists. `count` and `sats` cover all of them. */
+export const STRAY_OUTPUTS_LISTED = 20;
 export const strayOutputSchema = z
   .object({
-    vaultId: z.string().uuid(),
     txid,
     vout: z.number().int().min(0).max(0xffffffff),
     value: sats,
@@ -72,6 +69,21 @@ export const strayOutputSchema = z
   })
   .strict();
 export type StrayOutput = z.infer<typeof strayOutputSchema>;
+/**
+ * Confirmed payments to a vault's script other than its recorded `funding`, as the server last
+ * counted them. A vault takes one deposit: the server flags these, no withdrawal spends them,
+ * and the app can't recover them. Anyone can pay the script, so the record has a fixed size:
+ * `outputs` lists the first STRAY_OUTPUTS_LISTED by when they were first seen.
+ */
+export const strayPaymentsSchema = z
+  .object({
+    vaultId: z.string().uuid(),
+    count: z.number().int().min(1),
+    sats,
+    outputs: z.array(strayOutputSchema).min(1).max(STRAY_OUTPUTS_LISTED),
+  })
+  .strict();
+export type StrayPayments = z.infer<typeof strayPaymentsSchema>;
 export const recoverySchema = z
   .object({
     format: z.literal("qsb-recovery-v1"),

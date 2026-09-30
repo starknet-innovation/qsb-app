@@ -6332,12 +6332,16 @@
           "status": {
             "$ref": "#/components/schemas/ChainStatus"
           },
-          "strayOutputs": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/StrayOutput"
-            },
-            "description": "The vault's flagged stray outputs, including any this check found. A failed lookup returns the ones already flagged."
+          "strayPayments": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrayPayments"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The vault's flagged stray payments, including any this check found, or null. A failed lookup returns the record already flagged."
           },
           "submission": {
             "$ref": "#/components/schemas/FundingSubmission"
@@ -6349,7 +6353,7 @@
         "required": [
           "vault",
           "status",
-          "strayOutputs",
+          "strayPayments",
           "previousTxHex"
         ],
         "additionalProperties": false
@@ -6576,18 +6580,18 @@
             },
             "description": "Ids of vaults whose unconfirmed deposit the server stored and can resend."
           },
-          "strayOutputs": {
+          "strayPayments": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/StrayOutput"
+              "$ref": "#/components/schemas/StrayPayments"
             },
-            "description": "Every vault's flagged stray outputs, as last checked by `GET /api/vaults/{id}/funding`."
+            "description": "One record per vault with flagged stray payments, as last checked by `GET /api/vaults/{id}/funding`."
           }
         },
         "required": [
           "vaults",
           "resendable",
-          "strayOutputs"
+          "strayPayments"
         ],
         "additionalProperties": false
       },
@@ -6993,7 +6997,7 @@
         "additionalProperties": false,
         "description": "The coordinator's public solved result: the approved manifest and the GPU solution. It carries no secret; the client assembles the withdrawal from it and its recovery backup."
       },
-      "StrayOutput": {
+      "StrayPayments": {
         "type": "object",
         "properties": {
           "vaultId": {
@@ -7001,33 +7005,57 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           },
-          "txid": {
-            "type": "string",
-            "pattern": "^[a-f0-9A-F]{64}$"
-          },
-          "vout": {
+          "count": {
             "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
-          "value": {
+          "sats": {
             "$ref": "#/components/schemas/Sats"
           },
-          "firstSeenAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          "outputs": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "txid": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9A-F]{64}$"
+                },
+                "vout": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "value": {
+                  "$ref": "#/components/schemas/Sats"
+                },
+                "firstSeenAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                }
+              },
+              "required": [
+                "txid",
+                "vout",
+                "value",
+                "firstSeenAt"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
           "vaultId",
-          "txid",
-          "vout",
-          "value",
-          "firstSeenAt"
+          "count",
+          "sats",
+          "outputs"
         ],
         "additionalProperties": false,
-        "description": "A confirmed payment to a vault's script other than its recorded deposit, flagged when the server first saw it. A vault takes one deposit: no withdrawal spends this output, and the app can't recover it."
+        "description": "Confirmed payments to a vault's script other than its recorded deposit, as the server last counted them. `count` and `sats` cover all of them; `outputs` lists the first 20 by when they were first seen. A vault takes one deposit: no withdrawal spends these outputs, and the app can't recover them."
       },
       "SubmissionStatus": {
         "type": "string",

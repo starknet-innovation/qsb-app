@@ -9,7 +9,7 @@ import { EVENT_SETTLE_MS, listOwnerEvents } from "../server/owner-events";
 import { BITCOIN_NETWORK, NETWORK_CONFIG } from "../src/lib/network";
 import { outputScript } from "../src/lib/transactions";
 import { withVaultConfiguration } from "../src/lib/provenance";
-import type { PublicVault, Withdrawal } from "../src/lib/model";
+import { STRAY_OUTPUTS_LISTED, type PublicVault, type Withdrawal } from "../src/lib/model";
 
 // Unsigned transactions and a fake chain API only: no keys, no network.
 const opts = { allowUnknownOutputs: true, allowUnknownInputs: true };
@@ -116,34 +116,61 @@ describe("stray payments to a vault's script", () => {
     const body = await response.json();
     const flagged = {
       vaultId: f.vault.id,
-      txid: stray.txid,
-      vout: 3,
-      value: "25000",
-      firstSeenAt: expect.any(String),
+      count: 1,
+      sats: "25000",
+      outputs: [{ txid: stray.txid, vout: 3, value: "25000", firstSeenAt: expect.any(String) }],
     };
     // The unconfirmed payment isn't flagged until it confirms; the recorded funding never is.
-    expect(body.strayOutputs).toEqual([flagged]);
-    expect((await f.row())?.strayOutputs).toEqual([flagged]);
+    expect(body.strayPayments).toEqual(flagged);
+    expect((await f.row())?.strayPayments).toEqual(flagged);
     expect((await f.row())?.vault).toEqual(f.vault);
     expect(await f.events()).toMatchObject([
       { type: "deposit.stray_payment", subjectId: f.vault.id, status: "stray_payment" },
     ]);
     const lines = warn.mock.calls.map(([line]) => String(line));
     expect(lines).toEqual([
-      JSON.stringify({ strayPayment: { vaultId: f.vault.id, outputs: [`${stray.txid}:3`], sats: "25000" } }),
+      JSON.stringify({
+        strayPayment: { vaultId: f.vault.id, count: 1, newCount: 1, sats: "25000", outputs: [`${stray.txid}:3`] },
+      }),
     ]);
     expect(lines.join("\n")).not.toContain(owner);
 
     // Checking again finds nothing new: no second write, event or log line.
     const version = (await f.row())!.version;
     const again = await (await f.get(`/vaults/${f.vault.id}/funding`)).json();
-    expect(again.strayOutputs).toEqual([flagged]);
+    expect(again.strayPayments).toEqual(flagged);
     expect((await f.row())!.version).toBe(version);
     expect(await f.events()).toHaveLength(1);
     expect(warn).toHaveBeenCalledTimes(1);
 
     const list = await (await f.get("/vaults")).json();
-    expect(list.strayOutputs).toEqual([flagged]);
+    expect(list.strayPayments).toEqual([flagged]);
+  });
+
+  it("keeps the record a fixed size however many outputs arrive, and flags each increase", async () => {
+    const dust = (n: number) => ({ txid: n.toString(16).padStart(64, "0"), vout: 0, value: 546, status: { confirmed: true } });
+    let paid = Array.from({ length: 25 }, (_, i) => dust(i + 1));
+    const f = await fixture((deposit) => [
+      { txid: deposit, vout: 0, value: 100_000, status: { confirmed: true } },
+      ...paid,
+    ]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const first = (await (await f.get(`/vaults/${f.vault.id}/funding`)).json()).strayPayments;
+    expect(first).toMatchObject({ count: 25, sats: String(25 * 546) });
+    expect(first.outputs).toHaveLength(STRAY_OUTPUTS_LISTED);
+
+    paid = Array.from({ length: 5000 }, (_, i) => dust(i + 1));
+    const second = (await (await f.get(`/vaults/${f.vault.id}/funding`)).json()).strayPayments;
+    expect(second).toMatchObject({ count: 5000, sats: String(5000 * 546) });
+    // The listed outputs are the first ones seen; the record doesn't grow.
+    expect(second.outputs).toEqual(first.outputs);
+    // Only the count and the total change: 20 listed outputs stay within a few KB.
+    expect(JSON.stringify((await f.row())!.strayPayments).length).toBeLessThan(4096);
+    expect(await f.events()).toHaveLength(2);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(warn.mock.calls[1][0]))).toEqual({
+      strayPayment: { vaultId: f.vault.id, count: 5000, newCount: 4975, sats: String(5000 * 546), outputs: [] },
+    });
   });
 
   it("never lets a withdrawal spend a flagged output", async () => {
@@ -153,7 +180,7 @@ describe("stray payments to a vault's script", () => {
     ]);
     vi.spyOn(console, "warn").mockImplementation(() => {});
     await f.get(`/vaults/${f.vault.id}/funding`);
-    expect((await f.row())?.strayOutputs).toHaveLength(1);
+    expect((await f.row())?.strayPayments).toMatchObject({ count: 1 });
     const before = [...f.store.rows.keys()];
     const manifest: Withdrawal = {
       vaultId: f.vault.id,
@@ -178,11 +205,11 @@ describe("stray payments to a vault's script", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const response = await f.get(`/vaults/${f.vault.id}/funding`);
     expect(response.status).toBe(200);
-    expect((await response.json()).strayOutputs).toEqual([]);
-    expect((await f.row())?.strayOutputs).toBeUndefined();
+    expect((await response.json()).strayPayments).toBeNull();
+    expect((await f.row())?.strayPayments).toBeUndefined();
     expect(await f.events()).toEqual([]);
     expect(error.mock.calls.map(([line]) => String(line))).toContain(
-      JSON.stringify({ strayOutputs: "lookup_failed", error: "Error" }),
+      JSON.stringify({ strayPayments: "lookup_failed", error: "Error" }),
     );
   });
 

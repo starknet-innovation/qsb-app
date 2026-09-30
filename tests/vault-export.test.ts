@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { vaultExport } from "../src/lib/vault-export";
 import { withVaultConfiguration } from "../src/lib/provenance";
-import type { StrayOutput } from "../src/lib/model";
+import type { StrayPayments } from "../src/lib/model";
 
 const vault = (id: string, funded: boolean) =>
   withVaultConfiguration({
@@ -21,13 +21,8 @@ const vault = (id: string, funded: boolean) =>
 describe("vault export", () => {
   const a = vault("1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a", true);
   const b = vault("2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b2b", false);
-  const stray: StrayOutput = {
-    vaultId: a.id,
-    txid: "cd".repeat(32),
-    vout: 3,
-    value: "25000",
-    firstSeenAt: "2026-09-29T00:00:00.000Z",
-  };
+  const output = { txid: "cd".repeat(32), vout: 3, value: "25000", firstSeenAt: "2026-09-29T00:00:00.000Z" };
+  const stray: StrayPayments = { vaultId: a.id, count: 1, sats: "25000", outputs: [output] };
   const record = vaultExport([a, b], [stray], new Date("2026-09-30T12:00:00.000Z"));
 
   it("gives each deposit its QSB version, funding, status and stray payments", () => {
@@ -45,9 +40,9 @@ describe("vault export", () => {
           scriptHash: a.scriptHash,
           status: "confirmed",
           funding: a.funding,
-          strayOutputs: [{ txid: stray.txid, vout: 3, value: "25000", firstSeenAt: stray.firstSeenAt }],
+          strayPayments: { count: 1, sats: "25000", outputs: [output] },
         },
-        expect.objectContaining({ id: b.id, status: "unfunded", funding: null, strayOutputs: [] }),
+        expect.objectContaining({ id: b.id, status: "unfunded", funding: null, strayPayments: null }),
       ],
     });
   });

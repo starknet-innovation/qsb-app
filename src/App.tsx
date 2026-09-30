@@ -41,7 +41,7 @@ import {
   type PublicVault,
   type Recovery,
   type Job,
-  type StrayOutput,
+  type StrayPayments,
 } from "./lib/model";
 import { downloadVaultExport } from "./lib/vault-export";
 type Page = "vaults" | "activity" | "recovery" | "protocol" | "costs";
@@ -62,7 +62,7 @@ export default function App() {
     // Vaults whose unconfirmed deposit has stored Slipstream bytes the server can resend.
     [resendable, setResendable] = useState<Set<string>>(new Set()),
     // Payments to a vault's script beyond its one deposit, flagged by the server. Never spent.
-    [stray, setStray] = useState<StrayOutput[]>([]),
+    [stray, setStray] = useState<StrayPayments[]>([]),
     [manualDeposit, setManualDeposit] = useState<{ vaultId: string; txid: string; rawTxHex: string }>(),
     [jobs, setJobs] = useState<Job[]>([]),
     [modal, setModal] = useState<"create" | "readiness" | null>(null),
@@ -153,13 +153,13 @@ export default function App() {
     const refresh = async () => {
       try {
         const [v, j] = await Promise.all([
-          api<{ vaults: PublicVault[]; resendable?: string[]; strayOutputs?: StrayOutput[] }>("/vaults"),
+          api<{ vaults: PublicVault[]; resendable?: string[]; strayPayments?: StrayPayments[] }>("/vaults"),
           api<{ jobs: Job[] }>("/jobs"),
         ]);
         if (!disposed) {
           setVaults(v.vaults);
           setResendable(new Set(v.resendable ?? []));
-          setStray(v.strayOutputs ?? []);
+          setStray(v.strayPayments ?? []);
           setJobs(j.jobs);
         }
       } catch {}
@@ -549,7 +549,7 @@ export default function App() {
               ) : (
                 <div className="vault-list">
                   {vaults.map((v) => {
-                    const flagged = stray.filter((o) => o.vaultId === v.id);
+                    const flagged = stray.find((p) => p.vaultId === v.id);
                     return (
                     <article className="vault-row" key={v.id}>
                       <div className="vault-icon">
@@ -567,11 +567,11 @@ export default function App() {
                             Deposit {short(v.funding.txid)}:{v.funding.vout}
                           </p>
                         )}
-                        {flagged.length > 0 && (
+                        {flagged && (
                           <p className="vault-warning" role="status">
-                            {flagged.length === 1 ? "1 payment" : `${flagged.length} payments`} of{" "}
-                            {formatBtc(flagged.reduce((sum, o) => sum + BigInt(o.value), 0n))} BTC reached this
-                            vault outside its one deposit. No withdrawal spends them, and the app can't recover them.
+                            {flagged.count === 1 ? "1 payment" : `${flagged.count} payments`} of{" "}
+                            {formatBtc(flagged.sats)} BTC reached this vault outside its one deposit. No
+                            withdrawal spends them, and the app can't recover them.
                           </p>
                         )}
                       </div>
@@ -590,7 +590,7 @@ export default function App() {
                               const updated = await api<{
                                 vault: PublicVault;
                                 status: { confirmed: boolean };
-                                strayOutputs?: StrayOutput[];
+                                strayPayments?: StrayPayments | null;
                               }>(`/vaults/${v.id}/funding`);
                               setVaults((items) =>
                                 items.map((item) =>
@@ -598,8 +598,8 @@ export default function App() {
                                 ),
                               );
                               setStray((items) => [
-                                ...items.filter((o) => o.vaultId !== v.id),
-                                ...(updated.strayOutputs ?? []),
+                                ...items.filter((p) => p.vaultId !== v.id),
+                                ...(updated.strayPayments ? [updated.strayPayments] : []),
                               ]);
                               setNotice(
                                 `Funding transaction: ${updated.status.confirmed ? "confirmed" : "submitted"}. No transaction was resubmitted.`,
