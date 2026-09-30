@@ -26,8 +26,10 @@ vi.mock("@aws-sdk/client-sfn", () => ({
 }));
 vi.mock("../server/network", async (original) => ({
   ...(await original<typeof import("../server/network")>()),
-  transactionsEnabled: true,
-  rehearsalAddressAllowed: mocks.allowed,
+  // Polling starts only while the deployment's mainnet switch is on.
+  get transactionsEnabled() {
+    return mocks.allowed();
+  },
 }));
 vi.mock("../server/store", async (original) => {
   const actual = await original<typeof import("../server/store")>();
@@ -328,18 +330,9 @@ it.each(["true", "false"])(
     ).toBeUndefined();
   },
 );
-it.each([undefined, "true", "false", "invalid"])(
-  "preserves testnet preflight semantics with mainnet-only switch %s",
-  (value) => {
-    expect(
-      reconciliationEnvironmentError({
-        ...required,
-        QSB_NETWORK: "testnet4",
-        QSB_MAINNET_ENABLED: value,
-      }),
-    ).toBeUndefined();
-  },
-);
+it.each(["testnet4", "regtest"])("refuses QSB_NETWORK=%s", (network) => {
+  expect(reconciliationEnvironmentError({ ...required, QSB_NETWORK: network })).toBe("QsbNetworkInvalid");
+});
 
 it("restarts a recorded paid job after its STANDARD execution closes under a new audited name", async () => {
   for (const [key, value] of Object.entries(required)) vi.stubEnv(key, value);

@@ -10,7 +10,7 @@ import {
 } from "../src/lib/model";
 
 import { NETWORK_ID, NETWORK_CONFIG } from "../src/lib/network";
-import { chainBase, testnet4Genesis } from "./network";
+import { chainBase } from "./network";
 import { withApiErrorCode, type ApiErrorCode } from "./api-errors";
 
 const statusSchema = z.object({
@@ -60,8 +60,7 @@ export class Esplora {
     return text;
   }
   async assertNetwork() {
-    const expected =
-      NETWORK_ID === "testnet4" ? testnet4Genesis : NETWORK_CONFIG.genesisHash;
+    const expected = NETWORK_CONFIG.genesisHash;
     // Check each operation; do not cache a provider's identity across requests.
     if ((await this.read("/block-height/0")).trim() !== expected)
       throw new ChainError(

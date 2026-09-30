@@ -61,8 +61,6 @@ const digest = (value: string) =>
 export function coordinatorPublicSolvedResult(
   job: Job,
 ): CoordinatorSolvedResult {
-  if (NETWORK_ID !== "mainnet")
-    throw new Error("Solved results are delivered on Bitcoin mainnet.");
   if (job.status !== "awaiting_authorization" || job.stage !== "verification")
     throw new Error("Coordinator has not published a solved result.");
   if (!job.solution) throw new Error("Coordinator solved result is incomplete.");

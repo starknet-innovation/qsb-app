@@ -10,7 +10,7 @@ import {
 } from "../src/lib/model";
 import { NETWORK_ID } from "../src/lib/network";
 import { assertSolverPin, solverRelease } from "../src/lib/provenance";
-import { rehearsalAddressAllowed, transactionsEnabled } from "./network";
+import { transactionsEnabled } from "./network";
 import { configuredCompute } from "./compute-provider";
 import { searchVersion, workRange } from "./search-ranges";
 import { store as defaultStore, type AtomicWrite, type Store } from "./store";
@@ -98,8 +98,8 @@ export type ReconciliationResult = {
   pollingStarted: boolean;
   reason?: string;
 };
-export function pollingStartAllowed(owner: string): boolean {
-  return transactionsEnabled && rehearsalAddressAllowed(owner);
+export function pollingStartAllowed(_owner: string): boolean {
+  return transactionsEnabled;
 }
 /** Operator-only reconciliation. Never submits or cancels work. Attach only
  * positive evidence bound to the saved Batch request; list absence is not proof.

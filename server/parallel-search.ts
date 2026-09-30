@@ -6,7 +6,7 @@ import {
   solverRelease,
 } from "../src/lib/provenance";
 import { NETWORK_ID } from "../src/lib/network";
-import { transactionsEnabled, rehearsalAddressAllowed } from "./network";
+import { transactionsEnabled } from "./network";
 import { chain } from "./chain";
 import { configuredCompute, computeConfigured } from "./compute-provider";
 import {
@@ -123,9 +123,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   const unknown = () => slots.some((s) => !s.runpodId);
   if (
     !terminal &&
-    (!transactionsEnabled ||
-      !rehearsalAddressAllowed(event.owner) ||
-      !ownerAllowed(event.owner))
+    (!transactionsEnabled || !ownerAllowed(event.owner))
   ) {
     // As on the single-GPU path: running chunks are not cancelled; resume polls them.
     if (job.status === "searching" && unknown()) {
@@ -135,7 +133,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     }
     job.status = "paused";
     const disabledReason = !transactionsEnabled
-      ? `${NETWORK_ID === "mainnet" ? "Mainnet" : "Network"} disabled by deployment.`
+      ? "Mainnet disabled by deployment."
       : "Wallet is not allowed by deployment configuration.";
     if (!job.error?.includes(disabledReason))
       job.error = `${disabledReason}${job.error ? ` ${job.error}` : ""}`;

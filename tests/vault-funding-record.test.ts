@@ -116,7 +116,6 @@ async function harness(confirmed = true) {
       : { confirmed: false, confirmations: 0 },
   );
   const submit = vi.spyOn(miner, "submit");
-  const probe = vi.spyOn(miner, "test");
   const vault = vaultOf(script);
   await store.put({
     pk: "OWNER#" + address,
@@ -136,7 +135,6 @@ async function harness(confirmed = true) {
     raw,
     status,
     submit,
-    probe,
   };
 }
 async function stored(store: MemoryStore, id: string) {
@@ -166,7 +164,6 @@ it("records vault funding when the confirmed payment matches", async () => {
     funding: { txid: h.payment.txid, vout: 0, value: "50000" },
   });
   expect(h.submit).not.toHaveBeenCalled();
-  expect(h.probe).not.toHaveBeenCalled();
   expect(release.mainnetEnabled).toBe(false);
   expect("broadcastAuthorized" in release).toBe(false);
   const version = (await h.store.get("OWNER#" + address, "VAULT#" + h.vault.id))
