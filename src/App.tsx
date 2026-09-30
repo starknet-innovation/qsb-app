@@ -28,10 +28,8 @@ import {
   LogOut,
   AlertCircle,
 } from "lucide-react";
-import { api, authenticate, clearSession, readSessionEpoch } from "./lib/api";
-import { MAINNET_SEARCH_PROFILE } from "./mainnet/submission";
+import { api, authenticate, clearSession } from "./lib/api";
 import TransactionDialog from "./TransactionDialog";
-import { MainnetRecoveryRoute } from "./mainnet/RecoveryRoute";
 import WalletCheck from "./WalletCheck";
 import Costs, { CostDisclosure } from "./Costs";
 import { connectWallet, signMessage, type Wallet } from "./lib/wallet";
@@ -78,9 +76,6 @@ export default function App() {
     [notice, setNotice] = useState("");
   // Deposit submission to MARA, and so every manual Slipstream path, needs both switches on.
   const submissionOn = operationsAllowed(config) && config?.exactSubmitEnabled === true;
-  const supervisedSearchEnabled = NETWORK_ID === "mainnet" && config?.network === "mainnet" && config?.supervisedSearch?.enabled === true && config.supervisedSearch.releaseId === MAINNET_SEARCH_PROFILE;
-  const mainnetRecoveryEnabled = NETWORK_ID === "mainnet" && config?.network === "mainnet" && config?.mainnetRecoveryEnabled === true && config?.supervisedSearch?.releaseId === MAINNET_SEARCH_PROFILE;
-  const [mainnetRecovery, setMainnetRecovery] = useState<Job>();
   const [transaction, setTransaction] = useState<{
     vault: PublicVault;
     job?: Job;
@@ -188,7 +183,6 @@ export default function App() {
     }
   }
   async function connect() {
-    setMainnetRecovery(undefined);
     const connectionGeneration = ++generation.current;
     clearSession();
     const assertCurrentConnection = () => {
@@ -208,7 +202,6 @@ export default function App() {
     }, () => generation.current === connectionGeneration);
   }
   function disconnect() {
-    setMainnetRecovery(undefined);
     generation.current++;
     setManualDeposit(undefined);
     setResendable(new Set());
@@ -607,7 +600,7 @@ export default function App() {
                             setNotice("This vault already has a withdrawal request. Review it in Activity.");
                             return;
                           }
-                          if (operationsAllowed(config) || (supervisedSearchEnabled && v.status === "confirmed" && !!v.funding))
+                          if (operationsAllowed(config))
                             setTransaction({ vault: v });
                           else setModal("readiness");
                         }}
@@ -737,13 +730,6 @@ export default function App() {
                       <button
                         className="primary"
                         onClick={() => {
-                          const execution = (j as Job & { execution?: { kind?: string; profile?: { id?: string } } }).execution;
-                          if (execution !== undefined) {
-                            if (mainnetRecoveryEnabled && execution?.kind === "qsb-supervised-service-v1" && execution.profile?.id === MAINNET_SEARCH_PROFILE)
-                              setMainnetRecovery(j);
-                            else setModal("readiness");
-                            return;
-                          }
                           const vault = vaults.find((v) => v.id === j.vaultId);
                           if (NETWORK_ID === "mainnet" && vault) {
                             void action("Loading the solved result", async () => {
@@ -1245,16 +1231,12 @@ export default function App() {
           )}
         </div>
       </dialog>
-      {mainnetRecovery && wallet && mainnetRecoveryEnabled && (
-        <MainnetRecoveryRoute job={mainnetRecovery} wallet={wallet} walletEpoch={generation.current} onClose={() => setMainnetRecovery(undefined)} />
-      )}
       {transaction && wallet && !conflictingCreation && (
         <TransactionDialog
           vault={transaction.vault}
           wallet={wallet}
           job={transaction.job}
           solvedResult={transaction.solvedResult}
-          supervisedSearch={supervisedSearchEnabled && !transaction.job && !conflictingCreation && transaction.vault.status === "confirmed" && transaction.vault.funding ? { releaseId: MAINNET_SEARCH_PROFILE, sessionEpoch: readSessionEpoch() } : undefined}
           onClose={() => setTransaction(undefined)}
           onUpdated={() => {
             void Promise.all([

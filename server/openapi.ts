@@ -44,7 +44,6 @@ import {
 } from "./scoped-keys";
 import { idempotencyKey, idempotentPosts } from "./idempotency";
 import type { Esplora } from "./chain";
-import type { mainnetUiConfig } from "./mainnetConfig";
 import type { EsploraInclusionReport } from "./miner-inclusion";
 import type { submitExact } from "./submit-exact";
 import type { FundingSubmission, submitFunding } from "./submit-funding";
@@ -342,22 +341,11 @@ type _ApiKeyMetadata = Assert<
   Fits<ApiKeyMetadata, z.infer<typeof apiKeyMetadata>>
 >;
 const apiKeyResponse = z.object({ apiKey: apiKeyMetadata });
-const uiConfig = {
-  supervisedSearch: z.object({ enabled: z.boolean(), releaseId: z.string() }),
-  mainnetRecoveryEnabled: z.boolean(),
-};
-type _UiConfig = Assert<
-  Fits<
-    Awaited<ReturnType<typeof mainnetUiConfig>>,
-    z.infer<z.ZodObject<typeof uiConfig>>
-  >
->;
 const configResponse = z.object({
   protocol: z.string(),
   qsbCommit: z.string(),
   kernelCommit: z.string(),
   checks: z.array(releaseCheck),
-  ...uiConfig,
   network: z.literal(NETWORK_ID),
   mainnetEnabled: z.boolean(),
   operationsEnabled: describe(
@@ -1068,7 +1056,6 @@ export const apiRoutes: readonly ApiRoute[] = [
     },
     errors: {
       404: ["job_not_found", "solved_result_unavailable"],
-      409: ["job_unsupported"],
     },
   },
   {
@@ -1099,7 +1086,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     responses: { 200: { description: "The paused job.", schema: jobResponse } },
     errors: merge(writes, {
       404: ["job_not_found"],
-      409: ["job_unsupported", "job_state_invalid"],
+      409: ["job_state_invalid"],
     }),
   },
   {
@@ -1116,7 +1103,6 @@ export const apiRoutes: readonly ApiRoute[] = [
       429: ["owner_active_withdrawal_limit"],
       404: ["job_not_found"],
       409: [
-        "job_unsupported",
         "job_state_invalid",
         "reconcile_required",
         "operator_review_required",
@@ -1138,7 +1124,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     },
     errors: merge(chainLookup, writes, {
       404: ["job_not_found", "intent_not_found", "vault_not_found"],
-      409: ["job_unsupported", "intent_conflict"],
+      409: ["intent_conflict"],
     }),
   },
   {

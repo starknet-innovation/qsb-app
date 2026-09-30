@@ -8,7 +8,6 @@ import {
   type ConsensusVerifier,
 } from "./consensus";
 import { exactSubmitEnabled } from "./exact-submit-permit";
-import { mainnetUiConfig, type MainnetUiOptions } from "./mainnetConfig";
 import {
   apiError,
   attachedApiErrorCode,
@@ -108,11 +107,6 @@ import { httpsTransport, systemResolver } from "./webhook-transport";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
-function supervisedServiceJob(job: unknown): boolean {
-  if (!job || typeof job !== "object") return false;
-  const execution = (job as { execution?: { kind?: string } }).execution;
-  return execution?.kind === "qsb-supervised-service-v1";
-}
 type Env = { Variables: { owner: string } };
 export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
 /**
@@ -130,7 +124,6 @@ export function createApp(
     exactSubmit?: boolean;
     apiKeys?: boolean;
     consensus?: ConsensusVerifier;
-    mainnetUi?: MainnetUiOptions;
     // Trusted server wiring only; routes under /api/jobs inherit the auth middleware.
     installAuthenticatedJobRoutes?: (routes: AuthenticatedJobRoutes) => void;
     /** Webhook HTTP and DNS. Defaults to the network; tests inject fakes. */
@@ -177,8 +170,6 @@ export function createApp(
     miner = dependencies.miner || slipstream;
   const enabled = dependencies.enabled ?? transactionsEnabled;
   const apiKeys = dependencies.apiKeys ?? apiKeysEnabled();
-  const mainnetUiOptions = { ...dependencies.mainnetUi };
-  const mainnetUiRoutes = { creation: false, admission: false };
   const limits = () => dependencies.ownerLimits ?? ownerLimits();
   // Cost- and funds-moving routes only; sign-in and reads stay open so the app can show this.
   const allowlisted = (owner: string) => limits().allowlist?.has(owner) ?? true;
@@ -326,12 +317,6 @@ export function createApp(
     c.header("Cache-Control", "no-store");
     return c.json({
       ...release,
-      ...(await mainnetUiConfig(
-        store,
-        NETWORK_ID,
-        mainnetUiOptions,
-        mainnetUiRoutes,
-      )),
       network: NETWORK_ID,
       mainnetEnabled: NETWORK_ID === "mainnet" && enabled,
       operationsEnabled: enabled,
@@ -916,13 +901,6 @@ export function createApp(
     const job = row.job as Job;
     if (job.owner !== c.get("owner"))
       return apiError(c, 404, "job_not_found", "Job not found");
-    if (supervisedServiceJob(job))
-      return apiError(
-        c,
-        409,
-        "job_unsupported",
-        "Supervised jobs are not delivered by the coordinator result.",
-      );
     try {
       return c.json(coordinatorPublicSolvedResult(job));
     } catch {
@@ -1122,13 +1100,6 @@ export function createApp(
     const r = await store.get(pk, sk);
     if (!r) return apiError(c, 404, "job_not_found", "Job not found");
     const job = r.job as Job;
-    if (supervisedServiceJob(job))
-      return apiError(
-        c,
-        409,
-        "job_unsupported",
-        "Supervised jobs are not controlled by this route.",
-      );
     if (!["searching", "queued"].includes(job.status))
       return apiError(
         c,
@@ -1163,13 +1134,6 @@ export function createApp(
       row = await store.get(pk, sk);
     if (!row) return apiError(c, 404, "job_not_found", "Job not found");
     const job = row.job as Job;
-    if (supervisedServiceJob(job))
-      return apiError(
-        c,
-        409,
-        "job_unsupported",
-        "Supervised jobs are not controlled by this route.",
-      );
     if (job.status !== "paused")
       return apiError(
         c,
@@ -1225,13 +1189,6 @@ export function createApp(
       row = await store.get(pk, sk);
     if (!row) return apiError(c, 404, "job_not_found", "Job not found");
     const job = row.job as Job;
-    if (supervisedServiceJob(job))
-      return apiError(
-        c,
-        409,
-        "job_unsupported",
-        "Supervised jobs are not controlled by this route.",
-      );
     if (!job.txid) return c.json({ job });
     const intent = await store.get(pk, `TX#${job.txid}`);
     if (!intent)
@@ -1318,14 +1275,7 @@ export function createApp(
     // legacy scriptSig has a different transaction identifier.
     return c.json({ job, status, includedTxid });
   });
-  const authenticatedGet = {
-    get: ((path: string, ...handlers: any[]) => {
-      if (path === "/api/jobs/:id/mainnet-solved-state" && handlers.length > 0)
-        mainnetUiRoutes.admission = true;
-      return (app.get.bind(app) as (...a: any[]) => any)(path, ...handlers);
-    }) as typeof app.get,
-  };
-  dependencies.installAuthenticatedJobRoutes?.(authenticatedGet);
+  dependencies.installAuthenticatedJobRoutes?.(app);
   return app;
 }
 export const app = createApp(defaultStore, { versionedAlias: true });

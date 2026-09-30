@@ -6,7 +6,6 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { deployedApiApp } from "../server/lambda";
 import { MemoryStore } from "../server/store";
-import capability from "../server/mainnet-capability.json";
 import { release } from "../src/lib/model";
 import { NETWORK_ID } from "../src/lib/network";
 
@@ -74,7 +73,6 @@ it("documents one mainnet pipeline through createApp, startWorkflow, and the coo
   );
   expect(releaseGate).not.toContain("provision_runtime");
   expect(release.mainnetEnabled).toBe(false);
-  expect(capability.broadcastAuthorized).toBe(false);
 });
 
 it("does not mount supervised job creation on the mainnet lambda", async () => {
@@ -88,7 +86,8 @@ it("does not mount supervised job creation on the mainnet lambda", async () => {
   const config = await (await app.request("/api/config")).json();
   expect(config.mainnetEnabled).toBe(false);
   expect(config.operationsEnabled).toBe(false);
-  expect(config.supervisedSearch.enabled).toBe(false);
+  expect(config).not.toHaveProperty("supervisedSearch");
+  expect(config).not.toHaveProperty("mainnetRecoveryEnabled");
   expect(config.network).toBe(NETWORK_ID);
 });
 

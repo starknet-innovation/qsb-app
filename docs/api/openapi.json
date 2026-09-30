@@ -1660,7 +1660,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `job_unsupported`, `job_state_invalid`, `idempotency_conflict`, `idempotency_in_progress`, `state_conflict`.",
+            "description": "Conflict: `job_state_invalid`, `idempotency_conflict`, `idempotency_in_progress`, `state_conflict`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1672,7 +1672,6 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "job_unsupported",
                             "job_state_invalid",
                             "idempotency_conflict",
                             "idempotency_in_progress",
@@ -1911,7 +1910,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `job_unsupported`, `job_state_invalid`, `idempotency_conflict`, `idempotency_in_progress`, `reconcile_required`, `operator_review_required`, `state_conflict`.",
+            "description": "Conflict: `job_state_invalid`, `idempotency_conflict`, `idempotency_in_progress`, `reconcile_required`, `operator_review_required`, `state_conflict`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1923,7 +1922,6 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "job_unsupported",
                             "job_state_invalid",
                             "idempotency_conflict",
                             "idempotency_in_progress",
@@ -2147,29 +2145,6 @@
               }
             }
           },
-          "409": {
-            "description": "Conflict: `job_unsupported`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ErrorResponse"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "enum": [
-                            "job_unsupported"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
           "500": {
             "description": "Internal error: `internal_error`.",
             "content": {
@@ -2332,7 +2307,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `job_unsupported`, `intent_conflict`, `chain_transaction_not_found`, `chain_error`, `state_conflict`.",
+            "description": "Conflict: `intent_conflict`, `chain_transaction_not_found`, `chain_error`, `state_conflict`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2344,7 +2319,6 @@
                       "properties": {
                         "code": {
                           "enum": [
-                            "job_unsupported",
                             "intent_conflict",
                             "chain_transaction_not_found",
                             "chain_error",
@@ -5974,25 +5948,6 @@
               "$ref": "#/components/schemas/ReleaseCheck"
             }
           },
-          "supervisedSearch": {
-            "type": "object",
-            "properties": {
-              "enabled": {
-                "type": "boolean"
-              },
-              "releaseId": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "enabled",
-              "releaseId"
-            ],
-            "additionalProperties": false
-          },
-          "mainnetRecoveryEnabled": {
-            "type": "boolean"
-          },
           "network": {
             "type": "string",
             "const": "mainnet"
@@ -6098,8 +6053,6 @@
           "qsbCommit",
           "kernelCommit",
           "checks",
-          "supervisedSearch",
-          "mainnetRecoveryEnabled",
           "network",
           "mainnetEnabled",
           "operationsEnabled",

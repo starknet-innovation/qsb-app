@@ -6,7 +6,6 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { expect, it } from "vitest";
 import { deployedApiApp } from "../server/lambda";
 import { MemoryStore } from "../server/store";
-import capability from "../server/mainnet-capability.json";
 import { release, type Job, type Withdrawal } from "../src/lib/model";
 import { coordinatorPublicSolvedResult } from "../src/mainnet/coordinatorResult";
 import {
@@ -124,7 +123,6 @@ async function signIn(app: ReturnType<typeof deployedApiApp>) {
 
 it("delivers the coordinator solved result and signs it locally without exporting secrets", async () => {
   expect(release.mainnetEnabled).toBe(false);
-  expect(capability.broadcastAuthorized).toBe(false);
   const store = new MemoryStore();
   const app = deployedApiApp("mainnet", store);
   const token = await signIn(app);
@@ -228,7 +226,6 @@ it("delivers the coordinator solved result and signs it locally without exportin
   );
   expect(submitted.status).toBe(503);
   expect(release.mainnetEnabled).toBe(false);
-  expect(capability.broadcastAuthorized).toBe(false);
 });
 
 it("delivers the solved result when the stored manifest comes back with keys reordered", async () => {
