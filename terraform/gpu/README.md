@@ -1,6 +1,6 @@
 # QSB GPU backend on AWS Batch
 
-This stack runs the external qsb-solver pinning and subset worker on On-Demand g5.xlarge A10G instances in Ireland: one per GPU a withdrawal may use at once (`workersMax` in `server/gpu-spend.json`, currently 16, sized to a 64-vCPU eu-west-1 quota). It is separate from the application state, so provisioning GPU compute cannot recreate the parked CDK stacks or activate mainnet.
+This stack runs the external qsb-solver pinning and subset worker on On-Demand g5.xlarge A10G instances in `var.region` (eu-west-2 after the move; see [REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md)): one per GPU a withdrawal may use at once (`workersMax` in `server/gpu-spend.json`, currently 16, sized to a 64-vCPU quota; a new region or account needs the same quota). It is separate from the application state, so provisioning GPU compute cannot recreate the parked CDK stacks or activate mainnet.
 
 Capacity: EC2 BEST_FIT, min 0/max 4 × `workersMax` vCPUs (`server/gpu-spend.json`; one g5.xlarge per GPU a withdrawal may use at once), g5.xlarge only. Verify that the operator account's G/VT quota supports that many vCPUs. Job definitions require one GPU, 4 vCPUs, 12 GB RAM, one attempt and a 900-second running timeout. An independent five-minute EventBridge/Lambda watchdog terminates jobs older than 30 minutes, including startup/queue time. It never submits replacements. Capacity scales to zero after AWS Batch's idle cooldown; this is not an instantaneous stop or a hard dollar budget. Idle startup/termination and storage are chargeable.
 
@@ -8,13 +8,13 @@ The worker image is a digest in private ECR, built from a clean pushed qsb-solve
 
 ## Deploy
 
-Use an operator-configured AWS profile and explicitly supply the expected `aws_account_id`, in eu-west-1. Commit and push source first and verify `git status --porcelain` is empty. Initialize a separate encrypted backend:
+Use an operator-configured AWS profile and explicitly supply the expected `aws_account_id` and `region` (eu-west-2; see [docs/REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md)). Commit and push source first and verify `git status --porcelain` is empty. Initialize a separate encrypted backend:
 
 ```
-terraform init -backend-config="bucket=${QSB_STATE_BUCKET:?Set the operator state bucket}" -backend-config=key=qsb/gpu/terraform.tfstate -backend-config=region=eu-west-1 -backend-config=encrypt=true -backend-config=use_lockfile=true
+terraform init -backend-config="bucket=${QSB_STATE_BUCKET:?Set the operator state bucket}" -backend-config=key=qsb/gpu/terraform.tfstate -backend-config=region=eu-west-2 -backend-config=encrypt=true -backend-config=use_lockfile=true
 ```
 
-Supply `release_manifest_path` (the generated app `terraform/.build/manifest.json` built with `--solver-release=RELEASE_ID`), `source_commit` (that clean pushed app commit), `image` (verified ECR digest), `vpc_id` and public `subnets` with an Internet gateway. Also supply the required `gpu_permissions_boundary_arn`:
+Supply `release_manifest_path` (the generated app `terraform/.build/manifest.json` built with `--solver-release=RELEASE_ID`), `source_commit` (that clean pushed app commit), `region`, `gpu_ami` (the ECS GPU-optimised AL2023 AMI pinned for that region; AMI IDs differ per region, see [REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md)), `image` (verified ECR digest in that region), `vpc_id` and public `subnets` with an Internet gateway. Also supply the required `gpu_permissions_boundary_arn`:
 
 ```hcl
 gpu_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-gpu-boundary"

@@ -1,12 +1,12 @@
 aws_account_id = "123456789012" # Replace with your intended account.
-region         = "eu-west-1"
+region         = "eu-west-2" # Organisation requirement; see docs/REGION-MIGRATION.md.
 name           = "qsb-app"
 network        = "mainnet" # Network identity only; transactions remain disabled.
 # Set source_commit from: git rev-parse HEAD
 # source_commit = "<full clean pushed commit SHA>"
 
 # Optional failure notification topic.
-# alarm_actions = ["arn:aws:sns:eu-west-1:123456789012:operations"]
+# alarm_actions = ["arn:aws:sns:eu-west-2:123456789012:operations"]
 
 # Required so the scoped deploy and operator roles can manage this stack (see README).
 iam_role_path                = "/qsb/runtime/"
@@ -23,13 +23,13 @@ api_keys_enabled = false
 # Set only after publishing/enrolling a schema-v3 release and configuring its exact image.
 # solver_release_id = "enrolled-release-id"
 # Bind the independently deployed AWS GPU backend; no provider API key.
-# batch_job_queue = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu"
-# batch_job_definition = "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:1"
-# batch_job_bucket = "qsb-gpu-123456789012-eu-west-1-jobs"
+# batch_job_queue = "arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu"
+# batch_job_definition = "arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-gpu-solver:1"
+# batch_job_bucket = "qsb-gpu-123456789012-eu-west-2-jobs"
 
 # Optional MARA Slipstream credential: the ARN of the administrator-created qsb/slipstream secret.
 # Set it only after the runtime boundary allows that secret (ops/github-aws/update_installed.py).
-# slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/slipstream-AbC123"
+# slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:qsb/slipstream-AbC123"
 
 # Optional partner-phase per-owner limits, all off by default (docs/OPERATIONAL-RUNBOOK.md#per-owner-limits).
 # owner_allowlist       = ["<partner address, exactly as it signs in>"]

@@ -112,11 +112,16 @@ def statement_diff(installed, rendered):
 
 
 def trusted(document):
-    """Who a trust policy lets in: each statement's principal, and any OIDC audience/subject it pins."""
+    """Who a trust policy lets in: each statement's principal, any OIDC audience/subject it pins, and
+    any principal-ARN condition (an Identity Center permission set's role is named that way)."""
     out = []
     for s in (document or {}).get('Statement', []):
-        pinned = {k: v for k, v in (s.get('Condition', {}).get('StringEquals', {})).items()
-                  if k.endswith((':sub', ':aud'))}
+        conditions = s.get('Condition', {})
+        pinned = {k: v for k, v in conditions.get('StringEquals', {}).items() if k.endswith((':sub', ':aud'))}
+        for operator, keys in conditions.items():
+            for key, value in keys.items():
+                if key.lower() == 'aws:principalarn':
+                    pinned[f'{operator}:{key}'] = value
         out.append(json.dumps({'Principal': s.get('Principal'), 'NotPrincipal': s.get('NotPrincipal'),
                                'pinned': pinned}, sort_keys=True))
     return sorted(out)
@@ -206,19 +211,50 @@ targets.append(('qsb-github-deploy trust', 'policy', live_deploy_role['AssumeRol
                 update_deploy_trust))
 
 user = human['user']
-live_user = aws('iam', 'get-user-policy', '--user-name', user['name'], '--policy-name', 'assume-qsb-roles', readable=True)
-live_user = UNREADABLE if live_user is None else live_user['PolicyDocument']
+# With an Identity Center permission set there is no IAM user here; its policy lives in Identity Center.
+if user:
+    live_user = aws('iam', 'get-user-policy', '--user-name', user['name'], '--policy-name', 'assume-qsb-roles',
+                    readable=True)
+    live_user = UNREADABLE if live_user is None else live_user['PolicyDocument']
 
+    def update_user():
+        aws('iam', 'put-user-policy', '--user-name', user['name'], '--policy-name', 'assume-qsb-roles',
+            '--policy-document', json.dumps(user['inline']))
+        read_back(f"{user['name']}/assume-qsb-roles",
+                  lambda: aws('iam', 'get-user-policy', '--user-name', user['name'],
+                              '--policy-name', 'assume-qsb-roles')['PolicyDocument'], user['inline'])
 
-def update_user():
-    aws('iam', 'put-user-policy', '--user-name', user['name'], '--policy-name', 'assume-qsb-roles',
-        '--policy-document', json.dumps(user['inline']))
-    read_back(f"{user['name']}/assume-qsb-roles",
-              lambda: aws('iam', 'get-user-policy', '--user-name', user['name'],
-                          '--policy-name', 'assume-qsb-roles')['PolicyDocument'], user['inline'])
+    targets.append((f"{user['name']}/assume-qsb-roles", 'policy', live_user, user['inline'], update_user))
 
+permission_set = human['permission_set']
+if permission_set:
+    # Identity Center provisions the permission set into this account as a reserved role carrying its policy.
+    # This tool can't change it (that's done in Identity Center), so a difference blocks the run instead.
+    label = f"permission set {permission_set['name']} (Identity Center)"
+    listed_roles = aws('iam', 'list-roles', '--path-prefix', '/aws-reserved/sso.amazonaws.com/', readable=True)
+    if listed_roles is None:
+        targets.append((label, 'external', UNREADABLE, permission_set['inline'], None))
+    else:
+        name = re.compile(rf"AWSReservedSSO_{re.escape(permission_set['name'])}_[0-9A-Za-z]{{16}}")
+        found = [r['RoleName'] for r in listed_roles['Roles'] if name.fullmatch(r['RoleName'])]
+        if len(found) != 1:
+            blockers.append(f'{label}: expected one provisioned role in this account, found {len(found)}; '
+                            'assign the permission set to this account first')
+        else:
+            reserved = found[0]
+            if aws('iam', 'list-attached-role-policies', '--role-name', reserved)['AttachedPolicies']:
+                blockers.append(f'{label}: carries managed policies this commit does not render; remove them in '
+                                'Identity Center')
+            names = aws('iam', 'list-role-policies', '--role-name', reserved)['PolicyNames']
+            if len(names) != 1:
+                blockers.append(f'{label}: has {len(names)} inline policies, not the one rendered')
+            else:
+                installed = aws('iam', 'get-role-policy', '--role-name', reserved, '--policy-name', names[0])['PolicyDocument']
+                targets.append((label, 'external', installed, permission_set['inline'], None))
+                if installed != permission_set['inline']:
+                    blockers.append(f"{label}: differs from the rendered permission-set.json. Attach it in Identity "
+                                    "Center and re-provision the permission set, then re-run; this tool can't change it")
 
-targets.append((f"{user['name']}/assume-qsb-roles", 'policy', live_user, user['inline'], update_user))
 
 def update_trust(spec):
     aws('iam', 'update-assume-role-policy', '--role-name', spec['name'], '--policy-document', json.dumps(spec['trust']))
@@ -245,7 +281,7 @@ for role in ('viewonly', 'operator'):
                     lambda spec=spec: update_session(spec)))
 
 # The updater corrects documents; it never moves who a role trusts. That comes from the inventory
-# (operator_user, subject) and needs its own reviewed step.
+# (operator_user or operator_sso_permission_set, subject) and needs its own reviewed step.
 for label, kind, installed, wanted, _ in targets:
     if label.endswith(' trust') and installed is not UNREADABLE and installed != wanted \
             and trusted(installed) != trusted(wanted):

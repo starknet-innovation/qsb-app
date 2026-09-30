@@ -58,7 +58,12 @@ def plan():
     # The validator expects five aws_iam_role rows in an expanded plan (a real plan has three `lambda`
     # roles, one `workflow` and one `operator_reconcile`); any five with those names satisfy it.
     rows += [role('lambda'), role('workflow'), role('operator_reconcile'), role('lambda'), role('workflow')]
+    # An existing stack: its state already holds resources (a first apply's state is empty).
+    existing = [{'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed',
+                 'values': {'arn': 'arn:aws:dynamodb:eu-west-2:123456789012:table/qsb-app-records'}}]
     return {'planned_values': {'root_module': {'resources': rows}},
+            'variables': {'region': {'value': 'eu-west-2'}},
+            'prior_state': {'values': {'root_module': {'resources': existing}}},
             'resource_changes': [{'mode': 'managed', 'change': {'actions': ['create']}}]}
 
 
@@ -351,6 +356,35 @@ class DeployChecks(unittest.TestCase):
             with self.subTest(action=action):
                 self.refused(self.with_miner_credential(grant={'Effect': 'Allow', 'Action': action, 'Resource': '*'},
                                                         policy_name='logs'), 'Only the miner_credential policy')
+
+    def test_a_region_change_on_an_existing_stack_is_refused(self):
+        # Resources in state that refresh no longer finds would be recreated silently.
+        doc = plan()
+        doc['resource_drift'] = [{'address': 'aws_dynamodb_table.records', 'mode': 'managed',
+                                  'change': {'actions': ['delete']}}]
+        self.refused(doc, 'resources in state were not found', '--deploy')
+        # Existing resources in another region than the plan's.
+        doc = plan()
+        doc['prior_state'] = {'values': {'root_module': {'resources': [
+            {'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed',
+             'values': {'arn': 'arn:aws:dynamodb:eu-west-1:123456789012:table/qsb-app-records'}}]}}}
+        self.refused(doc, 'is in eu-west-1, not eu-west-2', '--deploy')
+        # Global resources carry no region, and same-region resources pass.
+        doc['prior_state']['values']['root_module']['resources'] = [
+            {'type': 'aws_iam_role', 'name': 'lambda', 'mode': 'managed', 'values': {'arn': 'arn:aws:iam::123456789012:role/x'}},
+            {'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed',
+             'values': {'arn': 'arn:aws:dynamodb:eu-west-2:123456789012:table/qsb-app-records'}}]
+        self.assertEqual(self.run_check(doc, '--deploy')[0], 0)
+        doc = plan()
+        del doc['variables']
+        self.refused(doc, 'must set var.region', '--deploy')
+
+    def test_an_empty_state_needs_first_apply(self):
+        # A wrong backend bucket or key loads no resources; only a first apply may start from nothing.
+        doc = plan()
+        del doc['prior_state']
+        self.refused(doc, 'the state holds no resources', '--deploy')
+        self.assertEqual(self.run_check(doc, '--deploy', '--first-apply')[0], 0)
 
     def with_workflow(self, **changes):
         doc = plan()

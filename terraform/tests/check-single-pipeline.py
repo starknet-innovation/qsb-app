@@ -468,8 +468,35 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
             'frontendObjects': types.get('aws_s3_object', 0), 'resourceTypes': dict(sorted(types.items()))}
 
 
+def region_checks(plan):
+    """Refuse a plan that would move an existing stack to another region, or recreate resources it lost.
+
+    With AWS provider 6.x each resource keeps its region in state and is refreshed there, so a change of
+    var.region shows up as existing resources whose ARNs name another region: refuse those. Separately,
+    resources in state that refresh no longer finds (deleted outside Terraform) would be recreated
+    silently: refuse that drift too. The region_pin resource refuses the change at plan as well.
+    See docs/REGION-MIGRATION.md."""
+    region = (plan.get('variables', {}).get('region') or {}).get('value')
+    require(isinstance(region, str) and region, 'the plan must set var.region explicitly')
+    gone = [r['address'] for r in plan.get('resource_drift', [])
+            if r.get('mode') == 'managed' and 'delete' in r.get('change', {}).get('actions', [])]
+    require(not gone, f'{len(gone)} resources in state were not found (e.g. {", ".join(gone[:3])}): deleted '
+                      'outside Terraform, or planned with the wrong credentials. Investigate before applying')
+    for row in module_resources((plan.get('prior_state') or {}).get('values', {}).get('root_module', {})):
+        parts = str(row.get('values', {}).get('arn') or '').split(':')
+        if len(parts) > 3 and parts[3]:  # global services (IAM, CloudFront, S3 buckets) carry no region
+            require(parts[3] == region, f"{row['type']}.{row['name']} is in {parts[3]}, not {region}")
+    return region
+
+
 def deploy_checks(plan, first_apply):
     """What the scoped deploy and operator roles need in order to manage what an admin first applied."""
+    region = region_checks(plan)
+    # A wrong backend bucket or state key loads an empty state, and a plan against it only creates, so it
+    # would start a second stack while the live one stays unmanaged. Only a first apply may start empty.
+    existing = module_resources((plan.get('prior_state') or {}).get('values', {}).get('root_module', {}))
+    require(first_apply or existing, 'the state holds no resources: wrong backend bucket or key? A new stack '
+                                     'needs --first-apply')
     rows = module_resources(plan['planned_values']['root_module'])
     roles = [r['values'] for r in rows if r['type'] == 'aws_iam_role']
     for role in roles:
@@ -496,7 +523,7 @@ def deploy_checks(plan, first_apply):
         actions = {tuple(r['change']['actions']) for r in plan.get('resource_changes', []) if r.get('mode') == 'managed'}
         require(actions <= {('create',)}, 'first apply must be create-only: the state key must be empty and no '
                                           'resource may already exist')
-    return {'deployChecks': 'passed', 'roles': len(roles), 'firstApply': first_apply}
+    return {'deployChecks': 'passed', 'roles': len(roles), 'firstApply': first_apply, 'region': region}
 
 
 def unknown_lambda_env(changes):

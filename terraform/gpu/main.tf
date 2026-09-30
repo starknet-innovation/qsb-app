@@ -28,6 +28,14 @@ variable "gpu_permissions_boundary_arn" {
     error_message = "Use this account's exact policy/qsb/bootstrap/qsb-gpu-boundary ARN."
   }
 }
+variable "region" {
+  type        = string
+  description = "Deploy region, set explicitly. QSB runs in eu-west-2 (organisation requirement); eu-west-1 only while the legacy stack is torn down. See docs/REGION-MIGRATION.md."
+  validation {
+    condition     = can(regex("^[a-z]{2}-[a-z]+-[0-9]$", var.region))
+    error_message = "Use an AWS region name such as eu-west-2."
+  }
+}
 variable "source_commit" {
   type = string
   validation {
@@ -40,8 +48,8 @@ variable "image" {
   type = string
   validation {
 
-    condition     = can(regex("^${var.aws_account_id}\\.dkr\\.ecr\\.eu-west-1\\.amazonaws\\.com/qsb-solver@sha256:[a-f0-9]{64}$", var.image))
-    error_message = "Use the immutable AWS A10G solver image in the QSB repository."
+    condition     = can(regex("^${var.aws_account_id}\\.dkr\\.ecr\\.${var.region}\\.amazonaws\\.com/qsb-solver@sha256:[a-f0-9]{64}$", var.image))
+    error_message = "Use the immutable AWS A10G solver image in this region's QSB repository."
 
   }
 
@@ -88,7 +96,7 @@ resource "terraform_data" "release_identity" {
     precondition {
       condition = try(
         can(regex("^ghcr\\.io/starknet-innovation/qsb-solver@sha256:[a-f0-9]{64}$", local.release_build.identities.solver.image)) &&
-        var.image == "${var.aws_account_id}.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", local.release_build.identities.solver.image)[1]}",
+        var.image == "${var.aws_account_id}.dkr.ecr.${var.region}.amazonaws.com/qsb-solver@${split("@", local.release_build.identities.solver.image)[1]}",
         false
       )
       error_message = "GPU image must preserve the enrolled producer manifest digest from the app build."
@@ -97,8 +105,11 @@ resource "terraform_data" "release_identity" {
 }
 variable "gpu_ami" {
   type        = string
-  default     = "ami-05db4db06e751ab89"
-  description = "Pinned AWS ECS AL2023 NVIDIA x86_64 AMI, Ireland; verified 2026-09-25."
+  description = "Pinned AWS ECS AL2023 NVIDIA x86_64 AMI for var.region, set explicitly: AMI IDs are per region. Ireland (eu-west-1) was ami-05db4db06e751ab89, verified 2026-09-25. For another region pin the same AMI name there; see docs/REGION-MIGRATION.md."
+  validation {
+    condition     = can(regex("^ami-[0-9a-f]{8,17}$", var.gpu_ami))
+    error_message = "Use an exact AMI ID pinned for this region."
+  }
 }
 variable "subnets" {
   type = list(string)
@@ -108,7 +119,7 @@ variable "vpc_id" {
 }
 provider "aws" {
 
-  region              = "eu-west-1"
+  region              = var.region
   allowed_account_ids = [var.aws_account_id]
   default_tags {
     tags = {
@@ -119,6 +130,11 @@ provider "aws" {
 }
 locals {
   name = "qsb-gpu"
+}
+# Pins this state to its region; see the same resource in the app stack and docs/REGION-MIGRATION.md.
+resource "terraform_data" "region_pin" {
+  triggers_replace = var.region
+  lifecycle { prevent_destroy = true }
 }
 resource "aws_ecr_repository" "solver" {
 
@@ -133,7 +149,7 @@ resource "aws_ecr_repository" "solver" {
 
 }
 resource "aws_s3_bucket" "jobs" {
-  bucket = "qsb-gpu-${var.aws_account_id}-eu-west-1-jobs"
+  bucket = "qsb-gpu-${var.aws_account_id}-${var.region}-jobs"
 }
 resource "aws_s3_bucket_public_access_block" "jobs" {
 
@@ -243,7 +259,7 @@ resource "aws_iam_role" "job" {
         StringEquals = {
           "aws:SourceAccount" = var.aws_account_id
           }, ArnLike = {
-          "aws:SourceArn" = "arn:aws:ecs:eu-west-1:${var.aws_account_id}:*"
+          "aws:SourceArn" = "arn:aws:ecs:${var.region}:${var.aws_account_id}:*"
         }
       }
     }]
@@ -392,7 +408,7 @@ resource "aws_batch_job_definition" "solver" {
     },
     logConfiguration = {
       logDriver = "awslogs", options = {
-        awslogs-group = aws_cloudwatch_log_group.jobs.name, awslogs-region = "eu-west-1", awslogs-stream-prefix = "solver"
+        awslogs-group = aws_cloudwatch_log_group.jobs.name, awslogs-region = var.region, awslogs-stream-prefix = "solver"
       }
     }
 

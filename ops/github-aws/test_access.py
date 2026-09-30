@@ -22,7 +22,7 @@ def matches(action, patterns):
 class HumanAccess(unittest.TestCase):
     def setUp(self):
         self.out = access(dict(
-            account=ACCOUNT, region='eu-west-1', subject='repo:example/qsb:ref:refs/heads/main',
+            account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
             state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
             origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
             operator_user='qsb-operator-user', gpu_vpc='vpc-0test'))
@@ -65,6 +65,57 @@ class HumanAccess(unittest.TestCase):
         self.assertEqual(grants, {'sts:AssumeRole', 'iam:ChangePassword', 'iam:GetUser', 'iam:GetAccountPasswordPolicy'})
         assume = self.sid(user['inline']['Statement'], 'AssumeQsbRoles')
         self.assertEqual(assume['Resource'], guard['NotResource'])
+
+    def sso(self, **extra):
+        inventory = dict(account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
+                         state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
+                         origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
+                         gpu_vpc='vpc-0test', **extra)
+        return access(inventory)
+
+    def test_an_identity_center_permission_set_can_be_the_trusted_principal(self):
+        out = self.sso(operator_sso_permission_set='QsbOperator')
+        base = f'arn:aws:iam::{ACCOUNT}:role/aws-reserved/sso.amazonaws.com/'
+        name = 'AWSReservedSSO_QsbOperator_' + '?' * 16
+        patterns = [base + name, base + '*/' + name]
+        for role in ('viewonly', 'operator'):
+            [statement] = out[role]['trust']['Statement']
+            # Only the permission set's role, under the reserved path no one can create roles in.
+            self.assertEqual(statement['Principal'], {'AWS': f'arn:aws:iam::{ACCOUNT}:root'})
+            self.assertEqual(statement['Action'], 'sts:AssumeRole')
+            self.assertEqual(statement['Condition'], {'ArnLike': {'aws:PrincipalArn': patterns}})
+            self.assertEqual(out[role]['max_session'], 3600)
+        matches = lambda arn: any(fnmatch.fnmatchcase(arn, p) for p in patterns)
+        suffix = '0123456789abcdef'
+        # With and without the region segment.
+        self.assertTrue(matches(f'{base}eu-west-2/AWSReservedSSO_QsbOperator_{suffix}'))
+        self.assertTrue(matches(f'{base}AWSReservedSSO_QsbOperator_{suffix}'))
+        # Not another permission set whose name ends or starts the same way.
+        for other in (f'AWSReservedSSO_OtherAWSReservedSSO_QsbOperator_{suffix}', f'AWSReservedSSO_QsbOperator_x_{suffix}',
+                      f'AWSReservedSSO_QsbOperatorX_{suffix}'):
+            with self.subTest(other=other):
+                self.assertFalse(matches(base + other))
+                self.assertFalse(matches(f'{base}eu-west-2/{other}'))
+        # No IAM user; the permission set may assume the two roles and nothing else.
+        self.assertIsNone(out['user'])
+        policy = out['permission_set']['inline']['Statement']
+        roles = [f'arn:aws:iam::{ACCOUNT}:role/qsb/bootstrap/qsb-viewonly', f'arn:aws:iam::{ACCOUNT}:role/qsb/bootstrap/qsb-operator']
+        self.assertEqual(self.sid(policy, 'AssumeQsbRoles')['Resource'], roles)
+        self.assertEqual(self.sid(policy, 'OnlyTheseRoles')['NotResource'], roles)
+        self.assertEqual(set(self.sid(policy, 'NothingElse')['NotAction']), {'sts:AssumeRole', 'sts:GetCallerIdentity'})
+        self.assertEqual({a for a, _ in self.allowed(policy)}, {'sts:AssumeRole'})
+        # Everything the operator and viewonly roles may do is the same as with an IAM user.
+        self.assertEqual(out['operator']['policies'], self.out['operator']['policies'])
+        self.assertEqual(out['viewonly']['policies'], self.out['viewonly']['policies'])
+
+    def test_exactly_one_operator_identity_is_required(self):
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            self.sso()
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            self.sso(operator_user='qsb-operator-user', operator_sso_permission_set='QsbOperator')
+        for bad in ('Qsb Operator', 'a' * 33, 'x*', ''):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.sso(operator_sso_permission_set=bad)
 
     def test_viewonly_adds_only_reads_and_denies_data(self):
         self.assertEqual(self.out['viewonly']['managed'], ['arn:aws:iam::aws:policy/job-function/ViewOnlyAccess'])
@@ -129,7 +180,7 @@ class HumanAccess(unittest.TestCase):
 
     def test_smoke_jobs_and_role_passing_stay_exact(self):
         smoke = self.sid(self.operator, 'GpuSmokeJobs')
-        self.assertEqual(smoke['Resource'], [f'arn:aws:batch:eu-west-1:{ACCOUNT}:job/*'])
+        self.assertEqual(smoke['Resource'], [f'arn:aws:batch:eu-west-2:{ACCOUNT}:job/*'])
         self.assertEqual(smoke['Condition'], {'StringEquals': {'aws:ResourceTag/Project': 'qsb-gpu'}})
         tags = self.sid(self.operator, 'GpuSmokeJobTags')
         self.assertEqual(tags['Condition'], {'StringEquals': {'aws:RequestTag/Project': 'qsb-gpu'}})
@@ -151,19 +202,19 @@ class HumanAccess(unittest.TestCase):
         self.assertFalse(any('Ingress' in a for a in manage['Action']))
         for action, statement in self.allowed(self.operator):
             if statement['Sid'] == 'SecurityGroupInGpuVpc':
-                self.assertEqual(statement['Resource'], [f'arn:aws:ec2:eu-west-1:{ACCOUNT}:vpc/vpc-0test'])
+                self.assertEqual(statement['Resource'], [f'arn:aws:ec2:eu-west-2:{ACCOUNT}:vpc/vpc-0test'])
             elif action.startswith('ec2:') and not action.startswith(('ec2:Describe', 'ec2:GetLaunchTemplateData')):
                 self.assertIn('Condition', statement, (action, statement['Sid']))
             if action.startswith('ec2:Describe'):
-                self.assertEqual(statement['Condition'], {'StringEquals': {'aws:RequestedRegion': 'eu-west-1'}})
+                self.assertEqual(statement['Condition'], {'StringEquals': {'aws:RequestedRegion': 'eu-west-2'}})
 
     def test_paid_work_is_limited_to_the_qsb_queue(self):
         batch = self.sid(self.operator, 'GpuBatch')
         self.assertEqual(batch['Resource'], [
-            f'arn:aws:batch:eu-west-1:{ACCOUNT}:compute-environment/qsb-gpu',
-            f'arn:aws:batch:eu-west-1:{ACCOUNT}:job-queue/qsb-gpu',
-            f'arn:aws:batch:eu-west-1:{ACCOUNT}:job-definition/qsb-gpu-solver',
-            f'arn:aws:batch:eu-west-1:{ACCOUNT}:job-definition/qsb-gpu-solver:*'])
+            f'arn:aws:batch:eu-west-2:{ACCOUNT}:compute-environment/qsb-gpu',
+            f'arn:aws:batch:eu-west-2:{ACCOUNT}:job-queue/qsb-gpu',
+            f'arn:aws:batch:eu-west-2:{ACCOUNT}:job-definition/qsb-gpu-solver',
+            f'arn:aws:batch:eu-west-2:{ACCOUNT}:job-definition/qsb-gpu-solver:*'])
         for action, statement in self.allowed(self.operator):
             if action in ('batch:*', 'batch:SubmitJob'):
                 self.assertTrue(all('qsb-gpu' in r for r in statement['Resource']), statement['Sid'])
@@ -183,7 +234,7 @@ class HumanAccess(unittest.TestCase):
         for action in ('batch:SubmitJob', 'ec2:RunInstances', 'iam:PassRole', 'secretsmanager:GetSecretValue', 's3:*'):
             self.assertFalse(matches(action, granted), action)
         inputs = self.sid(boundary, 'JobInputs')
-        self.assertEqual(inputs['Resource'], [f'arn:aws:s3:::qsb-gpu-{ACCOUNT}-eu-west-1-jobs/inputs/*'])
+        self.assertEqual(inputs['Resource'], [f'arn:aws:s3:::qsb-gpu-{ACCOUNT}-eu-west-2-jobs/inputs/*'])
 
     def test_operator_cannot_add_external_resource_grants(self):
         guard = self.sid(self.operator, 'OnlyRequiredLambdaPrincipals')

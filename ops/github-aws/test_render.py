@@ -14,7 +14,7 @@ from render import render
 class SinglePipelinePolicies(unittest.TestCase):
     def setUp(self):
         self.inventory = dict(
-            account='123456789012', region='eu-west-1',
+            account='123456789012', region='eu-west-2',
             subject='repo:example/qsb:ref:refs/heads/main',
             state_bucket='qsb-test-state', distributions=['TESTCDN'],
             apis=['testapi'], origin_access_controls=['TESTOAC'],
@@ -24,6 +24,16 @@ class SinglePipelinePolicies(unittest.TestCase):
 
     def statement(self, policy, sid):
         return next(s for s in self.policies[policy]['Statement'] if s['Sid'] == sid)
+
+    def test_a_new_account_without_registered_edge_ids_renders_valid_policies(self):
+        empty = render(dict(self.inventory, distributions=[], apis=[], origin_access_controls=[], response_headers_policies=[]))
+        self.assertTrue(all(s['Resource'] for s in empty['deploy']['Statement']))
+        cdn = next(s for s in empty['deploy']['Statement'] if s['Sid'] == 'RegisteredQsbCloudFront')
+        self.assertTrue(all(r.endswith('/UNREGISTERED') for r in cdn['Resource']))
+        apis = next(s for s in empty['deploy']['Statement'] if s['Sid'] == 'RegisteredQsbApis')
+        self.assertTrue(all('/apis/UNREGISTERED' in r for r in apis['Resource']))
+        # Registering the IDs later changes only those resources, so the policy shape is the same.
+        self.assertEqual([s['Sid'] for s in empty['deploy']['Statement']], [s['Sid'] for s in self.policies['deploy']['Statement']])
 
     def test_removed_services_have_no_deploy_or_runtime_actions(self):
         removed = {'ec2', 'backup', 'sqs', 'events', 'ecr'}
@@ -35,7 +45,7 @@ class SinglePipelinePolicies(unittest.TestCase):
         # The only secret any runtime role may ever read is the API's MARA Slipstream credential.
         secret = [s for s in self.policies['boundary']['Statement'] if any(a.startswith('secretsmanager:') for a in s['Action'])]
         self.assertEqual(secret, [{'Sid': 'MinerCredential', 'Effect': 'Allow', 'Action': ['secretsmanager:GetSecretValue'],
-                                   'Resource': ['arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/slipstream-??????'],
+                                   'Resource': ['arn:aws:secretsmanager:eu-west-2:123456789012:secret:qsb/slipstream-??????'],
                                    'Condition': {'ArnLike': {'aws:PrincipalArn': 'arn:aws:iam::123456789012:role/qsb/runtime/qsb-*-api'}}}])
         self.assertFalse(any(a in ('*', 'kms:*', 'kms:Decrypt') for s in self.policies['boundary']['Statement'] for a in s['Action']))
 
@@ -50,17 +60,17 @@ class SinglePipelinePolicies(unittest.TestCase):
                         self.assertEqual(action, 'iam:ListInstanceProfilesForRole')
 
     def test_batch_boundary_limits_paid_jobs_and_s3_prefixes(self):
-        self.assertEqual(self.statement('boundary','BatchSubmit')['Resource'], ['arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu','arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:*'])
+        self.assertEqual(self.statement('boundary','BatchSubmit')['Resource'], ['arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu','arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-gpu-solver:*'])
         self.assertEqual(self.statement('boundary','GpuInputs')['Action'], ['s3:PutObject'])
         self.assertEqual(self.statement('boundary','GpuOutputs')['Action'], ['s3:GetObject'])
         self.assertEqual(self.statement('boundary','BatchCancel')['Condition'], {'StringEquals':{'aws:ResourceTag/Project':'qsb-gpu'}})
 
     def test_batch_read_tag_and_artifact_resources_are_exact(self):
         expected = {
-            'BatchRead': (['batch:DescribeJobs','batch:DescribeJobDefinitions','batch:DescribeJobQueues','batch:DescribeComputeEnvironments','batch:ListJobs'], ['*'], {'StringEquals':{'aws:RequestedRegion':'eu-west-1'}}),
-            'BatchTag': (['batch:TagResource'], ['arn:aws:batch:eu-west-1:123456789012:job/*', 'arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu', 'arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:*'], {'StringEquals':{'aws:RequestTag/Project':'qsb-gpu'},'ForAllValues:StringEquals':{'aws:TagKeys':['Project','QsbRequest','InputSha256']}}),
-            'GpuInputs': (['s3:PutObject'], ['arn:aws:s3:::qsb-gpu-123456789012-eu-west-1-jobs/inputs/*'], None),
-            'GpuOutputs': (['s3:GetObject'], ['arn:aws:s3:::qsb-gpu-123456789012-eu-west-1-jobs/outputs/*'], None),
+            'BatchRead': (['batch:DescribeJobs','batch:DescribeJobDefinitions','batch:DescribeJobQueues','batch:DescribeComputeEnvironments','batch:ListJobs'], ['*'], {'StringEquals':{'aws:RequestedRegion':'eu-west-2'}}),
+            'BatchTag': (['batch:TagResource'], ['arn:aws:batch:eu-west-2:123456789012:job/*', 'arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu', 'arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-gpu-solver:*'], {'StringEquals':{'aws:RequestTag/Project':'qsb-gpu'},'ForAllValues:StringEquals':{'aws:TagKeys':['Project','QsbRequest','InputSha256']}}),
+            'GpuInputs': (['s3:PutObject'], ['arn:aws:s3:::qsb-gpu-123456789012-eu-west-2-jobs/inputs/*'], None),
+            'GpuOutputs': (['s3:GetObject'], ['arn:aws:s3:::qsb-gpu-123456789012-eu-west-2-jobs/outputs/*'], None),
         }
         for sid, (actions, resources, condition) in expected.items():
             statement = {'Sid':sid, 'Effect':'Allow', 'Action':actions, 'Resource':resources}

@@ -8,6 +8,7 @@ variables {
   solver_release_id       = try(jsondecode(file(".build/manifest.json")).identities.solver.id, "")
   operator_principal_arns = ["arn:aws:iam::123456789012:user/reconcile-test"]
   aws_account_id          = "123456789012"
+  region                  = "eu-west-2"
   name                    = "qsb-test"
   network                 = "mainnet"
 }
@@ -131,7 +132,7 @@ run "reject_partial_compute_config" {
   command = plan
   variables {
     network         = "mainnet"
-    batch_job_queue = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu"
+    batch_job_queue = "arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu"
   }
   expect_failures = [terraform_data.release]
 }
@@ -160,9 +161,9 @@ run "configured_single_pipeline" {
   command = plan
   variables {
     network              = "mainnet"
-    batch_job_queue      = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu"
-    batch_job_definition = "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:1"
-    batch_job_bucket     = "qsb-gpu-jobs"
+    batch_job_queue      = "arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu"
+    batch_job_definition = "arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-gpu-solver:1"
+    batch_job_bucket     = "qsb-gpu-123456789012-eu-west-2-jobs"
   }
   assert {
     condition     = output.compute_configured && !output.transactions_enabled && length(aws_iam_role_policy.batch) == 1 && aws_lambda_function.coordinator.environment[0].variables.AWS_BATCH_JOB_QUEUE == var.batch_job_queue && !contains(keys(aws_lambda_function.api.environment[0].variables), "AWS_BATCH_JOB_QUEUE") && length(aws_lambda_function.reference.environment) == 0
@@ -193,9 +194,9 @@ run "operator_reconcile_scope" {
   command = plan
   variables {
     network                      = "mainnet"
-    batch_job_queue              = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu"
-    batch_job_definition         = "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:1"
-    batch_job_bucket             = "qsb-gpu-jobs"
+    batch_job_queue              = "arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu"
+    batch_job_definition         = "arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-gpu-solver:1"
+    batch_job_bucket             = "qsb-gpu-123456789012-eu-west-2-jobs"
     operator_principal_arns      = ["arn:aws:iam::123456789012:user/alice", "arn:aws:iam::123456789012:role/operators"]
     iam_role_path                = "/qsb/runtime/"
     iam_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary"
@@ -255,7 +256,7 @@ run "reject_provider_definition_wildcard" {
   command = plan
   variables {
     network              = "mainnet"
-    batch_job_definition = "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-*"
+    batch_job_definition = "arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-*"
   }
   expect_failures = [var.batch_job_definition]
 }
@@ -271,7 +272,7 @@ run "miner_credential_api_only" {
   command = plan
   variables {
     network               = "mainnet"
-    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/slipstream-AbC123"
+    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:qsb/slipstream-AbC123"
   }
   assert {
     condition = length(aws_iam_role_policy.miner_credential) == 1 && jsonencode(jsondecode(aws_iam_role_policy.miner_credential[0].policy).Statement) == jsonencode([
@@ -288,7 +289,7 @@ run "reject_miner_credential_other_secret" {
   command = plan
   variables {
     network               = "mainnet"
-    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/other-AbC123"
+    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:qsb/other-AbC123"
   }
   expect_failures = [var.slipstream_secret_arn]
 }
@@ -296,7 +297,7 @@ run "reject_miner_credential_other_account" {
   command = plan
   variables {
     network               = "mainnet"
-    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-1:210987654321:secret:qsb/slipstream-AbC123"
+    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-2:210987654321:secret:qsb/slipstream-AbC123"
   }
   expect_failures = [var.slipstream_secret_arn]
 }
@@ -307,6 +308,69 @@ run "reject_miner_credential_other_region" {
     slipstream_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:qsb/slipstream-AbC123"
   }
   expect_failures = [var.slipstream_secret_arn]
+}
+run "reject_miner_credential_legacy_region" {
+  command = plan
+  variables {
+    network               = "mainnet"
+    slipstream_secret_arn = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/slipstream-AbC123"
+  }
+  expect_failures = [var.slipstream_secret_arn]
+}
+run "reject_batch_binding_other_region" {
+  command = plan
+  variables {
+    network              = "mainnet"
+    batch_job_queue      = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu"
+    batch_job_definition = "arn:aws:batch:eu-west-1:123456789012:job-definition/qsb-gpu-solver:1"
+    batch_job_bucket     = "qsb-gpu-123456789012-eu-west-1-jobs"
+  }
+  expect_failures = [var.batch_job_queue, var.batch_job_definition, var.batch_job_bucket]
+}
+run "reject_batch_binding_other_account" {
+  command = plan
+  variables {
+    network              = "mainnet"
+    batch_job_queue      = "arn:aws:batch:eu-west-2:210987654321:job-queue/qsb-gpu"
+    batch_job_definition = "arn:aws:batch:eu-west-2:210987654321:job-definition/qsb-gpu-solver:1"
+    batch_job_bucket     = "qsb-gpu-210987654321-eu-west-2-jobs"
+  }
+  expect_failures = [var.batch_job_queue, var.batch_job_definition, var.batch_job_bucket]
+}
+run "freeze_throttles_every_function" {
+  command = plan
+  variables {
+    network            = "mainnet"
+    lambda_concurrency = 0
+  }
+  assert {
+    condition     = aws_lambda_function.api.reserved_concurrent_executions == 0 && aws_lambda_function.coordinator.reserved_concurrent_executions == 0 && aws_lambda_function.reference.reserved_concurrent_executions == 0
+    error_message = "A freeze must throttle every application function, so nothing writes the records table."
+  }
+}
+run "reject_negative_concurrency" {
+  command = plan
+  variables {
+    network            = "mainnet"
+    lambda_concurrency = -1
+  }
+  expect_failures = [var.lambda_concurrency]
+}
+run "region_is_pinned" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition     = terraform_data.region_pin.triggers_replace == "eu-west-2"
+    error_message = "The state must be pinned to its region, so a region change can't replan the stack elsewhere."
+  }
+}
+run "reject_malformed_region" {
+  command = plan
+  variables {
+    network = "mainnet"
+    region  = "London"
+  }
+  expect_failures = [var.region]
 }
 run "exact_submit_default_off" {
   command = plan
@@ -516,7 +580,7 @@ run "reject_provider_queue_wildcard" {
   command = plan
   variables {
     network         = "mainnet"
-    batch_job_queue = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-*"
+    batch_job_queue = "arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-*"
   }
   expect_failures = [var.batch_job_queue]
 }

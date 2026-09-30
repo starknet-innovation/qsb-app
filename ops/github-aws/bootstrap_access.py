@@ -4,7 +4,9 @@
 Requires an administrator profile (today the account root). Without --apply it only
 prints the plan. It never changes an existing identity, never creates a password,
 access key or MFA device, and prints names only (no ARNs or account numbers).
-The operator sets the user's console password and MFA device afterwards.
+The operator sets the user's console password and MFA device afterwards. In an account reached
+through IAM Identity Center (`operator_sso_permission_set`) there is no IAM user: the
+administrator attaches the rendered permission-set policy to that permission set instead.
 
 --resume finishes a run that stopped partway: every identity that already exists must
 match the rendered documents exactly (path, policy documents, trust, attachments, no
@@ -62,7 +64,8 @@ viewonly_names = [f'qsb-viewonly-{i}' for i in range(1, len(out['viewonly']['pol
 operator_names = [f'qsb-operator-{i}' for i in range(1, len(out['operator']['policies']) + 1)]
 plan = {
     'commit': commit, 'apply': a.apply,
-    'user': out['user']['path'] + out['user']['name'],
+    'user': out['user']['path'] + out['user']['name'] if out['user']
+    else f"none: Identity Center permission set {out['permission_set']['name']}",
     'roles': {'qsb-viewonly': ['ViewOnlyAccess', *viewonly_names], 'qsb-operator': operator_names},
     'gpu_boundary': 'qsb-gpu-boundary',
     'external_access_analyzer': 'qsb-external-access (created only if the account has none)',
@@ -85,7 +88,8 @@ user = out['user']
 documents = {'qsb-gpu-boundary': out['gpu_boundary']['document'],
              **dict(zip(viewonly_names, out['viewonly']['policies'])),
              **dict(zip(operator_names, out['operator']['policies']))}
-clash = ({'qsb-viewonly', 'qsb-operator'} & set(roles)) | (set(documents) & set(policies)) | ({user['name']} & set(users))
+clash = ({'qsb-viewonly', 'qsb-operator'} & set(roles)) | (set(documents) & set(policies)) \
+    | ({user['name']} & set(users) if user else set())
 if clash and not a.resume:
     raise SystemExit('Already exists, inspect before updating: ' + ', '.join(sorted(clash)))
 if 'qsb-runtime-boundary' not in policies:
@@ -116,7 +120,7 @@ for name in sorted(set(documents) & set(policies)):
     allowed = (lambda r: r.startswith('qsb-gpu-')) if name == 'qsb-gpu-boundary' else (lambda r: False)
     if bounded['PolicyUsers'] or not all(allowed(r['RoleName']) for r in bounded['PolicyRoles']):
         drift(name, 'is used as a permissions boundary outside the GPU roles')
-if user['name'] in users:
+if user and user['name'] in users:
     if users[user['name']].get('Path') != user['path']:
         drift(user['name'], 'is not under ' + user['path'])
     attached = {x['PolicyArn'] for x in aws('iam', 'list-attached-user-policies', '--user-name', user['name'])['AttachedPolicies']}
@@ -182,7 +186,10 @@ for name in ['qsb-gpu-boundary', *viewonly_names, *operator_names]:
     arns[name] = create_policy(name, documents[name], purpose)
     print('created policy ' + name, flush=True)
 
-if user_missing is not None:
+if user is None:
+    print('no IAM user: attach permission-set.json to Identity Center permission set '
+          + out['permission_set']['name'], flush=True)
+elif user_missing is not None:
     for managed in user_missing['managed']:
         aws('iam', 'attach-user-policy', '--user-name', user['name'], '--policy-arn', managed)
     if user_missing['inline']:
@@ -201,6 +208,7 @@ else:
 # A trust policy naming a just-created user is rejected as MalformedPolicyDocument ("Invalid
 # principal in policy") until IAM has propagated the new principal. Retry only that, for ~2 minutes.
 ROLE_ATTEMPTS, ROLE_WAIT = 24, 5
+who = f"{user['name']} with MFA" if user else f"Identity Center permission set {out['permission_set']['name']}"
 for role, names in (('viewonly', viewonly_names), ('operator', operator_names)):
     spec = out[role]
     if spec['name'] in roles:
@@ -214,7 +222,7 @@ for role, names in (('viewonly', viewonly_names), ('operator', operator_names)):
         ok, _, code, text = call('iam', 'create-role', '--role-name', spec['name'], '--path', spec['path'],
                            '--assume-role-policy-document', json.dumps(spec['trust']),
                            '--max-session-duration', str(spec['max_session']),
-                           '--description', f'QSB {role}: assumed by {user["name"]} with MFA', '--tags', tags)
+                           '--description', f'QSB {role}: assumed by {who}', '--tags', tags)
         if ok:
             break
         if code != 'MalformedPolicyDocument' or 'Invalid principal' not in text or attempt + 1 == ROLE_ATTEMPTS:
@@ -223,5 +231,7 @@ for role, names in (('viewonly', viewonly_names), ('operator', operator_names)):
     for policy_arn in list(spec['managed']) + [arns[n] for n in names]:
         aws('iam', 'attach-role-policy', '--role-name', spec['name'], '--policy-arn', policy_arn)
     print(f"created role {spec['name']} with {len(spec['managed']) + len(names)} managed policies", flush=True)
-print(json.dumps({'done': True, 'commit': commit, 'next': 'set console password and TOTP MFA for the user as root'}),
+print(json.dumps({'done': True, 'commit': commit,
+                  'next': 'set console password and TOTP MFA for the user as root' if user else
+                  'attach permission-set.json to the Identity Center permission set and require MFA for it'}),
       flush=True)

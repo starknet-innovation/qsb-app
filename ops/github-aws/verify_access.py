@@ -2,11 +2,17 @@
 """Check the QSB human access policies with IAM's policy simulator.
 
 Without --live, simulates the rendered documents. With --live, simulates the
-installed qsb-operator and qsb-viewonly roles (which also covers ViewOnlyAccess).
+installed qsb-operator and qsb-viewonly roles (which also covers ViewOnlyAccess) and,
+with an IAM user, that user.
+
+In an Identity Center account, --live simulates the role Identity Center provisions
+in this account for the permission set (AWSReservedSSO_<name>_<suffix>, which carries
+the permission set's policies). It fails if there isn't exactly one such role.
 Read-only; works from the qsb-viewonly role. Prints case names and decisions only.
 """
 import argparse
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -77,7 +83,7 @@ operator_cases = [
     ('pass gpu role to backup', 'iam:PassRole', gpu_role, False, [ctx('iam:PassedToService', 'backup.amazonaws.com')]),
     ('edit operator role', 'iam:PutRolePolicy', iam('role/qsb/bootstrap/qsb-operator'), False, gpu_bound),
     ('edit gpu boundary', 'iam:CreatePolicyVersion', iam('policy/qsb/bootstrap/qsb-gpu-boundary'), False, []),
-    ('edit operator user', 'iam:AttachUserPolicy', iam('user/qsb/operators/' + c['operator_user']), False, []),
+    ('edit operator user', 'iam:AttachUserPolicy', iam('user/qsb/operators/' + (c.get('operator_user') or 'anyone')), False, []),
     ('create access key', 'iam:CreateAccessKey', iam('user/anyone'), False, []),
     ('create user', 'iam:CreateUser', iam('user/anyone'), False, []),
     ('qsb function deploy', 'lambda:UpdateFunctionCode', arn('lambda', 'function:qsb-research-api'), True, []),
@@ -108,10 +114,10 @@ gpu_cases = [
 ]
 
 
-def simulate(label, documents, role, cases):
+def simulate(label, documents, principal, cases):
     for name, action, resource, allowed, context in cases:
-        if a.live and role:
-            args = ['simulate-principal-policy', '--policy-source-arn', iam(f'role/qsb/bootstrap/{role}')]
+        if a.live and principal:
+            args = ['simulate-principal-policy', '--policy-source-arn', principal]
         else:
             args = ['simulate-custom-policy', '--policy-input-list', *[json.dumps(d) for d in documents]]
         args += ['--action-names', action, '--resource-arns', resource]
@@ -128,9 +134,11 @@ def simulate(label, documents, role, cases):
         print(f'{label}: {name}: {decision}', flush=True)
 
 
-simulate('operator', out['operator']['policies'], 'qsb-operator', operator_cases)
-simulate('viewonly', out['viewonly']['policies'], 'qsb-viewonly', viewonly_cases)
+simulate('operator', out['operator']['policies'], iam('role/qsb/bootstrap/qsb-operator'), operator_cases)
+simulate('viewonly', out['viewonly']['policies'], iam('role/qsb/bootstrap/qsb-viewonly'), viewonly_cases)
 simulate('gpu-boundary', [out['gpu_boundary']['document']], None, gpu_cases)
+# The IAM user's inline policy, or in an Identity Center account the permission-set policy: same limits.
+human = out['user'] or out['permission_set']
 user_cases = [
     ('assume operator', 'sts:AssumeRole', iam('role/qsb/bootstrap/qsb-operator'), True, []),
     ('assume the reconcile role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-operator-reconcile'),
@@ -138,8 +146,24 @@ user_cases = [
     ('assume operator-made runtime role', 'sts:AssumeRole', iam('role/qsb/runtime/qsb-research-api'), 'explicitDeny', []),
     ('read records directly', 'dynamodb:GetItem', arn('dynamodb', 'table/qsb-research-records'), 'explicitDeny', []),
     ('invoke a function directly', 'lambda:InvokeFunction', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
-    ('create access key', 'iam:CreateAccessKey', iam('user/qsb/operators/' + c['operator_user']), 'explicitDeny', []),
+    ('create access key', 'iam:CreateAccessKey',
+     iam('user/qsb/operators/' + c['operator_user'] if out['user'] else 'user/anyone'), 'explicitDeny', []),
 ]
-simulate('user', [out['user']['inline']], None, user_cases)
+if out['user']:
+    simulate('user', [human['inline']], iam('user/qsb/operators/' + c['operator_user']), user_cases)
+elif a.live:
+    # The installed permission set, as provisioned into this account: exactly one reserved role for it.
+    r = subprocess.run(['aws', '--profile', a.profile, '--region', region, '--output', 'json', 'iam', 'list-roles',
+                        '--path-prefix', '/aws-reserved/sso.amazonaws.com/'], capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit('permission set: listing the Identity Center roles failed')
+    name = re.compile(rf"AWSReservedSSO_{re.escape(human['name'])}_[0-9A-Za-z]{{16}}")
+    matches = [role['Arn'] for role in json.loads(r.stdout)['Roles'] if name.fullmatch(role['RoleName'])]
+    if len(matches) != 1:
+        raise SystemExit(f"permission set: expected one provisioned role for {human['name']}, found {len(matches)}; "
+                         'is it assigned to this account?')
+    simulate('permission set', [human['inline']], matches[0], user_cases)
+else:
+    simulate('permission set (rendered)', [human['inline']], None, user_cases)
 total = len(operator_cases) + len(viewonly_cases) + len(gpu_cases) + len(user_cases)
 print(f'Passed {total} IAM simulations.', flush=True)

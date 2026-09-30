@@ -1,6 +1,10 @@
 variable "region" {
-  type    = string
-  default = "eu-west-1"
+  description = "Deploy region, set explicitly in every tfvars. QSB runs in eu-west-2 (organisation requirement); eu-west-1 only while the legacy stack is torn down. Moving region is a new stack, never an in-place change: see docs/REGION-MIGRATION.md."
+  type        = string
+  validation {
+    condition     = can(regex("^[a-z]{2}-[a-z]+-[0-9]$", var.region))
+    error_message = "Use an AWS region name such as eu-west-2."
+  }
 }
 variable "aws_account_id" {
   description = "Explicit intended AWS account; prevents accidental deployment elsewhere."
@@ -38,32 +42,40 @@ variable "batch_job_queue" {
   type    = string
   default = ""
   validation {
-    condition     = var.batch_job_queue == "" || can(regex("^arn:aws:batch:[a-z0-9-]+:[0-9]{12}:job-queue/qsb-[a-z0-9-]+$", var.batch_job_queue))
-    error_message = "Use an exact QSB AWS Batch binding."
+    condition = var.batch_job_queue == "" || (
+      can(regex("^arn:aws:batch:[a-z0-9-]+:[0-9]{12}:job-queue/qsb-[a-z0-9-]+$", var.batch_job_queue)) &&
+      try(split(":", var.batch_job_queue)[3] == var.region && split(":", var.batch_job_queue)[4] == var.aws_account_id, false)
+    )
+    error_message = "Use an exact QSB AWS Batch binding in this stack's account and region."
   }
 }
 variable "batch_job_definition" {
   type    = string
   default = ""
   validation {
-    condition     = var.batch_job_definition == "" || can(regex("^arn:aws:batch:[a-z0-9-]+:[0-9]{12}:job-definition/qsb-[a-z0-9-]+:[0-9]+$", var.batch_job_definition))
-    error_message = "Use an exact QSB AWS Batch binding."
+    condition = var.batch_job_definition == "" || (
+      can(regex("^arn:aws:batch:[a-z0-9-]+:[0-9]{12}:job-definition/qsb-[a-z0-9-]+:[0-9]+$", var.batch_job_definition)) &&
+      try(split(":", var.batch_job_definition)[3] == var.region && split(":", var.batch_job_definition)[4] == var.aws_account_id, false)
+    )
+    error_message = "Use an exact QSB AWS Batch binding in this stack's account and region."
   }
 }
 variable "batch_job_bucket" {
   type    = string
   default = ""
   validation {
-    condition     = var.batch_job_bucket == "" || can(regex("^qsb-[a-z0-9-]+$", var.batch_job_bucket))
-    error_message = "Use an exact QSB AWS Batch binding."
+    # The runtime boundary grants job input/output access to this bucket name only.
+    condition     = var.batch_job_bucket == "" || var.batch_job_bucket == "qsb-gpu-${var.aws_account_id}-${var.region}-jobs"
+    error_message = "Use this stack's account and region job bucket, qsb-gpu-<account>-<region>-jobs."
   }
 }
 variable "lambda_concurrency" {
-  type    = number
-  default = 2
+  description = "Reserved concurrency for each application function. 0 freezes the stack: every function is throttled, so nothing reads or writes the records table (the region-move freeze, docs/REGION-MIGRATION.md)."
+  type        = number
+  default     = 2
   validation {
-    condition     = var.lambda_concurrency >= 1 && var.lambda_concurrency <= 10 && floor(var.lambda_concurrency) == var.lambda_concurrency
-    error_message = "Concurrency must be an integer from 1 to 10 (AWS account quota must also permit it)."
+    condition     = var.lambda_concurrency >= 0 && var.lambda_concurrency <= 10 && floor(var.lambda_concurrency) == var.lambda_concurrency
+    error_message = "Concurrency must be an integer from 0 (frozen) to 10 (AWS account quota must also permit it)."
   }
 }
 variable "alarm_actions" {
