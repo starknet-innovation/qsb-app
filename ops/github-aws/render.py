@@ -2,7 +2,7 @@
 """Render reviewed QSB deployment policies from a private account inventory.
 
 No AWS mutations. Use an inventory with account, region, subject, distributions,
-apis, origin_access_controls, response_headers_policies and state_bucket.
+origin_access_controls, response_headers_policies and state_bucket.
 """
 import argparse
 import json
@@ -51,9 +51,6 @@ def render(c):
     edge += [cf('response-headers-policy/'+x) for x in registered(c, 'response_headers_policies')]
     allow('RegisteredQsbCloudFront', ['cloudfront:*'], edge)
     allow('CloudFrontDiscovery', ['cloudfront:ListDistributions','cloudfront:ListOriginAccessControls','cloudfront:ListResponseHeadersPolicies','cloudfront:ListCachePolicies','cloudfront:GetCachePolicy','cloudfront:GetOriginRequestPolicy'], ['*'])
-    api_resources = [f'arn:aws:apigateway:{region}::/apis/{x}'+suffix for x in registered(c, 'apis') for suffix in ['', '/*']]
-    allow('RegisteredQsbApis', ['apigateway:GET','apigateway:POST','apigateway:PUT','apigateway:PATCH','apigateway:DELETE'],api_resources)
-    allow('ApiDiscovery',['apigateway:GET'],[f'arn:aws:apigateway:{region}::/apis'])
     allow('CreateBoundedRuntimeRoles',['iam:CreateRole','iam:PutRolePolicy','iam:AttachRolePolicy','iam:UpdateAssumeRolePolicy','iam:PutRolePermissionsBoundary'],[runtime_roles],{'StringEquals':{'iam:PermissionsBoundary':boundary}})
     allow('ManageRuntimeRoles',['iam:GetRole','iam:ListInstanceProfilesForRole','iam:GetRolePolicy','iam:ListRolePolicies','iam:ListAttachedRolePolicies','iam:ListRoleTags','iam:TagRole','iam:UntagRole','iam:DeleteRolePolicy','iam:DetachRolePolicy','iam:DeleteRole','iam:UpdateRole','iam:UpdateRoleDescription'],[runtime_roles])
     allow('ReadRuntimeBoundary',['iam:GetPolicy','iam:GetPolicyVersion'],[boundary])
@@ -68,6 +65,9 @@ def render(c):
     allow('StateLocks',['s3:DeleteObject'],['arn:aws:s3:::'+c['state_bucket']+'/qsb/*.tflock'])
     statements.append(dict(Sid='ProtectBootstrapAndBoundaries',Effect='Deny',Action=['iam:*'],Resource=[role,iam('policy/qsb/bootstrap/*')]))
     statements.append(dict(Sid='NeverRemoveRuntimeBoundary',Effect='Deny',Action=['iam:DeleteRolePermissionsBoundary'],Resource=[runtime_roles]))
+    # The API's function URL takes AWS_IAM auth, which only CloudFront's origin access control signs for. Never a
+    # public one. An update that names no auth type keeps the current one.
+    statements.append(dict(Sid='OnlyIamFunctionUrls',Effect='Deny',Action=['lambda:CreateFunctionUrlConfig','lambda:UpdateFunctionUrlConfig'],Resource=['*'],Condition={'StringNotEqualsIfExists':{'lambda:FunctionUrlAuthType':'AWS_IAM'}}))
     # Runtime identities may access QSB application data, not IAM/control planes.
     runtime = []
     # Must cover every DynamoDB action the runtime role policies (terraform/policies/*.json) allow. Transactions

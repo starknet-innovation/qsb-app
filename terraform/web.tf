@@ -1,46 +1,33 @@
-resource "aws_apigatewayv2_api" "api" {
-  name          = "${var.name}-api"
-  protocol_type = "HTTP"
-  # API Gateway tags use /tags/* resources the scoped roles aren't granted, so tag changes are ignored:
-  # the first (admin) apply sets them once. Stacks built before the SourceCommit tag was dropped keep it here.
-  lifecycle { ignore_changes = [tags, tags_all] }
+# The API is a Lambda function URL that only CloudFront can call: AWS_IAM auth, and CloudFront signs every
+# request with origin access control (below). Nothing else reaches it, so there is no direct address to bypass
+# CloudFront with and no stage throttle shared by every caller; the API Lambda's reserved concurrency is the cap.
+# Clients send their credential in X-Qsb-Authorization, since the signature takes Authorization, and the
+# x-amz-content-sha256 of each body, which origin access control requires (docs/API.md#request-headers).
+resource "aws_lambda_function_url" "api" {
+  function_name      = aws_lambda_function.api.function_name
+  authorization_type = "AWS_IAM"
 }
-resource "aws_apigatewayv2_integration" "api" {
-  api_id                 = aws_apigatewayv2_api.api.id
-  integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_function.api.invoke_arn
-  payload_format_version = "2.0"
-  timeout_milliseconds   = 30000
+resource "aws_cloudfront_origin_access_control" "api" {
+  name                              = "${var.name}-api"
+  origin_access_control_origin_type = "lambda"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
 }
-resource "aws_apigatewayv2_route" "api" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "$default"
-  target    = "integrations/${aws_apigatewayv2_integration.api.id}"
+# CloudFront needs both actions on the function, and only for this distribution.
+resource "aws_lambda_permission" "api_url" {
+  statement_id           = "CloudFrontInvokeFunctionUrl"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.api.function_name
+  principal              = "cloudfront.amazonaws.com"
+  source_arn             = aws_cloudfront_distribution.web.arn
+  function_url_auth_type = "AWS_IAM"
 }
-resource "aws_cloudwatch_log_group" "api" {
-  name              = "/qsb/${var.name}/http"
-  retention_in_days = 30
-}
-resource "aws_apigatewayv2_stage" "api" {
-  api_id      = aws_apigatewayv2_api.api.id
-  name        = "$default"
-  auto_deploy = true
-  lifecycle { ignore_changes = [tags, tags_all] }
-  default_route_settings {
-    throttling_burst_limit = 30
-    throttling_rate_limit  = 10
-  }
-  access_log_settings {
-    destination_arn = aws_cloudwatch_log_group.api.arn
-    format          = jsonencode({ requestId = "$context.requestId", status = "$context.status", routeKey = "$context.routeKey" })
-  }
-}
-resource "aws_lambda_permission" "api" {
-  statement_id  = "HttpApiInvoke"
+resource "aws_lambda_permission" "api_invoke" {
+  statement_id  = "CloudFrontInvokeFunction"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.api.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
+  principal     = "cloudfront.amazonaws.com"
+  source_arn    = aws_cloudfront_distribution.web.arn
 }
 resource "aws_cloudfront_origin_access_control" "web" {
   name                              = "${var.name}-web"
@@ -88,8 +75,10 @@ resource "aws_cloudfront_distribution" "web" {
     origin_access_control_id = aws_cloudfront_origin_access_control.web.id
   }
   origin {
-    domain_name = trimprefix(aws_apigatewayv2_api.api.api_endpoint, "https://")
-    origin_id   = "api"
+    # The function URL is https://<id>.lambda-url.<region>.on.aws/: CloudFront takes its host.
+    domain_name              = split("/", aws_lambda_function_url.api.function_url)[2]
+    origin_id                = "api"
+    origin_access_control_id = aws_cloudfront_origin_access_control.api.id
     custom_origin_config {
       http_port              = 80
       https_port             = 443
@@ -133,6 +122,21 @@ resource "aws_cloudfront_distribution" "web" {
     geo_restriction { restriction_type = "none" }
   }
   viewer_certificate { cloudfront_default_certificate = true }
+}
+# The app's origin, which the API names in its sign-in challenge and allows for CORS (server/app.ts). It can't be
+# in the API Lambda's environment: CloudFront's API origin is the function URL, which belongs to that function, so
+# the function can't depend on CloudFront too. Terraform writes it here once the distribution exists. The app's
+# roles can't write SYSTEM# rows (policies/app-records.json), so only a deploy can change it.
+resource "aws_dynamodb_table_item" "app_origin" {
+  table_name = aws_dynamodb_table.records.name
+  hash_key   = aws_dynamodb_table.records.hash_key
+  range_key  = aws_dynamodb_table.records.range_key
+  item = jsonencode({
+    pk      = { S = "SYSTEM#DEPLOYMENT" }
+    sk      = { S = "APP_ORIGIN" }
+    version = { N = "0" }
+    origin  = { S = "https://${aws_cloudfront_distribution.web.domain_name}" }
+  })
 }
 resource "aws_s3_bucket_policy" "frontend" {
   bucket = aws_s3_bucket.frontend.id

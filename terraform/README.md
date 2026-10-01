@@ -9,7 +9,7 @@ Applying Terraform doesn't turn mainnet on and doesn't authorize a spend: the de
 | Component | Resources |
 | --- | --- |
 | Web | Private versioned/encrypted S3 bucket, public-access block, CloudFront OAC, HTTPS distribution and security headers |
-| API | HTTP API Gateway, throttled default stage, Node.js 22 ARM64 Lambda |
+| API | Node.js 22 ARM64 Lambda behind a function URL (`AWS_IAM`) that only CloudFront can call, through origin access control; no direct address and no API Gateway |
 | Persistence | On-demand DynamoDB table with `pk`/`sk`, `expiresAt` TTL, point-in-time recovery and deletion protection |
 | Search control | Node.js 22 coordinator, Standard Step Functions loop and continuation; no generic retry around paid work (only a throttled coordinator invoke is retried) |
 | CPU checks | Python 3.13 ARM64 reference Lambda; public inputs only |
@@ -17,7 +17,7 @@ Applying Terraform doesn't turn mainnet on and doesn't authorize a spend: the de
 | External | The GPU stack's AWS Batch queue, job definition and bucket, and an optional administrator-created `qsb/slipstream` secret (the API's MARA Slipstream credential); no secret values in Terraform |
 | Webhook retries (off by default) | A keys-only `webhook-due` index on the table, always; with `webhook_dispatcher_enabled`, a Node.js 22 dispatcher Lambda that Lambda doesn't retry and an EventBridge Scheduler schedule every 5 minutes, each with its own bounded role (`webhooks.tf`); see [Scheduled webhook dispatcher](../docs/OPERATIONAL-RUNBOOK.md#scheduled-webhook-dispatcher) |
 
-No custom DNS or certificates are needed for the default CloudFront hostname. Custom domains, and WAF or rate policy beyond API throttling, aren't set up.
+No custom DNS or certificates are needed for the default CloudFront hostname. Custom domains, WAF and rate policies aren't set up; the API Lambda's reserved concurrency caps the API. The API names its CloudFront origin in sign-in challenges and allows it for CORS, and reads it from the records table's `SYSTEM#DEPLOYMENT` / `APP_ORIGIN` row, which Terraform writes once the distribution exists (`terraform/web.tf`). If sign-in challenges name `http://127.0.0.1:5173` in a deployment, that row is missing.
 
 ## Prerequisites
 
@@ -74,14 +74,14 @@ State is kept in the bootstrap state bucket under `qsb/main/terraform.tfstate`, 
 
 Getting the role path wrong on the first apply means replacing the roles later, which needs an administrator again. `check-single-pipeline.py --deploy` refuses a plan that breaks the name, path, boundary or reconcile-principal rule.
 
-**First apply in an account.** It runs once as an administrator: in the current account, a temporary admin role for the day. The deploy role and `qsb-operator` can manage only CloudFront and API Gateway resources whose IDs are registered in the private inventory, and this stack creates new ones. Steps:
+**First apply in an account.** It runs once as an administrator: in the current account, a temporary admin role for the day. The deploy role and `qsb-operator` can manage only CloudFront resources whose IDs are registered in the private inventory, and this stack creates new ones. Steps:
 1. Use `qsb-viewonly` to check that nothing named `<name>-*` exists yet. IAM role names are unique across the account.
 2. Check that the state key is empty, so `plan` must be create-only, then run `check-single-pipeline.py --deploy --first-apply`.
 3. Start the apply with a fresh session. CloudFront can take over 15 minutes, and exported credentials last at most an hour. If they expire mid-apply, Terraform writes `errored.tfstate`. In that case:
    - run `terraform force-unlock` first if a lock remains, because `state push` takes the lock, then `terraform state push errored.tfstate`;
    - then plan again;
    - never re-apply blind.
-4. Register the new IDs. Take them from the outputs `cloudfront_distribution_id`, `origin_access_control_id`, `response_headers_policy_id` and `api_id`, and put them in the inventory keys `distributions`, `origin_access_controls`, `response_headers_policies` and `apis`. Until then the rendered deploy and operator policies name an `UNREGISTERED` placeholder, so registering the real IDs keeps the policies the same shape.
+4. Register the new IDs. Take them from the outputs `cloudfront_distribution_id`, `origin_access_control_ids` (the frontend's and the API's) and `response_headers_policy_id`, and put them in the inventory keys `distributions`, `origin_access_controls` and `response_headers_policies`. Until then the rendered deploy and operator policies name an `UNREGISTERED` placeholder, so registering the real IDs keeps the policies the same shape.
 5. Run `ops/github-aws/update_installed.py`:
    - plan mode as `qsb-viewonly`;
    - review it;
@@ -90,7 +90,7 @@ Getting the role path wrong on the first apply means replacing the roles later, 
    It refuses if the operator policies would need a different number of documents, or if a changed policy already has five versions. Either way, stop and handle it as a reviewed step.
 6. From then on, run plans and applies as `qsb-operator`. On the first such plan, when every Lambda environment is known from state, run `check-single-pipeline.py --deploy` again: it then checks key names and constants that a first plan can only check through configuration references.
 
-Replacing any registered resource later (the distribution, origin access control, response-headers policy or API) needs the administrator again. So do changes to the API stage's access-log settings, which need account-wide log-delivery permissions. The API and stage ignore tag changes, so new commits don't need API Gateway tag permissions. **Verify** both behaviours on the first `qsb-operator` apply.
+Replacing any registered resource later (the distribution, either origin access control or the response-headers policy) needs the administrator again, and so does creating a new one.
 
 Terraform can't prompt for MFA or read an `aws login` session. Export the CLI session instead, as described in `ops/github-aws/README.md`.
 

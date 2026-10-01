@@ -11,8 +11,10 @@ Both prefixes reach the same handlers and middleware: secure headers, CORS, the 
 
 ## Request headers
 
-- **Credential.** Send a session token or an API key as `X-Qsb-Authorization: Bearer <credential>`. `Authorization: Bearer <credential>` is accepted too; when both are sent, `X-Qsb-Authorization` wins. Prefer `X-Qsb-Authorization`: CloudFront origin access control in front of a Lambda function URL replaces `Authorization` with CloudFront's own SigV4 signature, so the server reads only a bearer from `Authorization`, never a signature.
-- **Body hash.** On every request with a body, send `x-amz-content-sha256` with the hex SHA-256 of the exact body bytes. CloudFront origin access control to a Lambda function URL requires it; the API itself doesn't check it.
+The deployed API is a Lambda function URL that only CloudFront can call: CloudFront signs every request it forwards with origin access control (`terraform/web.tf`). So:
+
+- **Credential.** Send a session token or an API key as `X-Qsb-Authorization: Bearer <credential>`. CloudFront replaces `Authorization` with its own SigV4 signature, so the server reads only a bearer from `Authorization`, never a signature, and an `Authorization: Bearer` credential works only against a server that isn't behind CloudFront, such as the local one. When both carry a bearer, `X-Qsb-Authorization` wins.
+- **Body hash.** On every POST, send `x-amz-content-sha256` with the hex SHA-256 of the exact body bytes (an empty body hashes the empty string). Origin access control refuses a POST without it, before the API sees it; the API itself doesn't check it.
 
 The webapp and the SDK send both ([`src/lib/session.ts`](../src/lib/session.ts)), and CORS allows them.
 
@@ -44,7 +46,7 @@ Every error that `createApp` returns has a JSON body with a message and a code:
 - `input_not_found` (a vout past its transaction's outputs) is a 409, like the other `input_*` codes. Its body has its own message, not the generic one: retrying the same outpoint can't succeed.
 - On `POST /api/vaults/:id/fund/submit`, `…/fund/resubmit` and `POST /api/jobs/:id/submit`, a provider failure's 502 or 503 isn't a refusal. An earlier attempt may have reached the miner, so treat the outcome as uncertain. Keep the signed bytes: resend a deposit only as those bytes, and check a withdrawal's status instead of submitting it again. The SDK and the webapp do this; the SDK counts only `submit_disabled` and the per-owner limit refusals as final.
 
-Errors produced in front of the app have no `code`. That includes errors from the API gateway, for example on throttling or when the function fails or times out (these can be JSON with only a `message` field), other non-JSON proxy errors, and Hono's plain-text 404 for a route that doesn't exist.
+Errors produced in front of the app have no `code`. That includes errors from CloudFront and from the Lambda function URL, for example when the function is throttled, fails or times out, or when origin access control refuses a request (such as a POST without `x-amz-content-sha256`), other non-JSON proxy errors, and Hono's plain-text 404 for a route that doesn't exist.
 
 [`server/api-errors.ts`](../server/api-errors.ts) is the source of truth. It exports `apiErrorCodes` (each code and its meaning), the `ApiErrorCode` type and the `API_ERROR_CODES` list. [`tests/api-errors.test.ts`](../tests/api-errors.test.ts) drives every code through `createApp`, checks that this table lists each one, and pins each error site's status, code and message in [`tests/api-error-sites.json`](../tests/api-error-sites.json), across `server/app.ts` and the server modules it imports.
 
@@ -164,7 +166,7 @@ Answer with any 2xx within 1 second; slower answers can time out, and the respon
 
 At least once, best effort; **the pull endpoint is authoritative**.
 
-- Deliveries are sent right after the change that caused them, from the request or coordinator step that made it, within a budget of a few seconds (API) or two seconds (coordinator). When a step has no time left to send, its deliveries are still queued. An API request that has already taken about 28 seconds skips this work, so its response still beats API Gateway's 30-second timeout. A change it made outside a transaction can then be missing from the event log; the job and vault endpoints still show it. Retries and queued deliveries go out on later coordinator steps and later API calls for your account. Where the deployment runs the scheduled dispatcher, they also go out within about five minutes of falling due, even when your account is idle; without it, an idle account's deliveries wait for its next activity.
+- Deliveries are sent right after the change that caused them, from the request or coordinator step that made it, within a budget of a few seconds (API) or two seconds (coordinator). When a step has no time left to send, its deliveries are still queued. An API request that has already taken about 28 seconds skips this work, so its response still beats CloudFront's 30-second origin response timeout. A change it made outside a transaction can then be missing from the event log; the job and vault endpoints still show it. Retries and queued deliveries go out on later coordinator steps and later API calls for your account. Where the deployment runs the scheduled dispatcher, they also go out within about five minutes of falling due, even when your account is idle; without it, an idle account's deliveries wait for its next activity.
 - After a failed attempt the webhook waits 30 s, 2 min, 10 min, 30 min, 1 h, 2 h, then 4 h between tries. An event is dropped after 8 failed attempts, and a webhook that fails 8 times in a row is marked `failing` and gets no more deliveries: delete it and register it again.
 - Up to 100 deliveries wait per account; past that the oldest are dropped.
 - Deliveries can arrive out of order or more than once. Use `at`, `QSB-Event-Id` and the pull endpoint to reconcile.

@@ -79,7 +79,7 @@ Nothing live changes in this phase.
      `state_bucket` name;
    - `operator_sso_permission_set` (for example `QsbOperator`) instead of `operator_user`;
    - `gpu_vpc`;
-   - empty `distributions`, `apis`, `origin_access_controls` and `response_headers_policies`. None exist yet. The
+   - empty `distributions`, `origin_access_controls` and `response_headers_policies`. None exist yet. The
      deploy policy names an `UNREGISTERED` placeholder until the real IDs are registered in step 7, so the policies
      keep the same shape.
 4. **Bootstrap** (AWS admin). Run `ops/github-aws/bootstrap.py`, then `ops/github-aws/bootstrap_access.py`: plan
@@ -114,7 +114,8 @@ Nothing live changes in this phase.
    - Leave `slipstream_secret_arn` empty for now.
    - `check-single-pipeline.py --deploy --first-apply` must pass.
 7. **Register the edge IDs** (temp admin).
-   - Add the new CloudFront distribution, API, origin access control and response-headers IDs to the inventory.
+   - Add the new CloudFront distribution, both origin access controls (the frontend's and the API's) and the
+     response-headers ID to the inventory.
    - Run `update_installed.py` as a plan, then with `--apply`. From then on `qsb-operator` manages the whole stack.
      The `UNREGISTERED` placeholder keeps the operator policy count the same, so this shouldn't happen. If it
      refuses anyway because the count changed, stop. The AWS admin then creates the extra `qsb-operator-<n>`

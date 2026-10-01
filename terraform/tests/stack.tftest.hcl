@@ -46,6 +46,14 @@ run "baseline" {
     network = "mainnet"
   }
   assert {
+    condition     = aws_lambda_function_url.api.authorization_type == "AWS_IAM" && aws_cloudfront_origin_access_control.api.origin_access_control_origin_type == "lambda" && aws_cloudfront_origin_access_control.api.signing_behavior == "always" && aws_cloudfront_origin_access_control.api.signing_protocol == "sigv4"
+    error_message = "The API's function URL must take AWS_IAM auth, and CloudFront must sign every request to it."
+  }
+  assert {
+    condition     = aws_lambda_permission.api_url.principal == "cloudfront.amazonaws.com" && aws_lambda_permission.api_url.action == "lambda:InvokeFunctionUrl" && aws_lambda_permission.api_url.function_url_auth_type == "AWS_IAM" && aws_lambda_permission.api_invoke.principal == "cloudfront.amazonaws.com" && aws_lambda_permission.api_invoke.action == "lambda:InvokeFunction"
+    error_message = "Only CloudFront may invoke the API's function URL."
+  }
+  assert {
     condition     = aws_cloudwatch_log_metric_filter.stray_payments.log_group_name == aws_cloudwatch_log_group.lambda["api"].name && aws_cloudwatch_log_metric_filter.stray_payments.pattern == "strayPayment" && aws_cloudwatch_metric_alarm.stray_payments.metric_name == "StrayPayments" && aws_cloudwatch_metric_alarm.stray_payments.namespace == "QSB/${var.name}" && aws_cloudwatch_metric_alarm.stray_payments.threshold == 1
     error_message = "The API's strayPayment log lines must raise the stray-payments alarm (server/stray-outputs.ts)."
   }

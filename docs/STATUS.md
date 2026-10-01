@@ -5,7 +5,7 @@ As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete
 ## Deployed
 
 - **Account and region.** One app stack and one GPU stack in a dedicated AWS account in eu-west-2, reached through IAM Identity Center. They were built from scratch on 30 September 2026; no data was copied from the earlier eu-west-1 stack ([REGION-MIGRATION.md](REGION-MIGRATION.md)).
-- **Pipeline.** API Lambda, Step Functions coordinator, AWS Batch GPUs and the CPU reference Lambda ([README](../README.md#how-a-withdrawal-runs)).
+- **Pipeline.** API Lambda, Step Functions coordinator, AWS Batch GPUs and the CPU reference Lambda ([README](../README.md#how-a-withdrawal-runs)). The API Lambda is a function URL that only CloudFront can call, through origin access control ([request headers](API.md#request-headers)).
 - **Solver.** `combined-aws-sm86-v0.2.0` (`qsb-ranked-v2-43c77084648a-e22afc720df1`), the optimized subset kernel with the repaired pinning ([SOLVER-REPOSITORY.md](SOLVER-REPOSITORY.md)).
 - **GPUs.** On-Demand `g5.xlarge` (one A10G each), up to 16 per withdrawal (`workersMax` in `server/gpu-spend.json`), scaling to zero when idle.
 - **Switches.** An uncached `GET /api/config` reports the mainnet and submit switches. Approvals and switch changes are recorded in the private deployment record, not in Git ([runbook](OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches)). API keys, the scheduled webhook dispatcher and the per-owner limits are off by default.

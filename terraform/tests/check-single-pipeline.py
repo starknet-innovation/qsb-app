@@ -26,8 +26,7 @@ ALLOWED = {
     'aws_s3_bucket_policy', 'aws_cloudwatch_log_group', 'aws_iam_role',
     'aws_iam_role_policy', 'aws_lambda_function', 'aws_lambda_permission',
     'aws_sfn_state_machine', 'aws_cloudwatch_metric_alarm', 'aws_cloudwatch_log_metric_filter',
-    'aws_apigatewayv2_api', 'aws_apigatewayv2_integration',
-    'aws_apigatewayv2_route', 'aws_apigatewayv2_stage',
+    'aws_lambda_function_url', 'aws_dynamodb_table_item',
     'aws_cloudfront_origin_access_control', 'aws_cloudfront_response_headers_policy',
     'aws_cloudfront_distribution', 'aws_scheduler_schedule', 'aws_lambda_function_event_invoke_config',
 }
@@ -68,7 +67,6 @@ def require(condition, message):
 # References carry no key names or constants; re-run with --deploy after the first apply, when the
 # environment is known, and rely on the mock-plan tests for constants.
 API_ENV_REFERENCES = {
-    'aws_cloudfront_distribution.web', 'aws_cloudfront_distribution.web.domain_name',
     'aws_dynamodb_table.records', 'aws_dynamodb_table.records.name',
     'local.owner_limit_env', 'local.solver_release_id', 'local.workflow_arn',
     'var.api_keys_enabled', 'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network',

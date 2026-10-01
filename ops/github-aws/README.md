@@ -22,9 +22,9 @@ buckets in the configured account and region. The runtime role path is `/qsb/run
 runtime policies requires the fixed administrator-owned boundary. It can't modify its own identity, the boundary,
 other projects' roles, or create static credentials. Runtime roles can't manage IAM.
 
-CloudFront distributions, origin controls, response-header policies and HTTP APIs are restricted to explicitly
+CloudFront distributions, origin access controls and response-header policies are restricted to explicitly
 registered QSB IDs. These identifiers don't encode project ownership, and some CloudFront resources can't be
-protected with tags. **New CDN/API resources must first be allocated and registered by an administrator.** The role
+protected with tags. **New CDN resources must first be allocated and registered by an administrator.** The role
 can fully manage registered infrastructure, but can't create arbitrary new CDN/API resources or EC2/VPC/backup
 infrastructure. Roles can be passed only to Lambda, Step Functions and EventBridge Scheduler, which runs the webhook
 dispatcher's schedule; the role can manage only `qsb-*` schedules in the default group.
@@ -46,7 +46,7 @@ can't administer the bucket or delete state snapshots.
 ## Provision and verify
 
 `render.py` takes a private inventory containing `account`, `region`, `subject`, `state_bucket` and arrays
-`distributions`, `apis`, `origin_access_controls`, and `response_headers_policies`. `access.py` also reads
+`distributions`, `origin_access_controls` (the frontend's and the API's), and `response_headers_policies`. `access.py` also reads
 `gpu_vpc` (the VPC of the `terraform/gpu` security group) and exactly one of `operator_sso_permission_set` or
 `operator_user` ([Human access without root](#human-access-without-root)). Keep that inventory, policy renders,
 state and receipts outside Git.
@@ -195,8 +195,9 @@ as low as the account needs, and set an AWS Budgets alert on the account.
 
 ### Persistent external access
 
-The operator is explicitly denied function URL creation and updates, DynamoDB resource policy writes and ECR
-repository policy writes. Lambda AddPermission is limited to API Gateway and EventBridge principals. That principal
+The operator, and the deploy role too, may create or update a function URL only with `AWS_IAM` auth: the API's, which
+only CloudFront's origin access control signs for. The operator is explicitly denied DynamoDB resource policy writes
+and ECR repository policy writes. Lambda AddPermission is limited to CloudFront and EventBridge principals. That principal
 restriction doesn't validate the permission's `SourceArn` or `SourceAccount`; keep source restrictions bound to the
 reviewed account and resources in Terraform. An operator can still grant persistent outside access via:
 
@@ -205,7 +206,7 @@ reviewed account and resources in Terraform. An operator can still grant persist
 - runtime role trust changes, S3 bucket policies (including frontend content access), or cross-account log
   subscriptions.
 
-[Cross-account API Gateway integrations](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-cross-account-lambda-integrations.html)
+A CloudFront distribution in another account, granted the API's function URL by such a permission,
 and [EventBridge cross-account service targets](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-service-cross-account.html)
 can provide an outside invocation path through those allowed service principals. MFA on the original operator
 session doesn't make downstream grants expire. Don't assume Access Analyzer reports every service-principal
@@ -250,7 +251,7 @@ python3 ops/github-aws/update_installed.py --profile ADMIN --inventory INVENTORY
 `differs`. For a changed statement it also shows the exact actions, resources, principals and conditions that
 differ, with account numbers masked. The inventory feeds these documents as much as the code does, so compare that
 detail with the reviewed diff: a principal or resource you don't recognise means the inventory, not the code,
-changed it. Masking covers account numbers only: the plan still shows VPC, CloudFront and API IDs, the state bucket
+changed it. Masking covers account numbers only: the plan still shows VPC and CloudFront IDs, the state bucket
 and the operator user's name. Keep plan output out of this public repository.
 
 **`--apply`** runs only from a clean `main` that matches `origin`, with an administrator profile. It shows the plan,
@@ -287,9 +288,8 @@ These stay with the AWS administrator, even though `qsb-operator` manages the st
   `permission-set.json` changes, the administrator first attaches it in Identity Center and re-provisions the
   permission set, then runs the update.
 - **A temporary admin role for the day,** as for an account's first apply, to:
-  - replace a registered resource (the CloudFront distribution, API, origin access control or response-headers
-    policy) and register the new ID;
-  - change the API's access logs.
+  - create or replace a registered resource (the CloudFront distribution, an origin access control or the
+    response-headers policy) and register the new ID.
 - **Alerts.** Alarm routing (the SNS topics in `alarm_actions`), the analyzer and CloudTrail alerts above, and their
   delivery tests.
 - **Secrets.** Creating or changing `qsb/slipstream` with the key holder

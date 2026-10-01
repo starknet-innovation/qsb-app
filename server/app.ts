@@ -140,7 +140,7 @@ function lowercaseOutpoints<
 }
 export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
 /**
- * API Gateway gives up after 30 seconds. Webhook sending stops 25 s into a request, and all
+ * CloudFront gives up on the API after 30 seconds. Webhook sending stops 25 s into a request, and all
  * event work (rows, queuing, sending) 28 s into it, so it can't turn a response into a 504.
  */
 const REQUEST_BUDGET_MS = 25_000;
@@ -229,15 +229,26 @@ export function createApp(
       ? { getPath: (request) => getPath(request).replace(/^\/v1(?=\/|$)/, "/api") }
       : {},
   );
-  const origin = process.env.APP_ORIGIN || "http://127.0.0.1:5173";
+  // The app's origin, for the sign-in challenge and CORS: APP_ORIGIN where it's set (the local server, tests),
+  // else the deployment's SYSTEM#DEPLOYMENT row, which Terraform writes once CloudFront exists (terraform/web.tf).
+  // Only a row read is cached: until the row exists, the local default stands in, and clients refuse its challenge.
+  const configuredOrigin = process.env.APP_ORIGIN;
+  let deploymentOrigin: string | undefined;
+  async function appOrigin() {
+    if (configuredOrigin) return configuredOrigin;
+    if (!deploymentOrigin) {
+      const row = await records.get("SYSTEM#DEPLOYMENT", "APP_ORIGIN");
+      if (typeof row?.origin === "string" && /^https:\/\/[a-z0-9.-]+$/.test(row.origin)) deploymentOrigin = row.origin;
+    }
+    return deploymentOrigin ?? "http://127.0.0.1:5173";
+  }
   app.use("*", secureHeaders());
-  app.use(
-    "*",
+  app.use("*", async (c, next) =>
     cors({
-      origin,
+      origin: await appOrigin(),
       allowHeaders: ["Content-Type", CREDENTIAL_HEADER, BODY_HASH_HEADER, "Authorization", "Idempotency-Key"],
       allowMethods: ["GET", "POST", "OPTIONS"],
-    }),
+    })(c, next),
   );
   app.use(
     "*",
@@ -389,7 +400,7 @@ export function createApp(
     }
     const id = randomUUID(),
       expiresAt = Math.floor(Date.now() / 1000) + CHALLENGE_SECONDS;
-    const message = `QSB Vault sign-in\nOrigin: ${origin}\nAddress: ${address}\nNetwork: bitcoin-${NETWORK_ID}\nNonce: ${id}\nExpires: ${new Date(expiresAt * 1000).toISOString()}\nThis signature authorizes this session only. It does not authorize a Bitcoin transaction.`;
+    const message = `QSB Vault sign-in\nOrigin: ${await appOrigin()}\nAddress: ${address}\nNetwork: bitcoin-${NETWORK_ID}\nNonce: ${id}\nExpires: ${new Date(expiresAt * 1000).toISOString()}\nThis signature authorizes this session only. It does not authorize a Bitcoin transaction.`;
     await store.put({
       pk: `CHALLENGE#${id}`,
       sk: "AUTH",

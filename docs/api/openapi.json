@@ -143,6 +143,18 @@
             "session": []
           }
         ],
+        "parameters": [
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -353,6 +365,16 @@
               "type": "string",
               "format": "uuid",
               "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
             }
           }
         ],
@@ -573,6 +595,18 @@
         "operationId": "createChallenge",
         "summary": "Start sign-in: get a message to sign",
         "description": "The message names the app origin, the address, the network, a nonce and the expiry. It authorizes a session only, never a Bitcoin transaction.",
+        "parameters": [
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -694,6 +728,18 @@
       "post": {
         "operationId": "verifyChallenge",
         "summary": "Finish sign-in: exchange the signature for a session token",
+        "parameters": [
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1223,6 +1269,18 @@
             ]
           }
         ],
+        "parameters": [
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1541,6 +1599,16 @@
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]{8,128}$"
             }
+          },
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
           }
         ],
         "responses": {
@@ -1790,6 +1858,16 @@
             "schema": {
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]{8,128}$"
+            }
+          },
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
             }
           }
         ],
@@ -2465,6 +2543,16 @@
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]{8,128}$"
             }
+          },
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
           }
         ],
         "requestBody": {
@@ -2718,6 +2806,18 @@
             "apiKey": [
               "read"
             ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
           }
         ],
         "requestBody": {
@@ -3527,6 +3627,16 @@
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]{8,128}$"
             }
+          },
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
           }
         ],
         "requestBody": {
@@ -3765,6 +3875,16 @@
             "schema": {
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]{8,128}$"
+            }
+          },
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
             }
           }
         ],
@@ -4056,6 +4176,16 @@
             "schema": {
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]{8,128}$"
+            }
+          },
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
             }
           }
         ],
@@ -4532,6 +4662,16 @@
             "schema": {
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]{8,128}$"
+            }
+          },
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
             }
           }
         ],
@@ -5108,6 +5248,18 @@
             "session": []
           }
         ],
+        "parameters": [
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -5320,6 +5472,16 @@
             "description": "The webhook id.",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "x-amz-content-sha256",
+            "in": "header",
+            "required": true,
+            "description": "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
             }
           }
         ],
@@ -7393,13 +7555,13 @@
         "type": "apiKey",
         "in": "header",
         "name": "X-Qsb-Authorization",
-        "description": "A session token from BIP-322 sign-in:\n\n1. `POST /auth/challenge` with the wallet address. The response has a challenge `id` and a `message`. The challenge lasts 5 minutes and works once.\n2. Sign `message` with the address's key, as a BIP-322 signature.\n3. `POST /auth/verify` with the `id` and the `signature`. The response has the `token`.\n\nSend `X-Qsb-Authorization: Bearer <token>`. `Authorization: Bearer <token>` is accepted too, but behind CloudFront origin access control that header carries CloudFront's signature, so use `X-Qsb-Authorization`. A session lasts 1 hour and is bound to the signing address and this deployment's network. After that, requests return `session_expired`; sign in again."
+        "description": "A session token from BIP-322 sign-in:\n\n1. `POST /auth/challenge` with the wallet address. The response has a challenge `id` and a `message`. The challenge lasts 5 minutes and works once.\n2. Sign `message` with the address's key, as a BIP-322 signature.\n3. `POST /auth/verify` with the `id` and the `signature`. The response has the `token`.\n\nSend `X-Qsb-Authorization: Bearer <token>`. CloudFront origin access control replaces `Authorization` with its own signature, so `Authorization: Bearer <token>` works only against a server that isn't behind CloudFront, such as the local one. A session lasts 1 hour and is bound to the signing address and this deployment's network. After that, requests return `session_expired`; sign in again."
       },
       "apiKey": {
         "type": "apiKey",
         "in": "header",
         "name": "X-Qsb-Authorization",
-        "description": "An API key minted with a session (`POST /api-keys`). It acts for the same owner. Send `X-Qsb-Authorization: Bearer qsb_mainnet_<43 base64url characters>`, or `Authorization: Bearer …` where the API isn't behind CloudFront origin access control.\n\nAn operation that accepts a key lists the one scope the key needs (`ApiKeyScope`). The key-management routes take a session only.\n\nA key works only on the network in its prefix, until it expires or is revoked. Keys are refused with `api_keys_disabled` unless the deployment switches them on (`apiKeysEnabled` in the configuration)."
+        "description": "An API key minted with a session (`POST /api-keys`). It acts for the same owner. Send `X-Qsb-Authorization: Bearer qsb_mainnet_<43 base64url characters>`.\n\nAn operation that accepts a key lists the one scope the key needs (`ApiKeyScope`). The key-management routes take a session only.\n\nA key works only on the network in its prefix, until it expires or is revoked. Keys are refused with `api_keys_disabled` unless the deployment switches them on (`apiKeysEnabled` in the configuration)."
       }
     }
   }

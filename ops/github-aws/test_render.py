@@ -20,7 +20,7 @@ class SinglePipelinePolicies(unittest.TestCase):
             account='123456789012', region='eu-west-2',
             subject='repo:example/qsb:ref:refs/heads/main',
             state_bucket='qsb-test-state', distributions=['TESTCDN'],
-            apis=['testapi'], origin_access_controls=['TESTOAC'],
+            origin_access_controls=['TESTOAC', 'TESTAPIOAC'],
             response_headers_policies=['TESTHEADERS'],
         )
         self.policies = render(self.inventory)
@@ -33,7 +33,7 @@ class SinglePipelinePolicies(unittest.TestCase):
         # render.py grants, not fail before simulating anything. A fake aws CLI stops it at the first call.
         with tempfile.TemporaryDirectory() as tmp:
             inventory = Path(tmp) / 'inventory.json'
-            inventory.write_text(json.dumps(dict(self.inventory, distributions=[], apis=[], origin_access_controls=[],
+            inventory.write_text(json.dumps(dict(self.inventory, distributions=[], origin_access_controls=[],
                                                  response_headers_policies=[])))
             fake = Path(tmp) / 'aws'
             fake.write_text('#!/bin/sh\nexit 7\n')
@@ -48,17 +48,15 @@ class SinglePipelinePolicies(unittest.TestCase):
         self.assertEqual(registered(dict(distributions=['E1']), 'distributions'), ['E1'])
 
     def test_a_new_account_without_registered_edge_ids_renders_valid_policies(self):
-        empty = render(dict(self.inventory, distributions=[], apis=[], origin_access_controls=[], response_headers_policies=[]))
+        empty = render(dict(self.inventory, distributions=[], origin_access_controls=[], response_headers_policies=[]))
         self.assertTrue(all(s['Resource'] for s in empty['deploy']['Statement']))
         cdn = next(s for s in empty['deploy']['Statement'] if s['Sid'] == 'RegisteredQsbCloudFront')
         self.assertTrue(all(r.endswith('/UNREGISTERED') for r in cdn['Resource']))
-        apis = next(s for s in empty['deploy']['Statement'] if s['Sid'] == 'RegisteredQsbApis')
-        self.assertTrue(all('/apis/UNREGISTERED' in r for r in apis['Resource']))
         # Registering the IDs later changes only those resources, so the policy shape is the same.
         self.assertEqual([s['Sid'] for s in empty['deploy']['Statement']], [s['Sid'] for s in self.policies['deploy']['Statement']])
 
     def test_removed_services_have_no_deploy_or_runtime_actions(self):
-        removed = {'ec2', 'backup', 'sqs', 'events', 'ecr'}
+        removed = {'ec2', 'backup', 'sqs', 'events', 'ecr', 'apigateway'}
         for kind in ('deploy', 'boundary'):
             for statement in self.policies[kind]['Statement']:
                 if statement['Effect'] == 'Allow':
@@ -225,7 +223,7 @@ class SinglePipelinePolicies(unittest.TestCase):
     def test_retained_pipeline_and_boundary_grants(self):
         for service in ('Lambda', 'Dynamodb', 'States', 'Cloudwatch'):
             self.assertEqual(self.statement('deploy', service + 'Qsb')['Effect'], 'Allow')
-        for sid in ('QsbBuckets', 'QsbLogs', 'RegisteredQsbCloudFront', 'RegisteredQsbApis'):
+        for sid in ('QsbBuckets', 'QsbLogs', 'RegisteredQsbCloudFront'):
             self.assertEqual(self.statement('deploy', sid)['Effect'], 'Allow')
         self.assertEqual(self.statement('boundary', 'Functions')['Action'], ['lambda:InvokeFunction'])
         self.assertIn('states:StartExecution', self.statement('boundary', 'Workflow')['Action'])
@@ -235,6 +233,14 @@ class SinglePipelinePolicies(unittest.TestCase):
                 'arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary'}})
         self.assertEqual(self.statement('deploy', 'NeverRemoveRuntimeBoundary')['Effect'], 'Deny')
         self.assertEqual(self.statement('deploy', 'ProtectBootstrapAndBoundaries')['Effect'], 'Deny')
+
+    def test_deployer_can_only_create_iam_function_urls(self):
+        # The API's function URL is reachable only through CloudFront origin access control, which signs with
+        # AWS_IAM. The deployer's lambda:* on qsb-* functions must never make one public.
+        guard = self.statement('deploy', 'OnlyIamFunctionUrls')
+        self.assertEqual((guard['Effect'], guard['Resource']), ('Deny', ['*']))
+        self.assertEqual(set(guard['Action']), {'lambda:CreateFunctionUrlConfig', 'lambda:UpdateFunctionUrlConfig'})
+        self.assertEqual(guard['Condition'], {'StringNotEqualsIfExists': {'lambda:FunctionUrlAuthType': 'AWS_IAM'}})
 
 
 if __name__ == '__main__':

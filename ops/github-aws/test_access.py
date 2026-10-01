@@ -241,11 +241,14 @@ class HumanAccess(unittest.TestCase):
         self.assertEqual((guard['Effect'], guard['Action'], guard['Resource']),
                          ('Deny', ['lambda:AddPermission'], ['*']))
         self.assertEqual(guard['Condition'], {'StringNotEquals': {
-            'lambda:Principal': ['apigateway.amazonaws.com', 'events.amazonaws.com']}})
-        guard = self.sid(self.operator, 'NoFunctionUrlsOrExternalResourcePolicies')
+            'lambda:Principal': ['cloudfront.amazonaws.com', 'events.amazonaws.com']}})
+        guard = self.sid(self.operator, 'OnlyIamFunctionUrls')
         self.assertEqual((guard['Effect'], guard['Resource']), ('Deny', ['*']))
-        self.assertEqual(set(guard['Action']), {'lambda:CreateFunctionUrlConfig',
-            'lambda:UpdateFunctionUrlConfig', 'dynamodb:PutResourcePolicy', 'ecr:SetRepositoryPolicy'})
+        self.assertEqual(set(guard['Action']), {'lambda:CreateFunctionUrlConfig', 'lambda:UpdateFunctionUrlConfig'})
+        self.assertEqual(guard['Condition'], {'StringNotEqualsIfExists': {'lambda:FunctionUrlAuthType': 'AWS_IAM'}})
+        guard = self.sid(self.operator, 'NoExternalResourcePolicies')
+        self.assertEqual((guard['Effect'], guard['Resource']), ('Deny', ['*']))
+        self.assertEqual(set(guard['Action']), {'dynamodb:PutResourcePolicy', 'ecr:SetRepositoryPolicy'})
 
     def test_access_analyzer_is_readable_but_out_of_operator_reach(self):
         guard = self.sid(self.operator, 'ProtectAccessAnalyzer')

@@ -37,7 +37,9 @@ gpu_role = iam('role/qsb/runtime/qsb-gpu-job')
 queue = arn('batch', 'job-queue/qsb-gpu')
 
 operator_cases = [
-    ('allow api invocation permission', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), True,
+    ('allow cloudfront invocation permission', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), True,
+     [ctx('lambda:Principal', 'cloudfront.amazonaws.com')]),
+    ('deny api gateway principal', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), 'explicitDeny',
      [ctx('lambda:Principal', 'apigateway.amazonaws.com')]),
     ('allow watchdog invocation permission', 'lambda:AddPermission', arn('lambda', 'function:qsb-gpu-watchdog'), True,
      [ctx('lambda:Principal', 'events.amazonaws.com')]),
@@ -46,8 +48,12 @@ operator_cases = [
     ('deny missing lambda principal', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
     ('deny public lambda principal', 'lambda:AddPermission', arn('lambda', 'function:qsb-research-api'), 'explicitDeny',
      [ctx('lambda:Principal', '*')]),
-    ('deny function url creation', 'lambda:CreateFunctionUrlConfig', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
-    ('deny function url updates', 'lambda:UpdateFunctionUrlConfig', arn('lambda', 'function:qsb-research-api'), 'explicitDeny', []),
+    ('allow iam function url', 'lambda:CreateFunctionUrlConfig', arn('lambda', 'function:qsb-research-api'), True,
+     [ctx('lambda:FunctionUrlAuthType', 'AWS_IAM')]),
+    ('deny public function url', 'lambda:CreateFunctionUrlConfig', arn('lambda', 'function:qsb-research-api'), 'explicitDeny',
+     [ctx('lambda:FunctionUrlAuthType', 'NONE')]),
+    ('deny public function url update', 'lambda:UpdateFunctionUrlConfig', arn('lambda', 'function:qsb-research-api'),
+     'explicitDeny', [ctx('lambda:FunctionUrlAuthType', 'NONE')]),
     ('deny table resource policy', 'dynamodb:PutResourcePolicy', arn('dynamodb', 'table/qsb-records'), 'explicitDeny', []),
     ('silence the analyzer', 'access-analyzer:DeleteAnalyzer', arn('access-analyzer', 'analyzer/qsb-external-access'),
      'explicitDeny', []),

@@ -225,7 +225,7 @@ This is separate from AWS Batch reconciliation. Never use the compute `--not-sub
 
 Each transactional Put is authorized as `dynamodb:PutItem` with its own leading key, so the `EVENT#` row needs no grant beyond `OWNER#*` PutItem. That is AWS's per-item authorization of TransactWriteItems; verify it against the current AWS documentation before relying on a narrower policy.
 
-The withdrawal API Lambda has a 120-second timeout, but API Gateway returns a timeout after its 30-second integration budget. A caller timeout doesn't stop an already running Lambda or prove the miner never received the POST: treat it as uncertain and follow the steps above. Never retry the POST or reset its intent.
+The withdrawal API Lambda has a 120-second timeout, but CloudFront returns a timeout after its 30-second origin response timeout. A caller timeout doesn't stop an already running Lambda or prove the miner never received the POST: treat it as uncertain and follow the steps above. Never retry the POST or reset its intent.
 
 ## Operator session
 

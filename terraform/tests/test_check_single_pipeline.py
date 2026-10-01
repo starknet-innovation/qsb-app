@@ -210,8 +210,7 @@ class DeployChecks(unittest.TestCase):
             {'type': 'aws_lambda_function', 'name': 'reference', 'mode': 'managed',
              'change': {'actions': ['create'], 'after_unknown': {'environment': []}}}]
         if refs is None:
-            refs = ['aws_dynamodb_table.records', 'aws_dynamodb_table.records.name', 'aws_cloudfront_distribution.web',
-                    'aws_cloudfront_distribution.web.domain_name', 'var.mainnet_enabled']
+            refs = ['aws_dynamodb_table.records', 'aws_dynamodb_table.records.name', 'var.mainnet_enabled']
         doc['configuration'] = {'root_module': {'resources': [
             {'address': 'aws_lambda_function.api', 'expressions': {'environment': [{'variables': {'references': refs}}]}}]}}
         return doc
@@ -226,6 +225,9 @@ class DeployChecks(unittest.TestCase):
                      'not reviewed')
         self.refused(self.unknown_api_env(refs=['aws_dynamodb_table.records.name', 'local.batch_env']), 'not reviewed')
         self.refused(self.unknown_api_env(refs=['var.network']), 'must use the same table')
+        # CloudFront's API origin is the function's own URL, so the API can't draw on CloudFront (terraform/web.tf).
+        self.refused(self.unknown_api_env(refs=['aws_dynamodb_table.records.name',
+                                                'aws_cloudfront_distribution.web.domain_name']), 'not reviewed')
         doc = self.unknown_api_env()
         del doc['configuration']
         self.refused(doc, 'unknown until apply')
