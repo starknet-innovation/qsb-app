@@ -6411,6 +6411,50 @@
           "computeSeconds": {
             "type": "number"
           },
+          "usage": {
+            "description": "The AWS Batch time this withdrawal's GPU chunks took, measured from each finished chunk's Batch record. Absent until the first chunk finishes.",
+            "type": "object",
+            "properties": {
+              "chunks": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "GPU chunks seen finished, whatever the outcome."
+              },
+              "failed": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Of those, chunks that failed, timed out or were cancelled."
+              },
+              "runMs": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Total time the chunks ran on a GPU: AWS Batch `stoppedAt` minus `startedAt`."
+              },
+              "queueMs": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Total time from submission to each chunk starting: queueing, instance start and image pull."
+              },
+              "unmeasured": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Chunks that finished without running, or whose Batch record had no usable times."
+              }
+            },
+            "required": [
+              "chunks",
+              "failed",
+              "runMs",
+              "queueMs",
+              "unmeasured"
+            ],
+            "additionalProperties": false
+          },
           "revision": {
             "type": "integer",
             "minimum": -9007199254740991,

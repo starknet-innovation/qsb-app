@@ -28,6 +28,7 @@ import {
   publishedHitRecords,
 } from "./hit-capacity";
 import { candidateOutput, applyVerifiedHit } from "./candidate-output";
+import { meterChunk } from "./gpu-usage";
 import type { Row, Store } from "./store";
 
 type Event = { owner: string; jobId: string; revision: number; polls?: number };
@@ -169,6 +170,8 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     for (const slot of [...slots]) {
       if (!slot.runpodId) continue;
       const r = await provider.status(slot.runpodId, slot.batchSubmission);
+      // Every chunk is seen finished here before polling stops, so all are metered.
+      if (meterChunk(job, slot, r)) changed = true;
       if (ACTIVE.includes(r.status)) {
         // A cancellation acknowledgement is not terminal: keep polling the ID.
         await provider.cancel(slot.runpodId);
@@ -226,6 +229,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   const completed = new Set(job.completedAttempts ?? []);
   for (const slot of [...slots]) {
     const r = await provider.status(slot.runpodId!, slot.batchSubmission);
+    meterChunk(job, slot, r);
     const current = slot.stage === job.stage && job.status !== "failed";
     if (!current) {
       // Superseded by a verified hit or a failed job: stop it, never credit it.

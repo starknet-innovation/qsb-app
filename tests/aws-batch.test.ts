@@ -390,3 +390,29 @@ it("drain checks every active Batch status and rejects malformed discovery", asy
     "ProviderListInvalid",
   );
 });
+it("reports a finished job's Batch times for metering, keeping only usable timestamps", async () => {
+  const t = setup();
+  Object.assign(t.job, { status: "FAILED", createdAt: 1_000, startedAt: 2_000, stoppedAt: 9_000 });
+  expect(await t.provider.status(id)).toEqual({
+    id,
+    status: "FAILED",
+    timing: { createdAt: 1_000, startedAt: 2_000, stoppedAt: 9_000 },
+  });
+  Object.assign(t.job, { startedAt: undefined, stoppedAt: -1, createdAt: 1.5 });
+  expect((await t.provider.status(id)).timing).toEqual({});
+  t.job.status = "SUCCEEDED";
+  Object.assign(t.job, { createdAt: 1_000, startedAt: 2_000, stoppedAt: 3_000 });
+  t.s3.send.mockResolvedValue({
+    ContentLength: 200,
+    Body: {
+      transformToString: async () =>
+        JSON.stringify({ jobId: id, inputSha256: "b".repeat(64), executionTime: 1, output: {} }),
+    },
+  });
+  expect(await t.provider.status(id)).toMatchObject({
+    status: "COMPLETED",
+    timing: { createdAt: 1_000, startedAt: 2_000, stoppedAt: 3_000 },
+  });
+  t.job.status = "RUNNING";
+  expect((await t.provider.status(id)).timing).toBeUndefined();
+});

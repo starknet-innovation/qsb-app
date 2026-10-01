@@ -581,3 +581,59 @@ describe("owner GPU budget", () => {
     expect(await budgetRow()).toMatchObject({ reservedSeconds: 2700 });
   });
 });
+
+describe("GPU usage metering", () => {
+  // Batch times in epoch milliseconds: submitted, started running, stopped.
+  const timed = (state: object, createdAt: number, startedAt?: number, stoppedAt?: number) => ({
+    ...state,
+    timing: { createdAt, ...(startedAt === undefined ? {} : { startedAt }), ...(stoppedAt === undefined ? {} : { stoppedAt }) },
+  });
+
+  it("meters every finished chunk's Batch time once, whatever its outcome", async () => {
+    await seed({ status: "searching", parallelSlots: [slot(0), slot(1), slot(2), slot(3)] });
+    states.c0 = timed(output("pinning", 0), 1_000, 61_000, 661_000); // 60 s queued, 600 s running
+    states.c1 = timed({ status: "FAILED" }, 2_000, 32_000, 92_000); // 30 s queued, 60 s running
+    await handler(event);
+    let job = await saved();
+    expect(job.usage).toEqual({ chunks: 2, failed: 1, runMs: 660_000, queueMs: 90_000, unmeasured: 0 });
+    expect(job.status).toBe("paused");
+    // The paused tick stops the two still running; each is metered when seen stopped.
+    expect(await handler(event)).toMatchObject({ done: false });
+    states.c2 = timed({ status: "FAILED" }, 3_000, 4_000, 5_000);
+    states.c3 = timed({ status: "CANCELLED" }, 3_000);
+    expect(await handler(event)).toMatchObject({ done: true });
+    job = await saved();
+    expect(job.usage).toEqual({ chunks: 4, failed: 3, runMs: 661_000, queueMs: 91_000, unmeasured: 1 });
+    // A paused job keeps its stopped chunks for resume, marked so they aren't counted again.
+    expect(job.parallelSlots!.map((s) => [s.runpodId, s.metered])).toEqual([["c2", true], ["c3", true]]);
+    await handler(event);
+    expect((await saved()).usage).toEqual(job.usage);
+  });
+
+  it("counts a chunk held for CPU review once, however often it is seen again", async () => {
+    await seed({ status: "searching", parallelSlots: [slot(0)] });
+    states.c0 = timed(output("pinning", 0, ["candidate"]), 0, 10_000, 70_000); // CPU answers { valid: false }
+    await handler(event);
+    await handler(event);
+    const job = await saved();
+    expect(job).toMatchObject({ status: "paused", error: "GPU candidates failed independent CPU verification." });
+    expect(job.parallelSlots).toMatchObject([{ runpodId: "c0", metered: true }]);
+    expect(job.usage).toEqual({ chunks: 1, failed: 0, runMs: 60_000, queueMs: 10_000, unmeasured: 0 });
+  });
+
+  it("leaves running chunks unmetered and counts a chunk without usable times as unmeasured", async () => {
+    await seed({ status: "searching", parallelSlots: [slot(0), slot(1)] });
+    states.c0 = output("pinning", 0); // finished, but no Batch times
+    await handler(event);
+    const job = await saved();
+    expect(job.usage).toEqual({ chunks: 1, failed: 0, runMs: 0, queueMs: 0, unmeasured: 1 });
+    expect(job.parallelSlots!.find((s) => s.runpodId === "c1")!.metered).toBeUndefined();
+  });
+
+  it("covers every withdrawal while the search runs in parallel", async () => {
+    // Metering lives on the parallel path. With one worker the single-GPU path would run
+    // instead, unmetered: extend metering to it before setting workersMax to 1.
+    const { gpuSpendLimits } = await vi.importActual<typeof import("../server/gpu-spend")>("../server/gpu-spend");
+    expect(gpuSpendLimits.workersMax).toBeGreaterThan(1);
+  });
+});

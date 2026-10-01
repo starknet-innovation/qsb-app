@@ -31,7 +31,20 @@ export type ComputeStatus = {
     | "TIMED_OUT";
   executionTime?: number;
   output?: unknown;
+  /** A finished chunk's AWS Batch times, in epoch milliseconds, for metering (server/gpu-usage.ts). */
+  timing?: ChunkTiming;
 };
+export type ChunkTiming = { createdAt?: number; startedAt?: number; stoppedAt?: number };
+/** The times AWS Batch recorded for a job; anything not a usable timestamp is left out. */
+function batchTiming(job: { createdAt?: number; startedAt?: number; stoppedAt?: number }): ChunkTiming {
+  const time = (value: unknown) =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  return Object.fromEntries(
+    (["createdAt", "startedAt", "stoppedAt"] as const)
+      .map((key) => [key, time(job[key])])
+      .filter(([, value]) => value !== undefined),
+  );
+}
 export type PreparedRun = (() => Promise<{ id: string }>) & {
   identity: BatchSubmissionIdentity;
 };
@@ -347,9 +360,10 @@ export class AwsBatch implements ComputeProvider {
         status: "COMPLETED",
         executionTime: output.executionTime,
         output: output.output,
+        timing: batchTiming(j),
       };
     }
-    if (j.status === "FAILED") return { id, status: "FAILED" };
+    if (j.status === "FAILED") return { id, status: "FAILED", timing: batchTiming(j) };
     if (j.status === "RUNNING") return { id, status: "IN_PROGRESS" };
     if (
       !["SUBMITTED", "PENDING", "RUNNABLE", "STARTING"].includes(j.status || "")

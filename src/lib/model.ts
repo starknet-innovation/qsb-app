@@ -15,6 +15,25 @@ export type SearchSlot = {
   runpodId?: string;
   /** Stamped from an explicit resume: if this chunk is found stopped, repeat it once. */
   retryOnStop?: true;
+  /** Its Batch time is already in the job's `usage` (server/gpu-usage.ts). */
+  metered?: true;
+};
+/**
+ * The AWS Batch time a withdrawal's GPU chunks took, read from each finished chunk's Batch
+ * record (server/gpu-usage.ts). Measured, unlike `gpuBudgetReservedSeconds`, which is what was
+ * reserved, and `computeSeconds`, which is what the solver reports for completed chunks.
+ */
+export type JobUsage = {
+  /** Chunks seen finished, whatever the outcome. */
+  chunks: number;
+  /** Of those, chunks that failed, timed out or were cancelled. */
+  failed: number;
+  /** Total time the chunks' containers ran: Batch `stoppedAt` minus `startedAt`. */
+  runMs: number;
+  /** Total time from submission to the container starting: queueing, instance start, image pull. */
+  queueMs: number;
+  /** Chunks that finished without running, or whose Batch record had no usable times. */
+  unmeasured: number;
 };
 import type { SolverPin } from "./provenance";
 import { NETWORK_ID } from "./network";
@@ -186,6 +205,7 @@ export type Job = {
   };
   error?: string;
   computeSeconds: number;
+  usage?: JobUsage;
   solution?: {
     sequence: number;
     locktime: number;
