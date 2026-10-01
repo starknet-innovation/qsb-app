@@ -11,6 +11,7 @@ import {
   CheckCheck,
   ChevronDown,
   ChevronRight,
+  Copy,
   Download,
   ExternalLink,
   FileKey2,
