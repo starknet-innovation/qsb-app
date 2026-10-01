@@ -42,7 +42,7 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
             if args[1:3] == ['rev-parse', 'HEAD']: return COMMIT + '\n'
             if args[1] == 'branch': return 'ops/test\n'
             if args[1] == 'ls-remote': return COMMIT + '\trefs/heads/ops/test\n'
-            self.fail(f'Unexpected command {args}')
+            raise AssertionError(f'Unexpected command {args}')
 
         def aws(command, **kwargs):
             nonlocal last

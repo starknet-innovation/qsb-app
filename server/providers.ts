@@ -56,11 +56,6 @@ async function minerSecret(): Promise<MinerSecret | undefined> {
     );
   }
 }
-async function json(url: string, init?: RequestInit) {
-  const r = await fetch(url, { ...init, signal: AbortSignal.timeout(20000) });
-  if (!r.ok) throw new Error(`Provider request failed (${r.status})`);
-  return r.json();
-}
 const minerTxid = z.string().regex(/^[a-f0-9]{64}$/i);
 export const slipstreamStatusSchema = z.object({
   transaction: z.object({

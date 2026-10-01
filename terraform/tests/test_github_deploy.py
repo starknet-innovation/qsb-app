@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import github_deploy as gd  # noqa: E402
@@ -77,7 +77,7 @@ class Redaction(unittest.TestCase):
                 del os.environ['QSB_REDACT_FILE']
         masked = {l.removeprefix('::add-mask::') for l in lines}
         self.assertTrue(all(l.startswith('::add-mask::') for l in lines))
-        self.assertTrue({ACCOUNT, ROLE, QUEUE, f'qsb-gpu-{ACCOUNT}-eu-west-2-jobs', '/qsb/runtime/'} <= masked)
+        self.assertLessEqual({ACCOUNT, ROLE, QUEUE, f'qsb-gpu-{ACCOUNT}-eu-west-2-jobs', '/qsb/runtime/'}, masked)
         self.assertFalse({'qsb-app', 'eu-west-2', 'mainnet'} & masked)
         self.assertEqual(set(recorded), masked)
 
@@ -91,7 +91,7 @@ class Retries(unittest.TestCase):
             item = responses.pop(0)
             if isinstance(item, Exception):
                 raise item
-            return mock.MagicMock(__enter__=lambda s: mock.MagicMock(read=lambda: item), __exit__=lambda *a: None)
+            return MagicMock(__enter__=lambda s: MagicMock(read=lambda: item), __exit__=lambda *a: None)
         return urlopen
 
     def http(self, code, body=b''):
@@ -100,19 +100,19 @@ class Retries(unittest.TestCase):
     def test_sts_transient_400s_timeouts_and_5xx_are_retried(self):
         opener = self.fail_then(self.http(400, b'<Code>IDPCommunicationError</Code>'), TimeoutError(),
                                 self.http(503), b'ok')
-        with mock.patch.object(gd.urllib.request, 'urlopen', opener), mock.patch.object(gd.time, 'sleep'):
+        with patch.object(gd.urllib.request, 'urlopen', opener), patch.object(gd.time, 'sleep'):
             self.assertEqual(gd.request(object(), gd.time.monotonic() + 50), b'ok')
 
     def test_a_real_refusal_is_not_retried_and_keeps_its_body(self):
         opener = self.fail_then(self.http(403, b'<Code>AccessDenied</Code>'), b'never')
-        with mock.patch.object(gd.urllib.request, 'urlopen', opener), mock.patch.object(gd.time, 'sleep'):
+        with patch.object(gd.urllib.request, 'urlopen', opener), patch.object(gd.time, 'sleep'):
             with self.assertRaises(gd.urllib.error.HTTPError) as caught:
                 gd.request(object(), gd.time.monotonic() + 50)
         self.assertEqual(caught.exception.read(), b'<Code>AccessDenied</Code>')
 
     def test_retries_stop_at_the_deadline(self):
         opener = self.fail_then(*[TimeoutError()] * 50)
-        with mock.patch.object(gd.urllib.request, 'urlopen', opener), mock.patch.object(gd.time, 'sleep'):
+        with patch.object(gd.urllib.request, 'urlopen', opener), patch.object(gd.time, 'sleep'):
             with self.assertRaises(TimeoutError):
                 gd.request(object(), gd.time.monotonic() + 3)
 
@@ -174,9 +174,9 @@ class CredentialProcess(unittest.TestCase):
         env = {'QSB_ROLE_ARN': ROLE, 'QSB_ACCOUNT_ID': account, 'QSB_SESSION': 'qsb-plan-1', 'AWS_REGION': 'eu-west-2',
                'ACTIONS_ID_TOKEN_REQUEST_URL': 'https://token.example/?api-version=2.0',
                'ACTIONS_ID_TOKEN_REQUEST_TOKEN': 'request-token'}
-        with mock.patch.dict(os.environ, env), mock.patch.object(gd, 'request', fake_request), \
-                mock.patch('sys.stdout', new_callable=io.StringIO) as out, \
-                mock.patch('sys.stderr', new_callable=io.StringIO) as err:
+        with patch.dict(os.environ, env), patch.object(gd, 'request', fake_request), \
+                patch('sys.stdout', new_callable=io.StringIO) as out, \
+                patch('sys.stderr', new_callable=io.StringIO) as err:
             code = gd.credential_process()
         return code, out.getvalue(), err.getvalue(), calls
 
@@ -195,7 +195,7 @@ class CredentialProcess(unittest.TestCase):
     def test_failures_reach_the_private_log_because_terraform_drops_stderr(self):
         with tempfile.TemporaryDirectory() as d:
             log = Path(d, 'credentials.log')
-            with mock.patch.dict(os.environ, {'QSB_CREDENTIAL_LOG': str(log)}):
+            with patch.dict(os.environ, {'QSB_CREDENTIAL_LOG': str(log)}):
                 code, out, err, _ = self.assume(account='210987654321')
             self.assertEqual((code, out), (1, ''))
             self.assertIn('The role is not in the account QSB_AWS_ACCOUNT_ID names.', log.read_text())

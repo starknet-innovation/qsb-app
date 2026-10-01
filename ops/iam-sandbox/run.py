@@ -185,7 +185,9 @@ def main(a):
         seen = rows('OWNER#', 'SYSTEM#')
         check('denied batch wrote neither row', not any(seen.values()), seen)
         report['completed'] = True
-    except BaseException as e:  # held so cleanup, the evidence and the ABORTED message below still happen
+    # A failed step raises SystemExit and an interrupt raises KeyboardInterrupt: both are held, like any other
+    # exception, so cleanup, the evidence and the ABORTED message below still happen.
+    except (Exception, SystemExit, KeyboardInterrupt) as e:
         cause = e
         # Printed now, so the cause survives even if cleanup or the evidence write then fails.
         print(f'aborting: {str(cause) or type(cause).__name__}; cleaning up', flush=True)

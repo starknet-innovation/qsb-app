@@ -2,7 +2,6 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { hex } from "@scure/base";
 import { z } from "zod";
 import { canonicalManifest, withdrawalSchema, type Job } from "../lib/model";
-import { NETWORK_ID } from "../lib/network";
 
 const subset = z
   .array(z.number().int().min(0).max(149))
