@@ -35,6 +35,17 @@ export type ComputeStatus = {
   timing?: ChunkTiming;
 };
 export type ChunkTiming = { createdAt?: number; startedAt?: number; stoppedAt?: number };
+/**
+ * A job AWS Batch reports as succeeded whose output couldn't be read or checked. It keeps the
+ * original error's message and name, and carries the finished status with its Batch times, so
+ * the chunk's GPU time can still be metered before the error stops the tick.
+ */
+export class UnreadableOutput extends Error {
+  constructor(readonly finished: ComputeStatus, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    if (cause instanceof Error) this.name = cause.name;
+  }
+}
 /** The times AWS Batch recorded for a job; anything not a usable timestamp is left out. */
 function batchTiming(job: { createdAt?: number; startedAt?: number; stoppedAt?: number }): ChunkTiming {
   const time = (value: unknown) =>
@@ -326,42 +337,12 @@ export class AwsBatch implements ComputeProvider {
     )
       throw new Error("ProviderRequestIdentityMismatch");
     if (j.status === "SUCCEEDED") {
-      const r = await this.s3.send(
-        new GetObjectCommand({
-          Bucket: this.bucket,
-          Key: `outputs/${id}.json`,
-        }),
-        { abortSignal: AbortSignal.timeout(20000) },
-      );
-      if (!r.Body) throw new Error("ComputeOutputMissing");
-      if (r.ContentLength === undefined || r.ContentLength > 600000) {
-        (r.Body as any).destroy?.();
-        throw new Error("ComputeOutputTooLarge");
+      const finished = { id, status: "COMPLETED" as const, timing: batchTiming(j) };
+      try {
+        return { ...finished, ...(await this.output(id, j)) };
+      } catch (error) {
+        throw new UnreadableOutput(finished, error);
       }
-      const raw = await r.Body.transformToString();
-      if (Buffer.byteLength(raw) > 600000)
-        throw new Error("ComputeOutputTooLarge");
-      const output = z
-        .object({
-          jobId: z.literal(id),
-          inputSha256: z.string(),
-          executionTime: z.number().nonnegative(),
-          output: z.unknown(),
-        })
-        .strict()
-        .parse(JSON.parse(raw));
-      const digest = j.container?.environment?.find(
-        (e) => e.name === "QSB_INPUT_SHA256",
-      )?.value;
-      if (!digest || output.inputSha256 !== digest)
-        throw new Error("ComputeOutputIdentityMismatch");
-      return {
-        id,
-        status: "COMPLETED",
-        executionTime: output.executionTime,
-        output: output.output,
-        timing: batchTiming(j),
-      };
     }
     if (j.status === "FAILED") return { id, status: "FAILED", timing: batchTiming(j) };
     if (j.status === "RUNNING") return { id, status: "IN_PROGRESS" };
@@ -370,6 +351,39 @@ export class AwsBatch implements ComputeProvider {
     )
       throw new Error("ProviderStatusInvalid");
     return { id, status: "IN_QUEUE" };
+  }
+  /** A succeeded job's output, bound to its job ID and input. */
+  private async output(id: string, j: Awaited<ReturnType<AwsBatch["describe"]>>) {
+    const r = await this.s3.send(
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: `outputs/${id}.json`,
+      }),
+      { abortSignal: AbortSignal.timeout(20000) },
+    );
+    if (!r.Body) throw new Error("ComputeOutputMissing");
+    if (r.ContentLength === undefined || r.ContentLength > 600000) {
+      (r.Body as any).destroy?.();
+      throw new Error("ComputeOutputTooLarge");
+    }
+    const raw = await r.Body.transformToString();
+    if (Buffer.byteLength(raw) > 600000)
+      throw new Error("ComputeOutputTooLarge");
+    const output = z
+      .object({
+        jobId: z.literal(id),
+        inputSha256: z.string(),
+        executionTime: z.number().nonnegative(),
+        output: z.unknown(),
+      })
+      .strict()
+      .parse(JSON.parse(raw));
+    const digest = j.container?.environment?.find(
+      (e) => e.name === "QSB_INPUT_SHA256",
+    )?.value;
+    if (!digest || output.inputSha256 !== digest)
+      throw new Error("ComputeOutputIdentityMismatch");
+    return { executionTime: output.executionTime, output: output.output };
   }
   async cancel(id: string) {
     const j = await this.describe(id);

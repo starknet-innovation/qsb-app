@@ -28,6 +28,10 @@ describe("meterChunk", () => {
       chunks: 1, failed: 1, runMs: 0, queueMs: 0, unmeasured: 1,
     });
     expect(meter("COMPLETED").usage).toMatchObject({ chunks: 1, unmeasured: 1 });
+    // A completed chunk ran, so a missing start time leaves both intervals unknown.
+    expect(meter("COMPLETED", { createdAt: 0, stoppedAt: 70 }).usage).toEqual({
+      chunks: 1, failed: 0, runMs: 0, queueMs: 0, unmeasured: 1,
+    });
   });
 
   it("measures a chunk that never started as queued until it stopped, with no run time", () => {

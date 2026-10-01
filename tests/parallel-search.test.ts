@@ -70,6 +70,7 @@ import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job, type SearchSlot } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
+import { UnreadableOutput } from "../server/aws-batch";
 import { EVENT_SETTLE_MS, listOwnerEvents } from "../server/owner-events";
 import { registerWebhook } from "../server/webhooks";
 import { GPU_SECONDS_SK, OWNER_GPU_BUDGET_REACHED } from "../server/owner-limits";
@@ -642,6 +643,37 @@ describe("GPU usage metering", () => {
     // Nothing else from the tick was saved: the chunk is neither credited nor dropped.
     expect(job).toMatchObject({ attempt: 0, computeSeconds: 0, status: "searching" });
     expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it("saves a finished chunk's time before a later status call fails", async () => {
+    await seed({ status: "searching", parallelSlots: [slot(0), slot(1)] });
+    states.c0 = timed({ status: "FAILED" }, 0, 1_000, 31_000);
+    mocks.status.mockImplementation(async (id: string) => {
+      if (id === "c1") throw Error("ThrottlingException");
+      return states[id] ?? { id, status: "IN_PROGRESS" };
+    });
+    await expect(handler(event)).rejects.toThrow("ThrottlingException");
+    const job = await saved();
+    expect(job.usage).toEqual({ chunks: 1, failed: 1, runMs: 30_000, queueMs: 1_000, unmeasured: 0 });
+    expect(job.parallelSlots!.map((s) => [s.runpodId, s.metered])).toEqual([["c0", true], ["c1", undefined]]);
+  });
+
+  it("meters a succeeded chunk whose output can't be read, then stops for the operator", async () => {
+    await seed({ status: "searching", parallelSlots: [slot(0)] });
+    mocks.status.mockImplementation(async (id: string) => {
+      throw new UnreadableOutput(
+        { id, status: "COMPLETED", timing: { createdAt: 0, startedAt: 2_000, stoppedAt: 42_000 } },
+        Error("ComputeOutputIdentityMismatch"),
+      );
+    });
+    await expect(handler(event)).rejects.toThrow("ComputeOutputIdentityMismatch");
+    let job = await saved();
+    expect(job.usage).toEqual({ chunks: 1, failed: 0, runMs: 40_000, queueMs: 2_000, unmeasured: 0 });
+    expect(job.parallelSlots).toMatchObject([{ runpodId: "c0", metered: true }]);
+    // Seen again by a later poll, it isn't counted twice.
+    await expect(handler(event)).rejects.toThrow("ComputeOutputIdentityMismatch");
+    job = await saved();
+    expect(job.usage!.chunks).toBe(1);
   });
 
   it("covers every withdrawal while the search runs in parallel", async () => {

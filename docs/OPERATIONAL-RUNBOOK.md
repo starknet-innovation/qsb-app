@@ -43,12 +43,12 @@ Before a paid claim, a preparation failure pauses with "Solver contract, compute
 
 Each job's `usage` records the AWS Batch time its GPU chunks took ([`server/gpu-usage.ts`](../server/gpu-usage.ts)). Each time a chunk is seen finished, its Batch record's times are added once:
 
-- `runMs`, the total of `stoppedAt` − `startedAt`: the time the containers ran on a GPU. A chunk that never started ran for none.
+- `runMs`, the total of `stoppedAt` − `startedAt`: the time the containers ran on a GPU. A failed or cancelled chunk with no start time never started and ran for none. A completed chunk did run, so a missing start time leaves its time unmeasured.
 - `queueMs`, the total of `startedAt` − `createdAt`, or `stoppedAt` − `createdAt` for a chunk that never started: waiting for a GPU, starting the instance and pulling the image.
 
 `chunks` and `failed` count the chunks by outcome. `unmeasured` counts chunks with a missing or out-of-order time for either interval; whatever times they do have still count. A chunk kept on the job, for resume or for an operator's CPU-check review, is marked so it's counted once.
 
-Each tick reads every chunk's status and saves the newly finished chunks' time before it checks any output. So a tick that then stops for an operator, for example on a context or range mismatch, still records the chunk.
+Each tick saves a chunk's time as soon as it sees the chunk finished, before reading the next chunk's status or checking any output. So a tick that then stops for an operator still records it, whether it stops on a failed status call, a context or range mismatch, or a succeeded chunk whose output can't be read or checked.
 
 A chunk is metered only once a tick sees it finished. These are seen:
 - chunks the owner's pause or the end of the withdrawal stops: that tick keeps polling until none is active;

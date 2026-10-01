@@ -29,7 +29,7 @@ import {
 } from "./hit-capacity";
 import { candidateOutput, applyVerifiedHit } from "./candidate-output";
 import { meterChunk } from "./gpu-usage";
-import type { ComputeStatus } from "./aws-batch";
+import { UnreadableOutput, type ComputeStatus } from "./aws-batch";
 import type { Row, Store } from "./store";
 
 type Event = { owner: string; jobId: string; revision: number; polls?: number };
@@ -162,18 +162,26 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     await persist();
   }
   const provider = await configuredCompute();
-  // Read each chunk's status, and save the Batch time of chunks newly seen finished before
-  // acting on any result, so a check that then stops the tick for an operator can't lose it.
+  // Read each chunk's status. Save each chunk newly seen finished before the next call, and all
+  // of them before acting on any result, so a later failure that stops the tick for an
+  // operator can't lose a chunk's GPU time: not a later status call, not a rejected output.
   const poll = async (withoutId: "skip" | "read") => {
     const results = new Map<SearchSlot, ComputeStatus>();
-    let metered = false;
     for (const slot of slots) {
       if (!slot.runpodId && withoutId === "skip") continue;
-      const r = await provider.status(slot.runpodId!, slot.batchSubmission);
+      let r: ComputeStatus;
+      try {
+        r = await provider.status(slot.runpodId!, slot.batchSubmission);
+      } catch (error) {
+        // Finished, but its output can't be read or checked: it still used the GPU.
+        if (error instanceof UnreadableOutput && meterChunk(job, slot, error.finished))
+          // The original error is what the operator needs; a failed save is metered next poll.
+          await persist().catch(() => {});
+        throw error;
+      }
       results.set(slot, r);
-      if (meterChunk(job, slot, r)) metered = true;
+      if (meterChunk(job, slot, r)) await persist();
     }
-    if (metered) await persist();
     return results;
   };
 
