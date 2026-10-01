@@ -127,6 +127,8 @@ it.each([
   { schemaVersion: 2 },
   { solverCommit: "main" },
   { image: "ghcr.io/starknet-innovation/qsb-solver:latest" },
+  { image: "123456789012.dkr.ecr.eu-west-2.amazonaws.com/qsb-solver@sha256:" + "c".repeat(64) },
+  { image: "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@sha256:" + "c".repeat(64) },
   { solverRepository: "https://example.com/solver" },
   { sourceHashes: {} },
   { protocol: "other" },

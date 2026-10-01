@@ -21,11 +21,11 @@ export const externalSolverDescriptorSchema = z
     solverCommit: z.string().regex(/^[a-f0-9]{40}$/),
     // Wire identity is separate from the external repository's release commit.
     kernelCommit: z.string().regex(/^[a-f0-9]{40}$/),
+    // The attested image qsb-solver published. A stack's ECR copy of it is a deployment
+    // detail, checked against the queue's own account and region (server/aws-batch.ts).
     image: z
       .string()
-      .regex(
-        /^(?:ghcr\.io\/starknet-innovation\/qsb-solver|\d{12}\.dkr\.ecr\.eu-west-1\.amazonaws\.com\/qsb-solver)@sha256:[a-f0-9]{64}$/,
-      ),
+      .regex(/^ghcr\.io\/starknet-innovation\/qsb-solver@sha256:[a-f0-9]{64}$/),
   })
   .strict();
 export type SolverDescriptor =
