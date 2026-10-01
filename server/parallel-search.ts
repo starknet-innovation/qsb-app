@@ -184,8 +184,16 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       return r;
     } catch (error) {
       // Finished, but its output can't be read or checked: it still used the GPU. The original
-      // error is what the operator needs; a failed save is metered on the next poll.
-      if (error instanceof UnreadableOutput) await meter(slot, error.finished).catch(() => {});
+      // error is what stops the tick for the operator, so a failed save is logged, not thrown.
+      // The store client has already retried throttling and transient errors, and a conflict
+      // means another write won: the slot stays on the job without `metered` until it's polled
+      // again, on resume.
+      if (error instanceof UnreadableOutput)
+        await meter(slot, error.finished).catch((failure) =>
+          console.error(
+            JSON.stringify({ gpuUsage: "record_failed", error: (failure as Error)?.name ?? "Error" }),
+          ),
+        );
       throw error;
     }
   };

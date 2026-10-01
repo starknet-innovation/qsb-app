@@ -67,7 +67,7 @@ vi.mock("@aws-sdk/client-lambda", () => ({
 import { fixtureVault } from "./solver-fixture";
 import { pinSolver } from "../src/lib/provenance";
 import { handler } from "../server/coordinator";
-import { store, MemoryStore } from "../server/store";
+import { store, MemoryStore, Conflict } from "../server/store";
 import { release, type Job, type SearchSlot } from "../src/lib/model";
 import { workRange } from "../server/search-ranges";
 import { UnreadableOutput } from "../server/aws-batch";
@@ -690,6 +690,25 @@ describe("GPU usage metering", () => {
     const job = await saved();
     expect(job.usage).toEqual({ chunks: 2, failed: 1, runMs: 10_000, queueMs: 3_000, unmeasured: 0 });
     expect(job.parallelSlots!.map((s) => [s.runpodId, s.metered])).toEqual([["c0", undefined], ["c1", true], ["c2", true]]);
+  });
+
+  it("logs a failed metering save for an unreadable output and keeps the operator's error", async () => {
+    await seed({ status: "searching", parallelSlots: [slot(0)] });
+    mocks.status.mockImplementation(async (id: string) => {
+      throw new UnreadableOutput({ id, status: "COMPLETED", timing: { createdAt: 0, startedAt: 1, stoppedAt: 2 } }, Error("ComputeOutputMissing"));
+    });
+    const put = vi.spyOn(store, "put").mockRejectedValueOnce(new Conflict("Concurrent update"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(handler(event)).rejects.toThrow("ComputeOutputMissing");
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls.map(([line]) => String(line))).toContain(
+      JSON.stringify({ gpuUsage: "record_failed", error: "Error" }),
+    );
+    // Nothing was saved: the chunk stays on the job, visibly unmetered, for a later poll.
+    const job = await saved();
+    expect(job.usage).toBeUndefined();
+    expect(job.parallelSlots).toMatchObject([{ runpodId: "c0" }]);
+    expect(job.parallelSlots![0].metered).toBeUndefined();
   });
 
   it("covers every withdrawal while the search runs in parallel", async () => {
