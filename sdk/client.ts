@@ -3,7 +3,7 @@ import * as btc from "@scure/btc-signer";
 import { base64, hex } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { z } from "zod";
-import { ApiRequestError, createSessionClient } from "../src/lib/session";
+import { ApiRequestError, CREDENTIAL_HEADER, createSessionClient } from "../src/lib/session";
 import { NETWORK_ID } from "../src/lib/network";
 import { operationsAllowed } from "../src/lib/readiness";
 import { assertVaultConfiguration, withVaultConfiguration } from "../src/lib/provenance";
@@ -260,7 +260,7 @@ function transport(options: Pick<QsbClientOptions, "baseUrl" | "basePath" | "fet
   return createSessionClient(((path: string, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
     // A wallet session, once signed in, takes precedence; otherwise the key authenticates.
-    if (apiKey && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${apiKey}`);
+    if (apiKey && !headers.has(CREDENTIAL_HEADER)) headers.set(CREDENTIAL_HEADER, `Bearer ${apiKey}`);
     return send(`${origin}${path}`, {
       ...init,
       headers,

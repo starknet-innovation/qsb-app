@@ -30,6 +30,7 @@ import {
   type Job,
 } from "../src/lib/model";
 import { NETWORK_ID } from "../src/lib/network";
+import { CREDENTIAL_HEADER } from "../src/lib/session";
 import { coordinatorSolvedResultSchema } from "../src/mainnet/coordinatorResult";
 import { slipstreamRatesSchema } from "./providers";
 import {
@@ -1609,8 +1610,9 @@ export function openApiDocument() {
       schemas: componentSchemas(),
       securitySchemes: {
         session: {
-          type: "http",
-          scheme: "bearer",
+          type: "apiKey",
+          in: "header",
+          name: CREDENTIAL_HEADER,
           description: [
             "A session token from BIP-322 sign-in:",
             "",
@@ -1618,14 +1620,15 @@ export function openApiDocument() {
             "2. Sign `message` with the address's key, as a BIP-322 signature.",
             `3. \`POST ${pathOf("verifyChallenge")}\` with the \`id\` and the \`signature\`. The response has the \`token\`.`,
             "",
-            `Send \`Authorization: Bearer <token>\`. A session lasts ${duration(SESSION_SECONDS)} and is bound to the signing address and this deployment's network. After that, requests return \`session_expired\`; sign in again.`,
+            `Send \`${CREDENTIAL_HEADER}: Bearer <token>\`. \`Authorization: Bearer <token>\` is accepted too, but behind CloudFront origin access control that header carries CloudFront's signature, so use \`${CREDENTIAL_HEADER}\`. A session lasts ${duration(SESSION_SECONDS)} and is bound to the signing address and this deployment's network. After that, requests return \`session_expired\`; sign in again.`,
           ].join("\n"),
         },
         apiKey: {
-          type: "http",
-          scheme: "bearer",
+          type: "apiKey",
+          in: "header",
+          name: CREDENTIAL_HEADER,
           description: [
-            `An API key minted with a session (\`POST ${pathOf("createApiKey")}\`). It acts for the same owner. Send \`Authorization: Bearer qsb_mainnet_<43 base64url characters>\`.`,
+            `An API key minted with a session (\`POST ${pathOf("createApiKey")}\`). It acts for the same owner. Send \`${CREDENTIAL_HEADER}: Bearer qsb_mainnet_<43 base64url characters>\`, or \`Authorization: Bearer …\` where the API isn't behind CloudFront origin access control.`,
             "",
             "An operation that accepts a key lists the one scope the key needs (`ApiKeyScope`). The key-management routes take a session only.",
             "",

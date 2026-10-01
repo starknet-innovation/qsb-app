@@ -30,6 +30,7 @@ import {
 } from "./api-schemas";
 import { assertVaultConfiguration, pinSolver } from "../src/lib/provenance";
 import { Hono } from "hono";
+import { BODY_HASH_HEADER, CREDENTIAL_HEADER } from "../src/lib/session";
 import { getPath } from "hono/utils/url";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
@@ -104,6 +105,17 @@ import { httpsTransport, systemResolver } from "./webhook-transport";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
+/**
+ * The caller's `Bearer <credential>`: the X-Qsb-Authorization header, else an `Authorization`
+ * bearer. Behind CloudFront origin access control, `Authorization` holds CloudFront's own
+ * signature, so only a bearer is ever read from it.
+ */
+function credential(c: { req: { header(name: string): string | undefined } }): string {
+  const own = c.req.header(CREDENTIAL_HEADER);
+  if (own !== undefined) return own;
+  const authorization = c.req.header("Authorization") ?? "";
+  return authorization.startsWith("Bearer ") ? authorization : "";
+}
 // Persisted legacy rows remain unsupported until inventoried and reconciled.
 function supervisedServiceJob(job: unknown): boolean {
   if (!job || typeof job !== "object") return false;
@@ -223,7 +235,7 @@ export function createApp(
     "*",
     cors({
       origin,
-      allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
+      allowHeaders: ["Content-Type", CREDENTIAL_HEADER, BODY_HASH_HEADER, "Authorization", "Idempotency-Key"],
       allowMethods: ["GET", "POST", "OPTIONS"],
     }),
   );
@@ -348,7 +360,7 @@ export function createApp(
       maxBtc: null,
       withdrawalDeadline: null,
       computeBudget: null,
-      ownerLimits: await ownerLimitsConfig(c.req.header("Authorization")),
+      ownerLimits: await ownerLimitsConfig(credential(c)),
     });
   });
   app.get("/api/rates", async (c) => {
@@ -442,7 +454,7 @@ export function createApp(
   for (const route of idempotentPosts)
     app.post(`/api${route}`, idempotency(store, route));
   async function auth(c: any, next: () => Promise<void>) {
-    const bearer = c.req.header("Authorization") || "";
+    const bearer = credential(c);
     const apiKey = bearerApiKey(bearer);
     if (apiKey)
       return (await authorizeApiKey(c, store, apiKey, apiKeys)) ?? next();

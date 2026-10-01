@@ -664,7 +664,7 @@ describe("per-owner limits (#89)", () => {
 });
 
 describe("API keys (#87)", () => {
-  it("authenticates the CLI with an API key that appears only in the Authorization header", async () => {
+  it("authenticates the CLI with an API key that appears only in the X-Qsb-Authorization header", async () => {
     const w = world({ apiKeys: true });
     const owner = wallet(w.chain);
     const session = new QsbClient({ baseUrl: API, signer: loopbackTestSigner(owner.wif, API), fetch: w.fetch, qsb: localQsb().qsb });
@@ -691,8 +691,8 @@ describe("API keys (#87)", () => {
     // No wallet sign-in, and the key only ever as the bearer credential.
     expect(keyed.some((r) => r.url.includes("/auth/"))).toBe(false);
     for (const request of w.requests) {
-      const { authorization, ...others } = request.headers;
-      if (keyed.includes(request)) expect(authorization).toBe(`Bearer ${minted.key}`);
+      const { "x-qsb-authorization": credential, ...others } = request.headers;
+      if (keyed.includes(request)) expect(credential).toBe(`Bearer ${minted.key}`);
       const elsewhere = `${request.url}\n${decodeURIComponent(request.url)}\n${JSON.stringify(others)}\n${request.body}`;
       expect(elsewhere.includes(minted.key)).toBe(false);
     }
