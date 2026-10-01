@@ -676,6 +676,22 @@ describe("GPU usage metering", () => {
     expect(job.usage!.chunks).toBe(1);
   });
 
+  it("still cancels each running chunk as it's polled when a later status call fails", async () => {
+    await seed({ status: "paused", parallelSlots: [slot(0), slot(1), slot(2)] });
+    states.c1 = timed({ status: "FAILED" }, 0, 1_000, 9_000);
+    mocks.status.mockImplementation(async (id: string) => {
+      if (id === "c2")
+        throw new UnreadableOutput({ id, status: "COMPLETED", timing: { createdAt: 0, startedAt: 2_000, stoppedAt: 4_000 } }, Error("ComputeOutputMissing"));
+      return states[id] ?? { id, status: "IN_PROGRESS" };
+    });
+    await expect(handler(event)).rejects.toThrow("ComputeOutputMissing");
+    // The running chunk polled before the failure was stopped, as before metering.
+    expect(mocks.cancel.mock.calls.map((c) => c[0])).toEqual(["c0"]);
+    const job = await saved();
+    expect(job.usage).toEqual({ chunks: 2, failed: 1, runMs: 10_000, queueMs: 3_000, unmeasured: 0 });
+    expect(job.parallelSlots!.map((s) => [s.runpodId, s.metered])).toEqual([["c0", undefined], ["c1", true], ["c2", true]]);
+  });
+
   it("covers every withdrawal while the search runs in parallel", async () => {
     // Metering lives on the parallel path. With one worker the single-GPU path would run
     // instead, unmetered: extend metering to it before setting workersMax to 1.

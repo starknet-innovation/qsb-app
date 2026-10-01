@@ -99,9 +99,12 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   const job = row.job as Job;
   const pk = `OWNER#${event.owner}`;
   let version = row.version;
+  // The job as last saved: metering saves from it (see `meter` below).
+  let saved = structuredClone(job);
   const persist = async () => {
     await store.put({ ...row, version: version + 1, job }, version);
     version += 1;
+    saved = structuredClone(job);
   };
   const next = (done: boolean, waitSeconds = 5) => ({
     ...event,
@@ -162,27 +165,29 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     await persist();
   }
   const provider = await configuredCompute();
-  // Read each chunk's status. Save each chunk newly seen finished before the next call, and all
-  // of them before acting on any result, so a later failure that stops the tick for an
-  // operator can't lose a chunk's GPU time: not a later status call, not a rejected output.
-  const poll = async (withoutId: "skip" | "read") => {
-    const results = new Map<SearchSlot, ComputeStatus>();
-    for (const slot of slots) {
-      if (!slot.runpodId && withoutId === "skip") continue;
-      let r: ComputeStatus;
-      try {
-        r = await provider.status(slot.runpodId!, slot.batchSubmission);
-      } catch (error) {
-        // Finished, but its output can't be read or checked: it still used the GPU.
-        if (error instanceof UnreadableOutput && meterChunk(job, slot, error.finished))
-          // The original error is what the operator needs; a failed save is metered next poll.
-          await persist().catch(() => {});
-        throw error;
-      }
-      results.set(slot, r);
-      if (meterChunk(job, slot, r)) await persist();
+  // A chunk newly seen finished is metered on the job and on its last-saved copy, and that copy
+  // is saved at once. So a failure later in the tick (a status call, a rejected or unreadable
+  // output, a timeout) can't lose its GPU time, and none of the tick's unfinished changes, such
+  // as a dropped slot whose range isn't recorded as done yet, are saved with it.
+  const meter = async (slot: SearchSlot, r: ComputeStatus) => {
+    if (!meterChunk(job, slot, r)) return;
+    const copy = saved.parallelSlots?.find((s) => s.runpodId === slot.runpodId);
+    if (!copy || !meterChunk(saved, copy, r)) return;
+    await store.put({ ...row, version: version + 1, job: saved }, version);
+    version += 1;
+  };
+  // One chunk's status, metered before the caller acts on it.
+  const observe = async (slot: SearchSlot) => {
+    try {
+      const r = await provider.status(slot.runpodId!, slot.batchSubmission);
+      await meter(slot, r);
+      return r;
+    } catch (error) {
+      // Finished, but its output can't be read or checked: it still used the GPU. The original
+      // error is what the operator needs; a failed save is metered on the next poll.
+      if (error instanceof UnreadableOutput) await meter(slot, error.finished).catch(() => {});
+      throw error;
     }
-    return results;
   };
 
   // Paused: stop running chunks and keep every provider ID for resume. Finished: stop
@@ -190,10 +195,9 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   if (job.status === "paused" || terminal) {
     let running = false,
       changed = false;
-    const results = await poll("skip");
     for (const slot of [...slots]) {
-      const r = results.get(slot);
-      if (!r || !slot.runpodId) continue;
+      if (!slot.runpodId) continue;
+      const r = await observe(slot);
       if (ACTIVE.includes(r.status)) {
         // A cancellation acknowledgement is not terminal: keep polling the ID.
         await provider.cancel(slot.runpodId);
@@ -238,7 +242,6 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       : {}),
   });
 
-  const results = await poll("read");
   // An explicit resume allows each chunk it found in flight to be repeated once if it turns
   // out to have stopped, however many ticks that takes. Chunks sent later never inherit it.
   if (job.retryRequested) {
@@ -251,7 +254,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   let review: { stage: string; error: string } | undefined;
   const completed = new Set(job.completedAttempts ?? []);
   for (const slot of [...slots]) {
-    const r = results.get(slot)!;
+    const r = await observe(slot);
     const current = slot.stage === job.stage && job.status !== "failed";
     if (!current) {
       // Superseded by a verified hit or a failed job: stop it, never credit it.
@@ -452,6 +455,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
         break;
       }
       version += 1;
+      saved = structuredClone(job);
       assigned.add(attempt);
       const result = await submit();
       slot.runpodId = result.id;
