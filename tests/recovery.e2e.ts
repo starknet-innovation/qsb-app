@@ -89,7 +89,7 @@ test("cold recovery restores an encrypted disposable vault locally in a fresh br
     await page.goto("/");
     expect(await restored.cookies()).toEqual([]);
     expect(await page.evaluate(() => localStorage.length)).toBe(0);
-    await page.getByRole("button", { name: "Recovery", exact: true }).click();
+    await page.getByRole("link", { name: "Recovery", exact: true }).click();
     await page.getByLabel("Recovery file", { exact: true }).setInputFiles({
       name: "disposable-cold-recovery.json",
       mimeType: "application/json",

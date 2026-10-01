@@ -83,6 +83,13 @@ A vault takes exactly one deposit, its recorded `funding`. Someone can still pay
 
 A withdrawal never spends a stray output: `POST /api/jobs` accepts only the recorded `funding` as the vault input, and exact submission binds the transaction to it. The app offers no way to recover one. An unconfirmed payment is flagged once it confirms. A failed lookup returns the record already flagged (or `null`), changes nothing and doesn't fail the request.
 
+The webapp calls this route on its own while it's open and on screen:
+- A pending deposit is checked once a minute, once the tab has seen that deposit pending for five minutes, longer than a submission can run.
+- Each funded or withdrawn vault is checked about once an hour, at most three a minute.
+- A submitted withdrawal is checked with `GET /api/transactions/:id/status` once a minute.
+
+In each browser, one tab per wallet does the checking, and none does while a transaction dialog is open. Other browsers and devices check on their own. This needs the browser's Web Locks API. Without it, the webapp checks only when the user presses "Check now", which every vault with a deposit has.
+
 ## Events and webhooks
 
 Withdrawals take hours. Instead of polling each job, read your account's event log, and optionally register webhooks that tell you when to read it. `GET /events` and `GET /webhooks` take a wallet session or an API key with the `read` scope. Registering and deleting a webhook take a wallet session only: registration returns the signing secret and decides where your notifications go.

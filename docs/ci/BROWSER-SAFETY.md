@@ -7,7 +7,8 @@ and starts the application through `playwright.config.ts`'s `webServer`. CI does
 not reuse an existing server and rejects focused (`test.only`) tests.
 
 The suite includes local signing and backup reimport, deposit guards, recovery,
-and the exact-transaction confirmation dialog. Wallet, provider and submission
+the exact-transaction confirmation dialog, and the app's service status and
+vault-row actions, which follow the server's switches and chain state. Wallet, provider and submission
 calls use local stubs. Chromium uses a non-listening loopback proxy for external
 origins (bypassing localhost), so optional fonts fail promptly without DNS
 timeouts. The CI command additionally blocks new outbound IPv4 and
