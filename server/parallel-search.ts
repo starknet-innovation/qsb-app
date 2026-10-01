@@ -28,6 +28,8 @@ import {
   publishedHitRecords,
 } from "./hit-capacity";
 import { candidateOutput, applyVerifiedHit } from "./candidate-output";
+import { meterChunk } from "./gpu-usage";
+import { UnreadableOutput, type ComputeStatus } from "./aws-batch";
 import type { Row, Store } from "./store";
 
 type Event = { owner: string; jobId: string; revision: number; polls?: number };
@@ -97,9 +99,12 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   const job = row.job as Job;
   const pk = `OWNER#${event.owner}`;
   let version = row.version;
+  // The job as last saved: metering saves from it (see `meter` below).
+  let saved = structuredClone(job);
   const persist = async () => {
     await store.put({ ...row, version: version + 1, job }, version);
     version += 1;
+    saved = structuredClone(job);
   };
   const next = (done: boolean, waitSeconds = 5) => ({
     ...event,
@@ -160,6 +165,38 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     await persist();
   }
   const provider = await configuredCompute();
+  // A chunk newly seen finished is metered on the job and on its last-saved copy, and that copy
+  // is saved at once. So a failure later in the tick (a status call, a rejected or unreadable
+  // output, a timeout) can't lose its GPU time, and none of the tick's unfinished changes, such
+  // as a dropped slot whose range isn't recorded as done yet, are saved with it.
+  const meter = async (slot: SearchSlot, r: ComputeStatus) => {
+    if (!meterChunk(job, slot, r)) return;
+    const copy = saved.parallelSlots?.find((s) => s.runpodId === slot.runpodId);
+    if (!copy || !meterChunk(saved, copy, r)) return;
+    await store.put({ ...row, version: version + 1, job: saved }, version);
+    version += 1;
+  };
+  // One chunk's status, metered before the caller acts on it.
+  const observe = async (slot: SearchSlot) => {
+    try {
+      const r = await provider.status(slot.runpodId!, slot.batchSubmission);
+      await meter(slot, r);
+      return r;
+    } catch (error) {
+      // Finished, but its output can't be read or checked: it still used the GPU. The original
+      // error is what stops the tick for the operator, so a failed save is logged, not thrown.
+      // The store client has already retried throttling and transient errors, and a conflict
+      // means another write won: the slot stays on the job without `metered` until it's polled
+      // again, on resume.
+      if (error instanceof UnreadableOutput)
+        await meter(slot, error.finished).catch((failure) =>
+          console.error(
+            JSON.stringify({ gpuUsage: "record_failed", error: (failure as Error)?.name ?? "Error" }),
+          ),
+        );
+      throw error;
+    }
+  };
 
   // Paused: stop running chunks and keep every provider ID for resume. Finished: stop
   // and drop leftover chunks (a later stage no longer needs them).
@@ -168,7 +205,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       changed = false;
     for (const slot of [...slots]) {
       if (!slot.runpodId) continue;
-      const r = await provider.status(slot.runpodId, slot.batchSubmission);
+      const r = await observe(slot);
       if (ACTIVE.includes(r.status)) {
         // A cancellation acknowledgement is not terminal: keep polling the ID.
         await provider.cancel(slot.runpodId);
@@ -225,7 +262,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   let review: { stage: string; error: string } | undefined;
   const completed = new Set(job.completedAttempts ?? []);
   for (const slot of [...slots]) {
-    const r = await provider.status(slot.runpodId!, slot.batchSubmission);
+    const r = await observe(slot);
     const current = slot.stage === job.stage && job.status !== "failed";
     if (!current) {
       // Superseded by a verified hit or a failed job: stop it, never credit it.
@@ -426,6 +463,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
         break;
       }
       version += 1;
+      saved = structuredClone(job);
       assigned.add(attempt);
       const result = await submit();
       slot.runpodId = result.id;

@@ -25,6 +25,7 @@ As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete
 - The first mainnet deposit and withdrawal, on the earlier eu-west-1 stack (#22). The on-chain record is in [FIRST-MAINNET-WITHDRAWAL.md](FIRST-MAINNET-WITHDRAWAL.md).
 - Phases 1 and 2 of the non-custodial API and SDK (#85): `/v1`, the OpenAPI spec, scoped API keys, per-owner limits, signed webhooks, and the TypeScript SDK and `qsb` CLI ([API](API.md)).
 - Each deposit's QSB version, deposit outpoint, status and flagged stray payments, in the vault list and an export (#27).
+- Each withdrawal's measured GPU usage: the AWS Batch run and queue time of its chunks, in the job's `usage` ([runbook](OPERATIONAL-RUNBOOK.md#measured-gpu-usage)).
 - The move to the new eu-west-2 account (REGION-MIGRATION.md steps 1–10, and the GitHub part of step 12).
 
 ## Open
@@ -42,4 +43,5 @@ As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete
 
 - A "GPU hit output exceeds supported capacity" failure is terminal, and that withdrawal's deposit can't be withdrawn through the app until a reviewed recovery change lands ([runbook](OPERATIONAL-RUNBOOK.md#deterministic-pinning-failures)).
 - A resume can't use a new solver release: a withdrawal keeps the release it pinned at creation.
-- The GPU-time allowance (4,096 GPU-hours per withdrawal) is a planning figure from a code comment, not a measurement ([runbook](OPERATIONAL-RUNBOOK.md#gpu-time-allowance)).
+- The GPU-time allowance (4,096 GPU-hours per withdrawal) is a planning figure from a code comment, not a measurement ([runbook](OPERATIONAL-RUNBOOK.md#gpu-time-allowance)). Measured `usage` from real withdrawals is the data to reassess it with.
+- Measured GPU usage isn't a cost: there's no price table, instance idle time and the other AWS services aren't in it, and nothing reconciles it with the AWS bill. It also misses chunks still running when a tick pauses the search, until a resume polls them ([runbook](OPERATIONAL-RUNBOOK.md#measured-gpu-usage)).

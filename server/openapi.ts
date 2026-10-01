@@ -250,6 +250,18 @@ const jobFields = {
   manifestHash: z.string(),
   attempt: z.number().int(),
   computeSeconds: z.number(),
+  usage: describe(
+    z
+      .object({
+        chunks: describe(z.number().int().nonnegative(), "GPU chunks seen finished, whatever the outcome."),
+        failed: describe(z.number().int().nonnegative(), "Of those, chunks that failed, timed out or were cancelled."),
+        runMs: describe(z.number().int().nonnegative(), "Total time the chunks ran on a GPU: AWS Batch `stoppedAt` minus `startedAt`."),
+        queueMs: describe(z.number().int().nonnegative(), "Total time from submission to each chunk starting (or stopping, for a chunk that never started): queueing, instance start and image pull."),
+        unmeasured: describe(z.number().int().nonnegative(), "Chunks with a missing or out-of-order Batch time for either interval; their other times still count."),
+      })
+      .optional(),
+    "The AWS Batch time this withdrawal's GPU chunks took, measured from each finished chunk's Batch record. Absent until the first chunk finishes. A chunk is counted once a tick sees it finished; one still running when the search paused is counted when it's next polled.",
+  ),
   revision: z.number().int(),
   txid: z.string().optional(),
   error: z.string().optional(),

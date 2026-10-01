@@ -39,6 +39,30 @@ Startup, idle time, storage and provider billing behaviour are not capped by thi
 
 Before a paid claim, a preparation failure pauses with "Solver contract, compute provider configuration or public input upload unconfirmed; nothing was submitted" and leaves the reservation unchanged: fix the cause, then resume. A failure after the paid SubmitJob is an unknown submission: [reconcile it](#reconcile-an-unknown-aws-batch-submission), never retry it. The coordinator Lambda's 90-second timeout covers the CPU export, the compute-limits check, the SubmitJob call (20 seconds) and the database writes; it narrows timeout exposure but doesn't make the call and the write atomic.
 
+### Measured GPU usage
+
+Each job's `usage` records the AWS Batch time its GPU chunks took ([`server/gpu-usage.ts`](../server/gpu-usage.ts)). Each time a chunk is seen finished, its Batch record's times are added once:
+
+- `runMs`, the total of `stoppedAt` − `startedAt`: the time the containers ran on a GPU. A failed or cancelled chunk with no start time never started and ran for none. A completed chunk did run, so a missing start time leaves its time unmeasured.
+- `queueMs`, the total of `startedAt` − `createdAt`, or `stoppedAt` − `createdAt` for a chunk that never started: waiting for a GPU, starting the instance and pulling the image.
+
+`chunks` and `failed` count the chunks by outcome. `unmeasured` counts chunks with a missing or out-of-order time for either interval; whatever times they do have still count. A chunk kept on the job, for resume or for an operator's CPU-check review, is marked so it's counted once.
+
+Each tick saves a chunk's time as soon as it sees the chunk finished, before reading the next chunk's status or checking any output. So a tick that then stops for an operator still records it, whether it stops on a failed status call, a context or range mismatch, or a succeeded chunk whose output can't be read or checked. That save holds only the metering, on top of the job as last saved, never the tick's other unfinished changes. If it fails while the tick is already stopping on an unreadable output, the coordinator logs `{"gpuUsage": "record_failed"}` and the chunk stays on the job without `metered` until a resume polls it. Each chunk is still acted on, including being cancelled, right after its own status is read.
+
+A chunk is metered only once a tick sees it finished. These are seen:
+- chunks the owner's pause or the end of the withdrawal stops: that tick keeps polling until none is active;
+- chunks that finish while the job is searching.
+
+These aren't seen: chunks still running when a tick pauses the job for a stopped chunk, a failed CPU check, a failed preparation or a deployment switch (see "Some pauses leave GPU work running" below). They finish with nothing polling them, and stay on the job, unmetered, until a resume polls them.
+
+`usage` is a measurement, unlike the reservations above. It doesn't decide what is submitted, credited or cancelled, and it doesn't change the budget. It still isn't a bill:
+
+- GPU instances are shared between chunks and stay up for a while after the last one, so idle and instance-boot time outside a chunk's own `createdAt`–`stoppedAt` isn't in it. Neither are Lambda, Step Functions, S3 or DynamoDB.
+- It's recorded on the parallel search path, which every withdrawal takes while `workersMax` is above 1. `tests/parallel-search.test.ts` fails if `workersMax` is set to 1, because the single-GPU path isn't metered.
+- Jobs created before metering have no `usage`, or only the chunks finished since.
+- A slot on the job without `metered` is a chunk not yet seen finished. Before treating `usage` as complete, check that every slot is metered.
+
 ### Parallel GPU search
 
 `workersMax` is how many GPUs one withdrawal may use at once. Size it to the account's approved "Running On-Demand G and VT instances" quota in the stack's region: one `g5.xlarge` uses 4 vCPUs, so `workersMax` is at most quota ÷ 4. Both stacks follow the same value: the GPU stack sets the compute environment's `max_vcpus` to 4 × `workersMax`, and the coordinator refuses to submit ("nothing was submitted") unless the live compute environment matches exactly.
