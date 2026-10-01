@@ -6417,31 +6417,31 @@
             "properties": {
               "chunks": {
                 "type": "integer",
-                "minimum": -9007199254740991,
+                "minimum": 0,
                 "maximum": 9007199254740991,
                 "description": "GPU chunks seen finished, whatever the outcome."
               },
               "failed": {
                 "type": "integer",
-                "minimum": -9007199254740991,
+                "minimum": 0,
                 "maximum": 9007199254740991,
                 "description": "Of those, chunks that failed, timed out or were cancelled."
               },
               "runMs": {
                 "type": "integer",
-                "minimum": -9007199254740991,
+                "minimum": 0,
                 "maximum": 9007199254740991,
                 "description": "Total time the chunks ran on a GPU: AWS Batch `stoppedAt` minus `startedAt`."
               },
               "queueMs": {
                 "type": "integer",
-                "minimum": -9007199254740991,
+                "minimum": 0,
                 "maximum": 9007199254740991,
                 "description": "Total time from submission to each chunk starting (or stopping, for a chunk that never started): queueing, instance start and image pull."
               },
               "unmeasured": {
                 "type": "integer",
-                "minimum": -9007199254740991,
+                "minimum": 0,
                 "maximum": 9007199254740991,
                 "description": "Chunks with a missing or out-of-order Batch time for either interval; their other times still count."
               }
