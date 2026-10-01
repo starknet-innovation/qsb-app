@@ -30,9 +30,9 @@ export type JobUsage = {
   failed: number;
   /** Total time the chunks' containers ran: Batch `stoppedAt` minus `startedAt`. */
   runMs: number;
-  /** Total time from submission to the container starting: queueing, instance start, image pull. */
+  /** Total time from submission to the container starting, or stopping if it never started. */
   queueMs: number;
-  /** Chunks that finished without running, or whose Batch record had no usable times. */
+  /** Chunks with a missing or out-of-order Batch time for either interval. */
   unmeasured: number;
 };
 import type { SolverPin } from "./provenance";

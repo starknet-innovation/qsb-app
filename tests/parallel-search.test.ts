@@ -630,6 +630,20 @@ describe("GPU usage metering", () => {
     expect(job.parallelSlots!.find((s) => s.runpodId === "c1")!.metered).toBeUndefined();
   });
 
+  it("saves a finished chunk's time before checking its output, so a rejected output keeps it", async () => {
+    await seed({ status: "searching", parallelSlots: [slot(0), slot(1)] });
+    const bad = output("pinning", 0);
+    states.c0 = timed({ ...bad, output: { ...bad.output, kernelCommit: "f".repeat(40) } }, 0, 5_000, 65_000);
+    // The mismatch stops the tick for an operator, without the end-of-tick save.
+    await expect(handler(event)).rejects.toThrow("CandidateContextMismatch");
+    const job = await saved();
+    expect(job.usage).toEqual({ chunks: 1, failed: 0, runMs: 60_000, queueMs: 5_000, unmeasured: 0 });
+    expect(job.parallelSlots!.map((s) => [s.runpodId, s.metered])).toEqual([["c0", true], ["c1", undefined]]);
+    // Nothing else from the tick was saved: the chunk is neither credited nor dropped.
+    expect(job).toMatchObject({ attempt: 0, computeSeconds: 0, status: "searching" });
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
   it("covers every withdrawal while the search runs in parallel", async () => {
     // Metering lives on the parallel path. With one worker the single-GPU path would run
     // instead, unmetered: extend metering to it before setting workersMax to 1.

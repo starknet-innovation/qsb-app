@@ -29,6 +29,7 @@ import {
 } from "./hit-capacity";
 import { candidateOutput, applyVerifiedHit } from "./candidate-output";
 import { meterChunk } from "./gpu-usage";
+import type { ComputeStatus } from "./aws-batch";
 import type { Row, Store } from "./store";
 
 type Event = { owner: string; jobId: string; revision: number; polls?: number };
@@ -161,17 +162,30 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     await persist();
   }
   const provider = await configuredCompute();
+  // Read each chunk's status, and save the Batch time of chunks newly seen finished before
+  // acting on any result, so a check that then stops the tick for an operator can't lose it.
+  const poll = async (withoutId: "skip" | "read") => {
+    const results = new Map<SearchSlot, ComputeStatus>();
+    let metered = false;
+    for (const slot of slots) {
+      if (!slot.runpodId && withoutId === "skip") continue;
+      const r = await provider.status(slot.runpodId!, slot.batchSubmission);
+      results.set(slot, r);
+      if (meterChunk(job, slot, r)) metered = true;
+    }
+    if (metered) await persist();
+    return results;
+  };
 
   // Paused: stop running chunks and keep every provider ID for resume. Finished: stop
   // and drop leftover chunks (a later stage no longer needs them).
   if (job.status === "paused" || terminal) {
     let running = false,
       changed = false;
+    const results = await poll("skip");
     for (const slot of [...slots]) {
-      if (!slot.runpodId) continue;
-      const r = await provider.status(slot.runpodId, slot.batchSubmission);
-      // Every chunk is seen finished here before polling stops, so all are metered.
-      if (meterChunk(job, slot, r)) changed = true;
+      const r = results.get(slot);
+      if (!r || !slot.runpodId) continue;
       if (ACTIVE.includes(r.status)) {
         // A cancellation acknowledgement is not terminal: keep polling the ID.
         await provider.cancel(slot.runpodId);
@@ -216,6 +230,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       : {}),
   });
 
+  const results = await poll("read");
   // An explicit resume allows each chunk it found in flight to be repeated once if it turns
   // out to have stopped, however many ticks that takes. Chunks sent later never inherit it.
   if (job.retryRequested) {
@@ -228,8 +243,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   let review: { stage: string; error: string } | undefined;
   const completed = new Set(job.completedAttempts ?? []);
   for (const slot of [...slots]) {
-    const r = await provider.status(slot.runpodId!, slot.batchSubmission);
-    meterChunk(job, slot, r);
+    const r = results.get(slot)!;
     const current = slot.stage === job.stage && job.status !== "failed";
     if (!current) {
       // Superseded by a verified hit or a failed job: stop it, never credit it.

@@ -43,16 +43,25 @@ Before a paid claim, a preparation failure pauses with "Solver contract, compute
 
 Each job's `usage` records the AWS Batch time its GPU chunks took ([`server/gpu-usage.ts`](../server/gpu-usage.ts)). Each time a chunk is seen finished, its Batch record's times are added once:
 
-- `runMs`, the total of `stoppedAt` − `startedAt`: the time the containers ran on a GPU;
-- `queueMs`, the total of `startedAt` − `createdAt`: waiting for a GPU, starting the instance and pulling the image.
+- `runMs`, the total of `stoppedAt` − `startedAt`: the time the containers ran on a GPU. A chunk that never started ran for none.
+- `queueMs`, the total of `startedAt` − `createdAt`, or `stoppedAt` − `createdAt` for a chunk that never started: waiting for a GPU, starting the instance and pulling the image.
 
-`chunks` and `failed` count the chunks by outcome. `unmeasured` counts those that finished without running, such as a chunk cancelled in the queue, or whose Batch record had no usable times. A chunk kept on the job, for resume or for an operator's CPU-check review, is marked so it's counted once. A paused job keeps polling until no chunk is active, so every chunk is seen finished and metered.
+`chunks` and `failed` count the chunks by outcome. `unmeasured` counts chunks with a missing or out-of-order time for either interval; whatever times they do have still count. A chunk kept on the job, for resume or for an operator's CPU-check review, is marked so it's counted once.
+
+Each tick reads every chunk's status and saves the newly finished chunks' time before it checks any output. So a tick that then stops for an operator, for example on a context or range mismatch, still records the chunk.
+
+A chunk is metered only once a tick sees it finished. These are seen:
+- chunks the owner's pause or the end of the withdrawal stops: that tick keeps polling until none is active;
+- chunks that finish while the job is searching.
+
+These aren't seen: chunks still running when a tick pauses the job for a stopped chunk, a failed CPU check, a failed preparation or a deployment switch (see "Some pauses leave GPU work running" below). They finish with nothing polling them, and stay on the job, unmetered, until a resume polls them.
 
 `usage` is a measurement, unlike the reservations above. It doesn't decide what is submitted, credited or cancelled, and it doesn't change the budget. It still isn't a bill:
 
 - GPU instances are shared between chunks and stay up for a while after the last one, so idle and instance-boot time outside a chunk's own `createdAt`–`stoppedAt` isn't in it. Neither are Lambda, Step Functions, S3 or DynamoDB.
 - It's recorded on the parallel search path, which every withdrawal takes while `workersMax` is above 1. `tests/parallel-search.test.ts` fails if `workersMax` is set to 1, because the single-GPU path isn't metered.
 - Jobs created before metering have no `usage`, or only the chunks finished since.
+- A slot on the job without `metered` is a chunk not yet seen finished. Before treating `usage` as complete, check that every slot is metered.
 
 ### Parallel GPU search
 

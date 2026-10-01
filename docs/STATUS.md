@@ -44,4 +44,4 @@ As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete
 - A "GPU hit output exceeds supported capacity" failure is terminal, and that withdrawal's deposit can't be withdrawn through the app until a reviewed recovery change lands ([runbook](OPERATIONAL-RUNBOOK.md#deterministic-pinning-failures)).
 - A resume can't use a new solver release: a withdrawal keeps the release it pinned at creation.
 - The GPU-time allowance (4,096 GPU-hours per withdrawal) is a planning figure from a code comment, not a measurement ([runbook](OPERATIONAL-RUNBOOK.md#gpu-time-allowance)). Measured `usage` from real withdrawals is the data to reassess it with.
-- Measured GPU usage isn't a cost: there's no price table, instance idle time and the other AWS services aren't in it, and nothing reconciles it with the AWS bill.
+- Measured GPU usage isn't a cost: there's no price table, instance idle time and the other AWS services aren't in it, and nothing reconciles it with the AWS bill. It also misses chunks still running when a tick pauses the search, until a resume polls them ([runbook](OPERATIONAL-RUNBOOK.md#measured-gpu-usage)).
