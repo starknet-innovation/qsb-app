@@ -20,7 +20,7 @@ COMMIT = 'b' * 40
 ACCOUNT = '123456789012'
 INVENTORY = dict(account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
                  state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
-                 origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
+                 origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'], api_functions=['qsb-test-api'],
                  operator_user='qsb-operator-user', gpu_vpc='vpc-0test')
 SSO_INVENTORY = {**{k: v for k, v in INVENTORY.items() if k != 'operator_user'},
                  'operator_sso_permission_set': 'QsbOperator'}

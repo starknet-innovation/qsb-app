@@ -24,7 +24,7 @@ class HumanAccess(unittest.TestCase):
         self.out = access(dict(
             account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
             state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
-            origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
+            origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'], api_functions=['qsb-test-api'],
             operator_user='qsb-operator-user', gpu_vpc='vpc-0test'))
         self.operator = [s for d in self.out['operator']['policies'] for s in d['Statement']]
         self.viewonly = [s for d in self.out['viewonly']['policies'] for s in d['Statement']]
@@ -69,7 +69,7 @@ class HumanAccess(unittest.TestCase):
     def sso(self, **extra):
         inventory = dict(account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
                          state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
-                         origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
+                         origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'], api_functions=['qsb-test-api'],
                          gpu_vpc='vpc-0test', **extra)
         return access(inventory)
 

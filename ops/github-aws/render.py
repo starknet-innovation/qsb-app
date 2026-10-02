@@ -2,10 +2,11 @@
 """Render reviewed QSB deployment policies from a private account inventory.
 
 No AWS mutations. Use an inventory with account, region, subject, distributions,
-origin_access_controls, response_headers_policies and state_bucket.
+origin_access_controls, response_headers_policies, api_functions and state_bucket.
 """
 import argparse
 import json
+import re
 from pathlib import Path
 
 
@@ -15,6 +16,17 @@ def registered(c, kind):
     A new account has none registered until the administrator's first apply. IAM refuses an empty
     Resource, and leaving the statements out would change the policy count when IDs are registered."""
     return c[kind] or ['UNREGISTERED']
+
+
+def api_functions(c):
+    """The app stacks' API functions (terraform/compute.tf names them <name>-api), each with a role of the same
+    name: the only ones that may read the MARA credential. Unlike CloudFront IDs, the names are known before the
+    first apply, so they're required: a missing or malformed list stops the render rather than lock the API out."""
+    names = c.get('api_functions')
+    if not (isinstance(names, list) and names and all(isinstance(n, str) and re.fullmatch(r'qsb-(?!gpu-)[a-z0-9-]+-api', n)
+                                                      for n in names)):
+        raise SystemExit('The inventory needs api_functions: the API function names, such as ["qsb-app-api"]')
+    return names
 
 
 def render(c):
@@ -88,16 +100,16 @@ def render(c):
     allow('BatchCancel',['batch:CancelJob','batch:TerminateJob'],[arn('batch','job/*')],{'StringEquals':{'aws:ResourceTag/Project':'qsb-gpu'}},runtime)
     allow('GpuInputs',['s3:PutObject'],[f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/inputs/*'],target=runtime)
     allow('GpuOutputs',['s3:GetObject'],[f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/outputs/*'],target=runtime)
-    # The API's MARA Slipstream credential: read-only, one administrator-created secret, and only for API
-    # roles (terraform/compute.tf names them <name>-api), from an API function's own execution environment.
-    # Lambda sets lambda:SourceFunctionArn on those calls (and a few it makes for the function, such as its logs),
-    # never on a session taken elsewhere, so a session of such a role taken anywhere else, for example by another
-    # account a changed trust names, can't read it. A role still needs its own grant,
-    # which Terraform gives only to the API. This limits runtime roles, not deployers: whoever can deploy API
-    # code can read it.
+    # The API's MARA Slipstream credential: read-only, one administrator-created secret, and only for the
+    # registered API roles, from their own function's execution environment. Lambda sets lambda:SourceFunctionArn
+    # on those calls (and a few it makes for the function, such as its logs), never on a session taken elsewhere.
+    # Naming the functions, not qsb-*-api, means a deploy can't add a role and function of its own that read it
+    # for another account. A role still needs its own grant, which Terraform gives only to the API. This limits
+    # runtime roles, not deployers: whoever can deploy the API's code can read it.
+    api = api_functions(c)
     allow('MinerCredential',['secretsmanager:GetSecretValue'],[arn('secretsmanager','secret:qsb/slipstream-??????')],
-          {'ArnLike':{'aws:PrincipalArn':iam('role/qsb/runtime/qsb-*-api'),
-                      'lambda:SourceFunctionArn':arn('lambda','function:qsb-*-api')}},runtime)
+          {'ArnEquals':{'aws:PrincipalArn':[iam(f'role/qsb/runtime/{n}') for n in api],
+                        'lambda:SourceFunctionArn':[arn('lambda',f'function:{n}') for n in api]}},runtime)
     # AWS log-delivery control APIs have no resource-level authorization.
     allow('WorkflowLogDelivery',['logs:CreateLogDelivery','logs:GetLogDelivery','logs:UpdateLogDelivery','logs:DeleteLogDelivery','logs:ListLogDeliveries','logs:PutResourcePolicy','logs:DescribeResourcePolicies','logs:DescribeLogGroups'],['*'],{'StringEquals':{'aws:RequestedRegion':region}},runtime)
     trust={'Version':'2012-10-17','Statement':[{'Effect':'Allow','Principal':{'Federated':iam('oidc-provider/token.actions.githubusercontent.com')},'Action':'sts:AssumeRoleWithWebIdentity','Condition':{'StringEquals':{'token.actions.githubusercontent.com:aud':'sts.amazonaws.com','token.actions.githubusercontent.com:sub':c['subject']}}}]}

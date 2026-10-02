@@ -29,12 +29,12 @@ can fully manage registered infrastructure, but can't create arbitrary new CDN/A
 infrastructure. Roles can be passed only to Lambda, Step Functions and EventBridge Scheduler, which runs the webhook
 dispatcher's schedule; the role can manage only `qsb-*` schedules in the default group.
 
-The runtime boundary allows QSB data access and, for API roles (`qsb-*-api`) only, read-only access to one secret,
-`qsb/slipstream`: the optional MARA Slipstream credential (see `terraform/README.md`). Only calls from an API
-function's own execution environment get it (`lambda:SourceFunctionArn`, which Lambda sets on those calls and a few it
-makes for the function, such as its logs, never on a session taken elsewhere). So a session of an API role taken
-anywhere else, such as by another account a changed trust names, can't read it. It
-allows no other secret and no KMS decrypt. Deploying code confers that code's runtime access, so `qsb-operator` and `qsb-github-deploy` can
+The runtime boundary allows QSB data access and, for the API roles in `api_functions` only, read-only access to one
+secret, `qsb/slipstream`: the optional MARA Slipstream credential (see `terraform/README.md`). Only calls from that
+same function's execution environment get it (`lambda:SourceFunctionArn`, which Lambda sets on those calls and a few
+it makes for the function, such as its logs, never on a session taken elsewhere). So neither a session of an API
+role taken anywhere else, such as by another account a changed trust names, nor a role and function a deploy adds
+can read it. It allows no other secret and no KMS decrypt. Deploying code confers that code's runtime access, so `qsb-operator` and `qsb-github-deploy` can
 reach this secret through an API role. Workflow log-delivery control APIs and regional metadata discovery require
 regional wildcard resources; these are the runtime control-plane exceptions. In S3, the boundary allows only the GPU
 job bucket's prefixes (`s3:PutObject` on `inputs/*`, `s3:GetObject` on `outputs/*`), which Terraform grants to the
@@ -49,7 +49,9 @@ can't administer the bucket or delete state snapshots.
 ## Provision and verify
 
 `render.py` takes a private inventory containing `account`, `region`, `subject`, `state_bucket` and arrays
-`distributions`, `origin_access_controls` (the frontend's and the API's), and `response_headers_policies`. `access.py` also reads
+`distributions`, `origin_access_controls` (the frontend's and the API's), `response_headers_policies`, and
+`api_functions` (the API functions' names, `<name>-api` such as `qsb-app-api`; required, since they're known before any
+apply). `access.py` also reads
 `gpu_vpc` (the VPC of the `terraform/gpu` security group) and exactly one of `operator_sso_permission_set` or
 `operator_user` ([Human access without root](#human-access-without-root)). Keep that inventory, policy renders,
 state and receipts outside Git.
@@ -211,7 +213,8 @@ refuses a plan whose `source_arn` isn't this stack's distribution. An operator c
   subscriptions. IAM has no condition key for a trust policy's principals, so nothing here can deny a trust that
   names another account. `check-single-pipeline.py --deploy` refuses a plan in which the Lambda or workflow roles
   trust anything but their AWS service, which covers deploys but not a direct API call. A role trusted from outside
-  can still do what the boundary allows, except read `qsb/slipstream` (above).
+  can still do what the boundary allows, except read `qsb/slipstream` (above). Revoking a deployer therefore means
+  auditing every `qsb-*` runtime role's trust, and the `qsb-*` functions and schedules a deploy may have added.
 
 A CloudFront distribution in another account, granted the API's function URL by such a permission,
 and [EventBridge cross-account service targets](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-service-cross-account.html)
