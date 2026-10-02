@@ -165,7 +165,7 @@ describe.each([
     expect(b).toEqual(a);
     expect(a.status).toBe(204);
     expect(new Map(a.headers).get("access-control-allow-headers")).toBe(
-      "Content-Type,Authorization,Idempotency-Key",
+      "Content-Type,X-Qsb-Authorization,x-amz-content-sha256,Authorization,Idempotency-Key",
     );
   });
 

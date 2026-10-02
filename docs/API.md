@@ -1,6 +1,6 @@
 # API
 
-The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side, except the HORS preimages a signed withdrawal reveals by design. This page covers its prefixes, OpenAPI document, errors, per-owner limits, stray payments, idempotency, API keys, and its event log and webhooks.
+The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side, except the HORS preimages a signed withdrawal reveals by design. This page covers its prefixes, request headers, OpenAPI document, errors, per-owner limits, stray payments, idempotency, API keys, and its event log and webhooks.
 
 ## Prefixes
 
@@ -8,6 +8,15 @@ The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts
 - `/api` serves the same routes and stays for compatibility: a browser may still run a bundle cached from before the move. The webapp calls `/v1`; QSB runs on mainnet only.
 
 Both prefixes reach the same handlers and middleware: secure headers, CORS, the body limit, sign-in and error mapping. With `versionedAlias`, `createApp` rewrites a leading `/v1` segment to `/api` before routing, so a route is defined once. Only the coordinator API opts in: the mainnet Lambda (`server/lambda.ts`) and the local server (`server/local.ts`). CloudFront forwards `/v1/*` and `/api/*` to the API with the same uncached behaviour (`terraform/web.tf`), and `npm run dev`'s Vite proxy forwards both to the local server.
+
+## Request headers
+
+These two headers let the API sit behind CloudFront origin access control to a Lambda function URL, which signs each request with its own `Authorization` header and refuses a POST without a body hash.
+
+- **Credential.** Send a session token or an API key as `X-Qsb-Authorization: Bearer <credential>`. `Authorization: Bearer <credential>` is accepted too; when both are sent, `X-Qsb-Authorization` wins. The server reads only a bearer from `Authorization`, never a signature.
+- **Body hash.** On every request with a body, send `x-amz-content-sha256` with the hex SHA-256 of the exact body bytes. The API itself doesn't check it.
+
+The webapp and the SDK send both ([`src/lib/session.ts`](../src/lib/session.ts)), and CORS allows them.
 
 ## OpenAPI
 
@@ -216,7 +225,7 @@ revoke keys. They don't take `Idempotency-Key`: its records keep the response
 body, and a minted key must never be stored. If a mint's response is lost, mint
 again and revoke the key you didn't receive.
 
-Send a key as `Authorization: Bearer qsb_mainnet_<43 base64url characters>`.
+Send a key as `X-Qsb-Authorization: Bearer qsb_mainnet_<43 base64url characters>` ([request headers](#request-headers)).
 A bearer with any other prefix isn't a key, so the request is unauthenticated
 (401 `auth_required`). Expiry is required: 30 days by default, 90 at most. An owner can have at most 10 active keys.
 
