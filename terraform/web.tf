@@ -127,7 +127,8 @@ resource "aws_cloudfront_distribution" "web" {
 # The app's origin, which the API names in its sign-in challenge and allows for CORS (server/app.ts). It can't be
 # in the API Lambda's environment: CloudFront's API origin is the function URL, which belongs to that function, so
 # the function can't depend on CloudFront too. Terraform writes it here once the distribution exists. The app's
-# roles can't write SYSTEM# rows (policies/app-records.json), so only a deploy can change it.
+# roles can't write SYSTEM# rows (policies/app-records.json); the deploy role and qsb-operator, which manage the
+# table, can.
 resource "aws_dynamodb_table_item" "app_origin" {
   table_name = aws_dynamodb_table.records.name
   hash_key   = aws_dynamodb_table.records.hash_key
