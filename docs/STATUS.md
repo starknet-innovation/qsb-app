@@ -6,11 +6,11 @@ As of 2 October 2026. #8, the plan to a first mainnet withdrawal, is complete; w
 
 - **Account and region.** One app stack and one GPU stack in a dedicated AWS account in eu-west-2, reached through IAM Identity Center. They were built from scratch on 30 September 2026; no data was copied from the earlier eu-west-1 stack ([REGION-MIGRATION.md](REGION-MIGRATION.md)).
 - **Pipeline.** API Lambda, Step Functions coordinator, AWS Batch GPUs and the CPU reference Lambda ([README](../README.md#how-a-withdrawal-runs)).
-- **API.** A Lambda function URL with `AWS_IAM` auth, which CloudFront calls through origin access control (`terraform/web.tf`). It refuses requests CloudFront didn't sign.
+- **API.** A Lambda function URL with `AWS_IAM` auth, which CloudFront calls through origin access control (`terraform/web.tf`). It answers only requests signed by CloudFront, or by principals in this account with Lambda invoke permission: `qsb-operator`, the deploy role and the administrator.
 - **Solver.** `combined-aws-sm86-v0.2.0` (`qsb-ranked-v2-43c77084648a-e22afc720df1`), the optimized subset kernel with the repaired pinning ([SOLVER-REPOSITORY.md](SOLVER-REPOSITORY.md)).
 - **GPUs.** On-Demand `g5.xlarge` (one A10G each), up to 16 per withdrawal (`workersMax` in `server/gpu-spend.json`), scaling to zero when idle.
 - **Switches.** An uncached `GET /api/config` reports the mainnet and submit switches. Approvals and switch changes are recorded in the private deployment record, not in Git ([runbook](OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches)). API keys, the scheduled webhook dispatcher and the per-owner limits are off by default.
-- **Deploys.** A `qsb-operator` applies a reviewed plan, or `.github/workflows/deploy.yml` plans each push to `main` and applies after an approval once `QSB_AWS_DEPLOY_ENABLED` is `true` ([terraform/README.md](../terraform/README.md#deploy-from-github)).
+- **Deploys.** `QSB_AWS_DEPLOY_ENABLED` is `true`: `.github/workflows/deploy.yml` plans each push to `main` and applies after an approval. A `qsb-operator` can also apply a reviewed plan ([terraform/README.md](../terraform/README.md#deploy-from-github)).
 
 ## Decisions
 
