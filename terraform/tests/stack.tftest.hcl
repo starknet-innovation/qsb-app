@@ -53,8 +53,8 @@ run "baseline" {
     # The filter selects a number in the JSON record's `message` object, which no logged string
     # supplies, so a caller's request path in a log line can't raise the alarm
     # (tests/stray-outputs.test.ts evaluates the pattern against the API's console calls).
-    condition     = aws_lambda_function.api.logging_config[0].log_format == "JSON"
-    error_message = "The API must log in JSON for the stray-payments filter to match only its strayPayment objects."
+    condition     = aws_lambda_function.api.logging_config[0].log_format == "JSON" && contains(["TRACE", "DEBUG", "INFO", "WARN"], aws_lambda_function.api.logging_config[0].application_log_level)
+    error_message = "The API must log in JSON, keeping WARN records, for the stray-payments filter to match only its strayPayment objects."
   }
   assert {
     condition     = output.transactions_enabled == false && output.compute_configured == false
