@@ -1,6 +1,6 @@
 # Status
 
-As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete; what's open is listed below.
+As of 2 October 2026. #8, the plan to a first mainnet withdrawal, is complete; what's open is listed below.
 
 ## Deployed
 
@@ -31,14 +31,14 @@ As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete
 ## Open
 
 - **API behind CloudFront origin access control.** The stack serves the API from a Lambda function URL with `AWS_IAM` auth, which CloudFront calls through origin access control, in place of API Gateway (`terraform/web.tf`). The deployment still runs API Gateway until the AWS administrator applies it in the temporary admin window and registers the API's origin access control ([terraform/README.md](../terraform/README.md)).
-- **Legal:** confirm that the redistribution approval covers the served image `combined-aws-sm86-v0.2.0`. The earlier approval covered `aws-v0.1.0`. This needs legal review.
+- **Serve `combined-aws-sm86-v0.3.0`.** It is enrolled, not served: the same executables as the served release, on a runtime with Ubuntu updates applied at build; its 1 October 2026 release scan found no fixable findings. Serving it needs the eu-west-2 ECR copy, a job-definition revision and `solver_release_id` ([serving a release](SOLVER-REPOSITORY.md#serving-a-release)), with no pinned withdrawal still searching.
+- **Legal:** confirm that the redistribution approval covers the served image `combined-aws-sm86-v0.2.0`, and `combined-aws-sm86-v0.3.0` before it is served. The earlier approval covered `aws-v0.1.0`. This needs legal review.
 - **Solver image pull by digest.** #22 asked that the first bounded run confirm AWS Batch pulled the enrolled solver image by digest. No run has confirmed it yet: the first withdrawal's record ([FIRST-MAINNET-WITHDRAWAL.md](FIRST-MAINNET-WITHDRAWAL.md)) doesn't include it. Check the image that withdrawal's Batch jobs ran in eu-west-1 while AWS still keeps their records, or on the first eu-west-2 withdrawal.
 - **Legacy supervised jobs.** Persisted jobs marked `execution.kind: "qsb-supervised-service-v1"` stay rejected by exact submission and by the solved-result, pause, resume and status routes, and the UI hides their pause and resume controls. These guards stay until the production inventory is complete and any matching rows are reconciled or quarantined; removing the old UI doesn't show the table holds none.
-- **#24:** build-generated identities in place of in-repo self-hash pinning.
 - **#122:** support more than one QSB generator version, with the first generator change.
 - **#85 phase 3:** billing, terms of use, WAF and rate limits. This needs a separate decision.
 - **#119:** the QSB author's answers on the security figure, SHA-256 Config A, re-authorization and the single output.
-- **The old eu-west-1 stack** is still up. It is retired by REGION-MIGRATION.md step 11, then cleaned up.
+- **The old eu-west-1 stack** is retired by REGION-MIGRATION.md step 11, which is still pending, then cleaned up.
 
 ## Known gaps
 
