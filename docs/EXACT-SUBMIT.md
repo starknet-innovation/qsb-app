@@ -28,4 +28,4 @@ An Esplora response is chain-provider evidence, not an independently operated fu
 
 ## Miner transport
 
-The transport follows [MARA's OpenAPI](https://slipstream.mara.com/docs/openapi.json). Runtime authorization, if configured, stays confined to the exact MARA origin. The optional credential is the administrator-created `qsb/slipstream` secret: at runtime only API roles can read it, but anyone who can deploy runtime code can too. See "MARA Slipstream credential" in [`terraform/README.md`](../terraform/README.md#mara-slipstream-credential).
+The transport follows [MARA's OpenAPI](https://slipstream.mara.com/docs/openapi.json). Runtime authorization, if configured, stays confined to the exact MARA origin. The optional credential is the administrator-created `qsb/slipstream` secret: at runtime only the API function can read it, from its own execution environment, but anyone who can deploy runtime code can too. See "MARA Slipstream credential" in [`terraform/README.md`](../terraform/README.md#mara-slipstream-credential).

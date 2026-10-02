@@ -32,7 +32,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 | Wallet ↔ browser | The deposit PSBT goes to the wallet; the signed PSBT comes back. |
 | Browser | Unlocks the backup locally to check it still opens; nothing secret is sent. Builds a deposit paying the vault script. Each vault takes exactly one deposit. |
 | Crosses to the service | The signed deposit transaction plus a bearer session token or API key. |
-| Service | Checks the transaction pays the vault script, records the exact bytes and submits them to MARA. Reads the optional MARA credential from Secrets Manager; only the API roles can. |
+| Service | Checks the transaction pays the vault script, records the exact bytes and submits them to MARA. Reads the optional MARA credential from Secrets Manager; only the API function can, from its own environment. |
 | Outside parties | MARA receives the signed transaction and optional authorization/client-code credentials for possible mining. Submission may fail or remain uncertain; acceptance is not block inclusion. The deposit completes only after inclusion is independently confirmed. |
 
 ## 3. Withdraw: search

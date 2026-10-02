@@ -90,8 +90,9 @@ def render(c):
     allow('GpuOutputs',['s3:GetObject'],[f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/outputs/*'],target=runtime)
     # The API's MARA Slipstream credential: read-only, one administrator-created secret, and only for API
     # roles (terraform/compute.tf names them <name>-api), from an API function's own execution environment.
-    # Lambda sets lambda:SourceFunctionArn only on those calls, so a session of such a role taken anywhere else,
-    # for example by another account a changed trust names, can't read it. A role still needs its own grant,
+    # Lambda sets lambda:SourceFunctionArn on those calls (and a few it makes for the function, such as its logs),
+    # never on a session taken elsewhere, so a session of such a role taken anywhere else, for example by another
+    # account a changed trust names, can't read it. A role still needs its own grant,
     # which Terraform gives only to the API. This limits runtime roles, not deployers: whoever can deploy API
     # code can read it.
     allow('MinerCredential',['secretsmanager:GetSecretValue'],[arn('secretsmanager','secret:qsb/slipstream-??????')],

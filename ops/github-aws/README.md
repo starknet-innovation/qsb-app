@@ -31,8 +31,9 @@ dispatcher's schedule; the role can manage only `qsb-*` schedules in the default
 
 The runtime boundary allows QSB data access and, for API roles (`qsb-*-api`) only, read-only access to one secret,
 `qsb/slipstream`: the optional MARA Slipstream credential (see `terraform/README.md`). Only calls from an API
-function's own execution environment get it (`lambda:SourceFunctionArn`, which Lambda sets on those calls alone), so
-a session of an API role taken anywhere else, such as by another account a changed trust names, can't read it. It
+function's own execution environment get it (`lambda:SourceFunctionArn`, which Lambda sets on those calls and a few it
+makes for the function, such as its logs, never on a session taken elsewhere). So a session of an API role taken
+anywhere else, such as by another account a changed trust names, can't read it. It
 allows no other secret and no KMS decrypt. Deploying code confers that code's runtime access, so `qsb-operator` and `qsb-github-deploy` can
 reach this secret through an API role. Workflow log-delivery control APIs and regional metadata discovery require
 regional wildcard resources; these are the runtime control-plane exceptions. In S3, the boundary allows only the GPU
