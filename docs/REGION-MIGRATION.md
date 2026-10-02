@@ -121,7 +121,9 @@ Nothing live changes in this phase.
 7. **Register the edge IDs** (temp admin).
    - Add the new CloudFront distribution, both origin access controls (the frontend's and the API's) and the
      response-headers ID to the inventory.
-   - Run `update_installed.py` as a plan, then with `--apply`. From then on `qsb-operator` manages the whole stack.
+   - Run `update_installed.py` as a plan, then with `--apply`. From then on `qsb-operator` manages the whole stack. It
+     refuses if `api_functions` doesn't name the API function this apply created, with its own role: fix the
+     inventory, then install the corrected boundary, or the API can't read `qsb/slipstream`.
      The `UNREGISTERED` placeholder keeps the operator policy count the same, so this shouldn't happen. If it
      refuses anyway because the count changed, stop. The AWS admin then creates the extra `qsb-operator-<n>`
      managed policy under `/qsb/bootstrap/` with the document `access.py INVENTORY DIR` renders, attaches it to

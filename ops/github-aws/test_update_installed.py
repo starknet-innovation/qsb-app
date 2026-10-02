@@ -178,11 +178,16 @@ class UpdateInstalled(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, 'api_functions: qsb-test-api is not a deployed function'):
                     self.run_update(iam)
                 self.assertEqual(self.writes(), [])
-        # With the boundary unchanged (before the app stack exists, say), a missing function only warns.
+        # With the boundary unchanged and no app stack yet (a new account's GPU step), a missing function only warns.
         iam = self.installed()
-        iam['functions'] = {}
+        iam['functions'] = {'qsb-gpu-watchdog': role + 'qsb-gpu-watchdog'}
         self.run_update(iam)
         self.assertEqual(self.writes(), [])
+        # Once the app stack exists, an unchanged boundary naming a typo is refused too: bootstrap.py installed it.
+        iam = self.installed()
+        iam['functions'] = {'qsb-test-coordinator': role + 'qsb-test-coordinator', 'qsb-tset-api': role + 'qsb-tset-api'}
+        with self.assertRaisesRegex(SystemExit, 'fix the inventory, then install the corrected boundary'):
+            self.run_update(iam, apply=False)
         # A profile that can't list functions plans anyway, and --apply checks again.
         iam = self.installed()
         iam['functions_denied'] = True

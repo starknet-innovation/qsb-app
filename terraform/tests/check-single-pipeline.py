@@ -541,7 +541,7 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
                     and isinstance(statement.get('Resource'), str) and MINER_SECRET.match(statement['Resource'])
                     and set(statement) <= {'Sid', 'Effect', 'Action', 'Resource', 'Condition'},
                     'The miner credential grant must be GetSecretValue on the qsb/slipstream secret only')
-            # Read only from the API function's own execution environment, in the secret's account and Region.
+            # Read only with the credentials Lambda issues to the API function, in the secret's account and Region.
             region, account = statement['Resource'].split(':')[3:5]
             require(isinstance(api_function, str) and statement.get('Condition') == {'ArnLike': {
                         'lambda:SourceFunctionArn': f'arn:aws:lambda:{region}:{account}:function:{api_function}'}},

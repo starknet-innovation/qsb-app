@@ -87,7 +87,7 @@ Getting the role path wrong on the first apply means replacing the roles later, 
    - review it;
    - then, from a clean `main`, `--apply` as the administrator, confirmed or with `--yes --plan-hash`.
 
-   It refuses if the operator policies would need a different number of documents, if a changed policy already has five versions, or if it would install a runtime boundary naming an `api_functions` function that isn't deployed with its own role. Before the app stack exists it only warns about the function. Either way, stop and handle it as a reviewed step.
+   It refuses if the operator policies would need a different number of documents, if a changed policy already has five versions, or if the runtime boundary names an `api_functions` function that isn't deployed with its own role (which, after this first apply, means a wrong name in the inventory: fix it, then install the corrected boundary). Before the app stack exists, it only warns about the function. Either way, stop and handle it as a reviewed step.
 6. From then on, run plans and applies as `qsb-operator`. On the first such plan, when every Lambda environment is known from state, run `check-single-pipeline.py --deploy` again: it then checks key names and constants that a first plan can only check through configuration references.
 
 Replacing any registered resource later (the distribution, either origin access control or the response-headers policy) needs the administrator again, and so does creating a new one.
