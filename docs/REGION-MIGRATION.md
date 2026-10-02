@@ -82,6 +82,8 @@ Nothing live changes in this phase.
      `state_bucket` name;
    - `operator_sso_permission_set` (for example `QsbOperator`) instead of `operator_user`;
    - `gpu_vpc`;
+   - `api_functions`: `["<name>-api"]`, from the stack's planned `name` (for example `["qsb-app-api"]`). The
+     runtime boundary lets only that function read `qsb/slipstream`, and the render stops without it;
    - empty `distributions`, `origin_access_controls` and `response_headers_policies`. None exist yet. The
      deploy policy names an `UNREGISTERED` placeholder until the real IDs are registered in step 7, so the policies
      keep the same shape.
