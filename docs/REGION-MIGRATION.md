@@ -3,9 +3,9 @@
 The organisation requires all QSB infrastructure and data in eu-west-2 (London), in a new AWS account that people
 reach through IAM Identity Center.
 
-**Status (30 September 2026):** steps 1–10 are done, and the new stack is live. The GitHub part of step 12 is done.
-Left: retiring the old eu-west-1 stack ([step 11](#decommission-the-old-stack)) and, after the new stack has run a
-full deposit and withdrawal, deleting the old stack's retained data (cleanup; never the new stack's). The old stack gets no more deploys.
+**Status (2 October 2026):** steps 1–11 are done, and the new stack is live. The GitHub part of step 12 is done.
+Left: the local-profile part of step 12, and, after the new stack has run a full deposit and withdrawal,
+deleting the old stack's retained data (cleanup; never the new stack's). The old stack gets no more deploys.
 
 **QSB started over in the new account.** The new stack was built from scratch, and no data was copied: the records
 table, sessions and owner data all started empty. Users see a new app URL and sign in again; vaults created on the
@@ -138,7 +138,7 @@ Nothing live changes in this phase.
 10. **Switch on** (operator, with the owner's OK).
     - Repeat step 1's checks on the old stack.
     - Set both switches on in the new stack, plan and apply.
-11. **Retire the old stack's services** (the QSB owner, old account; pending). Steps 1 and 2 of "Decommission the
+11. **Retire the old stack's services** (the QSB owner, old account; done on 30 September 2026). Steps 1 and 2 of "Decommission the
     old stack" below destroy everything that could take a deposit, and keep the data. Afterwards nothing is left to
     switch back on by mistake. Deleting the kept data still waits for the cleanup.
 12. **Point the tooling at the new account.** Rename the `qsb-new-operator` profile to `qsb-operator` once the old
