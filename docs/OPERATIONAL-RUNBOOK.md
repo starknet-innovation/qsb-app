@@ -299,7 +299,13 @@ Rebuild an approved earlier clean, pushed commit and review its plan against the
 
 Commits whose Terraform still serves the API through API Gateway (`aws_apigatewayv2_*`) can't be applied by `deploy.yml` or `qsb-operator`. The deploy role has no API Gateway grants, and both roles may add Lambda permissions only for CloudFront and EventBridge (`ops/github-aws`). Such a plan still passes that commit's own checks. An apply then removes CloudFront's two permissions on the function and the `SYSTEM#DEPLOYMENT` origin row, and fails creating the API. The distribution still points at the function URL, so every API request gets 403 until an administrator repairs it.
 
-Roll back to such a commit only as the AWS administrator, in the temporary admin window, with `QSB_AWS_DEPLOY_ENABLED` set to `false`. If the commit is to stay deployed, install that commit's own `ops/github-aws` grants with its `update_installed.py` (with its `apis` inventory) before turning automatic deploys back on.
+Roll back to such a commit only as the AWS administrator, in the temporary admin window, with `QSB_AWS_DEPLOY_ENABLED` set to `false`. Leave it `false` while `main` still holds the function URL: a deploy from `main` would apply the function URL stack again.
+
+To keep the rolled-back commit deployed:
+1. Revert `main` to it through a reviewed PR.
+2. From that `main`, register the API ID the rollback created in `apis` and remove the API's origin access control from `origin_access_controls`.
+3. Run `update_installed.py` as a plan, then `--apply`. It applies only from a clean `main`.
+4. Only then set `QSB_AWS_DEPLOY_ENABLED` back to `true`.
 
 ### Rolling back past the index.html split
 

@@ -351,7 +351,27 @@ class DeployChecks(unittest.TestCase):
             self.refused(doc, 'must be in the records table')
         doc = plan()
         del self.origin_row(doc)['values']['item']
-        self.refused(doc, 'must be known at plan')
+        self.refused(doc, 'is unknown at plan')
+
+    def test_a_first_apply_with_the_distribution_unknown_passes_from_configuration(self):
+        # A real first apply (or a replaced distribution): its ARN and domain, and so each permission's source_arn
+        # and the origin row, are unknown until apply. The saved plan's configuration says what builds them.
+        doc = plan()
+        del doc['prior_state']
+        for r in doc['planned_values']['root_module']['resources']:
+            for key in ('arn', 'domain_name', 'source_arn', 'item'):
+                if r['type'] in ('aws_cloudfront_distribution', 'aws_lambda_permission', 'aws_dynamodb_table_item'):
+                    r['values'].pop(key, None)
+        arn = {'references': ['aws_cloudfront_distribution.web.arn', 'aws_cloudfront_distribution.web']}
+        domain = {'references': ['aws_cloudfront_distribution.web.domain_name', 'aws_cloudfront_distribution.web']}
+        doc['configuration'] = {'root_module': {'resources': [
+            {'address': f'aws_lambda_permission.{name}', 'expressions': {'source_arn': arn}}
+            for name in ('api_url', 'api_invoke')] + [
+            {'address': 'aws_dynamodb_table_item.app_origin', 'expressions': {'item': domain}}]}}
+        self.assertEqual(self.run_check(doc, '--deploy', '--first-apply'), (0, ''))
+        doc['configuration']['root_module']['resources'][-1]['expressions']['item'] = {
+            'references': ['aws_cloudfront_distribution.web.domain_name', 'aws_cloudfront_distribution.web', 'var.name']}
+        self.refused(doc, 'from aws_cloudfront_distribution.web.domain_name alone', '--deploy', '--first-apply')
 
     def test_known_table_names_must_match_the_table(self):
         doc = plan()

@@ -44,8 +44,10 @@ EXPECTED = {
 CLOUDFRONT_PERMISSIONS = {'api_url': 'lambda:InvokeFunctionUrl', 'api_invoke': 'lambda:InvokeFunction'}
 # How a saved plan's configuration names the distribution's ARN, where the ARN is unknown until apply.
 DISTRIBUTION_ARN_REFERENCES = {'aws_cloudfront_distribution.web.arn', 'aws_cloudfront_distribution.web'}
-# The origin row's key in the records table (server/app.ts reads it).
+# The origin row's key in the records table (server/app.ts reads it), and how a saved plan's configuration names
+# the distribution's domain in the row, where the domain is unknown until apply.
 APP_ORIGIN_KEY = {'pk': {'S': 'SYSTEM#DEPLOYMENT'}, 'sk': {'S': 'APP_ORIGIN'}}
+DISTRIBUTION_DOMAIN_REFERENCES = {'aws_cloudfront_distribution.web.domain_name', 'aws_cloudfront_distribution.web'}
 
 
 # The scheduled webhook dispatcher (webhooks.tf), present only with webhook_dispatcher_enabled. Its resources come
@@ -400,21 +402,29 @@ def cloudfront_permission_rules(rows, configuration):
                     "in the saved plan's configuration section")
 
 
-def app_origin_rules(rows):
+def app_origin_rules(rows, configuration):
     """The origin row is exactly SYSTEM#DEPLOYMENT / APP_ORIGIN in the records table, naming this stack's
     distribution. A deploy can write any row through an aws_dynamodb_table_item, and the API names this origin in
-    its sign-in challenges, so both its key and its value must be known at plan and match."""
+    its sign-in challenges. Where the distribution is created or replaced, its domain and so the row are unknown
+    until apply: the saved plan's configuration must then build the row from that domain only. The mock plans
+    check the row's key, and the --deploy re-run after a first apply checks the row itself."""
     values = next(r for r in rows if r['type'] == 'aws_dynamodb_table_item').get('values', {})
     table = next((r.get('values', {}).get('name') for r in rows if r['type'] == 'aws_dynamodb_table'), None)
     domain = next((r.get('values', {}).get('domain_name') for r in rows
                    if r['type'] == 'aws_cloudfront_distribution' and r['name'] == 'web'), None)
     require(table is not None and values.get('table_name') == table and values.get('hash_key') == 'pk' and
             values.get('range_key') == 'sk', 'aws_dynamodb_table_item.app_origin must be in the records table, keyed by pk and sk')
-    require(isinstance(values.get('item'), str) and domain is not None,
-            'aws_dynamodb_table_item.app_origin and the distribution domain must be known at plan')
-    require(json.loads(values['item']) == dict(APP_ORIGIN_KEY, version={'N': '0'}, origin={'S': f'https://{domain}'}),
-            "aws_dynamodb_table_item.app_origin must be exactly the SYSTEM#DEPLOYMENT / APP_ORIGIN row naming this "
-            "stack's distribution")
+    if isinstance(values.get('item'), str):
+        require(domain is not None and json.loads(values['item']) ==
+                dict(APP_ORIGIN_KEY, version={'N': '0'}, origin={'S': f'https://{domain}'}),
+                "aws_dynamodb_table_item.app_origin must be exactly the SYSTEM#DEPLOYMENT / APP_ORIGIN row naming "
+                "this stack's distribution")
+    else:
+        resources = {r['address']: r for r in (configuration or {}).get('root_module', {}).get('resources', [])}
+        item = resources.get('aws_dynamodb_table_item.app_origin', {}).get('expressions', {}).get('item', {})
+        require(set(item.get('references', [])) == DISTRIBUTION_DOMAIN_REFERENCES,
+                "aws_dynamodb_table_item.app_origin is unknown at plan, so the saved plan's configuration must build "
+                'it from aws_cloudfront_distribution.web.domain_name alone')
 
 
 def config_env_references(configuration, name):
@@ -449,7 +459,7 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
     if expanded:
         workflow_rules(rows)
         cloudfront_permission_rules(rows, configuration)
-        app_origin_rules(rows)
+        app_origin_rules(rows, configuration)
         due_index_rules(rows)
         dispatcher_rules(rows, dispatcher)
         funcs = {r['name']: r for r in rows if r['type'] == 'aws_lambda_function'}
