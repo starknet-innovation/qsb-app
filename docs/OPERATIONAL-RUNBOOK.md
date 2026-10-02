@@ -124,14 +124,18 @@ The API writes one access line for each request its code finishes, in its log gr
 - **Scope:** frontend requests aren't logged. CloudFront serves them from the frontend bucket and never reaches the API. A request that hits the Lambda timeout or runs out of memory, whose handler throws, or that the function URL refuses before the code runs, has no line either.
 - **`status`** is what the API returned, not always what the caller got. CloudFront stops waiting for a response after 30 seconds. It sends a GET or HEAD again, up to three tries in all, and answers 504 after the last. So one slow GET can log up to three lines with the same `cfId`, each with its own status, while the caller saw 504. A retry can also be throttled by the API's reserved concurrency (`lambda_concurrency`, 2 by default). The caller then gets 429, and that try has no line. CloudFront doesn't retry other methods: a slow POST logs one line, perhaps 200, while the caller saw 504.
 
-To find who made a request, search the log group with `aws logs filter-log-events`, which stores nothing:
+To find who made a request, search the log group with `aws logs filter-log-events`:
 
 ```sh
 aws logs filter-log-events --log-group-name /aws/lambda/<name>-api \
   --start-time <epoch ms> --end-time <epoch ms> --filter-pattern '"<cfId, requestId or path>"'
 ```
 
-Each line is one JSON record whose `message` is the access line as a string, so `{ $.message.access.… }` selectors match nothing: use a quoted text match, as above. A text match can also hit the same text in another line's path, so check which field matched. Logs Insights keeps each query's results for 7 days, a copy that can outlast the 30 days.
+Each line is one JSON record whose `message` is the access line as a string, so `{ $.message.access.… }` selectors match nothing: use a quoted text match, as above. A text match can also hit the same text in another line's path, so check which field matched. Searches leave copies of their own:
+- Logs Insights keeps each query's results for 7 days.
+- CloudTrail can record each search, pattern included, for 90 days, and longer in an organisation trail.
+
+So search by `cfId` or `requestId`, or by the post-deploy check's own path. A search by a vault, job or transaction path, or by an address, leaves that value in CloudTrail, and counts as a copy under the rule below.
 
 These lines are personal data. The address, country and network identify the caller, and paths name vaults, jobs and transactions (for example `/api/transactions/<txid>/status`), so a line can tie a caller's IP to their vault or to an on-chain transaction.
 

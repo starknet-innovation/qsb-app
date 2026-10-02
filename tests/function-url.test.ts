@@ -82,8 +82,19 @@ it("logs each viewer header only in the form CloudFront gives it", async () => {
       "x-amz-cf-id": "not-an-id",
     }) as never,
   );
-  const [ipv6, malformed] = log.mock.calls.map(([line]) => JSON.parse(String(line)).access);
+  // A caller's own header next to CloudFront's arrives joined with a comma: each is left out.
+  await handler(
+    event("GET", "/v1/health", {
+      "cloudfront-viewer-address": "192.0.2.1:1,198.51.100.10:46532",
+      "cloudfront-viewer-country": "ZZ,GB",
+      "cloudfront-viewer-asn": "1,64496",
+      "x-amz-cf-id": `${CF_ID},${CF_ID}`,
+    }) as never,
+  );
+  const [ipv6, malformed, joined] = log.mock.calls.map(([line]) => JSON.parse(String(line)).access);
   expect(ipv6.caller).toEqual({ address: "2001:db8::1:443" });
   expect(malformed.caller).toEqual({});
   expect(malformed.cfId).toBeUndefined();
+  expect(joined.caller).toEqual({});
+  expect(joined.cfId).toBeUndefined();
 });
