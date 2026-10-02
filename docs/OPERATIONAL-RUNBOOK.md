@@ -136,7 +136,12 @@ Each line is one JSON record whose `message` is the access line as a string, so 
 These lines are personal data. The address, country and network identify the caller, and paths name vaults, jobs and transactions (for example `/api/transactions/<txid>/status`), so a line can tie a caller's IP to their vault or to an on-chain transaction.
 
 - **Who can read them:** `qsb-operator`, the GitHub deploy role `qsb-github-deploy` (its `logs:*` on `/aws/lambda/qsb-*`, `ops/github-aws/render.py`), and the AWS administrator.
-- **Use:** read them for a security investigation only, or for the post-deploy check of the logged fields in `docs/STATUS.md`. That check reads only its own requests, found by the path only it uses.
+- **Use:** read them only for:
+  - a security investigation;
+  - triage of an API error or alarm;
+  - the post-deploy check of the logged fields in `docs/STATUS.md`, which reads only its own requests, found by the path only it uses.
+
+  Fetch only the records you need, for example `filter-log-events --filter-pattern '{ $.level = "ERROR" }'`, or a search by the failing invocation's `requestId`. Don't browse the log streams or use Live Tail: they show every caller's line.
 - **Copies:** don't copy a line's `caller` fields or path out of the log group without a reviewed decision. That covers files, issues, chat, exports and subscriptions. In an incident record, refer to a line by its time and `requestId` or `cfId`. That keeps the record to public identifiers (step 3 above), and the lines themselves expire with the log group.
 - **Retention:** don't extend the 30 days without a reviewed decision.
 
