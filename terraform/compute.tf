@@ -106,6 +106,11 @@ resource "aws_lambda_function" "api" {
   timeout                        = 120
   memory_size                    = 512
   reserved_concurrent_executions = var.lambda_concurrency
+  # JSON records keep a console call's sole object argument as its `message` object, so the
+  # stray-payments metric filter (workflow.tf) can select a field no logged string can supply.
+  logging_config {
+    log_format = "JSON"
+  }
   environment {
     variables = merge({ TABLE_NAME = aws_dynamodb_table.records.name, APP_ORIGIN = "https://${aws_cloudfront_distribution.web.domain_name}", QSB_EXACT_SUBMIT_ENABLED = tostring(var.exact_submit_enabled), WORKFLOW_ARN = local.workflow_arn, QSB_NETWORK = var.network, SOLVER_RELEASE_ID = local.solver_release_id, QSB_MAINNET_ENABLED = tostring(var.mainnet_enabled), QSB_API_KEYS_ENABLED = tostring(var.api_keys_enabled) }, local.owner_limit_env, var.slipstream_secret_arn == "" ? {} : { SLIPSTREAM_SECRET_ARN = var.slipstream_secret_arn })
   }
