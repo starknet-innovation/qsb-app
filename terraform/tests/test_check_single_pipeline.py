@@ -16,12 +16,21 @@ SCRIPT = Path(__file__).resolve().parent / 'check-single-pipeline.py'
 BOUNDARY = 'arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary'
 OPERATOR = 'arn:aws:iam::123456789012:role/qsb/bootstrap/qsb-operator'
 MINER = 'arn:aws:secretsmanager:eu-west-1:123456789012:secret:qsb/slipstream-AbC123'
+# The API function, in the secret's account and Region, as the miner credential grant names it.
+SOURCE_FUNCTION = 'arn:aws:lambda:eu-west-1:123456789012:function:qsb-app-api'
+
+
+# What each role trusts in the real stack: the Lambda and workflow roles their AWS service, the reconcile role
+# qsb-operator.
+SERVICE = {'lambda': 'lambda.amazonaws.com', 'workflow': 'states.amazonaws.com'}
 
 
 def role(name, trust=OPERATOR):
+    statement = ({'Effect': 'Allow', 'Principal': {'Service': SERVICE[name]}, 'Action': 'sts:AssumeRole'}
+                 if name in SERVICE else {'Principal': {'AWS': [trust]}})
     return {'type': 'aws_iam_role', 'name': name, 'mode': 'managed', 'values': {
         'name': f'qsb-app-{name}', 'path': '/qsb/runtime/', 'permissions_boundary': BOUNDARY,
-        'assume_role_policy': json.dumps({'Statement': [{'Principal': {'AWS': [trust]}}]})}}
+        'assume_role_policy': json.dumps({'Statement': [statement]})}}
 
 
 def workflow(retry=None, catch=None, fail=None):
@@ -398,7 +407,8 @@ class DeployChecks(unittest.TestCase):
         rows = doc['planned_values']['root_module']['resources']
         if env:
             next(r for r in rows if r['type'] == 'aws_lambda_function' and r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = arn
-        statement = grant or {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue', 'Resource': arn}
+        statement = grant or {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue', 'Resource': arn,
+                              'Condition': {'ArnLike': {'lambda:SourceFunctionArn': SOURCE_FUNCTION}}}
         rows.append({'type': 'aws_iam_role_policy', 'name': policy_name, 'mode': 'managed',
                      'values': {'policy': json.dumps({'Version': '2012-10-17', 'Statement': [statement]})}})
         return doc
@@ -415,6 +425,26 @@ class DeployChecks(unittest.TestCase):
                       {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue', 'Resource': [MINER]}):
             with self.subTest(grant=grant):
                 self.refused(self.with_miner_credential(grant=grant), 'qsb/slipstream secret only')
+
+    def test_the_miner_credential_is_read_only_from_the_api_function(self):
+        grant = lambda condition: dict({'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue', 'Resource': MINER},
+                                       **({'Condition': condition} if condition is not None else {}))
+        for condition in (None, {'ArnLike': {'lambda:SourceFunctionArn': SOURCE_FUNCTION.replace('-api', '-coordinator')}},
+                          {'ArnLike': {'lambda:SourceFunctionArn': 'arn:aws:lambda:eu-west-1:123456789012:function:*'}},
+                          {'ArnLike': {'aws:PrincipalArn': SOURCE_FUNCTION}}):
+            with self.subTest(condition=condition):
+                self.refused(self.with_miner_credential(grant=grant(condition)), 'only to calls from the API function')
+
+    def test_runtime_roles_trust_only_their_service(self):
+        for name, principal in (('lambda', {'AWS': 'arn:aws:iam::999999999999:root'}), ('workflow', {'Service': 'lambda.amazonaws.com'}),
+                                ('lambda', {'Service': ['lambda.amazonaws.com', 'ec2.amazonaws.com']})):
+            doc = plan()
+            target = next(r for r in doc['planned_values']['root_module']['resources']
+                          if r['type'] == 'aws_iam_role' and r['name'] == name)
+            target['values']['assume_role_policy'] = json.dumps({'Statement': [
+                {'Effect': 'Allow', 'Principal': principal, 'Action': 'sts:AssumeRole'}]})
+            with self.subTest(name=name, principal=principal):
+                self.refused(doc, f'aws_iam_role.{name} must trust only')
 
     def test_a_wildcard_action_counts_as_a_secret_grant(self):
         self.refused(self.with_miner_credential(grant={'Effect': 'Allow', 'Action': '*', 'Resource': '*'}, policy_name='start'),

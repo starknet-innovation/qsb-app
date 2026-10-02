@@ -90,6 +90,10 @@ MOCK_RUNS = {'baseline', 'configured_single_pipeline', 'miner_credential_api_onl
 MINER_SECRET = re.compile(r'^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:qsb/slipstream-[A-Za-z0-9]{6}$')
 MINER_POLICY = ('aws_iam_role_policy', 'miner_credential')
 MINER_GRANT = {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue'}
+# The API function's ARN as terraform/compute.tf builds it for the miner credential's lambda:SourceFunctionArn.
+MINER_SOURCE = '"lambda:SourceFunctionArn" = "arn:aws:lambda:${var.region}:${var.aws_account_id}:function:${var.name}-api"'
+# What each runtime role may trust: only its AWS service. The schedule and reconcile roles have their own checks.
+RUNTIME_TRUST = {'lambda': 'lambda.amazonaws.com', 'workflow': 'states.amazonaws.com'}
 # Data sources the stack reads; anything else (an aws_iam_policy_document, say) is unreviewed policy input.
 DATA_SOURCES = {'aws_partition', 'aws_cloudfront_cache_policy', 'aws_cloudfront_origin_request_policy'}
 # Where file-reading functions may read: the reviewed policies, build artifacts, the build manifest
@@ -313,9 +317,9 @@ def static_secret_rules(root):
             body = text[start:end]
             require(re.search(r'\brole\s*=\s*aws_iam_role\.lambda\["api"\]\.id\b', body)
                     and re.search(r'Resource\s*=\s*var\.slipstream_secret_arn\b', body)
-                    and len(re.findall(r'\bEffect\s*=', body)) == 1,
+                    and len(re.findall(r'\bEffect\s*=', body)) == 1 and MINER_SOURCE in body,
                     'aws_iam_role_policy.miner_credential must be one statement on the API role for '
-                    'var.slipstream_secret_arn')
+                    'var.slipstream_secret_arn, read only from the API function')
     for path in sorted((root / 'policies').glob('*.json')):
         for statement in json.loads(path.read_text()):
             require('NotAction' not in statement, f'policies/{path.name}: NotAction is not allowed')
@@ -396,6 +400,20 @@ def secret_grants(rows):
     return grants
 
 
+def runtime_trust_rules(roles):
+    """The Lambda and workflow roles trust only their AWS service. A deploy may create runtime roles, and a
+    role that trusted another account would let it act as that role, and read what the boundary allows, from
+    outside (ops/github-aws/README.md)."""
+    for row in (r for r in roles if r['name'] in RUNTIME_TRUST):
+        document = row.get('values', {}).get('assume_role_policy')
+        require(isinstance(document, str), f"aws_iam_role.{row['name']}: the trust policy must be known at plan")
+        statements = as_list(json.loads(document).get('Statement'))
+        require(statements and all(set(st) <= {'Sid', 'Effect', 'Principal', 'Action'} and st.get('Effect') == 'Allow'
+                                   and st.get('Action') == 'sts:AssumeRole'
+                                   and st.get('Principal') == {'Service': RUNTIME_TRUST[row['name']]} for st in statements),
+                f"aws_iam_role.{row['name']} must trust only {RUNTIME_TRUST[row['name']]}")
+
+
 def cloudfront_permission_rules(rows, configuration):
     """Each Lambda permission lets CloudFront invoke the API for this stack's distribution only. The IAM guards
     can't check a permission's SourceArn (ops/github-aws/README.md), so the plan must."""
@@ -472,6 +490,7 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
             'Expected only Lambda/workflow service roles, one reconciliation operator role and, with the webhook '
             'dispatcher, its schedule role')
     if expanded:
+        runtime_trust_rules(roles)
         workflow_rules(rows)
         cloudfront_permission_rules(rows, configuration)
         app_origin_rules(rows, configuration)
@@ -516,11 +535,17 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
         grants = secret_grants(rows)
         require(all(row['name'] == 'miner_credential' for row, _ in grants),
                 'Only the miner_credential policy may grant Secrets Manager access')
+        api_function = funcs['api'].get('values', {}).get('function_name')
         for row, statement in grants:
             require({k: statement.get(k) for k in MINER_GRANT} == MINER_GRANT
                     and isinstance(statement.get('Resource'), str) and MINER_SECRET.match(statement['Resource'])
-                    and set(statement) <= {'Sid', 'Effect', 'Action', 'Resource'},
+                    and set(statement) <= {'Sid', 'Effect', 'Action', 'Resource', 'Condition'},
                     'The miner credential grant must be GetSecretValue on the qsb/slipstream secret only')
+            # Read only from the API function's own execution environment, in the secret's account and Region.
+            region, account = statement['Resource'].split(':')[3:5]
+            require(isinstance(api_function, str) and statement.get('Condition') == {'ArnLike': {
+                        'lambda:SourceFunctionArn': f'arn:aws:lambda:{region}:{account}:function:{api_function}'}},
+                    'The miner credential grant must apply only to calls from the API function (lambda:SourceFunctionArn)')
         if miner:
             statements = as_list(json.loads(miner[0]['values']['policy']).get('Statement'))
             require(len(statements) == 1 and len(grants) == 1,

@@ -66,7 +66,8 @@ class SinglePipelinePolicies(unittest.TestCase):
         secret = [s for s in self.policies['boundary']['Statement'] if any(a.startswith('secretsmanager:') for a in s['Action'])]
         self.assertEqual(secret, [{'Sid': 'MinerCredential', 'Effect': 'Allow', 'Action': ['secretsmanager:GetSecretValue'],
                                    'Resource': ['arn:aws:secretsmanager:eu-west-2:123456789012:secret:qsb/slipstream-??????'],
-                                   'Condition': {'ArnLike': {'aws:PrincipalArn': 'arn:aws:iam::123456789012:role/qsb/runtime/qsb-*-api'}}}])
+                                   'Condition': {'ArnLike': {'aws:PrincipalArn': 'arn:aws:iam::123456789012:role/qsb/runtime/qsb-*-api',
+                                                             'lambda:SourceFunctionArn': 'arn:aws:lambda:eu-west-2:123456789012:function:qsb-*-api'}}}])
         self.assertFalse(any(a in ('*', 'kms:*', 'kms:Decrypt') for s in self.policies['boundary']['Statement'] for a in s['Action']))
 
     def test_role_deletion_lookup_is_scoped_without_instance_profile_management(self):

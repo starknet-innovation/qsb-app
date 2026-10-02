@@ -67,7 +67,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 | Backup files: vault, `-withdrawal`, `-signing` | Browser or SDK/CLI, locally | User's own storage | Nothing |
 | Session token (1 hour) / API key (scoped, up to 90 days) | API, after a BIP-322 sign-in | Browser, or the SDK caller | SHA-256 hash at rest; receives the bearer credential on authenticated requests |
 | Webhook signing secret | API, shown once to the owner | Owner's webhook receiver | The secret, to sign deliveries (HMAC-SHA256) |
-| MARA Slipstream credential (optional) | Administrator | AWS Secrets Manager | Read at runtime by API roles; sent only to MARA |
+| MARA Slipstream credential (optional) | Administrator | AWS Secrets Manager | Read at runtime by the API function only, from its own execution environment; sent only to MARA |
 
 ## Who can do what
 
@@ -81,4 +81,4 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 
 ## Sources
 
-Written against `main` at `e150b56` (30 September 2026): `src/lib/backup.ts`, `public/qsb/bridge.py`, `public/qsb/qsb_pipeline.py`, `src/lib/wallet.ts`, `src/mainnet/localSignature.ts`, `server/app.ts`, `server/scoped-keys.ts`, `server/webhooks.ts`, `terraform/variables.tf`, `src/TransactionDialog.tsx`, `server/providers.ts`, `server/submit-exact.ts`, `src/App.tsx`, `server/transaction-checks.ts`, `sdk/runtime.ts`, `sdk/signer.ts`, `sdk/client.ts`, `sdk/cli.ts`, `worker/cpu/handler.py` and [EXACT-SUBMIT.md](EXACT-SUBMIT.md). Keep this page, `key-custody.html` and `key-custody.png` in step; see "Docs" in `AGENTS.md`.
+Written against `main` at `366dc5c` (2 October 2026): `src/lib/backup.ts`, `public/qsb/bridge.py`, `public/qsb/qsb_pipeline.py`, `src/lib/wallet.ts`, `src/mainnet/localSignature.ts`, `server/app.ts`, `server/scoped-keys.ts`, `server/webhooks.ts`, `terraform/variables.tf`, `terraform/compute.tf`, `ops/github-aws/render.py`, `src/TransactionDialog.tsx`, `server/providers.ts`, `server/submit-exact.ts`, `src/App.tsx`, `server/transaction-checks.ts`, `sdk/runtime.ts`, `sdk/signer.ts`, `sdk/client.ts`, `sdk/cli.ts`, `worker/cpu/handler.py` and [EXACT-SUBMIT.md](EXACT-SUBMIT.md). Keep this page, `key-custody.html` and `key-custody.png` in step; see "Docs" in `AGENTS.md`.

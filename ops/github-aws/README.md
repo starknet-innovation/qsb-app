@@ -30,8 +30,10 @@ infrastructure. Roles can be passed only to Lambda, Step Functions and EventBrid
 dispatcher's schedule; the role can manage only `qsb-*` schedules in the default group.
 
 The runtime boundary allows QSB data access and, for API roles (`qsb-*-api`) only, read-only access to one secret,
-`qsb/slipstream`: the optional MARA Slipstream credential (see `terraform/README.md`). It allows no other secret and
-no KMS decrypt. Deploying code confers that code's runtime access, so `qsb-operator` and `qsb-github-deploy` can
+`qsb/slipstream`: the optional MARA Slipstream credential (see `terraform/README.md`). Only calls from an API
+function's own execution environment get it (`lambda:SourceFunctionArn`, which Lambda sets on those calls alone), so
+a session of an API role taken anywhere else, such as by another account a changed trust names, can't read it. It
+allows no other secret and no KMS decrypt. Deploying code confers that code's runtime access, so `qsb-operator` and `qsb-github-deploy` can
 reach this secret through an API role. Workflow log-delivery control APIs and regional metadata discovery require
 regional wildcard resources; these are the runtime control-plane exceptions. In S3, the boundary allows only the GPU
 job bucket's prefixes (`s3:PutObject` on `inputs/*`, `s3:GetObject` on `outputs/*`), which Terraform grants to the
@@ -205,7 +207,10 @@ refuses a plan whose `source_arn` isn't this stack's distribution. An operator c
 - a Lambda permission for either allowed service principal whose `SourceArn` or `SourceAccount` names another
   account, or whose source restrictions are missing;
 - runtime role trust changes, S3 bucket policies (including frontend content access), or cross-account log
-  subscriptions.
+  subscriptions. IAM has no condition key for a trust policy's principals, so nothing here can deny a trust that
+  names another account. `check-single-pipeline.py --deploy` refuses a plan in which the Lambda or workflow roles
+  trust anything but their AWS service, which covers deploys but not a direct API call. A role trusted from outside
+  can still do what the boundary allows, except read `qsb/slipstream` (above).
 
 A CloudFront distribution in another account, granted the API's function URL by such a permission,
 and [EventBridge cross-account service targets](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-service-cross-account.html)

@@ -227,7 +227,7 @@
   </div>
   <div class="cell service">
     <div class="step">Checks the transaction pays the vault script, records the exact bytes and submits them to MARA.</div>
-    <div class="step">Reads the optional MARA credential from Secrets Manager; only the API roles can.<br><span class="chip cred">MARA Slipstream credential</span></div>
+    <div class="step">Reads the optional MARA credential from Secrets Manager; only the API function can, from its own environment.<br><span class="chip cred">MARA Slipstream credential</span></div>
   </div>
   <div class="cell service">
     <div class="step">Reserves both outpoints atomically, then the coordinator runs the search.</div>
@@ -273,7 +273,7 @@
       <tr><td><span class="chip enc">Backup files</span><br>vault, -withdrawal, -signing</td><td>Browser or SDK/CLI, locally</td><td>User's own storage</td><td>Nothing</td></tr>
       <tr><td><span class="chip cred">Session token / API key</span><br>1 h / scoped, up to 90 days</td><td>API, after a BIP-322 sign-in</td><td>Browser, or the SDK caller</td><td>SHA-256 hash at rest; receives bearer credentials on authenticated requests</td></tr>
       <tr><td><span class="chip cred">Webhook signing secret</span></td><td>API, shown once to the owner</td><td>Owner's webhook receiver</td><td>The secret, to sign deliveries (HMAC-SHA256)</td></tr>
-      <tr><td><span class="chip cred">MARA Slipstream credential</span><br>optional</td><td>Administrator</td><td>AWS Secrets Manager</td><td>Read at runtime by API roles; sent only to MARA</td></tr>
+      <tr><td><span class="chip cred">MARA Slipstream credential</span><br>optional</td><td>Administrator</td><td>AWS Secrets Manager</td><td>Read at runtime by the API function only, from its own environment; sent only to MARA</td></tr>
     </table>
   </div>
   <div class="panel">
@@ -290,7 +290,7 @@
 </div>
 
 <footer>
-  <span>Source: starknet-innovation/qsb-app, main @ e150b56 (30 Sep 2026). Research snapshot; mainnet operations are off by default.</span>
+  <span>Source: starknet-innovation/qsb-app, main @ 366dc5c (2 Oct 2026). Research snapshot; mainnet operations are off by default.</span>
   <span>Key sources: src/lib/backup.ts · public/qsb/bridge.py · server/app.ts · docs/EXACT-SUBMIT.md · full list in docs/KEY-CUSTODY.md</span>
 </footer>
 
