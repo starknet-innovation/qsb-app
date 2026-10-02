@@ -5,6 +5,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import importlib.util
+
+# The checker as a module, for its pure functions; the other tests run it as a script.
+_spec = importlib.util.spec_from_file_location('check_single_pipeline', Path(__file__).with_name('check-single-pipeline.py'))
+check = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(check)
 
 SCRIPT = Path(__file__).resolve().parent / 'check-single-pipeline.py'
 BOUNDARY = 'arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-runtime-boundary'
@@ -482,6 +488,30 @@ class DeployChecks(unittest.TestCase):
         doc = plan()
         del doc['variables']
         self.refused(doc, 'must set var.region', '--deploy')
+
+    def test_every_planned_resource_stays_in_the_stack_region(self):
+        # Before anything is in state, and for buckets, whose ARNs carry no region: the plan's own regions.
+        doc = plan()
+        rows = doc['planned_values']['root_module']['resources']
+        rows.append({'type': 'aws_s3_bucket', 'name': 'frontend', 'mode': 'managed', 'values': {'region': 'eu-west-2'}})
+        self.assertEqual(check.region_checks(doc), 'eu-west-2')
+        rows[-1]['values']['region'] = 'us-east-1'
+        with self.assertRaisesRegex(ValueError, 'aws_s3_bucket.frontend is planned in us-east-1, not eu-west-2'):
+            check.region_checks(doc)
+        rows[-1]['values']['region'] = 'eu-west-2'
+        doc['configuration'] = {'root_module': {'resources': [
+            {'address': 'aws_s3_bucket.frontend', 'expressions': {'region': {'constant_value': 'eu-west-2'}}}]}}
+        with self.assertRaisesRegex(ValueError, 'aws_s3_bucket.frontend sets its own region'):
+            check.region_checks(doc)
+
+    def test_no_resource_in_the_source_sets_its_own_region(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'main.tf').write_text('variable "region" {\n  type = string\n}\nresource "aws_s3_bucket" "logs" {\n  bucket = "x"\n}\n')
+            check.static_region_rules(root)
+            (root / 'logs.tf').write_text('resource "aws_s3_bucket" "other" {\n  region = "us-east-1"\n  bucket = "y"\n}\n')
+            with self.assertRaisesRegex(ValueError, 'aws_s3_bucket.other sets its own region'):
+                check.static_region_rules(root)
 
     def test_an_empty_state_needs_first_apply(self):
         # A wrong backend bucket or key loads no resources; only a first apply may start from nothing.

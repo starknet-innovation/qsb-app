@@ -114,6 +114,19 @@ On an incident:
 2. Preserve unknown paid outcomes and reconcile them from the provider record. Never retry blindly, and never treat the loss of a local process as proof that remote GPU work stopped.
 3. Keep backups, passphrases and credentials out of the incident record. Record public identifiers only.
 
+### Who called the API
+
+The API writes one access line for each request it serves, in its log group (`/aws/lambda/<name>-api`, in the stack's region, kept 30 days): `{"access": {"time", "method", "path", "status", "requestId", "cfId", "caller": {"address", "country", "asn"}}}` (`server/lambda.ts`).
+
+- **`caller`** is the caller as CloudFront saw it: the IP address and source port, the two-letter country, and the AS number of the caller's network. These come from the `CloudFront-Viewer-Address`, `CloudFront-Viewer-Country` and `CloudFront-Viewer-ASN` headers, which CloudFront adds to each request it forwards (`terraform/web.tf`). The function URL's own source address is CloudFront's.
+- **`cfId`** is CloudFront's ID for the request (`X-Amz-Cf-Id`).
+- **Validation:** each header is logged only in the form CloudFront gives it, and left out otherwise. The fields describe the caller only if CloudFront replaces these headers when a caller sends them itself, which AWS doesn't document.
+- **Scope:** frontend requests aren't logged. CloudFront serves them from the frontend bucket and never reaches the API.
+
+To find who made a request, search the log group by time, path or status. Each line is one JSON record whose `message` is the access line as a string.
+
+These lines are personal data. The address, country and network identify the caller, and paths name vaults, jobs and transactions (for example `/api/transactions/<txid>/status`), so a line can tie a caller's IP to their vault or to an on-chain transaction. Read them for a security investigation only, keep what you copy into an incident record to the requests in question, and don't extend the 30 days without a reviewed decision.
+
 ### Stray payments
 
 `<name>-stray-payments` fires when the API flags more confirmed payments to a vault's script beyond its recorded deposit than it had recorded ([API](API.md#stray-payments)). The API Lambda logs in JSON format, one record per console call at INFO or above, with the call's text or object in `message`. When it flags a payment, its record's `message` is the object `{"strayPayment": {"vaultId": …, "count": …, "newCount": …, "sats": …, "outputs": ["<txid>:<vout>"]}}`. A metric filter on the API's log group counts those records with the pattern `{ $.message.strayPayment.newCount >= 1 }` (`terraform/workflow.tf`); filter the log group with the same pattern to find them. `count` and `sats` cover all the vault's stray outputs; `outputs` names those newly listed, and the vault's stray-payment record lists at most 20. The log record names the vault, not the owner.

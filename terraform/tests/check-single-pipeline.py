@@ -210,6 +210,16 @@ def dispatcher_rules(rows, dispatcher):
             require(row['name'] == 'webhook_schedule', 'The schedule role has only its invoke policy')
 
 
+def static_region_rules(root):
+    """Every resource is in the provider's region, var.region (docs/REGION-MIGRATION.md): no resource sets the
+    provider's per-resource region argument, which would place it in another Region."""
+    for path in sorted(root.glob('*.tf')):
+        text = path.read_text()
+        for kind, name, start, end in resource_blocks(text):
+            require(kind == 'variable' or not re.search(r'^  region\s*=', text[start:end], re.M),
+                    f'{path.name}: {kind}.{name} sets its own region; every resource stays in var.region')
+
+
 def static_dispatcher_rules(root):
     """Source rules for the webhook dispatcher's two roles, which hold even while role names are unknown at plan."""
     allowed = {'aws_iam_role.lambda["webhooks"]': {('aws_iam_role_policy', 'webhook_records'), ('aws_lambda_function', 'webhooks')},
@@ -547,6 +557,14 @@ def region_checks(plan):
         parts = str(row.get('values', {}).get('arn') or '').split(':')
         if len(parts) > 3 and parts[3]:  # global services (IAM, CloudFront, S3 buckets) carry no region
             require(parts[3] == region, f"{row['type']}.{row['name']} is in {parts[3]}, not {region}")
+    # The provider's per-resource region argument would place a resource in another Region before it is in state,
+    # and an S3 bucket's ARN carries none: refuse the argument, and any planned resource in another Region.
+    for resource in (plan.get('configuration') or {}).get('root_module', {}).get('resources', []):
+        require('region' not in resource.get('expressions', {}),
+                f"{resource.get('address')} sets its own region; every resource stays in var.region")
+    for row in module_resources(plan.get('planned_values', {}).get('root_module', {})):
+        planned = row.get('values', {}).get('region')
+        require(planned is None or planned == region, f"{row['type']}.{row['name']} is planned in {planned}, not {region}")
     return region
 
 
@@ -623,6 +641,7 @@ def module_resources(module):
 def main():
     root = Path(__file__).resolve().parents[1]
     static_secret_rules(root)
+    static_region_rules(root)
     static_dispatcher_rules(root)
     frontend_order_rules(root)
     if len(sys.argv) == 1:
