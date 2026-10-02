@@ -286,11 +286,10 @@ deletes a policy version. It refuses before any write in any of these cases:
 - the number of rendered access policies changed;
 - anything is missing, including all of a role's access policies;
 - any of the three roles carries a policy this commit doesn't render;
-- the runtime boundary names an `api_functions` function that isn't deployed with the runtime role of the same name,
-  which locks the API out of `qsb/slipstream`. It refuses when it would install that boundary, and also, once the app
-  stack exists, when the boundary is unchanged: `bootstrap.py` installs it before any function exists. Before the app
-  stack exists, for example in a new account's GPU step, it only warns. Plan mode checks this only if its profile can
-  list functions; `--apply` always does.
+- an app stack is deployed and an `api_functions` name isn't a deployed function with the runtime role of the same
+  name. The boundary, installed now or earlier by `bootstrap.py` before any function existed, would lock that API
+  out of `qsb/slipstream`. Before an app stack exists, for example in a new account's GPU step, it only warns. Plan
+  mode checks this only if its profile can list functions; `--apply` always does.
 
 Afterwards, run `verify.py --role-arn` and `verify_access.py --live`. Old policy versions stay stored but inactive;
 an administrator can delete them once verification passes.

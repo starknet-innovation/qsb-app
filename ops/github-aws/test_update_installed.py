@@ -167,27 +167,24 @@ class UpdateInstalled(unittest.TestCase):
     def test_api_functions_must_be_deployed_with_their_own_role(self):
         # A well-formed wrong name would install a boundary that locks the API out of the MARA credential.
         role = f'arn:aws:iam::{ACCOUNT}:role/qsb/runtime/'
-        for functions in ({}, {'qsb-tset-api': role + 'qsb-tset-api'}, {'qsb-test-api': role + 'qsb-test-coordinator'}):
+        coordinator = {'qsb-test-coordinator': role + 'qsb-test-coordinator'}
+        for functions in (coordinator, {**coordinator, 'qsb-tset-api': role + 'qsb-tset-api'},
+                          {'qsb-test-api': role + 'qsb-test-coordinator'}):
             iam = self.installed()
             iam['functions'] = functions
-            # Only an install of the boundary is refused: it must differ for the check to block.
-            iam['policies']['qsb-runtime-boundary'][-1] = {'Version': '2012-10-17', 'Statement': []}
             with self.subTest(functions=functions):
                 with self.assertRaisesRegex(SystemExit, 'api_functions: qsb-test-api is not a deployed function'):
                     self.run_update(iam, apply=False)
                 with self.assertRaisesRegex(SystemExit, 'api_functions: qsb-test-api is not a deployed function'):
                     self.run_update(iam)
                 self.assertEqual(self.writes(), [])
-        # With the boundary unchanged and no app stack yet (a new account's GPU step), a missing function only warns.
+        # Before an app stack exists (a new account's GPU step), the function can't be deployed yet: the run goes
+        # ahead, a changed boundary included.
         iam = self.installed()
         iam['functions'] = {'qsb-gpu-watchdog': role + 'qsb-gpu-watchdog'}
+        iam['policies']['qsb-runtime-boundary'][-1] = {'Version': '2012-10-17', 'Statement': []}
         self.run_update(iam)
-        self.assertEqual(self.writes(), [])
-        # Once the app stack exists, an unchanged boundary naming a typo is refused too: bootstrap.py installed it.
-        iam = self.installed()
-        iam['functions'] = {'qsb-test-coordinator': role + 'qsb-test-coordinator', 'qsb-tset-api': role + 'qsb-tset-api'}
-        with self.assertRaisesRegex(SystemExit, 'fix the inventory, then install the corrected boundary'):
-            self.run_update(iam, apply=False)
+        self.assertIn('create-policy-version', self.writes())
         # A profile that can't list functions plans anyway, and --apply checks again.
         iam = self.installed()
         iam['functions_denied'] = True

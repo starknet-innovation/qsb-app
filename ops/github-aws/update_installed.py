@@ -20,8 +20,8 @@ changes who a role trusts: moving a principal or an OIDC sub/aud is refused. It 
 detaches a policy, and never deletes a policy version. It refuses before any write when a
 changed managed policy already has IAM's five versions, the number of rendered access
 policies changed, something is missing, a role carries policies this commit doesn't render, or it
-would install, or once the app stack exists keep, a runtime boundary naming an api_functions function
-that isn't deployed with the runtime role of the same name.
+finds an app stack deployed and an api_functions name that isn't a deployed function with the runtime
+role of the same name.
 """
 import argparse
 import hashlib
@@ -159,8 +159,9 @@ else:
     deployed = {f.get('FunctionName'): f.get('Role') for f in listing.get('Functions', [])}
     api_missing = [name for name in c['api_functions']
                    if deployed.get(name) != f"arn:aws:iam::{c['account']}:role/qsb/runtime/{name}"]
-    # An app stack is deployed once its coordinator is (terraform/compute.tf: <name>-coordinator).
-    app_stack = any(re.fullmatch(r'qsb-(?!gpu-)[a-z0-9-]+-coordinator', name or '') for name in deployed)
+    # An app stack is deployed once its coordinator or an API function is (terraform/compute.tf: <name>-coordinator,
+    # <name>-api), which also covers a first apply that stopped part way.
+    app_stack = any(re.fullmatch(r'qsb-(?!gpu-)[a-z0-9-]+-(?:coordinator|api)', name or '') for name in deployed)
 
 
 def managed(name, document):
@@ -325,17 +326,15 @@ header = {'commit': commit, 'apply': a.apply, **({} if a.apply else {'plan_hash'
 print(json.dumps(header, indent=2), flush=True)
 if any(t[1] == 'missing' for t in targets):
     raise SystemExit('Some identities are missing; run the bootstrap first')
-# A wrong name blocks an install of the boundary, and any run once the app stack exists: bootstrap.py installs the
-# boundary before any function does, so a typo there must stop the first update after the first apply. Before the
-# app stack exists (a new account's GPU step), an unchanged boundary just gets a warning.
-boundary_changes = any(label == 'qsb-runtime-boundary' and installed != wanted for label, _, installed, wanted, _ in targets)
+# Once an app stack exists, a wrong name blocks the run: the boundary, installed now or earlier by bootstrap.py
+# before any function existed, would lock its API out of the secret. Before then there's no API to lock out, and
+# a correct name can't be deployed yet, so it only warns.
 for name in api_missing:
     message = f'api_functions: {name} is not a deployed function with the runtime role of the same name'
-    if boundary_changes or app_stack:
+    if app_stack:
         blockers.append(message + '; fix the inventory, then install the corrected boundary')
     else:
-        print(message + '; no app stack is deployed yet and the boundary is unchanged, so this run goes ahead',
-              file=sys.stderr)
+        print(message + '; no app stack is deployed yet, so this run goes ahead', file=sys.stderr)
 if blockers:
     raise SystemExit('; '.join(blockers))
 if not a.apply:
