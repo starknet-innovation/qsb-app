@@ -216,7 +216,11 @@ def static_region_rules(root):
     for path in sorted(root.glob('*.tf')):
         text = path.read_text()
         for kind, name, start, end in resource_blocks(text):
-            require(kind == 'variable' or not re.search(r'^  region\s*=', text[start:end], re.M),
+            body = text[start:end]
+            # A `region =` argument directly in the block, on its own line or not; not var.region, not `==`.
+            top = [m for m in re.finditer(r'(?<![.\w])region\s*=(?!=)', body)
+                   if body[:m.start()].count('{') - body[:m.start()].count('}') == 1]
+            require(kind == 'variable' or not top,
                     f'{path.name}: {kind}.{name} sets its own region; every resource stays in var.region')
 
 

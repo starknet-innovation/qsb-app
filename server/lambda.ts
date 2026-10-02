@@ -20,9 +20,10 @@ type FunctionUrlEvent = {
 
 // The viewer headers CloudFront adds to each request it forwards (its AllViewerExceptHostHeader origin request
 // policy, terraform/web.tf), each logged only in the form CloudFront gives it: the caller's IP address and source
-// port, its two-letter country, its network's AS number, and CloudFront's ID for the request.
+// port (IPv4 or IPv6, the port after the last colon), its two-letter country, its network's AS number, and
+// CloudFront's ID for the request.
 const VIEWER = {
-  address: ["cloudfront-viewer-address", /^[0-9A-Fa-f.:[\]]{3,64}$/],
+  address: ["cloudfront-viewer-address", /^[0-9A-Fa-f.:]{3,64}$/],
   country: ["cloudfront-viewer-country", /^[A-Z]{2}$/],
   asn: ["cloudfront-viewer-asn", /^[0-9]{1,10}$/],
   cfId: ["x-amz-cf-id", /^[A-Za-z0-9_-]{54}==$/],

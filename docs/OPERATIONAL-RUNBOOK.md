@@ -118,7 +118,7 @@ On an incident:
 
 The API writes one access line for each request it serves, in its log group (`/aws/lambda/<name>-api`, in the stack's region, kept 30 days): `{"access": {"time", "method", "path", "status", "requestId", "cfId", "caller": {"address", "country", "asn"}}}` (`server/lambda.ts`).
 
-- **`caller`** is the caller as CloudFront saw it: the IP address and source port, the two-letter country, and the AS number of the caller's network. These come from the `CloudFront-Viewer-Address`, `CloudFront-Viewer-Country` and `CloudFront-Viewer-ASN` headers, which CloudFront adds to each request it forwards (`terraform/web.tf`). The function URL's own source address is CloudFront's.
+- **`caller`** is the caller as CloudFront saw it: the IP address and source port (IPv4 or IPv6; the port is always after the last `:`), the two-letter country, and the AS number of the caller's network. These come from the `CloudFront-Viewer-Address`, `CloudFront-Viewer-Country` and `CloudFront-Viewer-ASN` headers, which CloudFront adds to each request it forwards (`terraform/web.tf`). The function URL's own source address is CloudFront's.
 - **`cfId`** is CloudFront's ID for the request (`X-Amz-Cf-Id`).
 - **Validation:** each header is logged only in the form CloudFront gives it, and left out otherwise. The fields describe the caller only if CloudFront replaces these headers when a caller sends them itself, which AWS doesn't document.
 - **Scope:** frontend requests aren't logged. CloudFront serves them from the frontend bucket and never reaches the API.

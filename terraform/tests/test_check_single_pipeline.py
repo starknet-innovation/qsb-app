@@ -509,9 +509,16 @@ class DeployChecks(unittest.TestCase):
             root = Path(directory)
             (root / 'main.tf').write_text('variable "region" {\n  type = string\n}\nresource "aws_s3_bucket" "logs" {\n  bucket = "x"\n}\n')
             check.static_region_rules(root)
-            (root / 'logs.tf').write_text('resource "aws_s3_bucket" "other" {\n  region = "us-east-1"\n  bucket = "y"\n}\n')
-            with self.assertRaisesRegex(ValueError, 'aws_s3_bucket.other sets its own region'):
-                check.static_region_rules(root)
+            # var.region, a comparison and a nested block's own argument aren't the resource's region.
+            (root / 'ok.tf').write_text('resource "terraform_data" "pin" {\n  input = var.region\n  lifecycle {\n'
+                                        '    precondition {\n      condition = var.region == "eu-west-2"\n'
+                                        '      error_message = "x"\n    }\n  }\n}\n'
+                                        'resource "aws_s3_bucket" "nested" {\n  thing {\n    region = "x"\n  }\n}\n')
+            check.static_region_rules(root)
+            for body in ('{\n  region = "us-east-1"\n  bucket = "y"\n}\n', '{ region = "us-east-1" }\n'):
+                (root / 'logs.tf').write_text('resource "aws_s3_bucket" "other" ' + body)
+                with self.assertRaisesRegex(ValueError, 'aws_s3_bucket.other sets its own region'):
+                    check.static_region_rules(root)
 
     def test_an_empty_state_needs_first_apply(self):
         # A wrong backend bucket or key loads no resources; only a first apply may start from nothing.

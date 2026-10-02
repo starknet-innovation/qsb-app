@@ -72,17 +72,18 @@ it("serves the API from a function URL event and logs one access line with the c
 
 it("logs each viewer header only in the form CloudFront gives it", async () => {
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
-  await handler(event("GET", "/v1/health", { "cloudfront-viewer-address": "[2001:db8::1]:443" }) as never);
+  // CloudFront writes an IPv6 caller as the address with ":port" appended, without brackets.
+  await handler(event("GET", "/v1/health", { "cloudfront-viewer-address": "2001:db8::1:443" }) as never);
   await handler(
     event("GET", "/v1/health", {
-      "cloudfront-viewer-address": "evil.example:1",
+      "cloudfront-viewer-address": "[evil.example]:1",
       "cloudfront-viewer-country": "gbr",
       "cloudfront-viewer-asn": "AS64496",
       "x-amz-cf-id": "not-an-id",
     }) as never,
   );
   const [ipv6, malformed] = log.mock.calls.map(([line]) => JSON.parse(String(line)).access);
-  expect(ipv6.caller).toEqual({ address: "[2001:db8::1]:443" });
+  expect(ipv6.caller).toEqual({ address: "2001:db8::1:443" });
   expect(malformed.caller).toEqual({});
   expect(malformed.cfId).toBeUndefined();
 });
