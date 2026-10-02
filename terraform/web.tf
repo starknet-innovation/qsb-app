@@ -103,7 +103,8 @@ resource "aws_cloudfront_distribution" "web" {
     viewer_protocol_policy = "https-only"
     allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods         = ["GET", "HEAD"]
-    # Managed CachingDisabled and AllViewerExceptHostHeader: preserve auth/cookies/query.
+    # Managed CachingDisabled and AllViewerExceptHostHeader: keep cookies, query and X-Qsb-Authorization (origin
+    # access control replaces Authorization with its signature).
     cache_policy_id            = data.aws_cloudfront_cache_policy.caching_disabled.id
     origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
