@@ -295,6 +295,12 @@ The coordinator's record policy (`terraform/policies/coordinator-records.json`) 
 
 Rebuild an approved earlier clean, pushed commit and review its plan against the current state ([terraform/README.md](../terraform/README.md#updates-and-rollback)). A rollback never releases consumed commitments or reservations, never duplicates paid work, and doesn't authorize a spend. Don't roll back reservation semantics or replay old workflows without a reviewed reconciliation decision. Never roll the API back past `d0a1732` (#78) while the `qsb/slipstream` secret holds `client_code` ([MARA Slipstream credential](../terraform/README.md#mara-slipstream-credential)).
 
+### Rolling back to an API Gateway commit
+
+Commits whose Terraform still serves the API through API Gateway (`aws_apigatewayv2_*`) can't be applied by `deploy.yml` or `qsb-operator`. The deploy role has no API Gateway grants, and both roles may add Lambda permissions only for CloudFront and EventBridge (`ops/github-aws`). Such a plan still passes that commit's own checks. An apply then removes CloudFront's two permissions on the function and the `SYSTEM#DEPLOYMENT` origin row, and fails creating the API. The distribution still points at the function URL, so every API request gets 403 until an administrator repairs it.
+
+Roll back to such a commit only as the AWS administrator, in the temporary admin window, with `QSB_AWS_DEPLOY_ENABLED` set to `false`. If the commit is to stay deployed, install that commit's own `ops/github-aws` grants with its `update_installed.py` (with its `apis` inventory) before turning automatic deploys back on.
+
 ### Rolling back past the index.html split
 
 Commits from #96 on hold the frontend's `index.html` at `aws_s3_object.index`. Earlier commits hold it at `aws_s3_object.frontend["index.html"]` and have no `moved` block back.

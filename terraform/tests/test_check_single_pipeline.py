@@ -44,6 +44,14 @@ DUE_INDEX = {'name': 'webhook-due', 'projection_type': 'KEYS_ONLY', 'non_key_att
 
 
 DISTRIBUTION = 'arn:aws:cloudfront::123456789012:distribution/E1EXAMPLE12345'
+DOMAIN = 'd111111abcdef8.cloudfront.net'
+
+
+def origin_item(**changes):
+    """The app-origin row as terraform/web.tf writes it."""
+    item = {'pk': {'S': 'SYSTEM#DEPLOYMENT'}, 'sk': {'S': 'APP_ORIGIN'}, 'version': {'N': '0'},
+            'origin': {'S': f'https://{DOMAIN}'}}
+    return json.dumps({k: v for k, v in dict(item, **changes).items() if v is not None})
 
 
 def plan():
@@ -52,8 +60,10 @@ def plan():
              'values': {'name': 'qsb-app-records', 'global_secondary_index': [dict(DUE_INDEX)]}},
             {'type': 'aws_s3_bucket', 'name': 'frontend', 'mode': 'managed', 'values': {}},
             {'type': 'aws_lambda_function_url', 'name': 'api', 'mode': 'managed', 'values': {'authorization_type': 'AWS_IAM'}},
-            {'type': 'aws_dynamodb_table_item', 'name': 'app_origin', 'mode': 'managed', 'values': {}},
-            {'type': 'aws_cloudfront_distribution', 'name': 'web', 'mode': 'managed', 'values': {'arn': DISTRIBUTION}},
+            {'type': 'aws_dynamodb_table_item', 'name': 'app_origin', 'mode': 'managed', 'values': {
+                'table_name': 'qsb-app-records', 'hash_key': 'pk', 'range_key': 'sk', 'item': origin_item()}},
+            {'type': 'aws_cloudfront_distribution', 'name': 'web', 'mode': 'managed',
+             'values': {'arn': DISTRIBUTION, 'domain_name': DOMAIN}},
             {'type': 'aws_sfn_state_machine', 'name': 'withdrawal', 'mode': 'managed', 'values': {'definition': workflow()}}]
     rows += [{'type': 'aws_lambda_permission', 'name': name, 'mode': 'managed',
               'values': {'principal': 'cloudfront.amazonaws.com', 'action': action, 'source_arn': DISTRIBUTION}}
@@ -325,6 +335,23 @@ class DeployChecks(unittest.TestCase):
         self.assertEqual(self.run_check(doc), (0, ''))
         doc['configuration']['root_module']['resources'][0]['expressions']['source_arn'] = {'constant_value': '*'}
         self.refused(doc, 'source_arn is unknown at plan')
+
+    def origin_row(self, doc):
+        return next(r for r in doc['planned_values']['root_module']['resources'] if r['type'] == 'aws_dynamodb_table_item')
+
+    def test_the_origin_row_is_exactly_the_app_origin_naming_this_distribution(self):
+        for item in (origin_item(origin={'S': 'https://attacker.example'}), origin_item(pk={'S': 'OWNER#bc1q'}),
+                     origin_item(sk={'S': 'VAULT#1'}), origin_item(version=None), origin_item(extra={'S': 'x'})):
+            doc = plan()
+            self.origin_row(doc)['values']['item'] = item
+            self.refused(doc, 'must be exactly the SYSTEM#DEPLOYMENT / APP_ORIGIN row')
+        for key, value in (('table_name', 'qsb-other'), ('hash_key', 'sk'), ('range_key', 'pk')):
+            doc = plan()
+            self.origin_row(doc)['values'][key] = value
+            self.refused(doc, 'must be in the records table')
+        doc = plan()
+        del self.origin_row(doc)['values']['item']
+        self.refused(doc, 'must be known at plan')
 
     def test_known_table_names_must_match_the_table(self):
         doc = plan()
