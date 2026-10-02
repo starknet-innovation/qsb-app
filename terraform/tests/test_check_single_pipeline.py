@@ -488,6 +488,11 @@ class DeployChecks(unittest.TestCase):
         doc = plan()
         del doc['variables']
         self.refused(doc, 'must set var.region', '--deploy')
+        # A first apply with another region: nothing is in state, and every planned region matches var.region.
+        doc = plan()
+        del doc['prior_state']
+        doc['variables'] = {'region': {'value': 'eu-west-1'}}
+        self.refused(doc, 'var.region is eu-west-1: QSB runs only in eu-west-2', '--deploy', '--first-apply')
 
     def test_every_planned_resource_stays_in_the_stack_region(self):
         # Before anything is in state, and for buckets, whose ARNs carry no region: the plan's own regions.

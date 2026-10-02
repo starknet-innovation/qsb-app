@@ -543,6 +543,10 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
             'frontendObjects': types.get('aws_s3_object', 0), 'resourceTypes': dict(sorted(types.items()))}
 
 
+# The organisation's one Region for QSB infrastructure and data (docs/REGION-MIGRATION.md).
+STACK_REGION = 'eu-west-2'
+
+
 def region_checks(plan):
     """Refuse a plan that would move an existing stack to another region, or recreate resources it lost.
 
@@ -553,6 +557,7 @@ def region_checks(plan):
     See docs/REGION-MIGRATION.md."""
     region = (plan.get('variables', {}).get('region') or {}).get('value')
     require(isinstance(region, str) and region, 'the plan must set var.region explicitly')
+    require(region == STACK_REGION, f'var.region is {region}: QSB runs only in {STACK_REGION} (docs/REGION-MIGRATION.md)')
     gone = [r['address'] for r in plan.get('resource_drift', [])
             if r.get('mode') == 'managed' and 'delete' in r.get('change', {}).get('actions', [])]
     require(not gone, f'{len(gone)} resources in state were not found (e.g. {", ".join(gone[:3])}): deleted '
