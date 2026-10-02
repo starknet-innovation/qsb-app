@@ -6,7 +6,7 @@
   Source of docs/key-custody.png; docs/KEY-CUSTODY.md is its text equivalent, so keep the two in step.
   After editing, re-render from the repository root:
     npx playwright screenshot --device "Desktop Chrome HiDPI" --viewport-size 1800,1000 --full-page docs/key-custody.html docs/key-custody.png
-  (run `npx playwright install chromium` once first). Update the commit in the footer to the one the diagram describes.
+  (run `npx playwright install chromium` once first).
   The page uses system fonts only, so line breaks can shift slightly between machines: check the PNG before committing it.
 -->
 <title>QSB key custody</title>
@@ -290,7 +290,7 @@
 </div>
 
 <footer>
-  <span>Source: starknet-innovation/qsb-app, main @ 366dc5c (2 Oct 2026), with the MARA credential readable only from the API function. Research snapshot; mainnet operations are off by default.</span>
+  <span>Source: starknet-innovation/qsb-app, main. Mainnet operations are off by default.</span>
   <span>Key sources: src/lib/backup.ts · public/qsb/bridge.py · server/app.ts · docs/EXACT-SUBMIT.md · full list in docs/KEY-CUSTODY.md</span>
 </footer>
 
