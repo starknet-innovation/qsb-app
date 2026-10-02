@@ -114,7 +114,7 @@ resource "aws_lambda_function" "api" {
     application_log_level = "INFO"
   }
   environment {
-    variables = merge({ TABLE_NAME = aws_dynamodb_table.records.name, APP_ORIGIN = "https://${aws_cloudfront_distribution.web.domain_name}", QSB_EXACT_SUBMIT_ENABLED = tostring(var.exact_submit_enabled), WORKFLOW_ARN = local.workflow_arn, QSB_NETWORK = var.network, SOLVER_RELEASE_ID = local.solver_release_id, QSB_MAINNET_ENABLED = tostring(var.mainnet_enabled), QSB_API_KEYS_ENABLED = tostring(var.api_keys_enabled) }, local.owner_limit_env, var.slipstream_secret_arn == "" ? {} : { SLIPSTREAM_SECRET_ARN = var.slipstream_secret_arn })
+    variables = merge({ TABLE_NAME = aws_dynamodb_table.records.name, QSB_EXACT_SUBMIT_ENABLED = tostring(var.exact_submit_enabled), WORKFLOW_ARN = local.workflow_arn, QSB_NETWORK = var.network, SOLVER_RELEASE_ID = local.solver_release_id, QSB_MAINNET_ENABLED = tostring(var.mainnet_enabled), QSB_API_KEYS_ENABLED = tostring(var.api_keys_enabled) }, local.owner_limit_env, var.slipstream_secret_arn == "" ? {} : { SLIPSTREAM_SECRET_ARN = var.slipstream_secret_arn })
   }
   depends_on = [terraform_data.release, aws_iam_role_policy.logs, aws_iam_role_policy.records, aws_iam_role_policy.start, aws_iam_role_policy.miner_credential]
 }

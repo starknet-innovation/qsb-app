@@ -806,7 +806,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         }),
       },
     },
-    errors: merge(writes, { 400: ["network_mismatch"] }),
+    errors: merge(writes, { 400: ["network_mismatch"], 503: ["app_origin_unavailable"] }),
   },
   {
     method: "post",
@@ -1456,6 +1456,11 @@ const parameter = (
   return { name, in: where, required, description, schema: json };
 };
 
+/** CloudFront origin access control in front of the API's function URL refuses a POST without it. */
+const bodyHash = describe(
+  z.string().regex(/^[a-f0-9]{64}$/),
+  "The hex SHA-256 of the exact request body bytes; an empty body hashes the empty string. CloudFront origin access control to the API's Lambda function URL requires it; the API itself doesn't check it.",
+);
 const securityOf = (auth: ReturnType<typeof routeAuth>) =>
   auth.kind === "none"
     ? {}
@@ -1495,6 +1500,7 @@ function operation(route: ApiRoute) {
       parameter(name, "query", false, schema),
     ),
     ...(keyed ? [parameter("Idempotency-Key", "header", false, idempotencyKey)] : []),
+    ...(route.method === "post" ? [parameter(BODY_HASH_HEADER, "header", true, bodyHash)] : []),
   ];
   const errors = routeErrors(route);
   const statuses = Object.keys(errors).map(Number) as ErrorStatus[];
@@ -1558,7 +1564,7 @@ export function openApiDocument() {
         "",
         "The server coordinates; it holds no secret. QSB state generation, the recovery backup, deposit signing and withdrawal assembly run on the client.",
         "",
-        `Send the credential in \`${CREDENTIAL_HEADER}\` (see the security schemes), and on every request with a body, \`${BODY_HASH_HEADER}\`: the hex SHA-256 of the exact body bytes, which CloudFront origin access control to a Lambda function URL requires. The API itself doesn't check it.`,
+        `Send the credential in \`${CREDENTIAL_HEADER}\` (see the security schemes), and on every POST, \`${BODY_HASH_HEADER}\`: the hex SHA-256 of the exact body bytes (of the empty string for a POST without a body), which CloudFront origin access control to a Lambda function URL requires. The API itself doesn't check it.`,
         "",
         "Every error is JSON with an `error` message and a stable `code` (`ApiErrorCode`). A route that doesn't exist returns a plain-text 404.",
         "",
@@ -1622,7 +1628,7 @@ export function openApiDocument() {
             "2. Sign `message` with the address's key, as a BIP-322 signature.",
             `3. \`POST ${pathOf("verifyChallenge")}\` with the \`id\` and the \`signature\`. The response has the \`token\`.`,
             "",
-            `Send \`${CREDENTIAL_HEADER}: Bearer <token>\`. \`Authorization: Bearer <token>\` is accepted too, but behind CloudFront origin access control that header carries CloudFront's signature, so use \`${CREDENTIAL_HEADER}\`. A session lasts ${duration(SESSION_SECONDS)} and is bound to the signing address and this deployment's network. After that, requests return \`session_expired\`; sign in again.`,
+            `Send \`${CREDENTIAL_HEADER}: Bearer <token>\`. CloudFront origin access control replaces \`Authorization\` with its own signature, so \`Authorization: Bearer <token>\` works only against a server that isn't behind CloudFront, such as the local one. A session lasts ${duration(SESSION_SECONDS)} and is bound to the signing address and this deployment's network. After that, requests return \`session_expired\`; sign in again.`,
           ].join("\n"),
         },
         apiKey: {
@@ -1630,7 +1636,7 @@ export function openApiDocument() {
           in: "header",
           name: CREDENTIAL_HEADER,
           description: [
-            `An API key minted with a session (\`POST ${pathOf("createApiKey")}\`). It acts for the same owner. Send \`${CREDENTIAL_HEADER}: Bearer qsb_mainnet_<43 base64url characters>\`, or \`Authorization: Bearer …\` where the API isn't behind CloudFront origin access control.`,
+            `An API key minted with a session (\`POST ${pathOf("createApiKey")}\`). It acts for the same owner. Send \`${CREDENTIAL_HEADER}: Bearer qsb_mainnet_<43 base64url characters>\`.`,
             "",
             "An operation that accepts a key lists the one scope the key needs (`ApiKeyScope`). The key-management routes take a session only.",
             "",

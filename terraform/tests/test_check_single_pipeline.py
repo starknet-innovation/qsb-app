@@ -43,12 +43,31 @@ DUE_INDEX = {'name': 'webhook-due', 'projection_type': 'KEYS_ONLY', 'non_key_att
                             {'attribute_name': 'webhookDueAt', 'key_type': 'RANGE'}]}
 
 
+DISTRIBUTION = 'arn:aws:cloudfront::123456789012:distribution/E1EXAMPLE12345'
+DOMAIN = 'd111111abcdef8.cloudfront.net'
+
+
+def origin_item(**changes):
+    """The app-origin row as terraform/web.tf writes it."""
+    item = {'pk': {'S': 'SYSTEM#DEPLOYMENT'}, 'sk': {'S': 'APP_ORIGIN'}, 'version': {'N': '0'},
+            'origin': {'S': f'https://{DOMAIN}'}}
+    return json.dumps({k: v for k, v in dict(item, **changes).items() if v is not None})
+
+
 def plan():
     # The table always carries the keys-only due-delivery index (terraform/data.tf).
     rows = [{'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed',
              'values': {'name': 'qsb-app-records', 'global_secondary_index': [dict(DUE_INDEX)]}},
             {'type': 'aws_s3_bucket', 'name': 'frontend', 'mode': 'managed', 'values': {}},
+            {'type': 'aws_lambda_function_url', 'name': 'api', 'mode': 'managed', 'values': {'authorization_type': 'AWS_IAM'}},
+            {'type': 'aws_dynamodb_table_item', 'name': 'app_origin', 'mode': 'managed', 'values': {
+                'table_name': 'qsb-app-records', 'hash_key': 'pk', 'range_key': 'sk', 'item': origin_item()}},
+            {'type': 'aws_cloudfront_distribution', 'name': 'web', 'mode': 'managed',
+             'values': {'arn': DISTRIBUTION, 'domain_name': DOMAIN}},
             {'type': 'aws_sfn_state_machine', 'name': 'withdrawal', 'mode': 'managed', 'values': {'definition': workflow()}}]
+    rows += [{'type': 'aws_lambda_permission', 'name': name, 'mode': 'managed',
+              'values': {'principal': 'cloudfront.amazonaws.com', 'action': action, 'source_arn': DISTRIBUTION}}
+             for name, action in (('api_url', 'lambda:InvokeFunctionUrl'), ('api_invoke', 'lambda:InvokeFunction'))]
     # Like the real stack: api and coordinator read the table; the reference Lambda has no environment.
     rows += [{'type': 'aws_lambda_function', 'name': f, 'mode': 'managed',
               'values': {'function_name': f'qsb-app-{f}', 'environment': [{'variables': {'TABLE_NAME': 'qsb-app-records'}}]}}
@@ -210,8 +229,7 @@ class DeployChecks(unittest.TestCase):
             {'type': 'aws_lambda_function', 'name': 'reference', 'mode': 'managed',
              'change': {'actions': ['create'], 'after_unknown': {'environment': []}}}]
         if refs is None:
-            refs = ['aws_dynamodb_table.records', 'aws_dynamodb_table.records.name', 'aws_cloudfront_distribution.web',
-                    'aws_cloudfront_distribution.web.domain_name', 'var.mainnet_enabled']
+            refs = ['aws_dynamodb_table.records', 'aws_dynamodb_table.records.name', 'var.mainnet_enabled']
         doc['configuration'] = {'root_module': {'resources': [
             {'address': 'aws_lambda_function.api', 'expressions': {'environment': [{'variables': {'references': refs}}]}}]}}
         return doc
@@ -226,6 +244,9 @@ class DeployChecks(unittest.TestCase):
                      'not reviewed')
         self.refused(self.unknown_api_env(refs=['aws_dynamodb_table.records.name', 'local.batch_env']), 'not reviewed')
         self.refused(self.unknown_api_env(refs=['var.network']), 'must use the same table')
+        # CloudFront's API origin is the function's own URL, so the API can't draw on CloudFront (terraform/web.tf).
+        self.refused(self.unknown_api_env(refs=['aws_dynamodb_table.records.name',
+                                                'aws_cloudfront_distribution.web.domain_name']), 'not reviewed')
         doc = self.unknown_api_env()
         del doc['configuration']
         self.refused(doc, 'unknown until apply')
@@ -243,8 +264,8 @@ class DeployChecks(unittest.TestCase):
         return doc
 
     def test_partly_unknown_api_environment_is_checked_by_key(self):
-        # The CI mock-plan shape: every key is named, only APP_ORIGIN's value is unknown; no configuration needed.
-        doc = self.with_unknown(plan(), 'api', [{'variables': {'APP_ORIGIN': True}}])
+        # The CI mock-plan shape: every key is named and one value is unknown at plan; no configuration needed.
+        doc = self.with_unknown(plan(), 'api', [{'variables': {'WORKFLOW_ARN': True}}])
         self.assertEqual(self.run_check(doc, '--deploy')[0], 0)
         doc = self.with_unknown(plan(), 'api', [{'variables': {'AWS_BATCH_JOB_QUEUE': True}}])
         self.refused(doc, 'Only coordinator may receive')
@@ -269,6 +290,89 @@ class DeployChecks(unittest.TestCase):
                 r['values']['environment'][0]['variables']['TABLE_NAME'] = 'qsb-other'
         self.refused(doc, 'must use the same table')
 
+    def test_the_api_function_url_takes_aws_iam_auth(self):
+        doc = plan()
+        for r in doc['planned_values']['root_module']['resources']:
+            if r['type'] == 'aws_lambda_function_url':
+                r['values']['authorization_type'] = 'NONE'
+        self.refused(doc, 'must take AWS_IAM auth')
+        doc = plan()
+        doc['planned_values']['root_module']['resources'].append(
+            {'type': 'aws_lambda_function_url', 'name': 'coordinator', 'mode': 'managed', 'values': {'authorization_type': 'AWS_IAM'}})
+        self.refused(doc, "Expected only aws_lambda_function_url: ['api']")
+
+    def permission(self, doc, name):
+        return next(r for r in doc['planned_values']['root_module']['resources']
+                    if r['type'] == 'aws_lambda_permission' and r['name'] == name)
+
+    def test_cloudfront_may_invoke_the_api_only_for_this_distribution(self):
+        for name in ('api_url', 'api_invoke'):
+            doc = plan()
+            self.permission(doc, name)['values']['source_arn'] = DISTRIBUTION.replace('E1EXAMPLE12345', 'E2OTHER123456')
+            self.refused(doc, "must name this stack's distribution")
+            doc = plan()
+            del self.permission(doc, name)['values']['source_arn']
+            self.refused(doc, 'source_arn is unknown at plan')
+            doc = plan()
+            self.permission(doc, name)['values']['principal'] = 'events.amazonaws.com'
+            self.refused(doc, 'to cloudfront.amazonaws.com')
+        doc = plan()
+        doc['planned_values']['root_module']['resources'].append(
+            {'type': 'aws_lambda_permission', 'name': 'other', 'mode': 'managed', 'values': {}})
+        self.refused(doc, "Expected only aws_lambda_permission: ['api_invoke', 'api_url']")
+
+    def test_an_unknown_source_arn_must_reference_the_distribution(self):
+        # A plan that replaces the distribution: its ARN, and so each permission's source_arn, is unknown.
+        doc = plan()
+        for r in doc['planned_values']['root_module']['resources']:
+            if r['type'] in ('aws_lambda_permission', 'aws_cloudfront_distribution'):
+                r['values'].pop('source_arn', None)
+                r['values'].pop('arn', None)
+        refs = {'references': ['aws_cloudfront_distribution.web.arn', 'aws_cloudfront_distribution.web']}
+        doc['configuration'] = {'root_module': {'resources': [
+            {'address': f'aws_lambda_permission.{name}', 'expressions': {'source_arn': refs}}
+            for name in ('api_url', 'api_invoke')]}}
+        self.assertEqual(self.run_check(doc), (0, ''))
+        doc['configuration']['root_module']['resources'][0]['expressions']['source_arn'] = {'constant_value': '*'}
+        self.refused(doc, 'source_arn is unknown at plan')
+
+    def origin_row(self, doc):
+        return next(r for r in doc['planned_values']['root_module']['resources'] if r['type'] == 'aws_dynamodb_table_item')
+
+    def test_the_origin_row_is_exactly_the_app_origin_naming_this_distribution(self):
+        for item in (origin_item(origin={'S': 'https://attacker.example'}), origin_item(pk={'S': 'OWNER#bc1q'}),
+                     origin_item(sk={'S': 'VAULT#1'}), origin_item(version=None), origin_item(extra={'S': 'x'})):
+            doc = plan()
+            self.origin_row(doc)['values']['item'] = item
+            self.refused(doc, 'must be exactly the SYSTEM#DEPLOYMENT / APP_ORIGIN row')
+        for key, value in (('table_name', 'qsb-other'), ('hash_key', 'sk'), ('range_key', 'pk')):
+            doc = plan()
+            self.origin_row(doc)['values'][key] = value
+            self.refused(doc, 'must be in the records table')
+        doc = plan()
+        del self.origin_row(doc)['values']['item']
+        self.refused(doc, 'is unknown at plan')
+
+    def test_a_first_apply_with_the_distribution_unknown_passes_from_configuration(self):
+        # A real first apply (or a replaced distribution): its ARN and domain, and so each permission's source_arn
+        # and the origin row, are unknown until apply. The saved plan's configuration says what builds them.
+        doc = plan()
+        del doc['prior_state']
+        for r in doc['planned_values']['root_module']['resources']:
+            for key in ('arn', 'domain_name', 'source_arn', 'item'):
+                if r['type'] in ('aws_cloudfront_distribution', 'aws_lambda_permission', 'aws_dynamodb_table_item'):
+                    r['values'].pop(key, None)
+        arn = {'references': ['aws_cloudfront_distribution.web.arn', 'aws_cloudfront_distribution.web']}
+        domain = {'references': ['aws_cloudfront_distribution.web.domain_name', 'aws_cloudfront_distribution.web']}
+        doc['configuration'] = {'root_module': {'resources': [
+            {'address': f'aws_lambda_permission.{name}', 'expressions': {'source_arn': arn}}
+            for name in ('api_url', 'api_invoke')] + [
+            {'address': 'aws_dynamodb_table_item.app_origin', 'expressions': {'item': domain}}]}}
+        self.assertEqual(self.run_check(doc, '--deploy', '--first-apply'), (0, ''))
+        doc['configuration']['root_module']['resources'][-1]['expressions']['item'] = {
+            'references': ['aws_cloudfront_distribution.web.domain_name', 'aws_cloudfront_distribution.web', 'var.name']}
+        self.refused(doc, 'from aws_cloudfront_distribution.web.domain_name alone', '--deploy', '--first-apply')
+
     def test_known_table_names_must_match_the_table(self):
         doc = plan()
         for r in doc['planned_values']['root_module']['resources']:
@@ -287,7 +391,7 @@ class DeployChecks(unittest.TestCase):
         doc = plan()
         rows = doc['planned_values']['root_module']['resources']
         if env:
-            next(r for r in rows if r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = arn
+            next(r for r in rows if r['type'] == 'aws_lambda_function' and r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = arn
         statement = grant or {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue', 'Resource': arn}
         rows.append({'type': 'aws_iam_role_policy', 'name': policy_name, 'mode': 'managed',
                      'values': {'policy': json.dumps({'Version': '2012-10-17', 'Statement': [statement]})}})
@@ -313,11 +417,11 @@ class DeployChecks(unittest.TestCase):
     def test_the_api_gets_the_reference_exactly_with_its_grant(self):
         self.refused(self.with_miner_credential(env=False), 'exactly when its read grant exists')
         doc = plan()
-        next(r for r in doc['planned_values']['root_module']['resources'] if r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = MINER
+        next(r for r in doc['planned_values']['root_module']['resources'] if r['type'] == 'aws_lambda_function' and r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = MINER
         self.refused(doc, 'exactly when its read grant exists')
         other = MINER.replace('AbC123', 'XyZ789')
         doc = self.with_miner_credential()
-        next(r for r in doc['planned_values']['root_module']['resources'] if r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = other
+        next(r for r in doc['planned_values']['root_module']['resources'] if r['type'] == 'aws_lambda_function' and r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = other
         self.refused(doc, 'exactly the secret the API is given')
 
     def test_only_the_api_receives_the_miner_credential(self):

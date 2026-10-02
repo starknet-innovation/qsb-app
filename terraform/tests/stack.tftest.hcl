@@ -2,6 +2,12 @@ mock_provider "aws" {
   mock_data "aws_partition" { defaults = { partition = "aws" } }
   mock_data "aws_caller_identity" { defaults = { account_id = "123456789012" } }
 }
+# The distribution's ARN, known at plan, so each CloudFront permission's source_arn can be checked against it.
+override_resource {
+  target          = aws_cloudfront_distribution.web
+  override_during = plan
+  values          = { arn = "arn:aws:cloudfront::123456789012:distribution/E1EXAMPLE12345" }
+}
 variables {
   # Use the actual clean build selection. The same suite supports a null or an
   # enrolled solver without changing artifacts or performing another native build.
@@ -44,6 +50,14 @@ run "baseline" {
   command = plan
   variables {
     network = "mainnet"
+  }
+  assert {
+    condition     = aws_lambda_function_url.api.authorization_type == "AWS_IAM" && aws_cloudfront_origin_access_control.api.origin_access_control_origin_type == "lambda" && aws_cloudfront_origin_access_control.api.signing_behavior == "always" && aws_cloudfront_origin_access_control.api.signing_protocol == "sigv4"
+    error_message = "The API's function URL must take AWS_IAM auth, and CloudFront must sign every request to it."
+  }
+  assert {
+    condition     = aws_lambda_permission.api_url.principal == "cloudfront.amazonaws.com" && aws_lambda_permission.api_url.action == "lambda:InvokeFunctionUrl" && aws_lambda_permission.api_url.function_url_auth_type == "AWS_IAM" && aws_lambda_permission.api_invoke.principal == "cloudfront.amazonaws.com" && aws_lambda_permission.api_invoke.action == "lambda:InvokeFunction" && aws_lambda_permission.api_invoke.invoked_via_function_url == true && aws_lambda_permission.api_url.source_arn == aws_cloudfront_distribution.web.arn && aws_lambda_permission.api_invoke.source_arn == aws_cloudfront_distribution.web.arn
+    error_message = "Only this stack's CloudFront distribution may invoke the API's function URL."
   }
   assert {
     condition     = aws_cloudwatch_log_metric_filter.stray_payments.log_group_name == aws_cloudwatch_log_group.lambda["api"].name && aws_cloudwatch_log_metric_filter.stray_payments.pattern == "{ $.message.strayPayment.newCount >= 1 }" && aws_cloudwatch_metric_alarm.stray_payments.metric_name == "StrayPayments" && aws_cloudwatch_metric_alarm.stray_payments.namespace == "QSB/${var.name}" && aws_cloudwatch_metric_alarm.stray_payments.threshold == 1

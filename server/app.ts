@@ -140,11 +140,15 @@ function lowercaseOutpoints<
 }
 export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
 /**
- * API Gateway gives up after 30 seconds. Webhook sending stops 25 s into a request, and all
+ * CloudFront gives up on the API after 30 seconds. Webhook sending stops 25 s into a request, and all
  * event work (rows, queuing, sending) 28 s into it, so it can't turn a response into a 504.
  */
 const REQUEST_BUDGET_MS = 25_000;
 const REQUEST_LIMIT_MS = 28_000;
+/** How long a container keeps the deployment's app origin before reading its row again. */
+const ORIGIN_TTL_MS = 5 * 60_000;
+/** How long before a container reads the row again after finding it missing, or failing to read it. */
+const ORIGIN_RETRY_MS = 30_000;
 export function createApp(
   records: Store = defaultStore,
   dependencies: {
@@ -229,16 +233,41 @@ export function createApp(
       ? { getPath: (request) => getPath(request).replace(/^\/v1(?=\/|$)/, "/api") }
       : {},
   );
-  const origin = process.env.APP_ORIGIN || "http://127.0.0.1:5173";
+  // The app's origin, for the sign-in challenge and CORS: APP_ORIGIN where it's set (the local server, tests),
+  // else the deployment's SYSTEM#DEPLOYMENT row, which Terraform writes once CloudFront exists (terraform/web.tf).
+  // The row is re-read ORIGIN_TTL_MS after a read that found it, so a replaced distribution reaches warm containers,
+  // and ORIGIN_RETRY_MS after one that didn't. A failed read keeps the origin last read. On Lambda there is no
+  // fallback: with no origin, sign-in answers 503 app_origin_unavailable and CORS allows none, while every other
+  // route works. Elsewhere, a server without APP_ORIGIN or the row names the Vite dev origin.
+  const configuredOrigin = process.env.APP_ORIGIN;
+  const onLambda = Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
+  let originRead: { origin?: string; readAgainAt: number } | undefined;
+  async function appOrigin(): Promise<string | undefined> {
+    if (configuredOrigin) return configuredOrigin;
+    if (!originRead || Date.now() >= originRead.readAgainAt) {
+      try {
+        const row = await records.get("SYSTEM#DEPLOYMENT", "APP_ORIGIN");
+        const origin =
+          typeof row?.origin === "string" && /^https:\/\/[a-z0-9.-]+$/.test(row.origin) ? row.origin : undefined;
+        originRead = { origin, readAgainAt: Date.now() + (origin ? ORIGIN_TTL_MS : ORIGIN_RETRY_MS) };
+      } catch (error) {
+        // Error class only. Keep any origin already read, and try again after ORIGIN_RETRY_MS.
+        console.error(JSON.stringify({ appOrigin: "read_failed", error: (error as Error)?.name ?? "Error" }));
+        originRead = { origin: originRead?.origin, readAgainAt: Date.now() + ORIGIN_RETRY_MS };
+      }
+    }
+    return originRead.origin ?? (onLambda ? undefined : "http://127.0.0.1:5173");
+  }
   app.use("*", secureHeaders());
-  app.use(
-    "*",
-    cors({
+  app.use("*", async (c, next) => {
+    const origin = await appOrigin();
+    if (!origin) return next();
+    return cors({
       origin,
       allowHeaders: ["Content-Type", CREDENTIAL_HEADER, BODY_HASH_HEADER, "Authorization", "Idempotency-Key"],
       allowMethods: ["GET", "POST", "OPTIONS"],
-    }),
-  );
+    })(c, next);
+  });
   app.use(
     "*",
     bodyLimit({
@@ -387,6 +416,14 @@ export function createApp(
         "Wallet address does not match this Bitcoin network.",
       );
     }
+    const origin = await appOrigin();
+    if (!origin)
+      return apiError(
+        c,
+        503,
+        "app_origin_unavailable",
+        "Sign-in isn't available yet: this deployment hasn't recorded its app origin. Try again shortly.",
+      );
     const id = randomUUID(),
       expiresAt = Math.floor(Date.now() / 1000) + CHALLENGE_SECONDS;
     const message = `QSB Vault sign-in\nOrigin: ${origin}\nAddress: ${address}\nNetwork: bitcoin-${NETWORK_ID}\nNonce: ${id}\nExpires: ${new Date(expiresAt * 1000).toISOString()}\nThis signature authorizes this session only. It does not authorize a Bitcoin transaction.`;

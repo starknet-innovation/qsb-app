@@ -229,7 +229,7 @@ This is separate from AWS Batch reconciliation. Never use the compute `--not-sub
 
 Each transactional Put is authorized as `dynamodb:PutItem` with its own leading key, so the `EVENT#` row needs no grant beyond `OWNER#*` PutItem. That is AWS's per-item authorization of TransactWriteItems; verify it against the current AWS documentation before relying on a narrower policy.
 
-The withdrawal API Lambda has a 120-second timeout, but API Gateway returns a timeout after its 30-second integration budget. A caller timeout doesn't stop an already running Lambda or prove the miner never received the POST: treat it as uncertain and follow the steps above. Never retry the POST or reset its intent.
+The withdrawal API Lambda has a 120-second timeout, but CloudFront returns a timeout after its 30-second origin response timeout. A caller timeout doesn't stop an already running Lambda or prove the miner never received the POST: treat it as uncertain and follow the steps above. Never retry the POST or reset its intent.
 
 ## Operator session
 
@@ -298,6 +298,18 @@ The coordinator's record policy (`terraform/policies/coordinator-records.json`) 
 ## Rollback
 
 Rebuild an approved earlier clean, pushed commit and review its plan against the current state ([terraform/README.md](../terraform/README.md#updates-and-rollback)). A rollback never releases consumed commitments or reservations, never duplicates paid work, and doesn't authorize a spend. Don't roll back reservation semantics or replay old workflows without a reviewed reconciliation decision. Never roll the API back past `d0a1732` (#78) while the `qsb/slipstream` secret holds `client_code` ([MARA Slipstream credential](../terraform/README.md#mara-slipstream-credential)).
+
+### Rolling back to an API Gateway commit
+
+Commits whose Terraform still serves the API through API Gateway (`aws_apigatewayv2_*`) can't be applied by `deploy.yml` or `qsb-operator`. The deploy role has no API Gateway grants, and both roles may add Lambda permissions only for CloudFront and EventBridge (`ops/github-aws`). Such a plan still passes that commit's own checks. An apply then removes CloudFront's two permissions on the function and the `SYSTEM#DEPLOYMENT` origin row, and fails creating the API. The distribution still points at the function URL, so every API request gets 403 until an administrator repairs it.
+
+Roll back to such a commit only as the AWS administrator, in the temporary admin window, with `QSB_AWS_DEPLOY_ENABLED` set to `false`. Leave it `false` while `main` still holds the function URL: a deploy from `main` would apply the function URL stack again.
+
+To keep the rolled-back commit deployed:
+1. Revert `main` to it through a reviewed PR.
+2. From that `main`, register the API ID the rollback created in `apis` and remove the API's origin access control from `origin_access_controls`.
+3. Run `update_installed.py` as a plan, then `--apply`. It applies only from a clean `main`.
+4. Only then set `QSB_AWS_DEPLOY_ENABLED` back to `true`.
 
 ### Rolling back past the index.html split
 

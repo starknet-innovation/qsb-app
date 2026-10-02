@@ -11,6 +11,7 @@
   "app.ts | onError | coded ?? 500 | attached ?? \"internal_error\" | attached === \"input_not_found\" ? \"The input's output index doesn't exist in its transaction.\" : \"Unable to complete the request. Please retry.\"",
   "app.ts | GET /api/rates | 503 | miner_rate_unavailable | Live miner fee quote is temporarily unavailable.",
   "app.ts | POST /api/auth/challenge | 400 | network_mismatch | Wallet address does not match this Bitcoin network.",
+  "app.ts | POST /api/auth/challenge | 503 | app_origin_unavailable | Sign-in isn't available yet: this deployment hasn't recorded its app origin. Try again shortly.",
   "app.ts | POST /api/auth/verify | 401 | challenge_expired | Sign-in request expired or already used.",
   "app.ts | POST /api/auth/verify | 401 | signature_invalid | Wallet signature is not valid.",
   "app.ts | auth | 401 | auth_required | Connect and sign in with Xverse.",
