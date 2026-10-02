@@ -30,7 +30,7 @@ variable "gpu_permissions_boundary_arn" {
 }
 variable "region" {
   type        = string
-  description = "Deploy region, set explicitly. QSB runs in eu-west-2 (organisation requirement); eu-west-1 only while the legacy stack is torn down. See docs/REGION-MIGRATION.md."
+  description = "Deploy region, set explicitly. QSB runs only in eu-west-2 (organisation requirement); the retired eu-west-1 stack is planned only to destroy it. See docs/REGION-MIGRATION.md."
   validation {
     condition     = can(regex("^[a-z]{2}-[a-z]+-[0-9]$", var.region))
     error_message = "Use an AWS region name such as eu-west-2."

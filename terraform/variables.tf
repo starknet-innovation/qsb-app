@@ -1,5 +1,5 @@
 variable "region" {
-  description = "Deploy region, set explicitly in every tfvars. QSB runs in eu-west-2 (organisation requirement); eu-west-1 only while the legacy stack is torn down. Moving region is a new stack, never an in-place change: see docs/REGION-MIGRATION.md."
+  description = "Deploy region, set explicitly in every tfvars. QSB runs only in eu-west-2 (organisation requirement), and check-single-pipeline.py --deploy refuses any other; the retired eu-west-1 stack is planned only to destroy it. Moving region is a new stack, never an in-place change: see docs/REGION-MIGRATION.md."
   type        = string
   validation {
     condition     = can(regex("^[a-z]{2}-[a-z]+-[0-9]$", var.region))

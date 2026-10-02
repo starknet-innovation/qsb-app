@@ -114,6 +114,41 @@ On an incident:
 2. Preserve unknown paid outcomes and reconcile them from the provider record. Never retry blindly, and never treat the loss of a local process as proof that remote GPU work stopped.
 3. Keep backups, passphrases and credentials out of the incident record. Record public identifiers only.
 
+### Who called the API
+
+The API writes one access line for each request its code finishes, in its log group (`/aws/lambda/<name>-api`, in the stack's region; CloudWatch deletes its events after 30 days, typically within 72 hours of that): `{"access": {"time", "method", "path", "status", "requestId", "cfId", "caller": {"address", "country", "asn"}}}` (`server/lambda.ts`).
+
+- **`caller`** is the caller as CloudFront saw it: the IP address and source port (IPv4 or IPv6; the port is always after the last `:`), the two-letter country, and the AS number of the caller's network. These come from the `CloudFront-Viewer-Address`, `CloudFront-Viewer-Country` and `CloudFront-Viewer-ASN` headers, which CloudFront adds to each request it forwards (`terraform/web.tf`). The function URL's own source address is CloudFront's.
+- **`cfId`** is CloudFront's ID for the request (`X-Amz-Cf-Id`).
+- **Validation:** each header is logged only in the form CloudFront gives it, and left out otherwise. The fields describe the caller only if CloudFront replaces these headers when a caller sends them itself, which AWS doesn't document. If it forwarded a caller's own value as well, the function URL would join the two with a comma, and the field would be left out. A request signed directly by `qsb-operator`, the deploy role or the administrator skips CloudFront, and its line records whatever of these headers it sent. Such a line looks like any other.
+- **Scope:** frontend requests aren't logged. CloudFront serves them from the frontend bucket and never reaches the API. A request that hits the Lambda timeout or runs out of memory, whose handler throws, or that the function URL refuses before the code runs, has no line either.
+- **`status`** is what the API returned, not always what the caller got. CloudFront stops waiting for a response after 30 seconds. It sends a GET or HEAD again, up to three tries in all, and answers 504 after the last. So one slow GET can log up to three lines with the same `cfId`, each with its own status, while the caller saw 504. A retry can also be throttled by the API's reserved concurrency (`lambda_concurrency`, 2 by default). The caller then gets 429, and that try has no line. CloudFront doesn't retry other methods: a slow POST logs one line, perhaps 200, while the caller saw 504.
+
+To find who made a request, search the log group with `aws logs filter-log-events`:
+
+```sh
+aws logs filter-log-events --log-group-name /aws/lambda/<name>-api \
+  --start-time <epoch ms> --end-time <epoch ms> --filter-pattern '"<cfId, requestId or path>"'
+```
+
+Each line is one JSON record whose `message` is the access line as a string, so `{ $.message.access.… }` selectors match nothing: use a quoted text match, as above. A text match can also hit the same text in another line's path, so check which field matched. Searches leave copies of their own:
+- Logs Insights keeps each query's results for 7 days.
+- CloudTrail can record each search, pattern included, for 90 days, and longer in an organisation trail.
+
+So search by `cfId` or `requestId`, or by the post-deploy check's own path. A search by a vault, job or transaction path, or by an address, leaves that value in CloudTrail, and counts as a copy under the rule below.
+
+These lines are personal data. The address, country and network identify the caller, and paths name vaults, jobs and transactions (for example `/api/transactions/<txid>/status`), so a line can tie a caller's IP to their vault or to an on-chain transaction.
+
+- **Who can read them:** `qsb-operator`, the GitHub deploy role `qsb-github-deploy` (its `logs:*` on `/aws/lambda/qsb-*`, `ops/github-aws/render.py`), and the AWS administrator.
+- **Use:** read them only for:
+  - a security investigation;
+  - triage of an API error or alarm;
+  - the post-deploy check of the logged fields in `docs/STATUS.md`, which reads only its own requests, found by the path only it uses.
+
+  Fetch only the records you need. Use `filter-log-events --filter-pattern '{ $.level = "ERROR" }'` for the errors the code logs. For a timeout, out-of-memory or crash, which logs no `ERROR` record, use `--filter-pattern '{ $.type = "platform.report" && $.record.status != "success" }'`, then search by that record's `record.requestId`. Don't browse the log streams or use Live Tail: they show every caller's line.
+- **Copies:** don't copy a line's `caller` fields or path out of the log group without a reviewed decision. That covers files, issues, chat, exports and subscriptions. In an incident record, refer to a line by its time and `requestId` or `cfId`. That keeps the record to public identifiers (step 3 above), and the lines themselves expire with the log group.
+- **Retention:** don't extend the 30 days without a reviewed decision.
+
 ### Stray payments
 
 `<name>-stray-payments` fires when the API flags more confirmed payments to a vault's script beyond its recorded deposit than it had recorded ([API](API.md#stray-payments)). The API Lambda logs in JSON format, one record per console call at INFO or above, with the call's text or object in `message`. When it flags a payment, its record's `message` is the object `{"strayPayment": {"vaultId": …, "count": …, "newCount": …, "sats": …, "outputs": ["<txid>:<vout>"]}}`. A metric filter on the API's log group counts those records with the pattern `{ $.message.strayPayment.newCount >= 1 }` (`terraform/workflow.tf`); filter the log group with the same pattern to find them. `count` and `sats` cover all the vault's stray outputs; `outputs` names those newly listed, and the vault's stray-payment record lists at most 20. The log record names the vault, not the owner.

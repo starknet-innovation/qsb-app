@@ -1,7 +1,10 @@
 # Moving QSB to a new account in eu-west-2
 
 The organisation requires all QSB infrastructure and data in eu-west-2 (London), in a new AWS account that people
-reach through IAM Identity Center.
+reach through IAM Identity Center. For the app stack (`terraform/`), `check-single-pipeline.py` refuses any resource
+that sets its own region, and `--deploy` refuses a plan whose `var.region` isn't eu-west-2 or with any resource,
+or any nested region such as a DynamoDB replica's, outside it. The GPU stack
+(`terraform/gpu`) has no such check.
 
 **Status (2 October 2026):** steps 1–11 are done, and the new stack is live. The GitHub part of step 12 is done.
 Left: the local-profile part of step 12, and, after the new stack has run a full deposit and withdrawal,

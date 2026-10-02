@@ -210,6 +210,21 @@ def dispatcher_rules(rows, dispatcher):
             require(row['name'] == 'webhook_schedule', 'The schedule role has only its invoke policy')
 
 
+def static_region_rules(root):
+    """Every resource is in the provider's region, var.region (docs/REGION-MIGRATION.md): no resource sets the
+    provider's per-resource region argument, which would place it in another Region."""
+    for path in sorted(root.glob('*.tf')):
+        text = path.read_text()
+        for kind, name, start, end in resource_blocks(text):
+            body = text[start:end]
+            # A `region =` argument directly in the block, on its own line or not; not var.region, not `==`. And
+            # a `region_name =` at any depth, as in a DynamoDB replica, which copies the resource's data there.
+            top = [m for m in re.finditer(r'(?<![.\w])region\s*=(?!=)', body)
+                   if body[:m.start()].count('{') - body[:m.start()].count('}') == 1]
+            require(kind == 'variable' or not (top or re.search(r'(?<![.\w])region_name\s*=(?!=)', body)),
+                    f'{path.name}: {kind}.{name} sets its own region; every resource stays in var.region')
+
+
 def static_dispatcher_rules(root):
     """Source rules for the webhook dispatcher's two roles, which hold even while role names are unknown at plan."""
     allowed = {'aws_iam_role.lambda["webhooks"]': {('aws_iam_role_policy', 'webhook_records'), ('aws_lambda_function', 'webhooks')},
@@ -529,6 +544,10 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
             'frontendObjects': types.get('aws_s3_object', 0), 'resourceTypes': dict(sorted(types.items()))}
 
 
+# The organisation's one Region for QSB infrastructure and data (docs/REGION-MIGRATION.md).
+STACK_REGION = 'eu-west-2'
+
+
 def region_checks(plan):
     """Refuse a plan that would move an existing stack to another region, or recreate resources it lost.
 
@@ -539,6 +558,7 @@ def region_checks(plan):
     See docs/REGION-MIGRATION.md."""
     region = (plan.get('variables', {}).get('region') or {}).get('value')
     require(isinstance(region, str) and region, 'the plan must set var.region explicitly')
+    require(region == STACK_REGION, f'var.region is {region}: QSB runs only in {STACK_REGION} (docs/REGION-MIGRATION.md)')
     gone = [r['address'] for r in plan.get('resource_drift', [])
             if r.get('mode') == 'managed' and 'delete' in r.get('change', {}).get('actions', [])]
     require(not gone, f'{len(gone)} resources in state were not found (e.g. {", ".join(gone[:3])}): deleted '
@@ -547,7 +567,31 @@ def region_checks(plan):
         parts = str(row.get('values', {}).get('arn') or '').split(':')
         if len(parts) > 3 and parts[3]:  # global services (IAM, CloudFront, S3 buckets) carry no region
             require(parts[3] == region, f"{row['type']}.{row['name']} is in {parts[3]}, not {region}")
+    # The provider's per-resource region argument would place a resource in another Region before it is in state,
+    # and an S3 bucket's ARN carries none: refuse the argument, and any planned resource in another Region.
+    for resource in (plan.get('configuration') or {}).get('root_module', {}).get('resources', []):
+        require('region' not in resource.get('expressions', {}),
+                f"{resource.get('address')} sets its own region; every resource stays in var.region")
+    for row in module_resources(plan.get('planned_values', {}).get('root_module', {})):
+        for where, planned in nested_regions(row.get('values', {})):
+            require(planned == region, f"{row['type']}.{row['name']} is planned in {planned}, not {region}"
+                                       + ('' if where == 'region' else f' ({where})'))
     return region
+
+
+def nested_regions(value, path=''):
+    """Every known `region` or `region_name` in a resource's planned values, at any depth: the resource's own
+    Region, and one a nested block places data in (a DynamoDB replica or witness, say)."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            where = f'{path}.{key}' if path else key
+            if key in ('region', 'region_name') and isinstance(item, str) and item:
+                yield where, item
+            else:
+                yield from nested_regions(item, where)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from nested_regions(item, f'{path}[{index}]')
 
 
 def deploy_checks(plan, first_apply):
@@ -623,6 +667,7 @@ def module_resources(module):
 def main():
     root = Path(__file__).resolve().parents[1]
     static_secret_rules(root)
+    static_region_rules(root)
     static_dispatcher_rules(root)
     frontend_order_rules(root)
     if len(sys.argv) == 1:
