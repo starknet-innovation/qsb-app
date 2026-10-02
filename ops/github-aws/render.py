@@ -65,7 +65,7 @@ def render(c):
     allow('StateLocks',['s3:DeleteObject'],['arn:aws:s3:::'+c['state_bucket']+'/qsb/*.tflock'])
     statements.append(dict(Sid='ProtectBootstrapAndBoundaries',Effect='Deny',Action=['iam:*'],Resource=[role,iam('policy/qsb/bootstrap/*')]))
     statements.append(dict(Sid='NeverRemoveRuntimeBoundary',Effect='Deny',Action=['iam:DeleteRolePermissionsBoundary'],Resource=[runtime_roles]))
-    # The API's function URL takes AWS_IAM auth, which only CloudFront's origin access control signs for. Never a
+    # The API's function URL takes AWS_IAM auth, which CloudFront signs for through origin access control. Never a
     # public one. Null=false limits the deny to requests that name an auth type: an update that names none keeps
     # the URL's current one, and CreateFunctionUrlConfig always names one.
     statements.append(dict(Sid='OnlyIamFunctionUrls',Effect='Deny',Action=['lambda:CreateFunctionUrlConfig','lambda:UpdateFunctionUrlConfig'],Resource=['*'],Condition={'StringNotEquals':{'lambda:FunctionUrlAuthType':'AWS_IAM'},'Null':{'lambda:FunctionUrlAuthType':'false'}}))

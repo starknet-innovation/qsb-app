@@ -196,7 +196,7 @@ as low as the account needs, and set an AWS Budgets alert on the account.
 ### Persistent external access
 
 The operator, and the deploy role too, may create or update a function URL only with `AWS_IAM` auth: the API's, which
-only CloudFront's origin access control signs for. The operator is explicitly denied DynamoDB resource policy writes
+CloudFront signs for through origin access control. The operator is explicitly denied DynamoDB resource policy writes
 and ECR repository policy writes. Lambda AddPermission is limited to CloudFront and EventBridge principals. That principal
 restriction doesn't validate the permission's `SourceArn` or `SourceAccount`; keep source restrictions bound to the
 reviewed account and resources in Terraform. An operator can still grant persistent outside access via:

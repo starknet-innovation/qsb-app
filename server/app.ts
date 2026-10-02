@@ -147,6 +147,8 @@ const REQUEST_BUDGET_MS = 25_000;
 const REQUEST_LIMIT_MS = 28_000;
 /** How long a container keeps the deployment's app origin before reading its row again. */
 const ORIGIN_TTL_MS = 5 * 60_000;
+/** How long before a container reads the row again after finding it missing, or failing to read it. */
+const ORIGIN_RETRY_MS = 30_000;
 export function createApp(
   records: Store = defaultStore,
   dependencies: {
@@ -233,20 +235,28 @@ export function createApp(
   );
   // The app's origin, for the sign-in challenge and CORS: APP_ORIGIN where it's set (the local server, tests),
   // else the deployment's SYSTEM#DEPLOYMENT row, which Terraform writes once CloudFront exists (terraform/web.tf).
-  // The row is re-read after ORIGIN_TTL_MS, so a replaced distribution reaches warm containers. On Lambda there is
-  // no fallback: until the row exists, sign-in answers 503 app_origin_unavailable and CORS allows no origin.
-  // Elsewhere, a server without APP_ORIGIN or the row names the Vite dev origin.
+  // The row is re-read ORIGIN_TTL_MS after a read that found it, so a replaced distribution reaches warm containers,
+  // and ORIGIN_RETRY_MS after one that didn't. A failed read keeps the origin last read. On Lambda there is no
+  // fallback: with no origin, sign-in answers 503 app_origin_unavailable and CORS allows none, while every other
+  // route works. Elsewhere, a server without APP_ORIGIN or the row names the Vite dev origin.
   const configuredOrigin = process.env.APP_ORIGIN;
   const onLambda = Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
-  let cachedOrigin: { origin: string; at: number } | undefined;
+  let originRead: { origin?: string; readAgainAt: number } | undefined;
   async function appOrigin(): Promise<string | undefined> {
     if (configuredOrigin) return configuredOrigin;
-    if (!cachedOrigin || Date.now() - cachedOrigin.at > ORIGIN_TTL_MS) {
-      const row = await records.get("SYSTEM#DEPLOYMENT", "APP_ORIGIN");
-      const origin = typeof row?.origin === "string" && /^https:\/\/[a-z0-9.-]+$/.test(row.origin) ? row.origin : undefined;
-      cachedOrigin = origin ? { origin, at: Date.now() } : undefined;
+    if (!originRead || Date.now() >= originRead.readAgainAt) {
+      try {
+        const row = await records.get("SYSTEM#DEPLOYMENT", "APP_ORIGIN");
+        const origin =
+          typeof row?.origin === "string" && /^https:\/\/[a-z0-9.-]+$/.test(row.origin) ? row.origin : undefined;
+        originRead = { origin, readAgainAt: Date.now() + (origin ? ORIGIN_TTL_MS : ORIGIN_RETRY_MS) };
+      } catch (error) {
+        // Error class only. Keep any origin already read, and try again after ORIGIN_RETRY_MS.
+        console.error(JSON.stringify({ appOrigin: "read_failed", error: (error as Error)?.name ?? "Error" }));
+        originRead = { origin: originRead?.origin, readAgainAt: Date.now() + ORIGIN_RETRY_MS };
+      }
     }
-    return cachedOrigin?.origin ?? (onLambda ? undefined : "http://127.0.0.1:5173");
+    return originRead.origin ?? (onLambda ? undefined : "http://127.0.0.1:5173");
   }
   app.use("*", secureHeaders());
   app.use("*", async (c, next) => {

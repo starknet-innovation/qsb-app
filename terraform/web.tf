@@ -1,6 +1,6 @@
-# The API is a Lambda function URL that only CloudFront can call: AWS_IAM auth, and CloudFront signs every
-# request with origin access control (below). Nothing else reaches it, so there is no direct address to bypass
-# CloudFront with and no stage throttle shared by every caller; the API Lambda's reserved concurrency is the cap.
+# The API is a Lambda function URL with AWS_IAM auth: it answers only signed requests. CloudFront signs every
+# request it forwards, with origin access control (below); otherwise only principals in this account with Lambda
+# invoke permissions can call it. The API Lambda's reserved concurrency caps it.
 # Clients send their credential in X-Qsb-Authorization, since the signature takes Authorization, and the
 # x-amz-content-sha256 of each body, which origin access control requires (docs/API.md#request-headers).
 resource "aws_lambda_function_url" "api" {

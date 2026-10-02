@@ -9,7 +9,7 @@ Applying Terraform doesn't turn mainnet on and doesn't authorize a spend: the de
 | Component | Resources |
 | --- | --- |
 | Web | Private versioned/encrypted S3 bucket, public-access block, CloudFront OAC, HTTPS distribution and security headers |
-| API | Node.js 22 ARM64 Lambda behind a function URL (`AWS_IAM`) that only CloudFront can call, through origin access control; no direct address and no API Gateway |
+| API | Node.js 22 ARM64 Lambda behind a function URL with `AWS_IAM` auth. CloudFront calls it through origin access control; otherwise only principals in this account with Lambda invoke permissions can |
 | Persistence | On-demand DynamoDB table with `pk`/`sk`, `expiresAt` TTL, point-in-time recovery and deletion protection |
 | Search control | Node.js 22 coordinator, Standard Step Functions loop and continuation; no generic retry around paid work (only a throttled coordinator invoke is retried) |
 | CPU checks | Python 3.13 ARM64 reference Lambda; public inputs only |
@@ -17,7 +17,7 @@ Applying Terraform doesn't turn mainnet on and doesn't authorize a spend: the de
 | External | The GPU stack's AWS Batch queue, job definition and bucket, and an optional administrator-created `qsb/slipstream` secret (the API's MARA Slipstream credential); no secret values in Terraform |
 | Webhook retries (off by default) | A keys-only `webhook-due` index on the table, always; with `webhook_dispatcher_enabled`, a Node.js 22 dispatcher Lambda that Lambda doesn't retry and an EventBridge Scheduler schedule every 5 minutes, each with its own bounded role (`webhooks.tf`); see [Scheduled webhook dispatcher](../docs/OPERATIONAL-RUNBOOK.md#scheduled-webhook-dispatcher) |
 
-No custom DNS or certificates are needed for the default CloudFront hostname. Custom domains, WAF and rate policies aren't set up; the API Lambda's reserved concurrency caps the API. The API names its CloudFront origin in sign-in challenges and allows it for CORS, and reads it from the records table's `SYSTEM#DEPLOYMENT` / `APP_ORIGIN` row, which Terraform writes once the distribution exists (`terraform/web.tf`). Until that row exists, sign-in answers 503 `app_origin_unavailable`; a container reads the row again every five minutes.
+No custom DNS or certificates are needed for the default CloudFront hostname. Custom domains, WAF and rate policies aren't set up; the API Lambda's reserved concurrency caps the API. The API names its CloudFront origin in sign-in challenges and allows it for CORS, and reads it from the records table's `SYSTEM#DEPLOYMENT` / `APP_ORIGIN` row, which Terraform writes once the distribution exists (`terraform/web.tf`). Until that row exists, sign-in answers 503 `app_origin_unavailable` and every other route works. A container reads the row again every five minutes, or every 30 seconds while it's missing or can't be read, keeping the origin it last read.
 
 ## Prerequisites
 

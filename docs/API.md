@@ -11,7 +11,7 @@ Both prefixes reach the same handlers and middleware: secure headers, CORS, the 
 
 ## Request headers
 
-The deployed API is a Lambda function URL that only CloudFront can call: CloudFront signs every request it forwards with origin access control (`terraform/web.tf`). So:
+The deployed API is a Lambda function URL with `AWS_IAM` auth, which CloudFront calls by signing every request it forwards with origin access control (`terraform/web.tf`). So:
 
 - **Credential.** Send a session token or an API key as `X-Qsb-Authorization: Bearer <credential>`. CloudFront replaces `Authorization` with its own SigV4 signature, so the server reads only a bearer from `Authorization`, never a signature, and an `Authorization: Bearer` credential works only against a server that isn't behind CloudFront, such as the local one. When both carry a bearer, `X-Qsb-Authorization` wins.
 - **Body hash.** On every POST, send `x-amz-content-sha256` with the hex SHA-256 of the exact body bytes (an empty body hashes the empty string). Origin access control refuses a POST without it, before the API sees it; the API itself doesn't check it.

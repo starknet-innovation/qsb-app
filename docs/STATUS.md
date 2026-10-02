@@ -5,7 +5,7 @@ As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete
 ## Deployed
 
 - **Account and region.** One app stack and one GPU stack in a dedicated AWS account in eu-west-2, reached through IAM Identity Center. They were built from scratch on 30 September 2026; no data was copied from the earlier eu-west-1 stack ([REGION-MIGRATION.md](REGION-MIGRATION.md)).
-- **Pipeline.** API Lambda, Step Functions coordinator, AWS Batch GPUs and the CPU reference Lambda ([README](../README.md#how-a-withdrawal-runs)). The API Lambda is a function URL that only CloudFront can call, through origin access control ([request headers](API.md#request-headers)).
+- **Pipeline.** API Lambda, Step Functions coordinator, AWS Batch GPUs and the CPU reference Lambda ([README](../README.md#how-a-withdrawal-runs)).
 - **Solver.** `combined-aws-sm86-v0.2.0` (`qsb-ranked-v2-43c77084648a-e22afc720df1`), the optimized subset kernel with the repaired pinning ([SOLVER-REPOSITORY.md](SOLVER-REPOSITORY.md)).
 - **GPUs.** On-Demand `g5.xlarge` (one A10G each), up to 16 per withdrawal (`workersMax` in `server/gpu-spend.json`), scaling to zero when idle.
 - **Switches.** An uncached `GET /api/config` reports the mainnet and submit switches. Approvals and switch changes are recorded in the private deployment record, not in Git ([runbook](OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches)). API keys, the scheduled webhook dispatcher and the per-owner limits are off by default.
@@ -30,6 +30,7 @@ As of 30 September 2026. #8, the plan to a first mainnet withdrawal, is complete
 
 ## Open
 
+- **API behind CloudFront origin access control.** The stack serves the API from a Lambda function URL with `AWS_IAM` auth, which CloudFront calls through origin access control, in place of API Gateway (`terraform/web.tf`). The deployment still runs API Gateway until the AWS administrator applies it in the temporary admin window and registers the API's origin access control ([terraform/README.md](../terraform/README.md)).
 - **Legal:** confirm that the redistribution approval covers the served image `combined-aws-sm86-v0.2.0`. The earlier approval covered `aws-v0.1.0`. This needs legal review.
 - **Solver image pull by digest.** #22 asked that the first bounded run confirm AWS Batch pulled the enrolled solver image by digest. No run has confirmed it yet: the first withdrawal's record ([FIRST-MAINNET-WITHDRAWAL.md](FIRST-MAINNET-WITHDRAWAL.md)) doesn't include it. Check the image that withdrawal's Batch jobs ran in eu-west-1 while AWS still keeps their records, or on the first eu-west-2 withdrawal.
 - **Legacy supervised jobs.** Persisted jobs marked `execution.kind: "qsb-supervised-service-v1"` stay rejected by exact submission and by the solved-result, pause, resume and status routes, and the UI hides their pause and resume controls. These guards stay until the production inventory is complete and any matching rows are reconciled or quarantined; removing the old UI doesn't show the table holds none.

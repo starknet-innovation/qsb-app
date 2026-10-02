@@ -35,7 +35,7 @@ EXPECTED = {
     'aws_s3_bucket': {'frontend'},
     'aws_lambda_function': {'api', 'coordinator', 'reference'},
     'aws_sfn_state_machine': {'withdrawal'},
-    # The API's function URL, only CloudFront can call (terraform/web.tf), and the row naming the app's origin.
+    # The API's function URL, with AWS_IAM auth (terraform/web.tf), and the row naming the app's origin.
     'aws_lambda_function_url': {'api'},
     'aws_dynamodb_table_item': {'app_origin'},
 }

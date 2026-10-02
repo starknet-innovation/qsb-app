@@ -120,7 +120,8 @@ export type QsbClientOptions = {
   /** `/v1` (default), the stable prefix, or `/api`, the compatibility alias. */
   basePath?: "/v1" | "/api";
   /**
-   * The origin the server names in its sign-in challenge (its APP_ORIGIN); defaults to
+   * The app origin the server names in its sign-in challenge (its APP_ORIGIN when set, otherwise, on the
+   * deployment, its SYSTEM#DEPLOYMENT row); defaults to
    * `baseUrl`'s origin. A challenge naming any other origin is never signed, so an endpoint
    * can't relay another deployment's challenge to obtain a session there.
    */
