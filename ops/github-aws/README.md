@@ -295,6 +295,31 @@ These stay with the AWS administrator, even though `qsb-operator` manages the st
   delivery tests.
 - **Secrets.** Creating or changing `qsb/slipstream` with the key holder
   ([MARA Slipstream credential](../../terraform/README.md#mara-slipstream-credential)).
+- **Image scanning.** Enhanced scanning of the `qsb-solver` repository with Amazon Inspector, which rescans its
+  images as new vulnerabilities are published. It's an account-level setting for the registry in eu-west-2, and
+  neither `qsb-viewonly` nor `qsb-operator` can read or change it. To turn it on, run these three in
+  order:
+  ```sh
+  aws inspector2 enable --resource-types ECR --account-ids ACCOUNT_ID --region eu-west-2
+  aws inspector2 update-configuration --region eu-west-2 --ecr-configuration rescanDuration=LIFETIME
+  aws ecr put-registry-scanning-configuration --region eu-west-2 --scan-type ENHANCED \
+    --rules '[{"scanFrequency":"CONTINUOUS_SCAN","repositoryFilters":[{"filter":"qsb-solver","filterType":"WILDCARD"}]}]'
+  ```
+  Then check, each with `--region eu-west-2`: `aws inspector2 batch-get-account-status` shows ECR scanning enabled,
+  `aws inspector2 get-configuration` shows `rescanDuration` `LIFETIME`, and `aws ecr get-registry-scanning-configuration`
+  shows `ENHANCED` with that rule. Before turning it on:
+  - Amazon Inspector bills each image's initial scan and each rescan
+    ([pricing](https://aws.amazon.com/inspector/pricing/)), and creates its service-linked role.
+  - It replaces basic scanning for the whole registry in the region: a repository that doesn't match a filter isn't
+    scanned at all.
+  - By default, a new account's Inspector stops rescanning an image 14 days after it was pushed or last used on a
+    running container, and closes its findings. `rescanDuration=LIFETIME` keeps rescanning every image for as long as
+    it exists. Raising the duration doesn't revive an image that has already expired, which is why it comes straight
+    after `enable` ([re-scan duration](https://docs.aws.amazon.com/inspector/latest/user/scanning_resources_configure_duration_setting_ecr.html)).
+  - When first turned on, it only takes images pushed in the last 14 days. Older images show
+    `SCAN_ELIGIBILITY_EXPIRED` and must be pushed again
+    ([enhanced scanning](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning-enhanced.html)).
+  - Neither role has any `inspector2` permission, so the findings are read as the administrator.
 
 The boundaries and alerts only hold while the operator can't edit them, and that holds only while the administrator
 is a different person.
