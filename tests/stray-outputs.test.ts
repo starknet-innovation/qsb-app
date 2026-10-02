@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { format } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
@@ -92,6 +94,41 @@ async function fixture(utxos: (deposit: string) => Utxo[] | Response) {
 const stray = { txid: "cd".repeat(32), vout: 3, value: 25_000, status: { confirmed: true } };
 const pending = { txid: "ef".repeat(32), vout: 0, value: 7_000, status: { confirmed: false } };
 
+// The stray-payments alarm's metric filter (terraform/workflow.tf): one numeric JSON comparison.
+const [, selector, least] =
+  /^\{ \$\.([\w.]+) >= (\d+) \}$/.exec(
+    /resource "aws_cloudwatch_log_metric_filter" "stray_payments" \{[\s\S]*?\bpattern\s*=\s*"([^"]*)"/.exec(
+      readFileSync(new URL("../terraform/workflow.tf", import.meta.url), "utf8"),
+    )?.[1] ?? "",
+  ) ?? [];
+
+/**
+ * How many of these console calls the alarm counts. The API logs in JSON (terraform/compute.tf):
+ * a call's sole argument is the record's `message` as is, and several are formatted into one
+ * string, as is an argument that can't be serialized.
+ */
+function alarmed(calls: unknown[][]) {
+  if (!selector) throw new Error("The stray-payments pattern is no longer one `{ $.path >= n }` comparison");
+  return calls.filter((args) => {
+    let record: unknown;
+    try {
+      record = JSON.parse(JSON.stringify({ message: args.length === 1 ? args[0] : format(...args) }));
+    } catch {
+      return false;
+    }
+    const value = selector.split(".").reduce<any>((node, key) => node?.[key], record);
+    return typeof value === "number" && value >= Number(least);
+  }).length;
+}
+
+/** Collects every console call, in order. */
+function consoleCalls() {
+  const calls: unknown[][] = [];
+  for (const method of ["trace", "debug", "log", "info", "warn", "error"] as const)
+    vi.spyOn(console, method).mockImplementation((...args: unknown[]) => void calls.push(args));
+  return calls;
+}
+
 describe("stray payments to a vault's script", () => {
   it("reads the script's outputs by the vault's script hash", async () => {
     const f = await fixture((deposit) => [
@@ -110,7 +147,8 @@ describe("stray payments to a vault's script", () => {
       stray,
       pending,
     ]);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const calls = consoleCalls();
+    const warn = vi.mocked(console.warn);
     const response = await f.get(`/vaults/${f.vault.id}/funding`);
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -127,13 +165,11 @@ describe("stray payments to a vault's script", () => {
     expect(await f.events()).toMatchObject([
       { type: "deposit.stray_payment", subjectId: f.vault.id, status: "stray_payment" },
     ]);
-    const lines = warn.mock.calls.map(([line]) => String(line));
-    expect(lines).toEqual([
-      JSON.stringify({
-        strayPayment: { vaultId: f.vault.id, count: 1, newCount: 1, sats: "25000", outputs: [`${stray.txid}:3`] },
-      }),
+    expect(warn.mock.calls).toEqual([
+      [{ strayPayment: { vaultId: f.vault.id, count: 1, newCount: 1, sats: "25000", outputs: [`${stray.txid}:3`] } }],
     ]);
-    expect(lines.join("\n")).not.toContain(owner);
+    expect(alarmed(calls)).toBe(1);
+    expect(JSON.stringify(calls)).not.toContain(owner);
 
     // Checking again finds nothing new: no second write, event or log line.
     const version = (await f.row())!.version;
@@ -142,6 +178,7 @@ describe("stray payments to a vault's script", () => {
     expect((await f.row())!.version).toBe(version);
     expect(await f.events()).toHaveLength(1);
     expect(warn).toHaveBeenCalledTimes(1);
+    expect(alarmed(calls)).toBe(1);
 
     const list = await (await f.get("/vaults")).json();
     expect(list.strayPayments).toEqual([flagged]);
@@ -154,7 +191,8 @@ describe("stray payments to a vault's script", () => {
       { txid: deposit, vout: 0, value: 100_000, status: { confirmed: true } },
       ...paid,
     ]);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const calls = consoleCalls();
+    const warn = vi.mocked(console.warn);
     const first = (await (await f.get(`/vaults/${f.vault.id}/funding`)).json()).strayPayments;
     expect(first).toMatchObject({ count: 25, sats: String(25 * 546) });
     expect(first.outputs).toHaveLength(STRAY_OUTPUTS_LISTED);
@@ -168,9 +206,10 @@ describe("stray payments to a vault's script", () => {
     expect(JSON.stringify((await f.row())!.strayPayments).length).toBeLessThan(4096);
     expect(await f.events()).toHaveLength(2);
     expect(warn).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(String(warn.mock.calls[1][0]))).toEqual({
-      strayPayment: { vaultId: f.vault.id, count: 5000, newCount: 4975, sats: String(5000 * 546), outputs: [] },
-    });
+    expect(warn.mock.calls[1]).toEqual([
+      { strayPayment: { vaultId: f.vault.id, count: 5000, newCount: 4975, sats: String(5000 * 546), outputs: [] } },
+    ]);
+    expect(alarmed(calls)).toBe(2);
   });
 
   it("never lets a withdrawal spend a flagged output", async () => {
@@ -202,15 +241,54 @@ describe("stray payments to a vault's script", () => {
 
   it("keeps the funding response when the lookup fails, and records nothing", async () => {
     const f = await fixture(() => new Response("", { status: 503 }));
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const calls = consoleCalls();
     const response = await f.get(`/vaults/${f.vault.id}/funding`);
     expect(response.status).toBe(200);
     expect((await response.json()).strayPayments).toBeNull();
     expect((await f.row())?.strayPayments).toBeUndefined();
     expect(await f.events()).toEqual([]);
-    expect(error.mock.calls.map(([line]) => String(line))).toContain(
+    expect(vi.mocked(console.error).mock.calls).toContainEqual([
       JSON.stringify({ strayPayments: "lookup_failed", error: "Error" }),
+    ]);
+    // A failure to flag isn't a stray payment.
+    expect(alarmed(calls)).toBe(0);
+  });
+
+  it("keeps the funding response when the record can't be written, and raises no alarm", async () => {
+    const f = await fixture((deposit) => [
+      { txid: deposit, vout: 0, value: 100_000, status: { confirmed: true } },
+      stray,
+    ]);
+    const put = f.store.put.bind(f.store);
+    vi.spyOn(f.store, "put").mockImplementation((row, ...rest) =>
+      row.strayPayments ? Promise.reject(new Error("unavailable")) : put(row, ...rest),
     );
+    const calls = consoleCalls();
+    const response = await f.get(`/vaults/${f.vault.id}/funding`);
+    expect(response.status).toBe(200);
+    expect((await response.json()).strayPayments).toBeNull();
+    expect((await f.row())?.strayPayments).toBeUndefined();
+    expect(await f.events()).toEqual([]);
+    expect(vi.mocked(console.error).mock.calls).toContainEqual([
+      JSON.stringify({ strayPayments: "record_failed", error: "Error" }),
+    ]);
+    expect(alarmed(calls)).toBe(0);
+  });
+
+  it("never counts a caller's request path towards the alarm", async () => {
+    const f = await fixture(() => [stray]);
+    // An unexpected error logs the request's path, which the caller chooses.
+    vi.spyOn(f.store, "get").mockRejectedValue(new Error("unavailable"));
+    const calls = consoleCalls();
+    const forged = JSON.stringify({ strayPayment: { vaultId: f.vault.id, newCount: 1 } });
+    for (const segment of ["strayPayment", encodeURI(forged)])
+      expect((await f.get(`/vaults/${segment}/funding`)).status).toBe(500);
+    const routes = vi
+      .mocked(console.error)
+      .mock.calls.map(([line]) => JSON.parse(String(line)).route)
+      .filter(Boolean);
+    expect(routes).toEqual(["/api/vaults/strayPayment/funding", `/api/vaults/${forged}/funding`]);
+    expect(alarmed(calls)).toBe(0);
   });
 
   it("doesn't look for stray outputs before a vault is funded", async () => {

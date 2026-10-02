@@ -30,6 +30,7 @@ As of 2 October 2026. #8, the plan to a first mainnet withdrawal, is complete; w
 
 ## Open
 
+- **API behind CloudFront origin access control.** The stack serves the API from a Lambda function URL with `AWS_IAM` auth, which CloudFront calls through origin access control, in place of API Gateway (`terraform/web.tf`). The deployment still runs API Gateway until the AWS administrator applies it in the temporary admin window and registers the API's origin access control ([terraform/README.md](../terraform/README.md)).
 - **Serve `combined-aws-sm86-v0.3.0`.** It is enrolled, not served: the same executables as the served release, on a runtime with Ubuntu updates applied at build; its 1 October 2026 release scan found no fixable findings. Serving it needs the eu-west-2 ECR copy, a job-definition revision and `solver_release_id` ([serving a release](SOLVER-REPOSITORY.md#serving-a-release)), with no pinned withdrawal still searching.
 - **Legal:** confirm that the redistribution approval covers the served image `combined-aws-sm86-v0.2.0`, and `combined-aws-sm86-v0.3.0` before it is served. The earlier approval covered `aws-v0.1.0`. This needs legal review.
 - **Solver image pull by digest.** #22 asked that the first bounded run confirm AWS Batch pulled the enrolled solver image by digest. No run has confirmed it yet: the first withdrawal's record ([FIRST-MAINNET-WITHDRAWAL.md](FIRST-MAINNET-WITHDRAWAL.md)) doesn't include it. Check the image that withdrawal's Batch jobs ran in eu-west-1 while AWS still keeps their records, or on the first eu-west-2 withdrawal.

@@ -37,6 +37,7 @@ PATTERNS = [
     (re.compile(r'(?<!\d)\d{12}(?!\d)'), '<account>'),
     (re.compile(r'\b[a-z0-9]+\.cloudfront\.net\b'), '<cloudfront-domain>'),
     (re.compile(r'\b[a-z0-9]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com\b'), '<api-endpoint>'),
+    (re.compile(r'\b[a-z0-9]+\.lambda-url\.[a-z0-9-]+\.on\.aws\b'), '<api-endpoint>'),
     (re.compile(r'\bE[A-Z0-9]{12,14}\b'), '<cloudfront-id>'),
     (re.compile(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'), '<uuid>'),
     (re.compile(r'/apis/[a-z0-9]+'), '/apis/<id>'),

@@ -116,7 +116,11 @@ On an incident:
 
 ### Stray payments
 
-`<name>-stray-payments` fires when the API flags more confirmed payments to a vault's script beyond its recorded deposit than it had recorded ([API](API.md#stray-payments)). A metric filter on the API's log group counts its `{"strayPayment": {"vaultId": …, "count": …, "newCount": …, "sats": …, "outputs": ["<txid>:<vout>"]}}` lines (`terraform/workflow.tf`). `count` and `sats` cover all the vault's stray outputs; `outputs` names those newly listed, and the record lists at most 20. The line names the vault, not the owner. The owner sees the payment in the vault list and gets a `deposit.stray_payment` event. A payment is flagged when the funding route next runs for that vault. The webapp runs it on its own for each funded or withdrawn vault about once an hour while it's open ([API](API.md#stray-payments)), so an owner who never opens the app isn't flagged until an SDK or API call makes that request.
+`<name>-stray-payments` fires when the API flags more confirmed payments to a vault's script beyond its recorded deposit than it had recorded ([API](API.md#stray-payments)). The API Lambda logs in JSON format, one record per console call at INFO or above, with the call's text or object in `message`. When it flags a payment, its record's `message` is the object `{"strayPayment": {"vaultId": …, "count": …, "newCount": …, "sats": …, "outputs": ["<txid>:<vout>"]}}`. A metric filter on the API's log group counts those records with the pattern `{ $.message.strayPayment.newCount >= 1 }` (`terraform/workflow.tf`); filter the log group with the same pattern to find them. `count` and `sats` cover all the vault's stray outputs; `outputs` names those newly listed, and the vault's stray-payment record lists at most 20. The log record names the vault, not the owner.
+
+Only that object raises the alarm. The API's own code logs everything else as a string, and the pattern never matches a string `message`, so a request path or other text a caller chooses can't raise it, even when it reads like the object. A failed check logs the string `{"strayPayments": "lookup_failed"}` (the chain lookup) or `"record_failed"` (the vault row write) with the error class. The alarm doesn't count it, and the next run of the funding route checks the vault again.
+
+The owner sees the payment in the vault list and gets a `deposit.stray_payment` event. A payment is flagged when the funding route next runs for that vault. The webapp runs it on its own for each funded or withdrawn vault about once an hour while it's open ([API](API.md#stray-payments)), so an owner who never opens the app isn't flagged until an SDK or API call makes that request.
 
 - Don't try to spend it, and don't build a transaction that does. No withdrawal the app builds includes it. Spending it would reuse the vault's one-time material, and whether that could ever be safe is a question for the QSB author, outside the app.
 - The vault's own deposit is unaffected and withdraws as usual.
@@ -225,7 +229,7 @@ This is separate from AWS Batch reconciliation. Never use the compute `--not-sub
 
 Each transactional Put is authorized as `dynamodb:PutItem` with its own leading key, so the `EVENT#` row needs no grant beyond `OWNER#*` PutItem. That is AWS's per-item authorization of TransactWriteItems; verify it against the current AWS documentation before relying on a narrower policy.
 
-The withdrawal API Lambda has a 120-second timeout, but API Gateway returns a timeout after its 30-second integration budget. A caller timeout doesn't stop an already running Lambda or prove the miner never received the POST: treat it as uncertain and follow the steps above. Never retry the POST or reset its intent.
+The withdrawal API Lambda has a 120-second timeout, but CloudFront returns a timeout after its 30-second origin response timeout. A caller timeout doesn't stop an already running Lambda or prove the miner never received the POST: treat it as uncertain and follow the steps above. Never retry the POST or reset its intent.
 
 ## Operator session
 
@@ -294,6 +298,18 @@ The coordinator's record policy (`terraform/policies/coordinator-records.json`) 
 ## Rollback
 
 Rebuild an approved earlier clean, pushed commit and review its plan against the current state ([terraform/README.md](../terraform/README.md#updates-and-rollback)). A rollback never releases consumed commitments or reservations, never duplicates paid work, and doesn't authorize a spend. Don't roll back reservation semantics or replay old workflows without a reviewed reconciliation decision. Never roll the API back past `d0a1732` (#78) while the `qsb/slipstream` secret holds `client_code` ([MARA Slipstream credential](../terraform/README.md#mara-slipstream-credential)).
+
+### Rolling back to an API Gateway commit
+
+Commits whose Terraform still serves the API through API Gateway (`aws_apigatewayv2_*`) can't be applied by `deploy.yml` or `qsb-operator`. The deploy role has no API Gateway grants, and both roles may add Lambda permissions only for CloudFront and EventBridge (`ops/github-aws`). Such a plan still passes that commit's own checks. An apply then removes CloudFront's two permissions on the function and the `SYSTEM#DEPLOYMENT` origin row, and fails creating the API. The distribution still points at the function URL, so every API request gets 403 until an administrator repairs it.
+
+Roll back to such a commit only as the AWS administrator, in the temporary admin window, with `QSB_AWS_DEPLOY_ENABLED` set to `false`. Leave it `false` while `main` still holds the function URL: a deploy from `main` would apply the function URL stack again.
+
+To keep the rolled-back commit deployed:
+1. Revert `main` to it through a reviewed PR.
+2. From that `main`, register the API ID the rollback created in `apis` and remove the API's origin access control from `origin_access_controls`.
+3. Run `update_installed.py` as a plan, then `--apply`. It applies only from a clean `main`.
+4. Only then set `QSB_AWS_DEPLOY_ENABLED` back to `true`.
 
 ### Rolling back past the index.html split
 

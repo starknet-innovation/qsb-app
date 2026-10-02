@@ -3,7 +3,7 @@ import * as btc from "@scure/btc-signer";
 import { base64, hex } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { z } from "zod";
-import { ApiRequestError, createSessionClient } from "../src/lib/session";
+import { ApiRequestError, CREDENTIAL_HEADER, createSessionClient } from "../src/lib/session";
 import { NETWORK_ID } from "../src/lib/network";
 import { operationsAllowed } from "../src/lib/readiness";
 import { assertVaultConfiguration, withVaultConfiguration } from "../src/lib/provenance";
@@ -120,7 +120,8 @@ export type QsbClientOptions = {
   /** `/v1` (default), the stable prefix, or `/api`, the compatibility alias. */
   basePath?: "/v1" | "/api";
   /**
-   * The origin the server names in its sign-in challenge (its APP_ORIGIN); defaults to
+   * The app origin the server names in its sign-in challenge (its APP_ORIGIN when set, otherwise, on the
+   * deployment, its SYSTEM#DEPLOYMENT row); defaults to
    * `baseUrl`'s origin. A challenge naming any other origin is never signed, so an endpoint
    * can't relay another deployment's challenge to obtain a session there.
    */
@@ -260,7 +261,7 @@ function transport(options: Pick<QsbClientOptions, "baseUrl" | "basePath" | "fet
   return createSessionClient(((path: string, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
     // A wallet session, once signed in, takes precedence; otherwise the key authenticates.
-    if (apiKey && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${apiKey}`);
+    if (apiKey && !headers.has(CREDENTIAL_HEADER)) headers.set(CREDENTIAL_HEADER, `Bearer ${apiKey}`);
     return send(`${origin}${path}`, {
       ...init,
       headers,

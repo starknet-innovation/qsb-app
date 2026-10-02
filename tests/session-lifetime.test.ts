@@ -30,7 +30,7 @@ async function main(){
   let authorization:string|null=null;const c=createSessionClient(async(input,init)=>{
    if(String(input).endsWith('challenge'))return response({id:'x',message:'x'});
    if(String(input).endsWith('verify'))return response({token});
-   authorization=new Headers(init?.headers).get('Authorization');return response({ok:true});
+   const sent=new Headers(init?.headers);assert.equal(sent.get('Authorization'),null);authorization=sent.get('X-Qsb-Authorization');return response({ok:true});
   });await c.authenticate('wallet',async()=> 'signature');assert.deepEqual(await c.api('/read'),{ok:true});assert.equal(authorization,'Bearer '+token);c.clearSession();await c.api('/read');assert.equal(authorization,null);passed++;
  }
  {

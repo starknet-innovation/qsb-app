@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { BODY_HASH_HEADER } from "../src/lib/session";
 import { inspectRoutes } from "hono/dev";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../server/app";
@@ -85,11 +86,12 @@ function checkParameters(method: string, path: string, params: Json[]) {
     expect(p).toMatchObject({ required: false, schema: { type: "string", pattern: expect.any(String) } });
   for (const p of params.filter((p) => p.in !== "path" && p.in !== "query"))
     expect(p).toMatchObject({
-      name: "Idempotency-Key",
       in: "header",
-      required: false,
+      // The body hash is required on every POST (CloudFront origin access control); Idempotency-Key is optional.
+      ...(p.name === BODY_HASH_HEADER ? { required: true } : { name: "Idempotency-Key", required: false }),
       schema: { type: "string", pattern: expect.any(String) },
     });
+  expect(params.some((p) => p.name === BODY_HASH_HEADER), `${method} ${path}`).toBe(method === "post");
 }
 
 describe("OpenAPI document", () => {
@@ -147,7 +149,10 @@ describe("OpenAPI document", () => {
       const header = ((operation.parameters ?? []) as Json[]).filter((p) => p.in === "header");
       expect({ route: route.operationId, header: header.map((p) => p.name) }).toEqual({
         route: route.operationId,
-        header: acceptsIdempotencyKey(route) ? ["Idempotency-Key"] : [],
+        header: [
+          ...(acceptsIdempotencyKey(route) ? ["Idempotency-Key"] : []),
+          ...(route.method === "post" ? [BODY_HASH_HEADER] : []),
+        ],
       });
       if (acceptsIdempotencyKey(route))
         expect(routeErrors(route)[409]).toEqual(

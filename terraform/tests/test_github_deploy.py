@@ -49,11 +49,12 @@ class Redaction(unittest.TestCase):
         text = (f'Error: AccessDenied: User: arn:aws:sts::{ACCOUNT}:assumed-role/qsb-github-deploy/x is not authorized '
                 'on distribution EXAMPLEDIST123 (d111111abcdef8.cloudfront.net), '
                 'https://a1b2c3d4e5.execute-api.eu-west-2.amazonaws.com and /apis/a1b2c3d4e5, '
+                'https://abcdefghijklmnopqrstuvwxyz234567.lambda-url.eu-west-2.on.aws/, '
                 's3://test-state-bucket/qsb/main/terraform.tfstate, '
                 'aws_lambda_function.app["api"]: Modifications complete after 2s [id=qsb-app-api], '
                 'request 0f8fad5b-d9cb-469f-a165-70867728950e, key ASIAABCDEFGHIJKLMNOP')
         out = gd.redact(text, [])
-        for leak in LEAKS + ['qsb-app-api', '0f8fad5b', 'ASIAABCDEFGHIJKLMNOP']:
+        for leak in LEAKS + ['qsb-app-api', '0f8fad5b', 'ASIAABCDEFGHIJKLMNOP', 'abcdefghijklmnopqrstuvwxyz234567']:
             self.assertNotIn(leak, out)
         self.assertIn('is not authorized', out)
         self.assertIn('aws_lambda_function.app["api"]', out)

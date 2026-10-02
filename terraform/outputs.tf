@@ -1,11 +1,10 @@
 output "app_url" { value = "https://${aws_cloudfront_distribution.web.domain_name}" }
-output "api_url" { value = aws_apigatewayv2_api.api.api_endpoint }
 output "frontend_bucket" { value = aws_s3_bucket.frontend.id }
 output "cloudfront_distribution_id" { value = aws_cloudfront_distribution.web.id }
-# The four IDs an administrator registers in the ops/github-aws inventory after the first apply.
-output "origin_access_control_id" { value = aws_cloudfront_origin_access_control.web.id }
+# The IDs an administrator registers in the ops/github-aws inventory after the first apply: the
+# distribution, both origin access controls and the response headers policy.
+output "origin_access_control_ids" { value = [aws_cloudfront_origin_access_control.web.id, aws_cloudfront_origin_access_control.api.id] }
 output "response_headers_policy_id" { value = aws_cloudfront_response_headers_policy.security.id }
-output "api_id" { value = aws_apigatewayv2_api.api.id }
 output "table_name" { value = aws_dynamodb_table.records.name }
 output "workflow_arn" { value = aws_sfn_state_machine.withdrawal.arn }
 output "source_commit" { value = var.source_commit }

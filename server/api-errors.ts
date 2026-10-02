@@ -12,7 +12,9 @@ export const apiErrorCodes = {
   invalid_request:
     "Validation failed, usually of the body or a path parameter. `issues` lists each problem.",
   request_too_large: "The request body is over the size limit.",
-  auth_required: "No well-formed `Authorization: Bearer <token>` header was sent.",
+  auth_required: "No well-formed `X-Qsb-Authorization: Bearer <token>` (or `Authorization: Bearer <token>`) header was sent.",
+  app_origin_unavailable:
+    "The deployment hasn't recorded its app origin yet, so it can't issue a sign-in challenge. Retry shortly.",
   session_expired:
     "The session is unknown, expired or for another network. Sign in again.",
   challenge_expired:

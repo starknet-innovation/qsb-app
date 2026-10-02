@@ -82,7 +82,7 @@ export function apiKeysEnabled() {
   return process.env.QSB_API_KEYS_ENABLED === "true";
 }
 
-/** The API key in an Authorization header, or undefined for any other bearer. */
+/** The API key in a `Bearer <credential>` header value (server/app.ts `credential`), or undefined for any other bearer. */
 export function bearerApiKey(header: string) {
   return bearerKey.exec(header)?.[1];
 }

@@ -15,14 +15,15 @@ export function strayPaymentsOf(row: Row): StrayPayments | null {
 }
 
 function logStrayError(stage: string, error: unknown) {
-  // Error class only: never URLs, owners or payloads.
+  // Error class only: never URLs, owners or payloads. A string, so the stray-payments alarm
+  // never counts a failure to flag.
   console.error(JSON.stringify({ strayPayments: stage, error: (error as Error)?.name ?? "Error" }));
 }
 
 /**
  * Look up the confirmed outputs at a funded vault's script and count those that aren't its
  * `funding`. When there are more than the vault row records, record the new count, total and
- * listed outputs, with a `deposit.stray_payment` owner event and a `strayPayment` log line for
+ * listed outputs, with a `deposit.stray_payment` owner event and a `strayPayment` log object for
  * the operator's alarm. Returns the row's stray payments.
  *
  * Anyone can pay the script, so the record stays a fixed size however many outputs arrive: it
@@ -73,16 +74,16 @@ export async function flagStrayPayments(
     return known;
   }
   store.recordStrayPayment(row.pk.slice("OWNER#".length), vault.id);
-  console.warn(
-    JSON.stringify({
-      strayPayment: {
-        vaultId: vault.id,
-        count: record.count,
-        newCount: record.count - (known?.count ?? 0),
-        sats: record.sats,
-        outputs: added.map(point),
-      },
-    }),
-  );
+  // One object, not a string: the API's JSON log record keeps it as its `message` object, which
+  // is what the stray-payments alarm's filter selects (terraform/workflow.tf).
+  console.warn({
+    strayPayment: {
+      vaultId: vault.id,
+      count: record.count,
+      newCount: record.count - (known?.count ?? 0),
+      sats: record.sats,
+      outputs: added.map(point),
+    },
+  });
   return record;
 }

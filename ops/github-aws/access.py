@@ -199,12 +199,18 @@ def access(c):
               {'StringEquals': {'iam:AWSServiceName': ['batch.amazonaws.com', 'ecs.amazonaws.com']}}),
     ]
     guards = [
+        # Function grants only for the services that invoke QSB functions: CloudFront, through origin access
+        # control to the API's function URL, and EventBridge, for the GPU watchdog.
         dict(Sid='OnlyRequiredLambdaPrincipals', Effect='Deny', Action=['lambda:AddPermission'],
              Resource=['*'], Condition={'StringNotEquals': {
-                 'lambda:Principal': ['apigateway.amazonaws.com', 'events.amazonaws.com']}}),
-        deny('NoFunctionUrlsOrExternalResourcePolicies', [
-            'lambda:CreateFunctionUrlConfig', 'lambda:UpdateFunctionUrlConfig',
-            'dynamodb:PutResourcePolicy', 'ecr:SetRepositoryPolicy'], ['*']),
+                 'lambda:Principal': ['cloudfront.amazonaws.com', 'events.amazonaws.com']}}),
+        # A function URL only with AWS_IAM auth, never a public one. Null=false limits the deny to requests that
+        # name an auth type: an update that names none keeps the URL's current one.
+        dict(Sid='OnlyIamFunctionUrls', Effect='Deny',
+             Action=['lambda:CreateFunctionUrlConfig', 'lambda:UpdateFunctionUrlConfig'], Resource=['*'],
+             Condition={'StringNotEquals': {'lambda:FunctionUrlAuthType': 'AWS_IAM'},
+                        'Null': {'lambda:FunctionUrlAuthType': 'false'}}),
+        deny('NoExternalResourcePolicies', ['dynamodb:PutResourcePolicy', 'ecr:SetRepositoryPolicy'], ['*']),
         # The external-access analyzer is the check on role trust and bucket policies; keep it out of reach.
         deny('ProtectAccessAnalyzer', ['access-analyzer:*'], ['*']),
         deny('ProtectBootstrapIdentities', ['iam:*'], [iam('role/qsb/bootstrap/*'), iam('policy/qsb/bootstrap/*'),

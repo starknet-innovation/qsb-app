@@ -26,8 +26,7 @@ ALLOWED = {
     'aws_s3_bucket_policy', 'aws_cloudwatch_log_group', 'aws_iam_role',
     'aws_iam_role_policy', 'aws_lambda_function', 'aws_lambda_permission',
     'aws_sfn_state_machine', 'aws_cloudwatch_metric_alarm', 'aws_cloudwatch_log_metric_filter',
-    'aws_apigatewayv2_api', 'aws_apigatewayv2_integration',
-    'aws_apigatewayv2_route', 'aws_apigatewayv2_stage',
+    'aws_lambda_function_url', 'aws_dynamodb_table_item',
     'aws_cloudfront_origin_access_control', 'aws_cloudfront_response_headers_policy',
     'aws_cloudfront_distribution', 'aws_scheduler_schedule', 'aws_lambda_function_event_invoke_config',
 }
@@ -36,7 +35,19 @@ EXPECTED = {
     'aws_s3_bucket': {'frontend'},
     'aws_lambda_function': {'api', 'coordinator', 'reference'},
     'aws_sfn_state_machine': {'withdrawal'},
+    # The API's function URL, with AWS_IAM auth (terraform/web.tf), and the row naming the app's origin.
+    'aws_lambda_function_url': {'api'},
+    'aws_dynamodb_table_item': {'app_origin'},
+    # CloudFront's two permissions on the API (terraform/web.tf): the stack's only Lambda permissions.
+    'aws_lambda_permission': {'api_url', 'api_invoke'},
 }
+CLOUDFRONT_PERMISSIONS = {'api_url': 'lambda:InvokeFunctionUrl', 'api_invoke': 'lambda:InvokeFunction'}
+# How a saved plan's configuration names the distribution's ARN, where the ARN is unknown until apply.
+DISTRIBUTION_ARN_REFERENCES = {'aws_cloudfront_distribution.web.arn', 'aws_cloudfront_distribution.web'}
+# The origin row's key in the records table (server/app.ts reads it), and how a saved plan's configuration names
+# the distribution's domain in the row, where the domain is unknown until apply.
+APP_ORIGIN_KEY = {'pk': {'S': 'SYSTEM#DEPLOYMENT'}, 'sk': {'S': 'APP_ORIGIN'}}
+DISTRIBUTION_DOMAIN_REFERENCES = {'aws_cloudfront_distribution.web.domain_name', 'aws_cloudfront_distribution.web'}
 
 
 # The scheduled webhook dispatcher (webhooks.tf), present only with webhook_dispatcher_enabled. Its resources come
@@ -62,13 +73,12 @@ def require(condition, message):
         raise ValueError(message)
 
 
-# Everything the API Lambda's environment may draw on (terraform/compute.tf). In a real first plan that
-# environment is unknown until apply, because it includes the CloudFront domain, so the plan's configuration
-# references are checked against this list instead: any new reference fails closed until reviewed here.
+# Everything the API Lambda's environment may draw on (terraform/compute.tf). Where a real first plan leaves that
+# environment unknown until apply, the plan's configuration references are checked against this list instead:
+# any new reference fails closed until reviewed here.
 # References carry no key names or constants; re-run with --deploy after the first apply, when the
 # environment is known, and rely on the mock-plan tests for constants.
 API_ENV_REFERENCES = {
-    'aws_cloudfront_distribution.web', 'aws_cloudfront_distribution.web.domain_name',
     'aws_dynamodb_table.records', 'aws_dynamodb_table.records.name',
     'local.owner_limit_env', 'local.solver_release_id', 'local.workflow_arn',
     'var.api_keys_enabled', 'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network',
@@ -371,6 +381,52 @@ def secret_grants(rows):
     return grants
 
 
+def cloudfront_permission_rules(rows, configuration):
+    """Each Lambda permission lets CloudFront invoke the API for this stack's distribution only. The IAM guards
+    can't check a permission's SourceArn (ops/github-aws/README.md), so the plan must."""
+    distribution = next((r for r in rows if r['type'] == 'aws_cloudfront_distribution' and r['name'] == 'web'), {})
+    arn = distribution.get('values', {}).get('arn')
+    resources = {r['address']: r for r in (configuration or {}).get('root_module', {}).get('resources', [])}
+    for row in (r for r in rows if r['type'] == 'aws_lambda_permission'):
+        values, address = row.get('values', {}), f"aws_lambda_permission.{row['name']}"
+        require(values.get('principal') == 'cloudfront.amazonaws.com' and
+                values.get('action') == CLOUDFRONT_PERMISSIONS[row['name']],
+                f'{address} must grant {CLOUDFRONT_PERMISSIONS[row["name"]]} to cloudfront.amazonaws.com')
+        if values.get('source_arn') is not None:
+            require(arn is not None and values['source_arn'] == arn,
+                    f"{address} must name this stack's distribution as its source_arn")
+        else:
+            expression = resources.get(address, {}).get('expressions', {}).get('source_arn', {})
+            require(set(expression.get('references', [])) == DISTRIBUTION_ARN_REFERENCES,
+                    f'{address}: source_arn is unknown at plan, so it must be aws_cloudfront_distribution.web.arn '
+                    "in the saved plan's configuration section")
+
+
+def app_origin_rules(rows, configuration):
+    """The origin row is exactly SYSTEM#DEPLOYMENT / APP_ORIGIN in the records table, naming this stack's
+    distribution. A deploy can write any row through an aws_dynamodb_table_item, and the API names this origin in
+    its sign-in challenges. Where the distribution is created or replaced, its domain and so the row are unknown
+    until apply: the saved plan's configuration must then build the row from that domain only. The mock plans
+    check the row's key, and the --deploy re-run after a first apply checks the row itself."""
+    values = next(r for r in rows if r['type'] == 'aws_dynamodb_table_item').get('values', {})
+    table = next((r.get('values', {}).get('name') for r in rows if r['type'] == 'aws_dynamodb_table'), None)
+    domain = next((r.get('values', {}).get('domain_name') for r in rows
+                   if r['type'] == 'aws_cloudfront_distribution' and r['name'] == 'web'), None)
+    require(table is not None and values.get('table_name') == table and values.get('hash_key') == 'pk' and
+            values.get('range_key') == 'sk', 'aws_dynamodb_table_item.app_origin must be in the records table, keyed by pk and sk')
+    if isinstance(values.get('item'), str):
+        require(domain is not None and json.loads(values['item']) ==
+                dict(APP_ORIGIN_KEY, version={'N': '0'}, origin={'S': f'https://{domain}'}),
+                "aws_dynamodb_table_item.app_origin must be exactly the SYSTEM#DEPLOYMENT / APP_ORIGIN row naming "
+                "this stack's distribution")
+    else:
+        resources = {r['address']: r for r in (configuration or {}).get('root_module', {}).get('resources', [])}
+        item = resources.get('aws_dynamodb_table_item.app_origin', {}).get('expressions', {}).get('item', {})
+        require(set(item.get('references', [])) == DISTRIBUTION_DOMAIN_REFERENCES,
+                "aws_dynamodb_table_item.app_origin is unknown at plan, so the saved plan's configuration must build "
+                'it from aws_cloudfront_distribution.web.domain_name alone')
+
+
 def config_env_references(configuration, name):
     """References behind a Lambda's environment map in a saved plan's configuration section."""
     resources = {r['address']: r for r in (configuration or {}).get('root_module', {}).get('resources', [])}
@@ -392,6 +448,9 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
         selected = [r for r in rows if r['type'] == kind]
         require(len(selected) == len(names) and {r['name'] for r in selected} == names,
                 f'Expected only {kind}: {sorted(names)}')
+    for url in (r for r in rows if expanded and r['type'] == 'aws_lambda_function_url'):
+        require(url.get('values', {}).get('authorization_type') == 'AWS_IAM',
+                'the API function URL must take AWS_IAM auth, so only CloudFront origin access control can call it')
     roles = [r for r in rows if r['type'] == 'aws_iam_role']
     role_names = {'lambda', 'workflow', 'operator_reconcile'} | ({DISPATCHER_ROLE} if dispatcher else set())
     require(len(roles) == ((7 if dispatcher else 5) if expanded else len(role_names)) and {r['name'] for r in roles} == role_names,
@@ -399,6 +458,8 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
             'dispatcher, its schedule role')
     if expanded:
         workflow_rules(rows)
+        cloudfront_permission_rules(rows, configuration)
+        app_origin_rules(rows, configuration)
         due_index_rules(rows)
         dispatcher_rules(rows, dispatcher)
         funcs = {r['name']: r for r in rows if r['type'] == 'aws_lambda_function'}

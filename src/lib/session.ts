@@ -10,6 +10,21 @@ export class ApiRequestError extends Error {
     this.name = "ApiRequestError";
   }
 }
+/**
+ * The header that carries a session token or an API key, as `Bearer <credential>`. It isn't
+ * `Authorization`, because CloudFront origin access control signs each request it sends to
+ * the API with its own `Authorization` header (AWS SigV4).
+ */
+export const CREDENTIAL_HEADER = "X-Qsb-Authorization";
+/**
+ * The hex SHA-256 of a request's body. CloudFront origin access control to a Lambda function
+ * URL requires it on every request with a body; the API itself doesn't check it.
+ */
+export const BODY_HASH_HEADER = "x-amz-content-sha256";
+export async function bodyHash(body: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 const sessionToken = /^[A-Za-z0-9_-]{43}$/;
 /** `basePath` prefixes every route: the webapp's own (`API_BASE_PATH`), or the SDK's choice. */
 export function createSessionClient(fetcher: typeof fetch = fetch, basePath: ApiBasePath = API_BASE_PATH) {
@@ -26,13 +41,15 @@ function restoreSession(value: string) {
   token = value;
 }
 async function api<T>(path: string, body?: unknown): Promise<T> {
+  const payload = body === undefined ? undefined : JSON.stringify(body);
   const r = await fetcher(`${basePath}${path}`, {
-    method: body === undefined ? "GET" : "POST",
+    method: payload === undefined ? "GET" : "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? { [CREDENTIAL_HEADER]: `Bearer ${token}` } : {}),
+      ...(payload === undefined ? {} : { [BODY_HASH_HEADER]: await bodyHash(payload) }),
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: payload,
   });
   const text = await r.text();
   let data;

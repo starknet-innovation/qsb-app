@@ -12,7 +12,7 @@ Before any miner request, the miner credential, if one is configured, is read; a
 
 A duplicate request returns the saved outcome without a second POST. Concurrent callers can't both win the intent transaction. A different witness for the same txid, or a different transaction for a job with an intent, is refused. A timeout, HTTP error, malformed response, crash, or failure to persist a response can't authorize another submission: the intent and the outpoint reservations remain. Even a crash after the intent but before the POST needs operator reconciliation. Availability is deliberately secondary to avoiding a second submission. Definite miner rejections currently keep the same conservative `uncertain` state.
 
-The API Lambda timeout is 120 seconds, to budget the chain reads, the bounded native check and the miner POST. API Gateway's integration budget stays 30 seconds, so a browser can time out while Lambda continues. That timeout is an unknown outcome, not permission to submit again.
+The API Lambda timeout is 120 seconds, to budget the chain reads, the bounded native check and the miner POST. CloudFront's origin response timeout stays 30 seconds, so a browser can time out while Lambda continues. That timeout is an unknown outcome, not permission to submit again.
 
 ## Native verification
 
