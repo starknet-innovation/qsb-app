@@ -38,7 +38,12 @@ EXPECTED = {
     # The API's function URL, with AWS_IAM auth (terraform/web.tf), and the row naming the app's origin.
     'aws_lambda_function_url': {'api'},
     'aws_dynamodb_table_item': {'app_origin'},
+    # CloudFront's two permissions on the API (terraform/web.tf): the stack's only Lambda permissions.
+    'aws_lambda_permission': {'api_url', 'api_invoke'},
 }
+CLOUDFRONT_PERMISSIONS = {'api_url': 'lambda:InvokeFunctionUrl', 'api_invoke': 'lambda:InvokeFunction'}
+# How a saved plan's configuration names the distribution's ARN, where the ARN is unknown until apply.
+DISTRIBUTION_ARN_REFERENCES = {'aws_cloudfront_distribution.web.arn', 'aws_cloudfront_distribution.web'}
 
 
 # The scheduled webhook dispatcher (webhooks.tf), present only with webhook_dispatcher_enabled. Its resources come
@@ -372,6 +377,27 @@ def secret_grants(rows):
     return grants
 
 
+def cloudfront_permission_rules(rows, configuration):
+    """Each Lambda permission lets CloudFront invoke the API for this stack's distribution only. The IAM guards
+    can't check a permission's SourceArn (ops/github-aws/README.md), so the plan must."""
+    distribution = next((r for r in rows if r['type'] == 'aws_cloudfront_distribution' and r['name'] == 'web'), {})
+    arn = distribution.get('values', {}).get('arn')
+    resources = {r['address']: r for r in (configuration or {}).get('root_module', {}).get('resources', [])}
+    for row in (r for r in rows if r['type'] == 'aws_lambda_permission'):
+        values, address = row.get('values', {}), f"aws_lambda_permission.{row['name']}"
+        require(values.get('principal') == 'cloudfront.amazonaws.com' and
+                values.get('action') == CLOUDFRONT_PERMISSIONS[row['name']],
+                f'{address} must grant {CLOUDFRONT_PERMISSIONS[row["name"]]} to cloudfront.amazonaws.com')
+        if values.get('source_arn') is not None:
+            require(arn is not None and values['source_arn'] == arn,
+                    f"{address} must name this stack's distribution as its source_arn")
+        else:
+            expression = resources.get(address, {}).get('expressions', {}).get('source_arn', {})
+            require(set(expression.get('references', [])) == DISTRIBUTION_ARN_REFERENCES,
+                    f'{address}: source_arn is unknown at plan, so it must be aws_cloudfront_distribution.web.arn '
+                    "in the saved plan's configuration section")
+
+
 def config_env_references(configuration, name):
     """References behind a Lambda's environment map in a saved plan's configuration section."""
     resources = {r['address']: r for r in (configuration or {}).get('root_module', {}).get('resources', [])}
@@ -403,6 +429,7 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
             'dispatcher, its schedule role')
     if expanded:
         workflow_rules(rows)
+        cloudfront_permission_rules(rows, configuration)
         due_index_rules(rows)
         dispatcher_rules(rows, dispatcher)
         funcs = {r['name']: r for r in rows if r['type'] == 'aws_lambda_function'}

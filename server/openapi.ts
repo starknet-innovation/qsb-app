@@ -1564,7 +1564,7 @@ export function openApiDocument() {
         "",
         "The server coordinates; it holds no secret. QSB state generation, the recovery backup, deposit signing and withdrawal assembly run on the client.",
         "",
-        `Send the credential in \`${CREDENTIAL_HEADER}\` (see the security schemes), and on every request with a body, \`${BODY_HASH_HEADER}\`: the hex SHA-256 of the exact body bytes, which CloudFront origin access control to a Lambda function URL requires. The API itself doesn't check it.`,
+        `Send the credential in \`${CREDENTIAL_HEADER}\` (see the security schemes), and on every POST, \`${BODY_HASH_HEADER}\`: the hex SHA-256 of the exact body bytes (of the empty string for a POST without a body), which CloudFront origin access control to a Lambda function URL requires. The API itself doesn't check it.`,
         "",
         "Every error is JSON with an `error` message and a stable `code` (`ApiErrorCode`). A route that doesn't exist returns a plain-text 404.",
         "",

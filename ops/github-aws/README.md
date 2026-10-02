@@ -199,7 +199,8 @@ The operator, and the deploy role too, may create or update a function URL only 
 CloudFront signs for through origin access control. The operator is explicitly denied DynamoDB resource policy writes
 and ECR repository policy writes. Lambda AddPermission is limited to CloudFront and EventBridge principals. That principal
 restriction doesn't validate the permission's `SourceArn` or `SourceAccount`; keep source restrictions bound to the
-reviewed account and resources in Terraform. An operator can still grant persistent outside access via:
+reviewed account and resources in Terraform. For the API's two CloudFront permissions, `check-single-pipeline.py`
+refuses a plan whose `source_arn` isn't this stack's distribution. An operator can still grant persistent outside access via:
 
 - a Lambda permission for either allowed service principal whose `SourceArn` or `SourceAccount` names another
   account, or whose source restrictions are missing;

@@ -43,6 +43,9 @@ DUE_INDEX = {'name': 'webhook-due', 'projection_type': 'KEYS_ONLY', 'non_key_att
                             {'attribute_name': 'webhookDueAt', 'key_type': 'RANGE'}]}
 
 
+DISTRIBUTION = 'arn:aws:cloudfront::123456789012:distribution/E1EXAMPLE12345'
+
+
 def plan():
     # The table always carries the keys-only due-delivery index (terraform/data.tf).
     rows = [{'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed',
@@ -50,7 +53,11 @@ def plan():
             {'type': 'aws_s3_bucket', 'name': 'frontend', 'mode': 'managed', 'values': {}},
             {'type': 'aws_lambda_function_url', 'name': 'api', 'mode': 'managed', 'values': {'authorization_type': 'AWS_IAM'}},
             {'type': 'aws_dynamodb_table_item', 'name': 'app_origin', 'mode': 'managed', 'values': {}},
+            {'type': 'aws_cloudfront_distribution', 'name': 'web', 'mode': 'managed', 'values': {'arn': DISTRIBUTION}},
             {'type': 'aws_sfn_state_machine', 'name': 'withdrawal', 'mode': 'managed', 'values': {'definition': workflow()}}]
+    rows += [{'type': 'aws_lambda_permission', 'name': name, 'mode': 'managed',
+              'values': {'principal': 'cloudfront.amazonaws.com', 'action': action, 'source_arn': DISTRIBUTION}}
+             for name, action in (('api_url', 'lambda:InvokeFunctionUrl'), ('api_invoke', 'lambda:InvokeFunction'))]
     # Like the real stack: api and coordinator read the table; the reference Lambda has no environment.
     rows += [{'type': 'aws_lambda_function', 'name': f, 'mode': 'managed',
               'values': {'function_name': f'qsb-app-{f}', 'environment': [{'variables': {'TABLE_NAME': 'qsb-app-records'}}]}}
@@ -283,6 +290,41 @@ class DeployChecks(unittest.TestCase):
         doc['planned_values']['root_module']['resources'].append(
             {'type': 'aws_lambda_function_url', 'name': 'coordinator', 'mode': 'managed', 'values': {'authorization_type': 'AWS_IAM'}})
         self.refused(doc, "Expected only aws_lambda_function_url: ['api']")
+
+    def permission(self, doc, name):
+        return next(r for r in doc['planned_values']['root_module']['resources']
+                    if r['type'] == 'aws_lambda_permission' and r['name'] == name)
+
+    def test_cloudfront_may_invoke_the_api_only_for_this_distribution(self):
+        for name in ('api_url', 'api_invoke'):
+            doc = plan()
+            self.permission(doc, name)['values']['source_arn'] = DISTRIBUTION.replace('E1EXAMPLE12345', 'E2OTHER123456')
+            self.refused(doc, "must name this stack's distribution")
+            doc = plan()
+            del self.permission(doc, name)['values']['source_arn']
+            self.refused(doc, 'source_arn is unknown at plan')
+            doc = plan()
+            self.permission(doc, name)['values']['principal'] = 'events.amazonaws.com'
+            self.refused(doc, 'to cloudfront.amazonaws.com')
+        doc = plan()
+        doc['planned_values']['root_module']['resources'].append(
+            {'type': 'aws_lambda_permission', 'name': 'other', 'mode': 'managed', 'values': {}})
+        self.refused(doc, "Expected only aws_lambda_permission: ['api_invoke', 'api_url']")
+
+    def test_an_unknown_source_arn_must_reference_the_distribution(self):
+        # A plan that replaces the distribution: its ARN, and so each permission's source_arn, is unknown.
+        doc = plan()
+        for r in doc['planned_values']['root_module']['resources']:
+            if r['type'] in ('aws_lambda_permission', 'aws_cloudfront_distribution'):
+                r['values'].pop('source_arn', None)
+                r['values'].pop('arn', None)
+        refs = {'references': ['aws_cloudfront_distribution.web.arn', 'aws_cloudfront_distribution.web']}
+        doc['configuration'] = {'root_module': {'resources': [
+            {'address': f'aws_lambda_permission.{name}', 'expressions': {'source_arn': refs}}
+            for name in ('api_url', 'api_invoke')]}}
+        self.assertEqual(self.run_check(doc), (0, ''))
+        doc['configuration']['root_module']['resources'][0]['expressions']['source_arn'] = {'constant_value': '*'}
+        self.refused(doc, 'source_arn is unknown at plan')
 
     def test_known_table_names_must_match_the_table(self):
         doc = plan()
