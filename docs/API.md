@@ -88,7 +88,7 @@ A vault takes exactly one deposit, its recorded `funding`. Someone can still pay
 
 - The response's `strayPayments`, and `GET /api/vaults`'s `strayPayments` (one per flagged vault), give `{ vaultId, count, sats, outputs }`. `count` and `sats` cover every such output; `outputs` lists the first 20 by when they were first seen, each as `{ txid, vout, value, firstSeenAt }`. Anyone can pay the script, so the record keeps a fixed size however many outputs arrive.
 - A `deposit.stray_payment` event, with status `stray_payment`, goes to the owner's event log and webhooks.
-- The API logs a `strayPayment` line for the operator, which raises the `<name>-stray-payments` alarm ([runbook](OPERATIONAL-RUNBOOK.md#stray-payments)).
+- The API logs a `strayPayment` object for the operator, which raises the `<name>-stray-payments` alarm ([runbook](OPERATIONAL-RUNBOOK.md#stray-payments)).
 
 A withdrawal never spends a stray output: `POST /api/jobs` accepts only the recorded `funding` as the vault input, and exact submission binds the transaction to it. The app offers no way to recover one. An unconfirmed payment is flagged once it confirms. A failed lookup returns the record already flagged (or `null`), changes nothing and doesn't fail the request.
 

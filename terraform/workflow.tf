@@ -54,12 +54,15 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   treat_missing_data  = "notBreaching"
   alarm_actions       = var.alarm_actions
 }
-# The API logs one {"strayPayment": ...} line when it first flags a payment to a vault's script
+# The API logs one { strayPayment } object when it first flags a payment to a vault's script
 # beyond its recorded deposit (server/stray-outputs.ts). It's never spent; see the runbook.
+# A plain term would match any line containing it, such as a caller's request path. This JSON
+# pattern selects a number inside the record's `message` object, and only a console call whose
+# sole argument is an object makes `message` an object (the API logs in JSON, compute.tf).
 resource "aws_cloudwatch_log_metric_filter" "stray_payments" {
   name           = "${var.name}-stray-payments"
   log_group_name = aws_cloudwatch_log_group.lambda["api"].name
-  pattern        = "strayPayment"
+  pattern        = "{ $.message.strayPayment.newCount >= 1 }"
   metric_transformation {
     name      = "StrayPayments"
     namespace = "QSB/${var.name}"
