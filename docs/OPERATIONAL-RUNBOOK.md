@@ -120,12 +120,17 @@ The API writes one access line for each request it serves, in its log group (`/a
 
 - **`caller`** is the caller as CloudFront saw it: the IP address and source port (IPv4 or IPv6; the port is always after the last `:`), the two-letter country, and the AS number of the caller's network. These come from the `CloudFront-Viewer-Address`, `CloudFront-Viewer-Country` and `CloudFront-Viewer-ASN` headers, which CloudFront adds to each request it forwards (`terraform/web.tf`). The function URL's own source address is CloudFront's.
 - **`cfId`** is CloudFront's ID for the request (`X-Amz-Cf-Id`).
-- **Validation:** each header is logged only in the form CloudFront gives it, and left out otherwise. The fields describe the caller only if CloudFront replaces these headers when a caller sends them itself, which AWS doesn't document.
+- **Validation:** each header is logged only in the form CloudFront gives it, and left out otherwise. The fields describe the caller only if CloudFront replaces these headers when a caller sends them itself, which AWS doesn't document. If it forwarded a caller's own value as well, the function URL would join the two with a comma, and the field would be left out.
 - **Scope:** frontend requests aren't logged. CloudFront serves them from the frontend bucket and never reaches the API.
 
 To find who made a request, search the log group by time, path or status. Each line is one JSON record whose `message` is the access line as a string.
 
-These lines are personal data. The address, country and network identify the caller, and paths name vaults, jobs and transactions (for example `/api/transactions/<txid>/status`), so a line can tie a caller's IP to their vault or to an on-chain transaction. Read them for a security investigation only, keep what you copy into an incident record to the requests in question, and don't extend the 30 days without a reviewed decision.
+These lines are personal data. The address, country and network identify the caller, and paths name vaults, jobs and transactions (for example `/api/transactions/<txid>/status`), so a line can tie a caller's IP to their vault or to an on-chain transaction.
+
+- **Who can read them:** `qsb-operator`, the GitHub deploy role `qsb-github-deploy` (its `logs:*` on `/aws/lambda/qsb-*`, `ops/github-aws/render.py`), and the AWS administrator.
+- **Use:** read them for a security investigation only.
+- **Incident records:** refer to a line by its time and `requestId` or `cfId`, not by copying its address or path. That keeps the record to public identifiers (step 3 above), and the lines themselves expire with the log group after 30 days.
+- **Retention:** don't extend the 30 days without a reviewed decision.
 
 ### Stray payments
 
