@@ -806,7 +806,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         }),
       },
     },
-    errors: merge(writes, { 400: ["network_mismatch"] }),
+    errors: merge(writes, { 400: ["network_mismatch"], 503: ["app_origin_unavailable"] }),
   },
   {
     method: "post",

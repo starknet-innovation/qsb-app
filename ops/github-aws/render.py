@@ -66,8 +66,13 @@ def render(c):
     statements.append(dict(Sid='ProtectBootstrapAndBoundaries',Effect='Deny',Action=['iam:*'],Resource=[role,iam('policy/qsb/bootstrap/*')]))
     statements.append(dict(Sid='NeverRemoveRuntimeBoundary',Effect='Deny',Action=['iam:DeleteRolePermissionsBoundary'],Resource=[runtime_roles]))
     # The API's function URL takes AWS_IAM auth, which only CloudFront's origin access control signs for. Never a
-    # public one. An update that names no auth type keeps the current one.
-    statements.append(dict(Sid='OnlyIamFunctionUrls',Effect='Deny',Action=['lambda:CreateFunctionUrlConfig','lambda:UpdateFunctionUrlConfig'],Resource=['*'],Condition={'StringNotEqualsIfExists':{'lambda:FunctionUrlAuthType':'AWS_IAM'}}))
+    # public one. Null=false limits the deny to requests that name an auth type: an update that names none keeps
+    # the URL's current one, and CreateFunctionUrlConfig always names one.
+    statements.append(dict(Sid='OnlyIamFunctionUrls',Effect='Deny',Action=['lambda:CreateFunctionUrlConfig','lambda:UpdateFunctionUrlConfig'],Resource=['*'],Condition={'StringNotEquals':{'lambda:FunctionUrlAuthType':'AWS_IAM'},'Null':{'lambda:FunctionUrlAuthType':'false'}}))
+    # Function grants only for the services that invoke QSB functions: CloudFront, through origin access control to
+    # the API's function URL, and EventBridge, for the GPU watchdog. lambda:* on qsb-* would otherwise let a deploy
+    # grant any account the function URL, and with it a way around CloudFront.
+    statements.append(dict(Sid='OnlyRequiredLambdaPrincipals',Effect='Deny',Action=['lambda:AddPermission'],Resource=['*'],Condition={'StringNotEquals':{'lambda:Principal':['cloudfront.amazonaws.com','events.amazonaws.com']}}))
     # Runtime identities may access QSB application data, not IAM/control planes.
     runtime = []
     # Must cover every DynamoDB action the runtime role policies (terraform/policies/*.json) allow. Transactions

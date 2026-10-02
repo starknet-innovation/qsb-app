@@ -35,6 +35,9 @@ EXPECTED = {
     'aws_s3_bucket': {'frontend'},
     'aws_lambda_function': {'api', 'coordinator', 'reference'},
     'aws_sfn_state_machine': {'withdrawal'},
+    # The API's function URL, only CloudFront can call (terraform/web.tf), and the row naming the app's origin.
+    'aws_lambda_function_url': {'api'},
+    'aws_dynamodb_table_item': {'app_origin'},
 }
 
 
@@ -61,9 +64,9 @@ def require(condition, message):
         raise ValueError(message)
 
 
-# Everything the API Lambda's environment may draw on (terraform/compute.tf). In a real first plan that
-# environment is unknown until apply, because it includes the CloudFront domain, so the plan's configuration
-# references are checked against this list instead: any new reference fails closed until reviewed here.
+# Everything the API Lambda's environment may draw on (terraform/compute.tf). Where a real first plan leaves that
+# environment unknown until apply, the plan's configuration references are checked against this list instead:
+# any new reference fails closed until reviewed here.
 # References carry no key names or constants; re-run with --deploy after the first apply, when the
 # environment is known, and rely on the mock-plan tests for constants.
 API_ENV_REFERENCES = {
@@ -390,6 +393,9 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
         selected = [r for r in rows if r['type'] == kind]
         require(len(selected) == len(names) and {r['name'] for r in selected} == names,
                 f'Expected only {kind}: {sorted(names)}')
+    for url in (r for r in rows if expanded and r['type'] == 'aws_lambda_function_url'):
+        require(url.get('values', {}).get('authorization_type') == 'AWS_IAM',
+                'the API function URL must take AWS_IAM auth, so only CloudFront origin access control can call it')
     roles = [r for r in rows if r['type'] == 'aws_iam_role']
     role_names = {'lambda', 'workflow', 'operator_reconcile'} | ({DISPATCHER_ROLE} if dispatcher else set())
     require(len(roles) == ((7 if dispatcher else 5) if expanded else len(role_names)) and {r['name'] for r in roles} == role_names,

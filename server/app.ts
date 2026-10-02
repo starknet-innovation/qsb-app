@@ -145,6 +145,8 @@ export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
  */
 const REQUEST_BUDGET_MS = 25_000;
 const REQUEST_LIMIT_MS = 28_000;
+/** How long a container keeps the deployment's app origin before reading its row again. */
+const ORIGIN_TTL_MS = 5 * 60_000;
 export function createApp(
   records: Store = defaultStore,
   dependencies: {
@@ -231,25 +233,31 @@ export function createApp(
   );
   // The app's origin, for the sign-in challenge and CORS: APP_ORIGIN where it's set (the local server, tests),
   // else the deployment's SYSTEM#DEPLOYMENT row, which Terraform writes once CloudFront exists (terraform/web.tf).
-  // Only a row read is cached: until the row exists, the local default stands in, and clients refuse its challenge.
+  // The row is re-read after ORIGIN_TTL_MS, so a replaced distribution reaches warm containers. On Lambda there is
+  // no fallback: until the row exists, sign-in answers 503 app_origin_unavailable and CORS allows no origin.
+  // Elsewhere, a server without APP_ORIGIN or the row names the Vite dev origin.
   const configuredOrigin = process.env.APP_ORIGIN;
-  let deploymentOrigin: string | undefined;
-  async function appOrigin() {
+  const onLambda = Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
+  let cachedOrigin: { origin: string; at: number } | undefined;
+  async function appOrigin(): Promise<string | undefined> {
     if (configuredOrigin) return configuredOrigin;
-    if (!deploymentOrigin) {
+    if (!cachedOrigin || Date.now() - cachedOrigin.at > ORIGIN_TTL_MS) {
       const row = await records.get("SYSTEM#DEPLOYMENT", "APP_ORIGIN");
-      if (typeof row?.origin === "string" && /^https:\/\/[a-z0-9.-]+$/.test(row.origin)) deploymentOrigin = row.origin;
+      const origin = typeof row?.origin === "string" && /^https:\/\/[a-z0-9.-]+$/.test(row.origin) ? row.origin : undefined;
+      cachedOrigin = origin ? { origin, at: Date.now() } : undefined;
     }
-    return deploymentOrigin ?? "http://127.0.0.1:5173";
+    return cachedOrigin?.origin ?? (onLambda ? undefined : "http://127.0.0.1:5173");
   }
   app.use("*", secureHeaders());
-  app.use("*", async (c, next) =>
-    cors({
-      origin: await appOrigin(),
+  app.use("*", async (c, next) => {
+    const origin = await appOrigin();
+    if (!origin) return next();
+    return cors({
+      origin,
       allowHeaders: ["Content-Type", CREDENTIAL_HEADER, BODY_HASH_HEADER, "Authorization", "Idempotency-Key"],
       allowMethods: ["GET", "POST", "OPTIONS"],
-    })(c, next),
-  );
+    })(c, next);
+  });
   app.use(
     "*",
     bodyLimit({
@@ -398,9 +406,17 @@ export function createApp(
         "Wallet address does not match this Bitcoin network.",
       );
     }
+    const origin = await appOrigin();
+    if (!origin)
+      return apiError(
+        c,
+        503,
+        "app_origin_unavailable",
+        "Sign-in isn't available yet: this deployment hasn't recorded its app origin. Try again shortly.",
+      );
     const id = randomUUID(),
       expiresAt = Math.floor(Date.now() / 1000) + CHALLENGE_SECONDS;
-    const message = `QSB Vault sign-in\nOrigin: ${await appOrigin()}\nAddress: ${address}\nNetwork: bitcoin-${NETWORK_ID}\nNonce: ${id}\nExpires: ${new Date(expiresAt * 1000).toISOString()}\nThis signature authorizes this session only. It does not authorize a Bitcoin transaction.`;
+    const message = `QSB Vault sign-in\nOrigin: ${origin}\nAddress: ${address}\nNetwork: bitcoin-${NETWORK_ID}\nNonce: ${id}\nExpires: ${new Date(expiresAt * 1000).toISOString()}\nThis signature authorizes this session only. It does not authorize a Bitcoin transaction.`;
     await store.put({
       pk: `CHALLENGE#${id}`,
       sk: "AUTH",

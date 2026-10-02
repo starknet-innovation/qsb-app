@@ -53,7 +53,7 @@ Errors produced in front of the app have no `code`. That includes errors from Cl
 | Area | Codes |
 |---|---|
 | Request | `invalid_request`, `request_too_large`, `network_mismatch` |
-| Sign-in | `auth_required`, `session_expired`, `challenge_expired`, `signature_invalid` |
+| Sign-in | `auth_required`, `session_expired`, `challenge_expired`, `signature_invalid`, `app_origin_unavailable` |
 | API keys | `api_key_invalid`, `api_key_revoked`, `api_key_not_allowed`, `api_key_scope_denied`, `api_key_limit_reached`, `api_key_not_found`, `api_keys_disabled` |
 | Switches | `operations_disabled`, `submit_disabled` |
 | Idempotency | `idempotency_conflict`, `idempotency_in_progress` |

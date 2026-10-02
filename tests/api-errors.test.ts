@@ -259,6 +259,20 @@ const slipstreamWith = (answer: () => Response) => {
 // Each case drives one error path. Together they cover every listed code.
 const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>][] = [
   ["invalid_request", 400, (f) => f.call("POST", "/auth/challenge", {})],
+  ["app_origin_unavailable", 503, (f) => {
+    // On Lambda without APP_ORIGIN, before Terraform writes the SYSTEM#DEPLOYMENT row. createApp reads both
+    // variables when it's built, which f.call does before it returns.
+    const saved = { lambda: process.env.AWS_LAMBDA_FUNCTION_NAME, origin: process.env.APP_ORIGIN };
+    process.env.AWS_LAMBDA_FUNCTION_NAME = "qsb-test-api";
+    delete process.env.APP_ORIGIN;
+    try {
+      return f.call("POST", "/auth/challenge", { address: owner });
+    } finally {
+      if (saved.lambda === undefined) delete process.env.AWS_LAMBDA_FUNCTION_NAME;
+      else process.env.AWS_LAMBDA_FUNCTION_NAME = saved.lambda;
+      if (saved.origin !== undefined) process.env.APP_ORIGIN = saved.origin;
+    }
+  }],
   ["request_too_large", 413, (f) => f.call("POST", "/auth/challenge", { address: "x".repeat(200_000) })],
   ["invalid_request", 400, (f) => f.call("POST", "/auth/challenge", undefined, { raw: "{" })],
   ["request_too_large", 413, (f) => f.call("POST", "/auth/challenge", undefined, { stream: JSON.stringify({ address: "x".repeat(200_000) }) })],

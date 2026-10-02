@@ -62,6 +62,9 @@ cases=[
  ('removed api gateway','apigateway:PATCH',f'arn:aws:apigateway:{region}::/apis/anything',False,[]),
  ('iam function url','lambda:CreateFunctionUrlConfig',f'arn:aws:lambda:{region}:{account}:function:qsb-research-api',True,[{'ContextKeyName':'lambda:FunctionUrlAuthType','ContextKeyValues':['AWS_IAM'],'ContextKeyType':'string'}]),
  ('public function url','lambda:CreateFunctionUrlConfig',f'arn:aws:lambda:{region}:{account}:function:qsb-research-api',False,[{'ContextKeyName':'lambda:FunctionUrlAuthType','ContextKeyValues':['NONE'],'ContextKeyType':'string'}]),
+ ('function url update naming no auth type','lambda:UpdateFunctionUrlConfig',f'arn:aws:lambda:{region}:{account}:function:qsb-research-api',True,[]),
+ ('cloudfront function grant','lambda:AddPermission',f'arn:aws:lambda:{region}:{account}:function:qsb-research-api',True,[{'ContextKeyName':'lambda:Principal','ContextKeyValues':['cloudfront.amazonaws.com'],'ContextKeyType':'string'}]),
+ ('public function grant','lambda:AddPermission',f'arn:aws:lambda:{region}:{account}:function:qsb-research-api',False,[{'ContextKeyName':'lambda:Principal','ContextKeyValues':['*'],'ContextKeyType':'string'}]),
  ('credential creation','iam:CreateAccessKey',f'arn:aws:iam::{account}:user/anyone',False,[]),
 ]
 for name,action,resource,allowed,context in cases:

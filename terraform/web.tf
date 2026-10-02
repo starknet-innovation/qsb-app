@@ -23,11 +23,12 @@ resource "aws_lambda_permission" "api_url" {
   function_url_auth_type = "AWS_IAM"
 }
 resource "aws_lambda_permission" "api_invoke" {
-  statement_id  = "CloudFrontInvokeFunction"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api.function_name
-  principal     = "cloudfront.amazonaws.com"
-  source_arn    = aws_cloudfront_distribution.web.arn
+  statement_id             = "CloudFrontInvokeFunction"
+  action                   = "lambda:InvokeFunction"
+  function_name            = aws_lambda_function.api.function_name
+  principal                = "cloudfront.amazonaws.com"
+  source_arn               = aws_cloudfront_distribution.web.arn
+  invoked_via_function_url = true
 }
 resource "aws_cloudfront_origin_access_control" "web" {
   name                              = "${var.name}-web"

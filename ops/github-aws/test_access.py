@@ -245,7 +245,8 @@ class HumanAccess(unittest.TestCase):
         guard = self.sid(self.operator, 'OnlyIamFunctionUrls')
         self.assertEqual((guard['Effect'], guard['Resource']), ('Deny', ['*']))
         self.assertEqual(set(guard['Action']), {'lambda:CreateFunctionUrlConfig', 'lambda:UpdateFunctionUrlConfig'})
-        self.assertEqual(guard['Condition'], {'StringNotEqualsIfExists': {'lambda:FunctionUrlAuthType': 'AWS_IAM'}})
+        self.assertEqual(guard['Condition'], {'StringNotEquals': {'lambda:FunctionUrlAuthType': 'AWS_IAM'},
+                                              'Null': {'lambda:FunctionUrlAuthType': 'false'}})
         guard = self.sid(self.operator, 'NoExternalResourcePolicies')
         self.assertEqual((guard['Effect'], guard['Resource']), ('Deny', ['*']))
         self.assertEqual(set(guard['Action']), {'dynamodb:PutResourcePolicy', 'ecr:SetRepositoryPolicy'})

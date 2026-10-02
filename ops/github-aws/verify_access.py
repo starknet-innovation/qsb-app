@@ -54,6 +54,8 @@ operator_cases = [
      [ctx('lambda:FunctionUrlAuthType', 'NONE')]),
     ('deny public function url update', 'lambda:UpdateFunctionUrlConfig', arn('lambda', 'function:qsb-research-api'),
      'explicitDeny', [ctx('lambda:FunctionUrlAuthType', 'NONE')]),
+    ('allow function url update naming no auth type', 'lambda:UpdateFunctionUrlConfig',
+     arn('lambda', 'function:qsb-research-api'), True, []),
     ('deny table resource policy', 'dynamodb:PutResourcePolicy', arn('dynamodb', 'table/qsb-records'), 'explicitDeny', []),
     ('silence the analyzer', 'access-analyzer:DeleteAnalyzer', arn('access-analyzer', 'analyzer/qsb-external-access'),
      'explicitDeny', []),

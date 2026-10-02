@@ -50,7 +50,7 @@ run "baseline" {
     error_message = "The API's function URL must take AWS_IAM auth, and CloudFront must sign every request to it."
   }
   assert {
-    condition     = aws_lambda_permission.api_url.principal == "cloudfront.amazonaws.com" && aws_lambda_permission.api_url.action == "lambda:InvokeFunctionUrl" && aws_lambda_permission.api_url.function_url_auth_type == "AWS_IAM" && aws_lambda_permission.api_invoke.principal == "cloudfront.amazonaws.com" && aws_lambda_permission.api_invoke.action == "lambda:InvokeFunction"
+    condition     = aws_lambda_permission.api_url.principal == "cloudfront.amazonaws.com" && aws_lambda_permission.api_url.action == "lambda:InvokeFunctionUrl" && aws_lambda_permission.api_url.function_url_auth_type == "AWS_IAM" && aws_lambda_permission.api_invoke.principal == "cloudfront.amazonaws.com" && aws_lambda_permission.api_invoke.action == "lambda:InvokeFunction" && aws_lambda_permission.api_invoke.invoked_via_function_url == true
     error_message = "Only CloudFront may invoke the API's function URL."
   }
   assert {

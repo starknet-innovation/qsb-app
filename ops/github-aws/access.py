@@ -204,10 +204,12 @@ def access(c):
         dict(Sid='OnlyRequiredLambdaPrincipals', Effect='Deny', Action=['lambda:AddPermission'],
              Resource=['*'], Condition={'StringNotEquals': {
                  'lambda:Principal': ['cloudfront.amazonaws.com', 'events.amazonaws.com']}}),
-        # A function URL only with AWS_IAM auth, never a public one. An update that names no auth type keeps it.
+        # A function URL only with AWS_IAM auth, never a public one. Null=false limits the deny to requests that
+        # name an auth type: an update that names none keeps the URL's current one.
         dict(Sid='OnlyIamFunctionUrls', Effect='Deny',
              Action=['lambda:CreateFunctionUrlConfig', 'lambda:UpdateFunctionUrlConfig'], Resource=['*'],
-             Condition={'StringNotEqualsIfExists': {'lambda:FunctionUrlAuthType': 'AWS_IAM'}}),
+             Condition={'StringNotEquals': {'lambda:FunctionUrlAuthType': 'AWS_IAM'},
+                        'Null': {'lambda:FunctionUrlAuthType': 'false'}}),
         deny('NoExternalResourcePolicies', ['dynamodb:PutResourcePolicy', 'ecr:SetRepositoryPolicy'], ['*']),
         # The external-access analyzer is the check on role trust and bucket policies; keep it out of reach.
         deny('ProtectAccessAnalyzer', ['access-analyzer:*'], ['*']),

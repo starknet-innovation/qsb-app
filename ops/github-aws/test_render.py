@@ -240,7 +240,13 @@ class SinglePipelinePolicies(unittest.TestCase):
         guard = self.statement('deploy', 'OnlyIamFunctionUrls')
         self.assertEqual((guard['Effect'], guard['Resource']), ('Deny', ['*']))
         self.assertEqual(set(guard['Action']), {'lambda:CreateFunctionUrlConfig', 'lambda:UpdateFunctionUrlConfig'})
-        self.assertEqual(guard['Condition'], {'StringNotEqualsIfExists': {'lambda:FunctionUrlAuthType': 'AWS_IAM'}})
+        self.assertEqual(guard['Condition'], {'StringNotEquals': {'lambda:FunctionUrlAuthType': 'AWS_IAM'},
+                                              'Null': {'lambda:FunctionUrlAuthType': 'false'}})
+        principals = self.statement('deploy', 'OnlyRequiredLambdaPrincipals')
+        self.assertEqual((principals['Effect'], principals['Action'], principals['Resource']),
+                         ('Deny', ['lambda:AddPermission'], ['*']))
+        self.assertEqual(principals['Condition'], {'StringNotEquals': {
+            'lambda:Principal': ['cloudfront.amazonaws.com', 'events.amazonaws.com']}})
 
 
 if __name__ == '__main__':

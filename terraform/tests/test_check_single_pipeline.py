@@ -48,6 +48,8 @@ def plan():
     rows = [{'type': 'aws_dynamodb_table', 'name': 'records', 'mode': 'managed',
              'values': {'name': 'qsb-app-records', 'global_secondary_index': [dict(DUE_INDEX)]}},
             {'type': 'aws_s3_bucket', 'name': 'frontend', 'mode': 'managed', 'values': {}},
+            {'type': 'aws_lambda_function_url', 'name': 'api', 'mode': 'managed', 'values': {'authorization_type': 'AWS_IAM'}},
+            {'type': 'aws_dynamodb_table_item', 'name': 'app_origin', 'mode': 'managed', 'values': {}},
             {'type': 'aws_sfn_state_machine', 'name': 'withdrawal', 'mode': 'managed', 'values': {'definition': workflow()}}]
     # Like the real stack: api and coordinator read the table; the reference Lambda has no environment.
     rows += [{'type': 'aws_lambda_function', 'name': f, 'mode': 'managed',
@@ -245,8 +247,8 @@ class DeployChecks(unittest.TestCase):
         return doc
 
     def test_partly_unknown_api_environment_is_checked_by_key(self):
-        # The CI mock-plan shape: every key is named, only APP_ORIGIN's value is unknown; no configuration needed.
-        doc = self.with_unknown(plan(), 'api', [{'variables': {'APP_ORIGIN': True}}])
+        # The CI mock-plan shape: every key is named and one value is unknown at plan; no configuration needed.
+        doc = self.with_unknown(plan(), 'api', [{'variables': {'WORKFLOW_ARN': True}}])
         self.assertEqual(self.run_check(doc, '--deploy')[0], 0)
         doc = self.with_unknown(plan(), 'api', [{'variables': {'AWS_BATCH_JOB_QUEUE': True}}])
         self.refused(doc, 'Only coordinator may receive')
@@ -271,6 +273,17 @@ class DeployChecks(unittest.TestCase):
                 r['values']['environment'][0]['variables']['TABLE_NAME'] = 'qsb-other'
         self.refused(doc, 'must use the same table')
 
+    def test_the_api_function_url_takes_aws_iam_auth(self):
+        doc = plan()
+        for r in doc['planned_values']['root_module']['resources']:
+            if r['type'] == 'aws_lambda_function_url':
+                r['values']['authorization_type'] = 'NONE'
+        self.refused(doc, 'must take AWS_IAM auth')
+        doc = plan()
+        doc['planned_values']['root_module']['resources'].append(
+            {'type': 'aws_lambda_function_url', 'name': 'coordinator', 'mode': 'managed', 'values': {'authorization_type': 'AWS_IAM'}})
+        self.refused(doc, "Expected only aws_lambda_function_url: ['api']")
+
     def test_known_table_names_must_match_the_table(self):
         doc = plan()
         for r in doc['planned_values']['root_module']['resources']:
@@ -289,7 +302,7 @@ class DeployChecks(unittest.TestCase):
         doc = plan()
         rows = doc['planned_values']['root_module']['resources']
         if env:
-            next(r for r in rows if r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = arn
+            next(r for r in rows if r['type'] == 'aws_lambda_function' and r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = arn
         statement = grant or {'Effect': 'Allow', 'Action': 'secretsmanager:GetSecretValue', 'Resource': arn}
         rows.append({'type': 'aws_iam_role_policy', 'name': policy_name, 'mode': 'managed',
                      'values': {'policy': json.dumps({'Version': '2012-10-17', 'Statement': [statement]})}})
@@ -315,11 +328,11 @@ class DeployChecks(unittest.TestCase):
     def test_the_api_gets_the_reference_exactly_with_its_grant(self):
         self.refused(self.with_miner_credential(env=False), 'exactly when its read grant exists')
         doc = plan()
-        next(r for r in doc['planned_values']['root_module']['resources'] if r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = MINER
+        next(r for r in doc['planned_values']['root_module']['resources'] if r['type'] == 'aws_lambda_function' and r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = MINER
         self.refused(doc, 'exactly when its read grant exists')
         other = MINER.replace('AbC123', 'XyZ789')
         doc = self.with_miner_credential()
-        next(r for r in doc['planned_values']['root_module']['resources'] if r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = other
+        next(r for r in doc['planned_values']['root_module']['resources'] if r['type'] == 'aws_lambda_function' and r['name'] == 'api')['values']['environment'][0]['variables']['SLIPSTREAM_SECRET_ARN'] = other
         self.refused(doc, 'exactly the secret the API is given')
 
     def test_only_the_api_receives_the_miner_credential(self):
