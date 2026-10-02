@@ -56,10 +56,9 @@ resource "aws_iam_role_policy" "reference" {
   role   = aws_iam_role.lambda["coordinator"].id
   policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "lambda:InvokeFunction", Resource = aws_lambda_function.reference.arn }] })
 }
-# Only the API calls MARA Slipstream, so only it may read the one miner credential, when configured, and only
-# from its own execution environment: Lambda sets lambda:SourceFunctionArn on those calls, never on a session taken
-# elsewhere, so a session of the API role taken anywhere else can't read the secret. The ARN is built from the name, because the function
-# depends on this policy.
+# Only the API calls MARA Slipstream, so only it may read the one miner credential, when configured, and only with
+# the credentials Lambda issues to it: they carry lambda:SourceFunctionArn, and a session of the API role assumed
+# any other way doesn't. The ARN is built from the name, because the function depends on this policy.
 resource "aws_iam_role_policy" "miner_credential" {
   count  = var.slipstream_secret_arn == "" ? 0 : 1
   role   = aws_iam_role.lambda["api"].id

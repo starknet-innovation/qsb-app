@@ -32,7 +32,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 | Wallet ↔ browser | The deposit PSBT goes to the wallet; the signed PSBT comes back. |
 | Browser | Unlocks the backup locally to check it still opens; nothing secret is sent. Builds a deposit paying the vault script. Each vault takes exactly one deposit. |
 | Crosses to the service | The signed deposit transaction plus a bearer session token or API key. |
-| Service | Checks the transaction pays the vault script, records the exact bytes and submits them to MARA. Reads the optional MARA credential from Secrets Manager; only the API function can, from its own environment. |
+| Service | Checks the transaction pays the vault script, records the exact bytes and submits them to MARA. Reads the optional MARA credential from Secrets Manager; only the API function can, with the credentials Lambda issues to it. |
 | Outside parties | MARA receives the signed transaction and optional authorization/client-code credentials for possible mining. Submission may fail or remain uncertain; acceptance is not block inclusion. The deposit completes only after inclusion is independently confirmed. |
 
 ## 3. Withdraw: search
@@ -67,7 +67,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 | Backup files: vault, `-withdrawal`, `-signing` | Browser or SDK/CLI, locally | User's own storage | Nothing |
 | Session token (1 hour) / API key (scoped, up to 90 days) | API, after a BIP-322 sign-in | Browser, or the SDK caller | SHA-256 hash at rest; receives the bearer credential on authenticated requests |
 | Webhook signing secret | API, shown once to the owner | Owner's webhook receiver | The secret, to sign deliveries (HMAC-SHA256) |
-| MARA Slipstream credential (optional) | Administrator | AWS Secrets Manager | Read at runtime by the API function only, from its own execution environment; sent only to MARA |
+| MARA Slipstream credential (optional) | Administrator | AWS Secrets Manager | Read at runtime by the API function only, with the credentials Lambda issues to it (copied out, those work until they expire); sent only to MARA |
 
 ## Who can do what
 

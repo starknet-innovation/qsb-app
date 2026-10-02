@@ -30,11 +30,11 @@ infrastructure. Roles can be passed only to Lambda, Step Functions and EventBrid
 dispatcher's schedule; the role can manage only `qsb-*` schedules in the default group.
 
 The runtime boundary allows QSB data access and, for the API roles in `api_functions` only, read-only access to one
-secret, `qsb/slipstream`: the optional MARA Slipstream credential (see `terraform/README.md`). Only calls from that
-same function's execution environment get it (`lambda:SourceFunctionArn`, which Lambda sets on those calls and a few
-it makes for the function, such as its logs, never on a session taken elsewhere). So neither a session of an API
-role taken anywhere else, such as by another account a changed trust names, nor a role and function a deploy adds
-can read it. It allows no other secret and no KMS decrypt. Deploying code confers that code's runtime access, so `qsb-operator` and `qsb-github-deploy` can
+secret, `qsb/slipstream`: the optional MARA Slipstream credential (see `terraform/README.md`). Only the credentials
+Lambda issues to that same function get it: they carry `lambda:SourceFunctionArn`, as do a few calls Lambda makes for
+the function, such as its logs. So neither a session of an API role assumed any other way, such as by another account
+a changed trust names, nor a role and function a deploy adds can read it. Credentials copied out of the function, by a
+bug that leaks its environment, would keep working until they expire. It allows no other secret and no KMS decrypt. Deploying code confers that code's runtime access, so `qsb-operator` and `qsb-github-deploy` can
 reach this secret through an API role. Workflow log-delivery control APIs and regional metadata discovery require
 regional wildcard resources; these are the runtime control-plane exceptions. In S3, the boundary allows only the GPU
 job bucket's prefixes (`s3:PutObject` on `inputs/*`, `s3:GetObject` on `outputs/*`), which Terraform grants to the

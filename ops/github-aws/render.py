@@ -101,8 +101,9 @@ def render(c):
     allow('GpuInputs',['s3:PutObject'],[f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/inputs/*'],target=runtime)
     allow('GpuOutputs',['s3:GetObject'],[f'arn:aws:s3:::qsb-gpu-{account}-{region}-jobs/outputs/*'],target=runtime)
     # The API's MARA Slipstream credential: read-only, one administrator-created secret, and only for the
-    # registered API roles, from their own function's execution environment. Lambda sets lambda:SourceFunctionArn
-    # on those calls (and a few it makes for the function, such as its logs), never on a session taken elsewhere.
+    # registered API roles, with the credentials Lambda issues to their own function. Those carry
+    # lambda:SourceFunctionArn (as do a few calls Lambda makes for the function, such as its logs); a session of the
+    # role assumed any other way doesn't. Credentials copied out of the function keep working until they expire.
     # Naming the functions, not qsb-*-api, means a deploy can't add a role and function of its own that read it
     # for another account. A role still needs its own grant, which Terraform gives only to the API. This limits
     # runtime roles, not deployers: whoever can deploy the API's code can read it.
