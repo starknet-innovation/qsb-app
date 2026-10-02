@@ -46,8 +46,15 @@ run "baseline" {
     network = "mainnet"
   }
   assert {
-    condition     = aws_cloudwatch_log_metric_filter.stray_payments.log_group_name == aws_cloudwatch_log_group.lambda["api"].name && aws_cloudwatch_log_metric_filter.stray_payments.pattern == "strayPayment" && aws_cloudwatch_metric_alarm.stray_payments.metric_name == "StrayPayments" && aws_cloudwatch_metric_alarm.stray_payments.namespace == "QSB/${var.name}" && aws_cloudwatch_metric_alarm.stray_payments.threshold == 1
-    error_message = "The API's strayPayment log lines must raise the stray-payments alarm (server/stray-outputs.ts)."
+    condition     = aws_cloudwatch_log_metric_filter.stray_payments.log_group_name == aws_cloudwatch_log_group.lambda["api"].name && aws_cloudwatch_log_metric_filter.stray_payments.pattern == "{ $.message.strayPayment.newCount >= 1 }" && aws_cloudwatch_metric_alarm.stray_payments.metric_name == "StrayPayments" && aws_cloudwatch_metric_alarm.stray_payments.namespace == "QSB/${var.name}" && aws_cloudwatch_metric_alarm.stray_payments.threshold == 1
+    error_message = "The API's strayPayment log objects must raise the stray-payments alarm (server/stray-outputs.ts)."
+  }
+  assert {
+    # The filter selects a number in the JSON record's `message` object, which no logged string
+    # supplies, so a caller's request path in a log line can't raise the alarm
+    # (tests/stray-outputs.test.ts evaluates the pattern against the API's console calls).
+    condition     = aws_lambda_function.api.logging_config[0].log_format == "JSON" && contains(["TRACE", "DEBUG", "INFO", "WARN"], aws_lambda_function.api.logging_config[0].application_log_level)
+    error_message = "The API must log in JSON, keeping WARN records, for the stray-payments filter to match only its strayPayment objects."
   }
   assert {
     condition     = output.transactions_enabled == false && output.compute_configured == false
