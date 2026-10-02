@@ -116,12 +116,13 @@ On an incident:
 
 ### Who called the API
 
-The API writes one access line for each request it serves, in its log group (`/aws/lambda/<name>-api`, in the stack's region; CloudWatch deletes its events after 30 days, typically within 72 hours of that): `{"access": {"time", "method", "path", "status", "requestId", "cfId", "caller": {"address", "country", "asn"}}}` (`server/lambda.ts`).
+The API writes one access line for each request its code finishes, in its log group (`/aws/lambda/<name>-api`, in the stack's region; CloudWatch deletes its events after 30 days, typically within 72 hours of that): `{"access": {"time", "method", "path", "status", "requestId", "cfId", "caller": {"address", "country", "asn"}}}` (`server/lambda.ts`).
 
 - **`caller`** is the caller as CloudFront saw it: the IP address and source port (IPv4 or IPv6; the port is always after the last `:`), the two-letter country, and the AS number of the caller's network. These come from the `CloudFront-Viewer-Address`, `CloudFront-Viewer-Country` and `CloudFront-Viewer-ASN` headers, which CloudFront adds to each request it forwards (`terraform/web.tf`). The function URL's own source address is CloudFront's.
 - **`cfId`** is CloudFront's ID for the request (`X-Amz-Cf-Id`).
 - **Validation:** each header is logged only in the form CloudFront gives it, and left out otherwise. The fields describe the caller only if CloudFront replaces these headers when a caller sends them itself, which AWS doesn't document. If it forwarded a caller's own value as well, the function URL would join the two with a comma, and the field would be left out.
-- **Scope:** frontend requests aren't logged. CloudFront serves them from the frontend bucket and never reaches the API.
+- **Scope:** frontend requests aren't logged. CloudFront serves them from the frontend bucket and never reaches the API. A request that hits the Lambda timeout, or that the function URL refuses before the code runs, has no line either.
+- **`status`** is what the API returned, not always what the caller got. CloudFront stops waiting after 30 seconds and answers 504, so a slower request can log 200 while the caller saw 504.
 
 To find who made a request, search the log group by time, path or status. Each line is one JSON record whose `message` is the access line as a string.
 
