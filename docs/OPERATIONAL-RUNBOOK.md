@@ -116,7 +116,7 @@ On an incident:
 
 ### Who called the API
 
-The API writes one access line for each request it serves, in its log group (`/aws/lambda/<name>-api`, in the stack's region, kept 30 days): `{"access": {"time", "method", "path", "status", "requestId", "cfId", "caller": {"address", "country", "asn"}}}` (`server/lambda.ts`).
+The API writes one access line for each request it serves, in its log group (`/aws/lambda/<name>-api`, in the stack's region; CloudWatch deletes its events after 30 days, typically within 72 hours of that): `{"access": {"time", "method", "path", "status", "requestId", "cfId", "caller": {"address", "country", "asn"}}}` (`server/lambda.ts`).
 
 - **`caller`** is the caller as CloudFront saw it: the IP address and source port (IPv4 or IPv6; the port is always after the last `:`), the two-letter country, and the AS number of the caller's network. These come from the `CloudFront-Viewer-Address`, `CloudFront-Viewer-Country` and `CloudFront-Viewer-ASN` headers, which CloudFront adds to each request it forwards (`terraform/web.tf`). The function URL's own source address is CloudFront's.
 - **`cfId`** is CloudFront's ID for the request (`X-Amz-Cf-Id`).
@@ -129,7 +129,7 @@ These lines are personal data. The address, country and network identify the cal
 
 - **Who can read them:** `qsb-operator`, the GitHub deploy role `qsb-github-deploy` (its `logs:*` on `/aws/lambda/qsb-*`, `ops/github-aws/render.py`), and the AWS administrator.
 - **Use:** read them for a security investigation only.
-- **Incident records:** refer to a line by its time and `requestId` or `cfId`, not by copying its address or path. That keeps the record to public identifiers (step 3 above), and the lines themselves expire with the log group after 30 days.
+- **Copies:** don't copy a line's `caller` fields or path out of the log group without a reviewed decision. That covers files, issues, chat, exports and subscriptions. In an incident record, refer to a line by its time and `requestId` or `cfId`. That keeps the record to public identifiers (step 3 above), and the lines themselves expire with the log group.
 - **Retention:** don't extend the 30 days without a reviewed decision.
 
 ### Stray payments
