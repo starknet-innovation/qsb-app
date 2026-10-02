@@ -108,7 +108,7 @@ resource "aws_lambda_function" "api" {
   reserved_concurrent_executions = var.lambda_concurrency
   # JSON records keep a console call's sole object argument as its `message` object, so the
   # stray-payments metric filter (workflow.tf) can select a field no logged string can supply.
-  # The flag is a console.warn, so the level must stay at WARN or below.
+  # The flag is a console.warn, so the level must keep WARN records: WARN, INFO, DEBUG or TRACE.
   logging_config {
     log_format            = "JSON"
     application_log_level = "INFO"
