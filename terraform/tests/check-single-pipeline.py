@@ -217,10 +217,11 @@ def static_region_rules(root):
         text = path.read_text()
         for kind, name, start, end in resource_blocks(text):
             body = text[start:end]
-            # A `region =` argument directly in the block, on its own line or not; not var.region, not `==`.
+            # A `region =` argument directly in the block, on its own line or not; not var.region, not `==`. And
+            # a `region_name =` at any depth, as in a DynamoDB replica, which copies the resource's data there.
             top = [m for m in re.finditer(r'(?<![.\w])region\s*=(?!=)', body)
                    if body[:m.start()].count('{') - body[:m.start()].count('}') == 1]
-            require(kind == 'variable' or not top,
+            require(kind == 'variable' or not (top or re.search(r'(?<![.\w])region_name\s*=(?!=)', body)),
                     f'{path.name}: {kind}.{name} sets its own region; every resource stays in var.region')
 
 
@@ -572,9 +573,25 @@ def region_checks(plan):
         require('region' not in resource.get('expressions', {}),
                 f"{resource.get('address')} sets its own region; every resource stays in var.region")
     for row in module_resources(plan.get('planned_values', {}).get('root_module', {})):
-        planned = row.get('values', {}).get('region')
-        require(planned is None or planned == region, f"{row['type']}.{row['name']} is planned in {planned}, not {region}")
+        for where, planned in nested_regions(row.get('values', {})):
+            require(planned == region, f"{row['type']}.{row['name']} is planned in {planned}, not {region}"
+                                       + ('' if where == 'region' else f' ({where})'))
     return region
+
+
+def nested_regions(value, path=''):
+    """Every known `region` or `region_name` in a resource's planned values, at any depth: the resource's own
+    Region, and one a nested block places data in (a DynamoDB replica or witness, say)."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            where = f'{path}.{key}' if path else key
+            if key in ('region', 'region_name') and isinstance(item, str) and item:
+                yield where, item
+            else:
+                yield from nested_regions(item, where)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from nested_regions(item, f'{path}[{index}]')
 
 
 def deploy_checks(plan, first_apply):

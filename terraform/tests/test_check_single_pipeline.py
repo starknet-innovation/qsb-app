@@ -508,6 +508,13 @@ class DeployChecks(unittest.TestCase):
             {'address': 'aws_s3_bucket.frontend', 'expressions': {'region': {'constant_value': 'eu-west-2'}}}]}}
         with self.assertRaisesRegex(ValueError, 'aws_s3_bucket.frontend sets its own region'):
             check.region_checks(doc)
+        # A nested region, such as a DynamoDB replica, copies the data to another Region.
+        for block in ('replica', 'global_table_witness'):
+            doc = plan()
+            table = next(r for r in doc['planned_values']['root_module']['resources'] if r['type'] == 'aws_dynamodb_table')
+            table['values'][block] = [{'region_name': 'us-east-1'}]
+            with self.assertRaisesRegex(ValueError, rf'aws_dynamodb_table.records is planned in us-east-1, not eu-west-2 \({block}\[0\].region_name\)'):
+                check.region_checks(doc)
 
     def test_no_resource_in_the_source_sets_its_own_region(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -520,7 +527,8 @@ class DeployChecks(unittest.TestCase):
                                         '      error_message = "x"\n    }\n  }\n}\n'
                                         'resource "aws_s3_bucket" "nested" {\n  thing {\n    region = "x"\n  }\n}\n')
             check.static_region_rules(root)
-            for body in ('{\n  region = "us-east-1"\n  bucket = "y"\n}\n', '{ region = "us-east-1" }\n'):
+            for body in ('{\n  region = "us-east-1"\n  bucket = "y"\n}\n', '{ region = "us-east-1" }\n',
+                         '{\n  replica {\n    region_name = "us-east-1"\n  }\n}\n'):
                 (root / 'logs.tf').write_text('resource "aws_s3_bucket" "other" ' + body)
                 with self.assertRaisesRegex(ValueError, 'aws_s3_bucket.other sets its own region'):
                     check.static_region_rules(root)
