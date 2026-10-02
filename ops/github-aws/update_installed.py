@@ -19,8 +19,9 @@ difference from that run, including a target plan mode couldn't read, is refused
 changes who a role trusts: moving a principal or an OIDC sub/aud is refused. It never creates or deletes an identity, never attaches or
 detaches a policy, and never deletes a policy version. It refuses before any write when a
 changed managed policy already has IAM's five versions, the number of rendered access
-policies changed, something is missing, a role carries policies this commit doesn't render, or an
-inventory api_functions name isn't a deployed function with the runtime role of the same name.
+policies changed, something is missing, a role carries policies this commit doesn't render, or it
+would install a runtime boundary naming an api_functions function that isn't deployed with the runtime
+role of the same name.
 """
 import argparse
 import hashlib
@@ -150,15 +151,14 @@ blockers = []  # refusals found while planning; checked before any write
 
 # The runtime boundary lets only the inventory's api_functions read the MARA credential (render.py). Each must be a
 # deployed function whose role has its name, or installing the boundary would lock the real API out of the secret.
+api_missing = []
 listing = aws('lambda', 'list-functions', readable=True)
 if listing is None:
     print('api_functions: unreadable with this profile (checked again by --apply)', file=sys.stderr)
 else:
     deployed = {f.get('FunctionName'): f.get('Role') for f in listing.get('Functions', [])}
-    for name in c['api_functions']:
-        if deployed.get(name) != f"arn:aws:iam::{c['account']}:role/qsb/runtime/{name}":
-            blockers.append(f'api_functions: {name} is not a deployed function with the runtime role of the same name; '
-                            'fix the inventory before installing the boundary')
+    api_missing = [name for name in c['api_functions']
+                   if deployed.get(name) != f"arn:aws:iam::{c['account']}:role/qsb/runtime/{name}"]
 
 
 def managed(name, document):
@@ -323,6 +323,15 @@ header = {'commit': commit, 'apply': a.apply, **({} if a.apply else {'plan_hash'
 print(json.dumps(header, indent=2), flush=True)
 if any(t[1] == 'missing' for t in targets):
     raise SystemExit('Some identities are missing; run the bootstrap first')
+# A wrong name blocks only an install of the boundary. Before the app stack exists (a new account's GPU step), or
+# while its function is being replaced, an unchanged boundary just gets a warning.
+boundary_changes = any(label == 'qsb-runtime-boundary' and installed != wanted for label, _, installed, wanted, _ in targets)
+for name in api_missing:
+    message = f'api_functions: {name} is not a deployed function with the runtime role of the same name'
+    if boundary_changes:
+        blockers.append(message + '; fix the inventory before installing the boundary')
+    else:
+        print(message + '; the boundary is unchanged, so this run goes ahead', file=sys.stderr)
 if blockers:
     raise SystemExit('; '.join(blockers))
 if not a.apply:

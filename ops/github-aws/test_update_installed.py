@@ -170,12 +170,19 @@ class UpdateInstalled(unittest.TestCase):
         for functions in ({}, {'qsb-tset-api': role + 'qsb-tset-api'}, {'qsb-test-api': role + 'qsb-test-coordinator'}):
             iam = self.installed()
             iam['functions'] = functions
+            # Only an install of the boundary is refused: it must differ for the check to block.
+            iam['policies']['qsb-runtime-boundary'][-1] = {'Version': '2012-10-17', 'Statement': []}
             with self.subTest(functions=functions):
                 with self.assertRaisesRegex(SystemExit, 'api_functions: qsb-test-api is not a deployed function'):
                     self.run_update(iam, apply=False)
                 with self.assertRaisesRegex(SystemExit, 'api_functions: qsb-test-api is not a deployed function'):
                     self.run_update(iam)
                 self.assertEqual(self.writes(), [])
+        # With the boundary unchanged (before the app stack exists, say), a missing function only warns.
+        iam = self.installed()
+        iam['functions'] = {}
+        self.run_update(iam)
+        self.assertEqual(self.writes(), [])
         # A profile that can't list functions plans anyway, and --apply checks again.
         iam = self.installed()
         iam['functions_denied'] = True

@@ -278,7 +278,7 @@ def static_secret_rules(root):
     """Source rules for secrets. Unlike plan values, source is never unknown, so these hold on every plan.
 
     They are a review aid against ordinary mistakes, not a sandbox: deliberately assembled strings can evade
-    any source scan, which is why the runtime boundary also limits the secret to API roles."""
+    any source scan, which is why the runtime boundary also limits the secret to the registered API function."""
     require(not list(root.glob('*.tf.json')), 'JSON Terraform files are not reviewed by this check')
     for path in sorted(root.glob('*.tf')):
         text = path.read_text()
