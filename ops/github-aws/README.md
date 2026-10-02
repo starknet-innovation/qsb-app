@@ -285,7 +285,10 @@ deletes a policy version. It refuses before any write in any of these cases:
 - a changed managed policy already has IAM's maximum of five versions;
 - the number of rendered access policies changed;
 - anything is missing, including all of a role's access policies;
-- any of the three roles carries a policy this commit doesn't render.
+- any of the three roles carries a policy this commit doesn't render;
+- an `api_functions` name isn't a deployed function whose role is the runtime role of the same name. Installing that
+  boundary would lock the API out of `qsb/slipstream`. Plan mode reports this only if its profile can list functions;
+  `--apply` always checks.
 
 Afterwards, run `verify.py --role-arn` and `verify_access.py --live`. Old policy versions stay stored but inactive;
 an administrator can delete them once verification passes.

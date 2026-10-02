@@ -19,7 +19,8 @@ difference from that run, including a target plan mode couldn't read, is refused
 changes who a role trusts: moving a principal or an OIDC sub/aud is refused. It never creates or deletes an identity, never attaches or
 detaches a policy, and never deletes a policy version. It refuses before any write when a
 changed managed policy already has IAM's five versions, the number of rendered access
-policies changed, something is missing, or a role carries policies this commit doesn't render.
+policies changed, something is missing, a role carries policies this commit doesn't render, or an
+inventory api_functions name isn't a deployed function with the runtime role of the same name.
 """
 import argparse
 import hashlib
@@ -146,6 +147,18 @@ for role in ('viewonly', 'operator'):
 targets = []  # (label, kind, installed document or value, rendered, apply function)
 UNREADABLE = object()  # plan mode only: this profile may not read the target
 blockers = []  # refusals found while planning; checked before any write
+
+# The runtime boundary lets only the inventory's api_functions read the MARA credential (render.py). Each must be a
+# deployed function whose role has its name, or installing the boundary would lock the real API out of the secret.
+listing = aws('lambda', 'list-functions', readable=True)
+if listing is None:
+    print('api_functions: unreadable with this profile (checked again by --apply)', file=sys.stderr)
+else:
+    deployed = {f.get('FunctionName'): f.get('Role') for f in listing.get('Functions', [])}
+    for name in c['api_functions']:
+        if deployed.get(name) != f"arn:aws:iam::{c['account']}:role/qsb/runtime/{name}":
+            blockers.append(f'api_functions: {name} is not a deployed function with the runtime role of the same name; '
+                            'fix the inventory before installing the boundary')
 
 
 def managed(name, document):
