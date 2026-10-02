@@ -11,8 +11,10 @@ Both prefixes reach the same handlers and middleware: secure headers, CORS, the 
 
 ## Request headers
 
-- **Credential.** Send a session token or an API key as `X-Qsb-Authorization: Bearer <credential>`. `Authorization: Bearer <credential>` is accepted too; when both are sent, `X-Qsb-Authorization` wins. Prefer `X-Qsb-Authorization`: CloudFront origin access control in front of a Lambda function URL replaces `Authorization` with CloudFront's own SigV4 signature, so the server reads only a bearer from `Authorization`, never a signature.
-- **Body hash.** On every request with a body, send `x-amz-content-sha256` with the hex SHA-256 of the exact body bytes. CloudFront origin access control to a Lambda function URL requires it; the API itself doesn't check it.
+These two headers let the API sit behind CloudFront origin access control to a Lambda function URL, which signs each request with its own `Authorization` header and refuses a POST without a body hash.
+
+- **Credential.** Send a session token or an API key as `X-Qsb-Authorization: Bearer <credential>`. `Authorization: Bearer <credential>` is accepted too; when both are sent, `X-Qsb-Authorization` wins. The server reads only a bearer from `Authorization`, never a signature.
+- **Body hash.** On every request with a body, send `x-amz-content-sha256` with the hex SHA-256 of the exact body bytes. The API itself doesn't check it.
 
 The webapp and the SDK send both ([`src/lib/session.ts`](../src/lib/session.ts)), and CORS allows them.
 

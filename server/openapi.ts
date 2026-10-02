@@ -30,7 +30,7 @@ import {
   type Job,
 } from "../src/lib/model";
 import { NETWORK_ID } from "../src/lib/network";
-import { CREDENTIAL_HEADER } from "../src/lib/session";
+import { BODY_HASH_HEADER, CREDENTIAL_HEADER } from "../src/lib/session";
 import { coordinatorSolvedResultSchema } from "../src/mainnet/coordinatorResult";
 import { slipstreamRatesSchema } from "./providers";
 import {
@@ -821,7 +821,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: z.object({
           token: describe(
             z.string(),
-            "The bearer token for `Authorization: Bearer <token>`.",
+            `The bearer token, for \`${CREDENTIAL_HEADER}: Bearer <token>\`.`,
           ),
         }),
       },
@@ -1170,7 +1170,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: apiKeyResponse.extend({
           key: describe(
             z.string(),
-            "The API key, `qsb_mainnet_<43 base64url characters>`, for `Authorization: Bearer <key>`. Shown only here.",
+            `The API key, \`qsb_mainnet_<43 base64url characters>\`, for \`${CREDENTIAL_HEADER}: Bearer <key>\`. Shown only here.`,
           ),
         }),
       },
@@ -1557,6 +1557,8 @@ export function openApiDocument() {
         "Paths are relative to a server: `/v1` is the stable prefix, which the mainnet webapp uses; `/api` is the same API, kept as a compatibility alias.",
         "",
         "The server coordinates; it holds no secret. QSB state generation, the recovery backup, deposit signing and withdrawal assembly run on the client.",
+        "",
+        `Send the credential in \`${CREDENTIAL_HEADER}\` (see the security schemes), and on every request with a body, \`${BODY_HASH_HEADER}\`: the hex SHA-256 of the exact body bytes, which CloudFront origin access control to a Lambda function URL requires. The API itself doesn't check it.`,
         "",
         "Every error is JSON with an `error` message and a stable `code` (`ApiErrorCode`). A route that doesn't exist returns a plain-text 404.",
         "",

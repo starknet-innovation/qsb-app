@@ -49,6 +49,29 @@ describe("credential header", () => {
     expect(await unsigned.json()).toMatchObject({ code: "auth_required" });
   });
 
+  it("reports the allowlist standing from X-Qsb-Authorization on /config", async () => {
+    const store = new MemoryStore();
+    await store.put({
+      pk: `SESSION#${createHash("sha256").update(tokens[owner]).digest("hex")}`,
+      sk: "AUTH",
+      version: 0,
+      owner,
+      network: "mainnet",
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    });
+    const server = createApp(store, {
+      versionedAlias: true,
+      ownerLimits: { allowlist: new Set([owner]), maxActiveJobs: null, maxGpuSeconds: null },
+    });
+    const config = async (headers: Record<string, string>) =>
+      (await (await server.request("/v1/config", { headers })).json()).ownerLimits;
+    expect(await config({ Authorization: sigv4, [CREDENTIAL_HEADER]: `Bearer ${tokens[owner]}` })).toMatchObject({
+      allowlist: true,
+      allowlisted: true,
+    });
+    expect(await config({ Authorization: sigv4 })).toMatchObject({ allowlist: true, allowlisted: null });
+  });
+
   it("prefers X-Qsb-Authorization when both headers carry a bearer", async () => {
     const vaults = await app();
     const both = await vaults({
