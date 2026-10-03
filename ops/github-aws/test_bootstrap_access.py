@@ -32,7 +32,7 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
         inventory = dict(account=ACCOUNT, region='eu-west-2',
             subject='repo:example/qsb:ref:refs/heads/main', state_bucket='qsb-test-state',
             distributions=['TESTCDN'], apis=['testapi'], origin_access_controls=['TESTOAC'],
-            response_headers_policies=['TESTHEADERS'], operator_user='qsb-operator-user', gpu_vpc='vpc-0test')
+            response_headers_policies=['TESTHEADERS'], api_functions=['qsb-test-api'], operator_user='qsb-operator-user', gpu_vpc='vpc-0test')
         if permission_set:
             del inventory['operator_user']
             inventory['operator_sso_permission_set'] = permission_set
@@ -208,7 +208,7 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
         from access import access
         out = access(dict(account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
                           state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
-                          origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
+                          origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'], api_functions=['qsb-test-api'],
                           operator_user='qsb-operator-user', gpu_vpc='vpc-0test'))
         docs = {'qsb-gpu-boundary': out['gpu_boundary']['document'],
                 'qsb-viewonly-1': out['viewonly']['policies'][0],
@@ -264,7 +264,7 @@ class BootstrapAnalyzerReadiness(unittest.TestCase):
         from access import access
         out = access(dict(account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
                           state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
-                          origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
+                          origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'], api_functions=['qsb-test-api'],
                           operator_user='qsb-operator-user', gpu_vpc='vpc-0test'))
         spec = out['viewonly']
         responses[('iam', 'list-roles')] = {'Roles': [{'RoleName': 'qsb-viewonly', 'Path': '/qsb/bootstrap/'}]}

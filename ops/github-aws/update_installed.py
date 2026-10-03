@@ -19,7 +19,9 @@ difference from that run, including a target plan mode couldn't read, is refused
 changes who a role trusts: moving a principal or an OIDC sub/aud is refused. It never creates or deletes an identity, never attaches or
 detaches a policy, and never deletes a policy version. It refuses before any write when a
 changed managed policy already has IAM's five versions, the number of rendered access
-policies changed, something is missing, or a role carries policies this commit doesn't render.
+policies changed, something is missing, a role carries policies this commit doesn't render, or it
+finds an app stack deployed and an api_functions name that isn't a deployed function with the runtime
+role of the same name.
 """
 import argparse
 import hashlib
@@ -146,6 +148,20 @@ for role in ('viewonly', 'operator'):
 targets = []  # (label, kind, installed document or value, rendered, apply function)
 UNREADABLE = object()  # plan mode only: this profile may not read the target
 blockers = []  # refusals found while planning; checked before any write
+
+# The runtime boundary lets only the inventory's api_functions read the MARA credential (render.py). Each must be a
+# deployed function whose role has its name, or installing the boundary would lock the real API out of the secret.
+api_missing, app_stack = [], False
+listing = aws('lambda', 'list-functions', readable=True)
+if listing is None:
+    print('api_functions: unreadable with this profile (checked again by --apply)', file=sys.stderr)
+else:
+    deployed = {f.get('FunctionName'): f.get('Role') for f in listing.get('Functions', [])}
+    api_missing = [name for name in c['api_functions']
+                   if deployed.get(name) != f"arn:aws:iam::{c['account']}:role/qsb/runtime/{name}"]
+    # An app stack is deployed once its coordinator or an API function is (terraform/compute.tf: <name>-coordinator,
+    # <name>-api), which also covers a first apply that stopped part way.
+    app_stack = any(re.fullmatch(r'qsb-(?!gpu-)[a-z0-9-]+-(?:coordinator|api)', name or '') for name in deployed)
 
 
 def managed(name, document):
@@ -310,6 +326,15 @@ header = {'commit': commit, 'apply': a.apply, **({} if a.apply else {'plan_hash'
 print(json.dumps(header, indent=2), flush=True)
 if any(t[1] == 'missing' for t in targets):
     raise SystemExit('Some identities are missing; run the bootstrap first')
+# Once an app stack exists, a wrong name blocks the run: the boundary, installed now or earlier by bootstrap.py
+# before any function existed, would lock its API out of the secret. Before then there's no API to lock out, and
+# a correct name can't be deployed yet, so it only warns.
+for name in api_missing:
+    message = f'api_functions: {name} is not a deployed function with the runtime role of the same name'
+    if app_stack:
+        blockers.append(message + '; fix the inventory, then install the corrected boundary')
+    else:
+        print(message + '; no app stack is deployed yet, so this run goes ahead', file=sys.stderr)
 if blockers:
     raise SystemExit('; '.join(blockers))
 if not a.apply:

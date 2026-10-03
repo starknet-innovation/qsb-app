@@ -20,7 +20,7 @@ COMMIT = 'b' * 40
 ACCOUNT = '123456789012'
 INVENTORY = dict(account=ACCOUNT, region='eu-west-2', subject='repo:example/qsb:ref:refs/heads/main',
                  state_bucket='qsb-test-state', distributions=['TESTCDN'], apis=['testapi'],
-                 origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'],
+                 origin_access_controls=['TESTOAC'], response_headers_policies=['TESTHEADERS'], api_functions=['qsb-test-api'],
                  operator_user='qsb-operator-user', gpu_vpc='vpc-0test')
 SSO_INVENTORY = {**{k: v for k, v in INVENTORY.items() if k != 'operator_user'},
                  'operator_sso_permission_set': 'QsbOperator'}
@@ -78,6 +78,11 @@ class UpdateInstalled(unittest.TestCase):
             arn_name = lambda: opt('--policy-arn').rsplit('/', 1)[-1]
             if (service, operation) == ('sts', 'get-caller-identity'):
                 out = {'Account': ACCOUNT}
+            elif (service, operation) == ('lambda', 'list-functions'):
+                if iam.get('functions_denied'):
+                    return subprocess.CompletedProcess(command, 254, '', 'An error occurred (AccessDenied) when calling')
+                functions = iam.get('functions', {'qsb-test-api': f'arn:aws:iam::{ACCOUNT}:role/qsb/runtime/qsb-test-api'})
+                out = {'Functions': [{'FunctionName': n, 'Role': r} for n, r in functions.items()]}
             elif operation == 'list-policies':
                 out = {'Policies': [{'PolicyName': n, 'Arn': f'arn:aws:iam::{ACCOUNT}:policy/qsb/bootstrap/{n}',
                                      'DefaultVersionId': f'v{len(v)}'} for n, v in iam['policies'].items()]}
@@ -158,6 +163,37 @@ class UpdateInstalled(unittest.TestCase):
         self.run_update(self.installed())
         self.assertEqual(self.writes(), [])
         self.assertTrue(all(item['status'] == 'identical' for item in self.plan))
+
+    def test_api_functions_must_be_deployed_with_their_own_role(self):
+        # A well-formed wrong name would install a boundary that locks the API out of the MARA credential.
+        role = f'arn:aws:iam::{ACCOUNT}:role/qsb/runtime/'
+        coordinator = {'qsb-test-coordinator': role + 'qsb-test-coordinator'}
+        for functions in (coordinator, {**coordinator, 'qsb-tset-api': role + 'qsb-tset-api'},
+                          {'qsb-test-api': role + 'qsb-test-coordinator'}):
+            iam = self.installed()
+            iam['functions'] = functions
+            with self.subTest(functions=functions):
+                with self.assertRaisesRegex(SystemExit, 'api_functions: qsb-test-api is not a deployed function'):
+                    self.run_update(iam, apply=False)
+                with self.assertRaisesRegex(SystemExit, 'api_functions: qsb-test-api is not a deployed function'):
+                    self.run_update(iam)
+                self.assertEqual(self.writes(), [])
+        # Before an app stack exists (a new account's GPU step), the function can't be deployed yet: the run goes
+        # ahead, a changed boundary included.
+        iam = self.installed()
+        iam['functions'] = {'qsb-gpu-watchdog': role + 'qsb-gpu-watchdog'}
+        iam['policies']['qsb-runtime-boundary'][-1] = {'Version': '2012-10-17', 'Statement': []}
+        self.run_update(iam)
+        self.assertIn('create-policy-version', self.writes())
+        # A profile that can't list functions plans anyway, and --apply checks again.
+        iam = self.installed()
+        iam['functions_denied'] = True
+        with self.assertRaises(SystemExit) as planned:
+            self.run_update(iam, apply=False)
+        self.assertIsNone(planned.exception.code)
+        with self.assertRaisesRegex(SystemExit, 'lambda list-functions failed'):
+            self.run_update(iam, plan_hash=self.plan_hash)
+        self.assertEqual(self.writes(), [])
 
     def test_identity_center_installation_has_no_user_target(self):
         self.inventory = SSO_INVENTORY

@@ -301,9 +301,9 @@ run "miner_credential_api_only" {
   }
   assert {
     condition = length(aws_iam_role_policy.miner_credential) == 1 && jsonencode(jsondecode(aws_iam_role_policy.miner_credential[0].policy).Statement) == jsonencode([
-      { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = var.slipstream_secret_arn }
+      { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = var.slipstream_secret_arn, Condition = { ArnLike = { "lambda:SourceFunctionArn" = "arn:aws:lambda:${var.region}:${var.aws_account_id}:function:${aws_lambda_function.api.function_name}" } } }
     ])
-    error_message = "The miner credential grant must be exactly GetSecretValue on the configured secret."
+    error_message = "The miner credential grant must be exactly GetSecretValue on the configured secret, from the API function only."
   }
   assert {
     condition     = aws_lambda_function.api.environment[0].variables.SLIPSTREAM_SECRET_ARN == var.slipstream_secret_arn && !contains(keys(aws_lambda_function.coordinator.environment[0].variables), "SLIPSTREAM_SECRET_ARN") && length(aws_lambda_function.reference.environment) == 0 && !output.transactions_enabled && !output.exact_submit_enabled

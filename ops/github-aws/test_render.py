@@ -21,7 +21,7 @@ class SinglePipelinePolicies(unittest.TestCase):
             subject='repo:example/qsb:ref:refs/heads/main',
             state_bucket='qsb-test-state', distributions=['TESTCDN'],
             origin_access_controls=['TESTOAC', 'TESTAPIOAC'],
-            response_headers_policies=['TESTHEADERS'],
+            response_headers_policies=['TESTHEADERS'], api_functions=['qsb-test-api'],
         )
         self.policies = render(self.inventory)
 
@@ -66,8 +66,19 @@ class SinglePipelinePolicies(unittest.TestCase):
         secret = [s for s in self.policies['boundary']['Statement'] if any(a.startswith('secretsmanager:') for a in s['Action'])]
         self.assertEqual(secret, [{'Sid': 'MinerCredential', 'Effect': 'Allow', 'Action': ['secretsmanager:GetSecretValue'],
                                    'Resource': ['arn:aws:secretsmanager:eu-west-2:123456789012:secret:qsb/slipstream-??????'],
-                                   'Condition': {'ArnLike': {'aws:PrincipalArn': 'arn:aws:iam::123456789012:role/qsb/runtime/qsb-*-api'}}}])
+                                   'Condition': {'ArnEquals': {
+                                       'aws:PrincipalArn': ['arn:aws:iam::123456789012:role/qsb/runtime/qsb-test-api'],
+                                       'lambda:SourceFunctionArn': ['arn:aws:lambda:eu-west-2:123456789012:function:qsb-test-api']}}}])
         self.assertFalse(any(a in ('*', 'kms:*', 'kms:Decrypt') for s in self.policies['boundary']['Statement'] for a in s['Action']))
+
+    def test_only_registered_api_functions_may_read_the_miner_credential(self):
+        # The names are known before any apply, so a missing or malformed list stops the render.
+        for names in (None, [], ['qsb-*-api'], ['qsb-app'], ['qsb-gpu-x-api'], 'qsb-app-api'):
+            inventory = {k: v for k, v in self.inventory.items() if k != 'api_functions'}
+            if names is not None:
+                inventory['api_functions'] = names
+            with self.subTest(names=names), self.assertRaises(SystemExit):
+                render(inventory)
 
     def test_role_deletion_lookup_is_scoped_without_instance_profile_management(self):
         statement = self.statement('deploy', 'ManageRuntimeRoles')
