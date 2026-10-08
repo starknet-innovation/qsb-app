@@ -28,10 +28,22 @@ export async function connectWallet(): Promise<Wallet> {
   );
   if (r.status !== "success")
     throw new Error(r.error.message || "Wallet connection declined.");
+  // Xverse answers with whichever Bitcoin network it's set to, not the one requested above.
+  const network = r.result.network?.bitcoin?.name;
+  if (network && network !== BitcoinNetworkType.Mainnet)
+    throw new Error(
+      `Xverse is set to ${network}. QSB runs on Bitcoin mainnet only: switch Xverse's network to Mainnet, then connect again.`,
+    );
   const address = r.result.addresses.find((a) => a.purpose === "payment");
   if (!address)
     throw new Error("Xverse did not return a Bitcoin payment address.");
-  outputScript(address.address);
+  try {
+    outputScript(address.address);
+  } catch {
+    throw new Error(
+      "Xverse returned an address that isn't a Bitcoin mainnet payment address. Switch Xverse's network to Mainnet, then connect again.",
+    );
+  }
   return {
     address: address.address,
     publicKey: address.publicKey,
