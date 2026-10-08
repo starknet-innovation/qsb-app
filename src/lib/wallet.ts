@@ -28,7 +28,8 @@ export async function connectWallet(): Promise<Wallet> {
   );
   if (r.status !== "success")
     throw new Error(r.error.message || "Wallet connection declined.");
-  // Xverse answers with whichever Bitcoin network it's set to, not the one requested above.
+  // Xverse can still connect on another network (some versions ignore the one requested above), so check the
+  // network it answered with.
   const network = r.result.network?.bitcoin?.name;
   if (network && network !== BitcoinNetworkType.Mainnet)
     throw new Error(
