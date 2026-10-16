@@ -1,6 +1,6 @@
 # Corrected-script fresh withdrawal campaign
 
-Status: **prepared, not authorized to run**. The fresh fixture is funded only in a network-disabled local Core regtest instance; pinning and both subset puzzles remain unsolved. The bounded native qualification run is not a completed search or withdrawal. This plan does not enroll an image, enable mainnet, authorize provider submissions or extend the completed bounded test's spending authorization.
+Status: **authorized for at most 24 aggregate GPU-hours, $30 total, one GPU at a time, with automatic shutdown**. The fresh fixture is funded only in a network-disabled local Core regtest instance; pinning and both subset puzzles remain unsolved. The bounded native qualification run is not a completed search or withdrawal. This campaign authorization does not enroll an image or enable mainnet; it is separate from the completed bounded qualification test.
 
 ## Bind the campaign before starting
 
@@ -31,9 +31,9 @@ Formula: `domain / sampleRanks × medianSeconds / 3600`. This is neither a compl
 
 A complete subset domain can contain no valid solution. Exhausting either required domain may require a new pin and new subset context; previous-pin coverage cannot be credited to it. Success can also occur before domain exhaustion. No validated success-probability model or confidence bound is established, so do not describe half a domain as the expected work or these figures as a guaranteed budget. Pinning, retries after reconciled provider failures, and pin restarts are additional. A 25-minute single-GPU window covers only about 0.074% of round 1 or 0.127% of round 2 at the short-sample rates, excluding pinning.
 
-## Proposed staged authorization
+## Authorized staged envelope
 
-Request approval for an initial **24 aggregate GPU-hour campaign cap**, **one GPU at a time**, with a corresponding **$26.96 compute ceiling at the quoted rate**. This is a bounded search attempt, not a promise to finish. Keep the cap inclusive of the calibration phase and billed GPU startup/idle time; reserve time for shutdown before admitting a new chunk. Establish a separate explicit storage/control-plane cap before launch; the compute figure is not an all-in bill. The old application per-job limit does not authorize this campaign.
+Enforce the approved **24 aggregate GPU-hour campaign cap**, **$30 total cap**, and **one GPU at a time**. At the quoted rate, 24 GPU-hours would cost approximately **$26.96 compute**. This is a bounded search attempt, not a promise to finish. Keep the cap inclusive of the calibration phase and billed GPU startup/idle time; reserve time for shutdown before admitting a new chunk. Reserve the remaining approximately $3.04 for storage, control-plane charges and shutdown margin; stop earlier if that reserve cannot cover actual costs. The $30 all-in cap takes precedence over reaching 24 GPU-hours. The old application per-job limit does not authorize this campaign.
 
 1. Within the first **one aggregate GPU-hour**, measure repeated longer ranges on the fresh public context: several rank counts, alternating order and separate startup/sustained slopes. Measure pinning as well as both subset stages; subset calibration uses a declared parameter context and cannot claim a solved pin. Pinning/subset probes not matching the eventual verified context do not receive proof coverage credit. Check final-image transport identity and CPU verification. Stop if measurements, exact range accounting or runtime identity are inconsistent.
 2. Spend the remaining approved envelope on genuine pinning until a valid hit is CPU verified. Export both subset parameter sets from that exact pin and fresh manifest. Search round 1 then round 2, stopping each stage only on a CPU-verified hit or exact exhaustion. Preserve completed ranges and all submission identities across bounded worker leases. Do not lower predicates to meet the time cap.

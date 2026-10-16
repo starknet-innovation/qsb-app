@@ -63,7 +63,10 @@ locals {
   enrolled_releases = { for name in fileset("${path.module}/../../src/lib/releases", "*.json") :
     jsondecode(file("${path.module}/../../src/lib/releases/${name}")).id => jsondecode(file("${path.module}/../../src/lib/releases/${name}"))
   }
-  enrolled_solver = try(local.enrolled_releases[local.release_build.identities.solver.id], null)
+  script_identity_source   = file("${path.module}/../../src/lib/script-version.ts")
+  current_script_version   = regex("CURRENT_SCRIPT_VERSION = '([^']+)'", local.script_identity_source)[0]
+  current_generator_commit = regex("CORRECTED_GENERATOR_COMMIT = '([^']+)'", local.script_identity_source)[0]
+  enrolled_solver          = try(local.enrolled_releases[local.release_build.identities.solver.id], null)
   # One g5.xlarge (4 vCPUs, one A10G) per GPU a withdrawal may use at once. The coordinator
   # refuses to submit unless the live compute environment matches this exactly.
   gpu_workers = jsondecode(file("${path.module}/../../server/gpu-spend.json")).workersMax
@@ -77,12 +80,14 @@ resource "terraform_data" "release_identity" {
     }
     precondition {
       condition = try(
-        local.enrolled_solver.schemaVersion == 3 &&
+        local.enrolled_solver.schemaVersion == 4 &&
+        local.enrolled_solver.scriptVersion == local.current_script_version &&
+        local.enrolled_solver.generatorCommit == local.current_generator_commit &&
         local.enrolled_solver.image == local.release_build.identities.solver.image &&
         local.enrolled_solver.solverCommit == local.release_build.identities.solver.solverCommit,
         false
       )
-      error_message = "Build solver must match an enrolled schema-3 descriptor's ID, image and source commit."
+      error_message = "Build solver must match an enrolled schema-4 corrected-script descriptor's ID, image and source commit."
     }
     precondition {
       condition = try(

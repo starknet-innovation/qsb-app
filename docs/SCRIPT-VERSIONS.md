@@ -39,3 +39,5 @@ Do not deploy this generator/CPU change with an old served descriptor. First qua
 Coordinators pause incompatible work without changing its release, parameter hashes or completed coverage. Known provider IDs remain available for drain; unknown submission markers remain available for operator reconciliation. Attaching an old provider ID is not authorization to credit its result or start corrected work. Existing recovery intent and budget accounting remain in force.
 
 Companion solver compatibility work: https://github.com/starknet-innovation/qsb-solver/pull/14. Native corrected-input GPU validation and an approved immutable descriptor remain prerequisites to enrollment.
+
+CI keeps incompatible schema-3 solver selection as a negative build test while no corrected image is enrolled. GPU Terraform mock plans use an explicitly synthetic schema-4 descriptor in a disposable copied tree, never the real enrollment registry. The production module requires corrected generator/script identities. A real selected corrected-image build remains required before rollout.
