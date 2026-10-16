@@ -1,3 +1,4 @@
+import { assertCurrentVaultScript } from "../src/lib/script-version";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { type PublicVault } from "../src/lib/model";
@@ -97,6 +98,8 @@ export async function submitFunding(
   if (vault.network !== "mainnet" || vault.id !== vaultId)
     throw new ChainError("Mainnet vault not found.", "vault_not_found");
   assertVaultConfiguration(vault);
+  try { assertCurrentVaultScript(vault); }
+  catch { throw new ChainError("Only corrected Config-A scripts can receive a new deposit.", "vault_invalid"); }
   const payment = matchVaultFunding(tx, vault.scriptHex, amount);
 
   let current: Row;

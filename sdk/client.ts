@@ -1,3 +1,4 @@
+import { assertCurrentVaultScript } from "../src/lib/script-version";
 import { randomUUID } from "node:crypto";
 import * as btc from "@scure/btc-signer";
 import { base64, hex } from "@scure/base";
@@ -565,6 +566,7 @@ export class QsbClient {
       amount,
       rate,
     );
+    assertCurrentVaultScript(vault);
     const tx = fundingPsbt(inputs, vault.scriptHex, amount, quote.fee, this.wallet.address);
     if (tx.outputsLength !== (quote.change ? 2 : 1))
       throw new Error("The deposit fee estimate doesn't match the transaction. Nothing was prepared.");
@@ -585,6 +587,7 @@ export class QsbClient {
   }
   /** Rebuild the prepared PSBT from its own inputs and the vault, so an edited file can't pass. */
   private expectedDeposit(prepared: PreparedDeposit, vault: PublicVault): btc.Transaction {
+    assertCurrentVaultScript(vault);
     const unsigned = btc.Transaction.fromPSBT(base64.decode(prepared.psbt), opts);
     const inputs: FundingInput[] = [];
     for (let i = 0; i < unsigned.inputsLength; i++) {
@@ -845,6 +848,7 @@ export class QsbClient {
         throw new Error("The job differs from the withdrawal intent in your backup.");
       this.guard.claim(`qsb-intent:${funding.vault.scriptHash}`, intent.manifestHash);
       const solved = await this.session.api<unknown>(`/jobs/${job.id}/solved-result`);
+      assertCurrentVaultScript(funding.vault);
       local = await rebuildWithdrawalFromSolvedResult({
         solved,
         job,

@@ -1,3 +1,4 @@
+import { assertCurrentVaultScript } from "./lib/script-version";
 import {fingerprint} from './lib/provenance';
 import {readSessionEpoch} from './lib/api';
 import { operationsAllowed } from "./lib/readiness";
@@ -498,6 +499,7 @@ export default function TransactionDialog({
             rate,
           ),
           feeSats = quote.fee;
+        assertCurrentVaultScript(vault);
         const expected = fundingPsbt(
           inputs,
           vault.scriptHex,
@@ -667,6 +669,7 @@ export default function TransactionDialog({
           throw Error(
             "The job differs from the withdrawal intent in your backup.",
           );
+        assertCurrentVaultScript(vault);
         const old = localStorage.getItem(`qsb-intent:${vault.scriptHash}`);
         if (old && old !== intent.manifestHash)
           throw Error("This device remembers a different authorization.");

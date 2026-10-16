@@ -1,3 +1,4 @@
+import { fixtureVault } from "./solver-fixture";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,7 +22,7 @@ const opts = { allowUnknownOutputs: true, allowUnknownInputs: true };
 const owner = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20) });
 const other = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20).fill(9) });
 const tokens = { [owner]: "A".repeat(43), [other]: "C".repeat(43) };
-const scriptHex = "51".repeat(100);
+const scriptHex = fixtureVault.scriptHex;
 const scriptHash = createHash("sha256").update(Buffer.from(scriptHex, "hex")).digest("hex");
 const key = "k-0123456789abcdef";
 
@@ -43,7 +44,7 @@ function vaultFor(paymentAddress: string, status: PublicVault["status"] = "unfun
     scriptHex,
     scriptHash,
     paymentAddress,
-    publicStateJson: JSON.stringify({ config: "A", hash_mode: "sha256", n: 150, round_sigs: [], full_script_hex: scriptHex }),
+    publicStateJson: fixtureVault.publicStateJson,
     status,
   });
 }
@@ -136,7 +137,7 @@ async function fixture() {
     [...store.rows.values()].filter((row) => row.sk.startsWith("IDEMPOTENCY#"));
   /** Seed a confirmed vault and a job awaiting authorization, for /jobs/:id/submit. */
   const exact = async () => {
-    const confirmed = { ...vaultFor(owner, "confirmed"), scriptHex: "51", funding: { txid: "11".repeat(32), vout: 0, value: "100000" } };
+    const confirmed = { ...vaultFor(owner, "confirmed"), funding: { txid: "11".repeat(32), vout: 0, value: "100000" } };
     const { job, raw } = withdrawal(confirmed);
     await store.put({ pk: `OWNER#${owner}`, sk: `VAULT#${confirmed.id}`, version: 0, vault: confirmed });
     await store.put({ pk: `OWNER#${owner}`, sk: `JOB#${job.id}`, version: 0, job });

@@ -1,3 +1,4 @@
+import { CORRECTED_GENERATOR_COMMIT, LEGACY_GENERATOR_COMMIT, CURRENT_SCRIPT_VERSION, LEGACY_SCRIPT_VERSION } from "./script-version";
 export type BatchSubmissionIdentity = {
   jobName: string;
   inputSha256: string;
@@ -64,7 +65,8 @@ export const publicVaultSchema = z
     configuration: z
       .object({
         protocol: z.literal("qsb-config-a-v1"),
-        generatorCommit: z.literal("2c9172051d5c150ef0a994ca6b988a08a3ef9e85"),
+        generatorCommit: z.enum([LEGACY_GENERATOR_COMMIT, CORRECTED_GENERATOR_COMMIT]),
+        scriptVersion: z.enum([LEGACY_SCRIPT_VERSION, CURRENT_SCRIPT_VERSION]).optional(),
         network: z.string(),
         config: z.literal("A"),
         scriptHash: txid,
@@ -216,7 +218,7 @@ export type Job = {
 };
 export const release = {
   protocol: "qsb-config-a-v1",
-  qsbCommit: "2c9172051d5c150ef0a994ca6b988a08a3ef9e85",
+  qsbCommit: CORRECTED_GENERATOR_COMMIT,
   kernelCommit: "2791ed0588f5014ccd688d48ba5502df2879f2f1",
   mainnetEnabled: false,
   checks: [
@@ -248,6 +250,7 @@ export function formatBtc(value: string | bigint): string {
 export function validatePublicState(value: string): void {
   const s = JSON.parse(value) as Record<string, unknown>;
   const allowed = [
+    "scriptVersion",
     "config",
     "hash_mode",
     "n",

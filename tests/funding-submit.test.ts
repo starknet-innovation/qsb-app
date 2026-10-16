@@ -1,3 +1,4 @@
+import { fixtureVault, publicScriptFixture } from "./solver-fixture";
 import { inspect } from "node:util";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +23,7 @@ const credentialFor = (authorization?: string) =>
 const opts = { allowUnknownOutputs: true, allowUnknownInputs: true };
 const address = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20) });
 const owner = address;
-const scriptHex = "51".repeat(100);
+const scriptHex = fixtureVault.scriptHex;
 
 function deposit(value = 50_000n, script = scriptHex, seed = 1) {
   const tx = new btc.Transaction({ ...opts, version: 2 });
@@ -38,7 +39,7 @@ async function setup() {
     id: crypto.randomUUID(),
     scriptHex,
     config: "A",
-    publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
+    publicStateJson: fixtureVault.publicStateJson,
     scriptHash: createHash("sha256").update(Buffer.from(scriptHex, "hex")).digest("hex"),
     paymentAddress: address,
     network: "mainnet",
@@ -55,6 +56,14 @@ async function setup() {
 }
 
 describe("submitFunding", () => {
+  it("refuses legacy deposits before credentials, durable writes or miner POST", async () => {
+    const f = await setup(); const before = (await f.row())!;
+    const legacy = publicScriptFixture("qsb-config-a-legacy-v1");
+    await f.store.put({...before, version:1, vault:{...f.vault,...legacy}},0);
+    const write = vi.spyOn(f.store,"put");
+    await expect(submitFunding(owner,f.vault.id,deposit(50000n,legacy.scriptHex),50000n,f.deps)).rejects.toThrow("Only corrected");
+    expect(write).not.toHaveBeenCalled();expect(f.miner.credential).not.toHaveBeenCalled();expect(f.miner.submitFunding).not.toHaveBeenCalled();
+  });
   it("records the intent before the POST, then marks it submitted", async () => {
     const f = await setup();
     const raw = deposit();

@@ -5,7 +5,7 @@ export function deployedSolver(requestedId?: string): SolverDescriptor {
   const id = process.env.SOLVER_RELEASE_ID;
   if (!id) throw new Error("SolverDeploymentRequired");
   const descriptor = solverRelease(id);
-  if (!("schemaVersion" in descriptor) || descriptor.schemaVersion !== 3)
+  if (!("schemaVersion" in descriptor) || descriptor.schemaVersion !== 4)
     throw new Error("SolverDeploymentContractRequired");
   assertPaidSolverContract(descriptor);
   if (requestedId !== undefined && requestedId !== id)
