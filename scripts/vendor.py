@@ -8,7 +8,7 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SOURCES = {
-    'qsb': ('avihu28/Quantum-Safe-Bitcoin-Transactions', '2c9172051d5c150ef0a994ca6b988a08a3ef9e85'),
+    'qsb': ('avihu28/Quantum-Safe-Bitcoin-Transactions', 'b22f81c093488d09b9cd59c171c79b6c40812cf1'),
 }
 # Fetch only the generator and independent reference: never download CUDA archives.
 FILES = (

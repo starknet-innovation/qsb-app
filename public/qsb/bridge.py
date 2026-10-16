@@ -6,11 +6,11 @@ import json
 import os
 from types import SimpleNamespace
 import qsb_pipeline as pipeline
-from bitcoin_tx import QSBScriptBuilder
+from bitcoin_tx import QSBScriptBuilder, classify_qsb_script, SCRIPT_VERSION
 
 PUBLIC_FIELDS = ('config', 'hash_mode', 'n', 't1s', 't1b', 't2s', 't2b',
                  'hors_commitments', 'dummy_sigs', 'pin_r', 'pin_s', 'pin_sig',
-                 'round_sigs', 'full_script_hex')
+                 'round_sigs', 'full_script_hex', 'scriptVersion')
 
 def validate_state(state):
     if (state['config'], state['hash_mode'], state['n'], state['t1s'], state['t1b'], state['t2s'], state['t2b']) != ('A', 'sha256', 150, 8, 1, 7, 2):
@@ -27,9 +27,8 @@ def validate_state(state):
         for i, secret in enumerate(state['hors_secrets'][ri]):
             if hash160(bytes.fromhex(secret)).hex() != state['hors_commitments'][ri][i]:
                 raise ValueError('Recovery secrets do not match commitments')
-    script = builder.build_full_script(bytes.fromhex(state['pin_sig']), *[bytes.fromhex(r['sig']) for r in state['round_sigs']])
-    if script.hex() != state['full_script_hex'] or len(script) > 10000 or builder.count_opcodes_runtime(script)[0] > 201:
-        raise ValueError('Recovery script mismatch')
+    classify_qsb_script(state)
+    script = bytes.fromhex(state['full_script_hex'])
     return script
 
 def generate():
@@ -37,6 +36,7 @@ def generate():
         pipeline.cmd_setup(SimpleNamespace(config='A', seed=None))
     with open('qsb_state.json') as f:
         state = json.load(f)
+    state['scriptVersion'] = SCRIPT_VERSION
     script = validate_state(state)
     public = {k: state[k] for k in PUBLIC_FIELDS}
     public['round_sigs'] = [{k: r[k] for k in ('r', 's', 'sig')} for r in state['round_sigs']]
@@ -50,6 +50,8 @@ def validate(state_json):
 def assemble(state_json, manifest_json, solution_json):
     state, m, hit = json.loads(state_json), json.loads(manifest_json), json.loads(solution_json)
     validate_state(state)
+    if classify_qsb_script(state) != SCRIPT_VERSION:
+        raise ValueError('Legacy script requires separately reviewed migration; assembly disabled')
     args = SimpleNamespace(funding_txid=m['funding']['txid'], funding_vout=m['funding']['vout'], funding_value=int(m['funding']['value']),
         extra_input_txid=m['helper']['txid'], extra_input_vout=m['helper']['vout'], extra_input_value=int(m['helper']['value']), extra_input_sequence=0xfffffffe,
         version=1, sequence=hit['sequence'], locktime=hit['locktime'], output_value=int(m['outputValue']), output_address='00'*20,

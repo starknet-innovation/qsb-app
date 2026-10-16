@@ -609,8 +609,8 @@ def cmd_export(args):
     builder._seed_witness(model, 0)
     model.push(('pin_kp',)); model.push(('pin_kn',))
     builder._model_pinning(model)
-    r1_sub, _ = builder._emit_round(model, 0, h2b(state['round_sigs'][0]['sig']), builder._canonical_subset(0))
-    r2_sub, _ = builder._emit_round(model, 1, h2b(state['round_sigs'][1]['sig']), builder._canonical_subset(1))
+    r1_sub, _ = builder._emit_round(model, 0, h2b(state['round_sigs'][0]['sig']), builder._canonical_subset(0), terminal=False)
+    r2_sub, _ = builder._emit_round(model, 1, h2b(state['round_sigs'][1]['sig']), builder._canonical_subset(1), terminal=True)
     # Sanity: concatenation must equal full_script
     assert pin_sub + r1_sub + r2_sub == full_script, \
         "Builder subscripts do not reassemble to full_script — layout drift"
