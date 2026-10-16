@@ -23,3 +23,19 @@ Run `python3 tests/test_reference.py` after `npm run vendor`. Tests cover:
 - A synthetic replay regression with real ECDSA and HORS checks: honest witnesses pass both layouts; replaying round 1 from a different-payee transaction passes the legacy layout and fails corrected round 1.
 
 The replay interpreter explicitly relaxes the three unsolved hash-to-DER puzzle checks. It is a focused component regression, not Bitcoin Core validation, a fresh full-search withdrawal, or a complete post-quantum security proof. Native GPU, final-image, fresh exact-transaction Core and external-miner validation remain separate gates.
+
+## Admission and immutable releases
+
+The TypeScript boundary independently reconstructs Config A from the public commitments with a shared stack model. This validates all pushes and stack-depth operands, not a raw byte search for an opcode. Python performs its own reconstruction during recovery, CPU export and assembly. The version label is checked against those bytes.
+
+Registration and newly signed/submitted deposits accept only the corrected layout; deposits still do not pin a solver. Read-only legacy backup/configuration access remains available. Browser and SDK withdrawal assembly and server exact submission refuse legacy scripts before signing or miner submission. An existing submitted transaction can still be reconciled by its durable identity.
+
+New withdrawal creation requires an enrolled schema-v4 descriptor containing `scriptVersion: qsb-config-a-cmsverify-v1` and the corrected generator commit. Old descriptors remain byte-identical and cannot authorize new corrected searches. Enrollment is an append-only publication step after qualification in qsb-solver: accepting the new schema does not attest, enroll or deploy a candidate image. Old jobs retain their recorded release and configuration hashes; they must never be silently migrated to a new release. Mainnet switches and exact-transaction authorization are unchanged.
+
+## Migration rollout
+
+Do not deploy this generator/CPU change with an old served descriptor. First qualify the companion corrected solver image, publish its immutable descriptor, and enroll it verbatim. Commit and review app, CPU artifact and solver selection together before activation. Inventory existing public vault/job records first; do not retrieve user recovery material. Legacy backups remain readable, but migration of a funded legacy output requires a separately reviewed exact-transaction procedure.
+
+Coordinators pause incompatible work without changing its release, parameter hashes or completed coverage. Known provider IDs remain available for drain; unknown submission markers remain available for operator reconciliation. Attaching an old provider ID is not authorization to credit its result or start corrected work. Existing recovery intent and budget accounting remain in force.
+
+Companion solver compatibility work: https://github.com/starknet-innovation/qsb-solver/pull/14. Native corrected-input GPU validation and an approved immutable descriptor remain prerequisites to enrollment.

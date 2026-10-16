@@ -9,7 +9,7 @@ import {
   type SearchSlot,
 } from "../src/lib/model";
 import { NETWORK_ID } from "../src/lib/network";
-import { assertSolverPin, solverRelease } from "../src/lib/provenance";
+import { assertSolverPin, solverRelease, solverScriptVersion } from "../src/lib/provenance";
 import { transactionsEnabled } from "./network";
 import { configuredCompute } from "./compute-provider";
 import { searchVersion, workRange } from "./search-ranges";
@@ -176,8 +176,7 @@ export async function reconcileUnknownSubmission(input: {
     ? assertSolverPin(job.solver, vault)
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
   if (
-    selected.searchVersion !== searchVersion ||
-    selected.generatorCommit !== release.qsbCommit
+    selected.searchVersion !== searchVersion
   )
     throw new ReconciliationError("SolverRuntimeMismatch");
   let replacementRequestKey: string | undefined;
@@ -211,6 +210,7 @@ export async function reconcileUnknownSubmission(input: {
           stage: z.string(),
           attempt: z.number(),
           kernelCommit: z.string(),
+          scriptVersion: z.string().optional(),
           workRange: z.record(z.string(), z.unknown()),
         })
         .parse(result.output);
@@ -222,6 +222,7 @@ export async function reconcileUnknownSubmission(input: {
         output.stage !== stage ||
         output.attempt !== attempt ||
         output.kernelCommit !== selected.kernelCommit ||
+        (solverScriptVersion(selected) === "qsb-config-a-cmsverify-v1" && output.scriptVersion !== solverScriptVersion(selected)) ||
         Object.entries(range).some(([k, v]) => output.workRange[k] !== v) ||
         Object.keys(output.workRange).some((k) => !(k in range))
       )

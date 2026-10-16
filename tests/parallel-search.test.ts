@@ -1,3 +1,4 @@
+import { CURRENT_SCRIPT_VERSION } from "../src/lib/script-version";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Parallel search with four GPUs. Unsigned fixtures and synthetic provider IDs only.
 const mocks = vi.hoisted(() => ({
@@ -101,7 +102,7 @@ const output = (stage: SearchSlot["stage"], attempt: number, candidates: string[
     manifestHash: "a".repeat(64),
     attempt,
     candidates,
-    kernelCommit: release.kernelCommit,
+    scriptVersion: CURRENT_SCRIPT_VERSION, kernelCommit: release.kernelCommit,
     checkpoint: "range-complete",
     workRange: workRange(stage, attempt),
   },
@@ -142,8 +143,8 @@ beforeEach(() => {
     Payload: Buffer.from(
       JSON.stringify(
         JSON.parse(command.input.Payload.toString()).action === "export"
-          ? { parameterBase64: "public", parameterSha256: "b".repeat(64) }
-          : { valid: false },
+          ? { scriptVersion: CURRENT_SCRIPT_VERSION, parameterBase64: "public", parameterSha256: "b".repeat(64) }
+          : { scriptVersion: CURRENT_SCRIPT_VERSION, valid: false },
       ),
     ),
   }));
@@ -204,8 +205,8 @@ it("a verified hit moves to the next stage and stops the superseded chunks witho
       Payload: Buffer.from(
         JSON.stringify(
           payload.action === "export"
-            ? { parameterBase64: "public", parameterSha256: "b".repeat(64) }
-            : { valid: true, sequence: range.sequence, locktime: range.locktime },
+            ? { scriptVersion: CURRENT_SCRIPT_VERSION, parameterBase64: "public", parameterSha256: "b".repeat(64) }
+            : { scriptVersion: CURRENT_SCRIPT_VERSION, valid: true, sequence: range.sequence, locktime: range.locktime },
         ),
       ),
     };
@@ -319,7 +320,7 @@ it("adopts a single-GPU job's running submission as a slot with its chunk and ID
 it("a failed CPU check outranks an interruption in the same tick and keeps that chunk's ID for review", async () => {
   await seed({ status: "searching", parallelSlots: [slot(0), slot(1), slot(2)] });
   states.c0 = { status: "FAILED" };
-  states.c1 = output("pinning", 1, ["candidate"]); // CPU verifier answers { valid: false }
+  states.c1 = output("pinning", 1, ["candidate"]); // CPU verifier answers { scriptVersion: CURRENT_SCRIPT_VERSION, valid: false }
   expect(await handler(event)).toMatchObject({ done: true });
   const job = await saved();
   expect(job).toMatchObject({ status: "paused", error: "GPU candidates failed independent CPU verification." });
@@ -613,7 +614,7 @@ describe("GPU usage metering", () => {
 
   it("counts a chunk held for CPU review once, however often it is seen again", async () => {
     await seed({ status: "searching", parallelSlots: [slot(0)] });
-    states.c0 = timed(output("pinning", 0, ["candidate"]), 0, 10_000, 70_000); // CPU answers { valid: false }
+    states.c0 = timed(output("pinning", 0, ["candidate"]), 0, 10_000, 70_000); // CPU answers { scriptVersion: CURRENT_SCRIPT_VERSION, valid: false }
     await handler(event);
     await handler(event);
     const job = await saved();
@@ -634,7 +635,7 @@ describe("GPU usage metering", () => {
   it("saves a finished chunk's time before checking its output, so a rejected output keeps it", async () => {
     await seed({ status: "searching", parallelSlots: [slot(0), slot(1)] });
     const bad = output("pinning", 0);
-    states.c0 = timed({ ...bad, output: { ...bad.output, kernelCommit: "f".repeat(40) } }, 0, 5_000, 65_000);
+    states.c0 = timed({ ...bad, output: { ...bad.output, scriptVersion: CURRENT_SCRIPT_VERSION, kernelCommit: "f".repeat(40) } }, 0, 5_000, 65_000);
     // The mismatch stops the tick for an operator, without the end-of-tick save.
     await expect(handler(event)).rejects.toThrow("CandidateContextMismatch");
     const job = await saved();
@@ -717,4 +718,14 @@ describe("GPU usage metering", () => {
     const { gpuSpendLimits } = await vi.importActual<typeof import("../server/gpu-spend")>("../server/gpu-spend");
     expect(gpuSpendLimits.workersMax).toBeGreaterThan(1);
   });
+});
+
+it("does not credit a parallel result from another script format", async () => {
+  await seed({ status: "searching", parallelSlots: [slot(0)] });
+  const result = output("pinning", 0);
+  states.c0 = { ...result, output: { ...result.output, scriptVersion: "qsb-config-a-legacy-v1" } };
+  await expect(handler(event)).rejects.toThrow("CandidateContextMismatch");
+  expect(mocks.cpu).not.toHaveBeenCalled();
+  expect((await saved()).attempt).toBe(0);
+  expect((await saved()).parallelSlots![0].runpodId).toBe("c0");
 });

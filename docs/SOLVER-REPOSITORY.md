@@ -16,7 +16,7 @@ The descriptors in `src/lib/releases` (see [its README](../src/lib/releases/READ
 | `qsb-solver-v0-1-0.json` | [`v0.1.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/v0.1.0) | Schema 2, with no search-contract binding, so it is refused for new paid submissions. Kept byte-identical for inspecting jobs. |
 | `qsb-config-a-ranked-v2.json` | archived | The descriptor from before the split. Its image names a placeholder account (`000000000000`) and is not deployable. Kept byte-identical; never edit it. |
 
-All three AWS releases use the same protocol, generator commit and `ranked-v2` search contract, so vaults are unaffected by which one is served.
+These AWS descriptors retain the legacy generator identity. They remain available for inspecting stored jobs but cannot serve corrected-script withdrawals. New work requires a qualified schema-4 release; see [script compatibility](SCRIPT-VERSIONS.md).
 
 ## Search contract
 
@@ -27,7 +27,7 @@ Both repositories carry `contracts/ranked-v2.json`. Their independent TypeScript
 A tagged qsb-solver release publishes a GHCR image by digest with GitHub build provenance, and attaches `solver.json` plus the contract. To enroll it:
 
 1. Verify the provenance against `starknet-innovation/qsb-solver` and the exact tag commit, and that the release asset is the file you enroll (commands below).
-2. Require `schemaVersion` 3 and `searchContract`: the SHA-256 of canonical sorted-key compact JSON of `contracts/ranked-v2.json`. The producer derives it after checking its vectors; the app registry independently compares it with `fingerprint()` of its own contract. Run both suites.
+2. Require `schemaVersion` 4, `scriptVersion: qsb-config-a-cmsverify-v1`, generator commit `b22f81c093488d09b9cd59c171c79b6c40812cf1`, and `searchContract`: the SHA-256 of canonical sorted-key compact JSON of `contracts/ranked-v2.json`. The producer derives it after checking its vectors; the app registry independently compares it with `fingerprint()` of its own contract. Run both suites.
 3. Copy `solver.json` verbatim as a new descriptor in `src/lib/releases`. Never edit an existing descriptor.
 4. Run the registry generator (it runs before tests, typechecking and builds), the tests and a build, and commit the descriptor with the regenerated `registry.generated.ts`. No coordinator change is needed.
 
@@ -79,13 +79,9 @@ A withdrawal pins the served release when it is created, and the coordinator che
 
 ## Checking hits locally
 
-`ops/aws-gpu-migration/replay-positive-hits.ts` reads an external public signing bundle and passes mocked Batch/S3 completed results through the real Batch parser and the local CPU reference. Run `npm run vendor`, then:
+`ops/aws-gpu-migration/replay-positive-hits.ts` accepts only a public signing bundle whose exact script reconstructs as the corrected format. It passes mocked Batch/S3 results through the parser and the local CPU reference, with explicit script-version binding. It never submits work, signs, broadcasts or credits ranges. Run `npm run vendor` first, then pass a separately produced corrected public bundle as its only argument.
 
-```sh
-npx tsx ops/aws-gpu-migration/replay-positive-hits.ts /path/to/public-signing-bundle.json
-```
-
-It never submits work, signs, broadcasts or credits ranges, and it doesn't copy the bundle into the repository. The recorded [replay evidence](../ops/aws-gpu-migration/positive-hit-replay.json) checks all three historical puzzle hits, malformed candidates, mismatched request and output hashes, and a changed subset locktime. Pinning candidates supply their own sequence and locktime, so that mutation isn't a pinning rejection test. These are real local cryptographic checks with mocked AWS transport, not a GPU search.
+Historical positive-hit bundles are deliberately refused; the saved `positive-hit-replay.json` does not qualify the corrected format. A fresh corrected full-predicate bundle is still required. Local replay is not a fresh GPU search or external miner proof.
 
 ## Licensing
 

@@ -1,3 +1,4 @@
+import { fixtureVault } from "./solver-fixture";
 import { describe, expect, it, vi } from "vitest";
 import { Signer } from "bip322-js";
 import * as btc from "@scure/btc-signer";
@@ -303,12 +304,9 @@ describe("submit route binds the stored spend", () => {
       id: stored.vaultId,
       name: "Vault",
       createdAt: "2026-09-24T00:00:00.000Z",
-      network: "mainnet",
-      config: "A",
-      scriptHex: "51",
-      scriptHash: "00".repeat(32),
+      ...fixtureVault,
       paymentAddress: owner,
-      publicStateJson: "{}",
+
       status: "confirmed",
     } as PublicVault;
     await store.put({

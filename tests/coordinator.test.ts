@@ -1,3 +1,4 @@
+import { CURRENT_SCRIPT_VERSION } from "../src/lib/script-version";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   enabled: true,
@@ -70,8 +71,8 @@ vi.mock("@aws-sdk/client-lambda", () => ({
   },
 }));
 import { createHash } from "node:crypto";
-import { fixtureVault } from "./solver-fixture";
-import { pinSolver } from "../src/lib/provenance";
+import { fixtureVault, publicScriptFixture } from "./solver-fixture";
+import { pinSolver, solverRelease, fingerprint, vaultConfiguration } from "../src/lib/provenance";
 import { handler } from "../server/coordinator";
 import { store, MemoryStore } from "../server/store";
 import { release, type Job } from "../src/lib/model";
@@ -126,8 +127,8 @@ beforeEach(() => {
     Payload: Buffer.from(
       JSON.stringify(
         JSON.parse(command.input.Payload.toString()).action === "export"
-          ? { parameterBase64: "public", parameterSha256: "b".repeat(64) }
-          : { valid: false },
+          ? { scriptVersion: CURRENT_SCRIPT_VERSION, parameterBase64: "public", parameterSha256: "b".repeat(64) }
+          : { scriptVersion: CURRENT_SCRIPT_VERSION, valid: false },
       ),
     ),
   }));
@@ -217,7 +218,7 @@ it("advances only a fully checked completed range and requests immediate continu
       manifestHash: "a".repeat(64),
       attempt: 0,
       candidates: [],
-      kernelCommit: release.kernelCommit,
+      scriptVersion: CURRENT_SCRIPT_VERSION, kernelCommit: release.kernelCommit,
       checkpoint: "range-complete",
       workRange: workRange("pinning", 0),
     },
@@ -271,7 +272,7 @@ function completedOutput(attempt: number, candidates: string[]) {
       manifestHash: "a".repeat(64),
       attempt,
       candidates,
-      kernelCommit: release.kernelCommit,
+      scriptVersion: CURRENT_SCRIPT_VERSION, kernelCommit: release.kernelCommit,
       checkpoint: "range-complete",
       workRange: workRange("pinning", attempt),
     },
@@ -504,6 +505,7 @@ it("retains the reservation when a verified pin advances to round1", async () =>
   mocks.cpu.mockResolvedValueOnce({
     Payload: Buffer.from(
       JSON.stringify({
+        scriptVersion: CURRENT_SCRIPT_VERSION,
         valid: true,
         sequence: range.sequence,
         locktime: range.locktime,
@@ -522,15 +524,7 @@ it("retains the reservation when a verified pin advances to round1", async () =>
 
 it("routes an external descriptor through submission and CPU verification without CUDA pins", async () => {
   process.env.SOLVER_RELEASE_ID = "external-test";
-  const vault = {
-    network: "mainnet",
-    config: "A",
-    scriptHex: "51",
-    scriptHash: createHash("sha256")
-      .update(Buffer.from("51", "hex"))
-      .digest("hex"),
-    publicStateJson: "{}",
-  };
+  const vault = fixtureVault;
   const pin = pinSolver(vault, "external-test");
   expect(pin.descriptor).not.toHaveProperty("sourceHashes");
   await seed({ solver: pin });
@@ -539,7 +533,7 @@ it("routes an external descriptor through submission and CPU verification withou
   expect(mocks.prepareRun).toHaveBeenCalledWith(pin.descriptor.image, expect.any(Object));
   expect(mocks.run).toHaveBeenCalledWith(
     expect.objectContaining({
-      kernelCommit: "b".repeat(40),
+      scriptVersion: CURRENT_SCRIPT_VERSION, kernelCommit: "b".repeat(40),
       searchVersion: "ranked-v2",
     }),
   );
@@ -552,7 +546,7 @@ it("routes an external descriptor through submission and CPU verification withou
       manifestHash: "a".repeat(64),
       attempt: 0,
       candidates: ["public-hit"],
-      kernelCommit: "b".repeat(40),
+      scriptVersion: CURRENT_SCRIPT_VERSION, kernelCommit: "b".repeat(40),
       checkpoint: "range-complete",
       workRange: workRange("pinning", 0),
     },
@@ -560,6 +554,7 @@ it("routes an external descriptor through submission and CPU verification withou
   mocks.cpu.mockResolvedValue({
     Payload: Buffer.from(
       JSON.stringify({
+        scriptVersion: CURRENT_SCRIPT_VERSION,
         valid: true,
         sequence: 2147483648,
         locktime: 500000000,
@@ -585,7 +580,7 @@ it("rejects worker identity mismatch before invoking the CPU verifier", async ()
       manifestHash: "a".repeat(64),
       attempt: 0,
       candidates: [],
-      kernelCommit: "b".repeat(40),
+      scriptVersion: CURRENT_SCRIPT_VERSION, kernelCommit: "b".repeat(40),
       checkpoint: "range-complete",
       workRange: workRange("pinning", 0),
     },
@@ -1114,9 +1109,63 @@ describe("owner limits", () => {
     expect(await claimWithdrawalSlot(store, "test", "next", 1, 0)).toBeUndefined();
     const done = completedOutput(0, ["public-hit"]);
     mocks.status.mockResolvedValue({ ...done, output: { ...done.output, stage: "round2", workRange: workRange("round2", 0) } });
-    mocks.cpu.mockResolvedValue({ Payload: Buffer.from(JSON.stringify({ valid: true, indices })) });
+    mocks.cpu.mockResolvedValue({ Payload: Buffer.from(JSON.stringify({ scriptVersion: CURRENT_SCRIPT_VERSION, valid: true, indices })) });
     await handler(event);
     expect(await job()).toMatchObject({ status: "awaiting_authorization", stage: "verification" });
     expect(await claimWithdrawalSlot(store, "test", "next", 1, 0)).toMatchObject({ row: { sk: ACTIVE_JOBS_SK } });
   });
+});
+
+it("refuses an unversioned CPU export before preparing paid work", async () => {
+  await seed();
+  mocks.cpu.mockResolvedValue({ Payload: Buffer.from(JSON.stringify({ parameterBase64: "public", parameterSha256: "b".repeat(64) })) });
+  await expect(handler(event)).rejects.toThrow();
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it("does not credit a result from a different script format", async () => {
+  await seed({ status: "searching", runpodId: "compute-1" });
+  mocks.status.mockResolvedValue({ status: "COMPLETED", output: {
+    status: "completed", stage: "pinning", manifestHash: "a".repeat(64), attempt: 0,
+    candidates: [], kernelCommit: release.kernelCommit, scriptVersion: "qsb-config-a-legacy-v1",
+    checkpoint: "range-complete", workRange: workRange("pinning", 0),
+  } });
+  await expect(handler(event)).rejects.toThrow("CandidateContextMismatch");
+  expect(mocks.cpu).not.toHaveBeenCalled();
+  expect((await store.get(pk, sk))?.job).toMatchObject({ attempt: 0, runpodId: "compute-1" });
+});
+
+
+it("pauses a legacy search without losing its paid ID, then drains it", async () => {
+  await seed({ status: "searching", runpodId: "old-paid-id" });
+  const vault = publicScriptFixture("qsb-config-a-legacy-v1");
+  const descriptor = solverRelease("qsb-config-a-ranked-v2-2791ed0");
+  const row = (await store.get(pk, sk))!;
+  const job = row.job as Job;
+  job.solver = { descriptor, releaseHash: fingerprint(descriptor), vaultConfigurationHash: fingerprint(vaultConfiguration(vault)) };
+  await store.put({ ...row, job }, row.version);
+  await store.put({ pk, sk: "VAULT#v", version: 1, vault }, 0);
+  expect(await handler(event)).toMatchObject({ done: false });
+  expect((await store.get(pk, sk))?.job).toMatchObject({ status: "paused", runpodId: "old-paid-id", attempt: 0 });
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
+  expect(mocks.cpu).not.toHaveBeenCalled();
+  mocks.status.mockResolvedValue({ status: "IN_PROGRESS" });
+  expect(await handler(event)).toMatchObject({ done: false });
+  expect(mocks.cancel).toHaveBeenCalledWith("old-paid-id");
+});
+it("keeps an unknown legacy submission reconcilable across migration", async () => {
+  await seed({ status: "searching", runpodId: undefined });
+  const vault = publicScriptFixture("qsb-config-a-legacy-v1");
+  const descriptor = solverRelease("qsb-config-a-ranked-v2-2791ed0");
+  const row = (await store.get(pk, sk))!;
+  const job = row.job as Job;
+  job.solver = { descriptor, releaseHash: fingerprint(descriptor), vaultConfigurationHash: fingerprint(vaultConfiguration(vault)) };
+  await store.put({ ...row, job }, row.version);
+  await store.put({ pk, sk: "VAULT#v", version: 1, vault }, 0);
+  expect(await handler(event)).toMatchObject({ done: true });
+  expect((await store.get(pk, sk))?.job).toMatchObject({ status: "paused", runpodId: undefined, attempt: 0 });
+  expect(mocks.prepareRun).not.toHaveBeenCalled();
+  expect(mocks.cpu).not.toHaveBeenCalled();
+  expect((await store.get(pk, sk))?.job).toMatchObject({error: expect.stringContaining("Submission outcome unknown")});
 });
