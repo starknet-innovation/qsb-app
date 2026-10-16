@@ -4,6 +4,25 @@ Status: **authorized for at most 24 aggregate GPU-hours, $30 total, one GPU at a
 
 ## Bind the campaign before starting
 
+### 2026-10-16 execution checkpoint
+
+The bounded corrected subset GPU gate passed (128 independent CPU/GPU hashes),
+and the fresh public-only three-stage search controller is prepared in solver
+PR #14. The next pinning hash/calibration diagnostic was built successfully,
+but its GPU execution and the fresh search could not start: AWS explicitly
+rejected `g5.xlarge` allocation in `eu-west-1a`, `eu-west-1b` and `eu-west-1c`.
+Each launch token was reconciled with no instance, and every temporary role,
+profile, security group, watchdog, schedule and staging bucket was deleted and
+independently checked. **Campaign GPU-hours consumed: zero.** This excludes the
+earlier, completed bounded qualification test. The approved envelope remains;
+no new approval is needed merely because capacity was unavailable.
+
+The solver's `docs/promotion/evidence/cmsverify-a10g-2026-10-16/campaign-capacity.json`
+retains public receipt hashes. A later capacity attempt needs a new durable
+identity, current pricing/cleanup checks and fixed deadlines. Never reuse the
+rejected state or infer that the fresh fixture is solved. No automatic launch,
+image enrollment or application deployment is scheduled by this document.
+
 Use one fresh fixture prepared by [the offline harness](README.md), preserving its local Core data, recovery state, exact manifest, public script hash and parameter hashes. Never fund a replacement or reuse a historical solution to shorten the search. Upload only the expressly public fixture/parameter files; the local test recovery and wallet never leave the host.
 
 Freeze the solver source commit, immutable image digest, build flags, CPU-reference identity and binary hashes into the campaign journal. The current native subset binary SHA256 is `673ad624ae1ceba184ed7219abf81641507412134c7bdc4224e3fc9defc5df15`; pinning is `cd70b2c2a7bcf129a9259c494413d5b2995368361e294e7bd284380d58df7a62`. Source-built executable checks do not replace final-image/queue identity validation. Any changed final binary needs its applicable gates rerun.
