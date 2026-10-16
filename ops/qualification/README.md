@@ -18,4 +18,4 @@ After both full-predicate subset searches succeed, add `round1` and `round2` arr
 
 ## Compute planning
 
-Each subset domain contains `C(150,9) = 82,947,113,349,100` candidates. Historical RTX4090 queue measurements of 2,704,928,748 ranks in 21.5073 seconds (round 1) and 12.8413 seconds (round 2) imply about 183.2 and 109.4 GPU-hours for complete respective domains **per pin**. Those are historical estimates, not measurements of the corrected image or another GPU model. Pinning, startup, restarts after exhausted subsets and provider failures add work. A bounded 25-minute test cannot promise a completed fresh proof. Measure corrected-image throughput first and obtain a concrete campaign cost/time budget before a long search; a prior per-job software cap is not a new spending authorization.
+See [the campaign plan](CAMPAIGN-PLAN.md) for current corrected-input A10G measurements, domain-size calculations, staged budget proposal and stop conditions. Short qualification timings are not sustained performance or a guaranteed time to solve. A prior software budget cap does not authorize a new paid search campaign.
