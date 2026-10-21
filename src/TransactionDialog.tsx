@@ -97,6 +97,8 @@ export default function TransactionDialog({
     // state stays visible: still loading, failed (and why), or genuinely none.
     [pointsLoading, setPointsLoading] = useState(!job),
     [pointsError, setPointsError] = useState(""),
+    // The latest read: an older one that answers after it is ignored.
+    pointsRead = useRef(0),
     [selection, setSelection] = useState<string[]>([]),
     [amount, setAmount] = useState(""),
     [feeRate, setFeeRate] = useState(""),
@@ -283,13 +285,14 @@ export default function TransactionDialog({
   // Read when the dialog opens and again on reaching the choice: a deposit's change or a new payment
   // can confirm while it's open, and a failed read must be retried, not shown as "no outputs".
   function loadPoints() {
-    const active = generation.current;
+    const active = generation.current, read = ++pointsRead.current;
+    const current = () => active === generation.current && read === pointsRead.current;
     setPointsLoading(true);
     setPointsError("");
     api<{ utxos: Point[] }>("/payment-utxos")
-      .then((x) => { if (active === generation.current) setPoints(x.utxos); })
-      .catch((e) => { if (active === generation.current) setPointsError(e?.message || "The request failed."); })
-      .finally(() => { if (active === generation.current) setPointsLoading(false); });
+      .then((x) => { if (current()) setPoints(x.utxos); })
+      .catch((e) => { if (current()) setPointsError(e?.message || "The request failed."); })
+      .finally(() => { if (current()) setPointsLoading(false); });
   }
   const manualReady = !!pendingFunding?.rawTxHex && confirmedRaw === pendingFunding.rawTxHex.toLowerCase();
   // MARA refuses a rate below its current minimum. It's re-read right before a fee is fixed,
@@ -333,6 +336,12 @@ export default function TransactionDialog({
     }
   })();
   const savedIntentFee = savedIntent ? BigInt(savedIntent.fee) : undefined;
+  // A read can drop an output (spent elsewhere): drop it from the choice too, so nothing chosen is
+  // hidden. A saved intent's helper stays: the backup fixes it.
+  useEffect(() => {
+    if (!savedIntent)
+      setSelection((chosen) => chosen.filter((k) => points.some((p) => key(p) === k)));
+  }, [points]);
   const withdrawalQuote = (() => {
     if (deposit || job) return undefined;
     if (savedIntentFee !== undefined) return { fee: savedIntentFee, vsize: 0, saved: true as const };
@@ -846,21 +855,28 @@ export default function TransactionDialog({
       ))}
     </dl>
   );
+  // While the outputs are being read, or after a read failed, say so rather than that one is missing.
+  const pointsBlocker = pointsError
+    ? "Couldn't read your wallet's confirmed outputs. Refresh them to continue."
+    : pointsLoading
+      ? "Reading your wallet's confirmed outputs…"
+      : undefined;
   // Why "Review" is disabled, shown next to it.
   const detailsBlocker = deposit
-    ? selection.length > 8
+    ? selected.length > 8
       ? "Choose at most eight payment outputs."
       : typeof depositQuote === "object"
       ? ""
-      : depositQuote ?? "Select payment outputs, then enter an amount and a fee rate."
+      : depositQuote ?? (selected.length ? undefined : pointsBlocker) ?? "Select payment outputs, then enter an amount and a fee rate."
     : solverId === null
       ? "No solver is available on this server, so a withdrawal can't start."
       : solverId === undefined
         ? "Checking the server's solver…"
         : selection.length !== 1 || !selected[0]
-          ? savedIntent
-            ? "The helper output this backup fixed isn't among your wallet's confirmed outputs."
-            : "Choose one helper output."
+          ? pointsBlocker ??
+            (savedIntent
+              ? "The helper output this backup fixed isn't among your wallet's confirmed outputs."
+              : "Choose one helper output.")
           : typeof withdrawalQuote !== "object"
             ? withdrawalQuote ?? "Enter a fee rate."
             : payout === undefined || payout <= 0n
@@ -1065,19 +1081,23 @@ export default function TransactionDialog({
                     : "A small output from your wallet that the withdrawal also spends. Its value is added to your payout."}
                 </p>
               )}
-              {pointsError ? (
+              {pointsError && (
                 <p role="alert">
                   Couldn't read your wallet's confirmed outputs: {pointsError}
                 </p>
-              ) : pointsLoading && points.length === 0 ? (
-                <p>Reading your wallet's confirmed outputs…</p>
-              ) : (
-                points.length === 0 && (
-                  <p>
-                    No confirmed payment outputs at {wallet.address} yet. An output appears here once it has one confirmation.
-                  </p>
-                )
               )}
+              <div role="status">
+                {!pointsError &&
+                  (pointsLoading && points.length === 0 ? (
+                    <p>Reading your wallet's confirmed outputs…</p>
+                  ) : (
+                    !pointsLoading && points.length === 0 && (
+                      <p>
+                        No confirmed payment outputs at {wallet.address} yet. An output appears here once it has one confirmation.
+                      </p>
+                    )
+                  ))}
+              </div>
               {points.map((p) => (
                 <label key={key(p)}>
                   <input
@@ -1106,8 +1126,8 @@ export default function TransactionDialog({
               <button
                 type="button"
                 className="secondary"
-                disabled={pointsLoading || !!busy}
-                onClick={loadPoints}
+                aria-disabled={pointsLoading || !!busy}
+                onClick={() => { if (!pointsLoading && !busy) loadPoints(); }}
               >
                 {pointsLoading ? "Reading outputs…" : "Refresh outputs"}
               </button>

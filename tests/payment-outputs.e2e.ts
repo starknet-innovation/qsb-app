@@ -1,8 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 
 // The wallet's confirmed outputs, as the deposit and withdrawal dialogs list them. Each read of
-// /payment-utxos takes the next answer from window.outputReads: a list, "fail", or "hold" (until
-// window.releaseOutputs() is called with a list).
+// /payment-utxos takes the next answer from window.outputReads: a list of output numbers, "fail",
+// or "hold" (until window.releaseOutputs() answers it with a list, or "fail").
 async function open(page: Page, reads: unknown[]) {
   await page.route("**/src/lib/qsb.ts*", (r) =>
     r.fulfill({
@@ -24,8 +24,9 @@ async function open(page: Page, reads: unknown[]) {
           window.outputCalls=(window.outputCalls||0)+1;
           const next=window.outputReads.shift();
           if(next==='fail')throw Error('CHAIN_DOWN');
-          if(next==='hold')return new Promise(resolve=>{window.releaseOutputs=list=>resolve({utxos:list.map(()=>f.point)});});
-          return {utxos:next.map(()=>f.point)};
+          const answer=list=>({utxos:list.map(n=>({...f.point,vout:n}))});
+          if(next==='hold')return new Promise((resolve,reject)=>{window.releaseOutputs=list=>{list==='fail'?reject(Error('LATE_FAIL')):resolve(answer(list));return new Promise(done=>setTimeout(done,200));};});
+          return answer(next);
         }
         throw Error('Unexpected API '+path);
       }`,
@@ -55,10 +56,12 @@ async function open(page: Page, reads: unknown[]) {
 const outputs = (page: Page) => page.getByRole("dialog").locator("fieldset").getByRole("checkbox");
 
 test("a failed read shows its error, not 'no outputs', and Refresh reads again", async ({ page }) => {
-  const dialog = await open(page, ["fail", "fail", [1]]);
+  const dialog = await open(page, ["fail", "fail", [0]]);
   await dialog.getByRole("button", { name: "Verify backup locally" }).click();
   await expect(dialog).toContainText("Couldn't read your wallet's confirmed outputs: CHAIN_DOWN");
   await expect(dialog).not.toContainText("No confirmed payment outputs");
+  // The hint by Review says why it can't go on, not that there's nothing to choose.
+  await expect(dialog.locator(".blocker")).toHaveText("Couldn't read your wallet's confirmed outputs. Refresh them to continue.");
   await dialog.getByRole("button", { name: "Refresh outputs" }).click();
   await expect(outputs(page)).toHaveCount(1);
   await expect(dialog).not.toContainText("Couldn't read");
@@ -68,7 +71,7 @@ test("a failed read shows its error, not 'no outputs', and Refresh reads again",
 test("reaching the choice reads the outputs again, so one that confirmed meanwhile appears", async ({ page }) => {
   // Empty when the dialog opened (say, a deposit's change still unconfirmed), confirmed by the time
   // the backup is verified.
-  const dialog = await open(page, [[], [1]]);
+  const dialog = await open(page, [[], [0]]);
   await dialog.getByRole("button", { name: "Verify backup locally" }).click();
   await expect(outputs(page)).toHaveCount(1);
   await expect(dialog).not.toContainText("No confirmed payment outputs");
@@ -77,13 +80,52 @@ test("reaching the choice reads the outputs again, so one that confirmed meanwhi
 test("'no outputs' appears only after a read answers with none, never while one is pending", async ({ page }) => {
   const dialog = await open(page, [[], "hold", "hold"]);
   await dialog.getByRole("button", { name: "Verify backup locally" }).click();
-  await expect(dialog).toContainText("Reading your wallet's confirmed outputs…");
+  await expect(dialog.getByRole("status").first()).toHaveText("Reading your wallet's confirmed outputs…");
   await expect(dialog).not.toContainText("No confirmed payment outputs");
-  await expect(dialog.getByRole("button", { name: "Reading outputs…" })).toBeDisabled();
+  // Refresh stays focusable while it reads, and ignores presses.
+  const reading = dialog.getByRole("button", { name: "Reading outputs…" });
+  await expect(reading).toHaveAttribute("aria-disabled", "true");
+  await reading.dispatchEvent("click");
+  expect(await page.evaluate(() => (window as any).outputCalls)).toBe(2);
   await page.evaluate(() => (window as any).releaseOutputs([]));
   await expect(dialog).toContainText(/No confirmed payment outputs at bc1q\w+ yet\. An output appears here once it has one confirmation\./);
   await dialog.getByRole("button", { name: "Refresh outputs" }).click();
   await expect(dialog).toContainText("Reading your wallet's confirmed outputs…");
-  await page.evaluate(() => (window as any).releaseOutputs([1]));
+  await page.evaluate(() => (window as any).releaseOutputs([0]));
   await expect(outputs(page)).toHaveCount(1);
+});
+
+test("an older read that answers late can't overwrite a newer one", async ({ page }) => {
+  for (const late of [[], "fail"]) {
+    // The read from opening the dialog is held; the one after verifying answers first.
+    const dialog = await open(page, ["hold", [0]]);
+    await dialog.getByRole("button", { name: "Verify backup locally" }).click();
+    await expect(outputs(page)).toHaveCount(1);
+    await outputs(page).check();
+    // Answer the older read, and wait until the dialog has handled the answer, before checking.
+    await page.evaluate((late) => (window as any).releaseOutputs(late), late);
+    await expect(outputs(page)).toBeChecked();
+    await expect(dialog).not.toContainText("No confirmed payment outputs");
+    await expect(dialog).not.toContainText("Couldn't read");
+    await expect(dialog.getByRole("button", { name: "Refresh outputs" })).toHaveAttribute("aria-disabled", "false");
+    await page.reload();
+  }
+});
+
+test("an output a read drops isn't still counted as chosen", async ({ page }) => {
+  // Eight outputs chosen; a refresh drops one of them (spent elsewhere) and adds another, which is
+  // then chosen: still eight, so nothing is refused.
+  const all = [0, 1, 2, 3, 4, 5, 6, 7];
+  const dialog = await open(page, [all, all, [...all.slice(0, 7), 8]]);
+  await dialog.getByRole("button", { name: "Verify backup locally" }).click();
+  await expect(outputs(page)).toHaveCount(8);
+  for (let i = 0; i < 8; i++) await outputs(page).nth(i).check();
+  await dialog.getByRole("button", { name: "Refresh outputs" }).click();
+  await expect(outputs(page)).toHaveCount(8);
+  await expect(outputs(page).nth(7)).not.toBeChecked();
+  await outputs(page).nth(7).check();
+  await dialog.getByLabel("Deposit amount (BTC)").fill("0.0005");
+  await dialog.getByLabel("Miner fee rate (sat/vB)").fill("2");
+  await expect(dialog).not.toContainText("Choose at most eight payment outputs.");
+  await expect(dialog).toContainText(/Estimated size \d+ vB/);
 });
