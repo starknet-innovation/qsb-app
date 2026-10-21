@@ -259,6 +259,11 @@ export function createApp(
     return originRead.origin ?? (onLambda ? undefined : "http://127.0.0.1:5173");
   }
   app.use("*", secureHeaders());
+  // Every answer here is current state (a wallet's outputs, a vault's status), so no cache may keep one.
+  app.use("*", async (c, next) => {
+    await next();
+    c.res.headers.set("Cache-Control", "no-store");
+  });
   app.use("*", async (c, next) => {
     const origin = await appOrigin();
     if (!origin) return next();

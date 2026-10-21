@@ -93,6 +93,10 @@ export default function TransactionDialog({
   if(lifetime.current!==lifetimeKey){lifetime.current=lifetimeKey;generation.current++;}
 
   const [points, setPoints] = useState<Point[]>([]),
+    // The wallet's confirmed outputs are read separately from the dialog's other steps, so their
+    // state stays visible: still loading, failed (and why), or genuinely none.
+    [pointsLoading, setPointsLoading] = useState(!job),
+    [pointsError, setPointsError] = useState(""),
     [selection, setSelection] = useState<string[]>([]),
     [amount, setAmount] = useState(""),
     [feeRate, setFeeRate] = useState(""),
@@ -258,10 +262,7 @@ export default function TransactionDialog({
         .then((r) => { if (active === generation.current) setMinerFloor(minerMinimumRate(r)); })
         .catch(() => { if (active === generation.current) setMinerFloor(null); });
     }
-    if (!job)
-      api<{ utxos: Point[] }>("/payment-utxos")
-        .then((x) => setPoints(x.utxos))
-        .catch((e) => setError(e.message));
+    if (!job) loadPoints();
     return () => {
       generation.current++;
       lockQsb();
@@ -279,6 +280,17 @@ export default function TransactionDialog({
     if (!job && !feeTouched.current && suggestedRate !== undefined) setFeeRate(String(suggestedRate));
   }, [suggestedRate]);
   const key = (p: Point) => `${p.txid}:${p.vout}`;
+  // Read when the dialog opens and again on reaching the choice: a deposit's change or a new payment
+  // can confirm while it's open, and a failed read must be retried, not shown as "no outputs".
+  function loadPoints() {
+    const active = generation.current;
+    setPointsLoading(true);
+    setPointsError("");
+    api<{ utxos: Point[] }>("/payment-utxos")
+      .then((x) => { if (active === generation.current) setPoints(x.utxos); })
+      .catch((e) => { if (active === generation.current) setPointsError(e?.message || "The request failed."); })
+      .finally(() => { if (active === generation.current) setPointsLoading(false); });
+  }
   const manualReady = !!pendingFunding?.rawTxHex && confirmedRaw === pendingFunding.rawTxHex.toLowerCase();
   // MARA refuses a rate below its current minimum. It's re-read right before a fee is fixed,
   // and nothing proceeds without it.
@@ -377,7 +389,9 @@ export default function TransactionDialog({
           setDestination(saved.destination);
           setSelection([key(saved.helper)]);
         } catch { /* Not a readable intent: beginWithdrawal refuses it. */ }
-      setStage(job || (deposit && pendingFunding) ? "review" : "details");
+      const next = job || (deposit && pendingFunding) ? "review" : "details";
+      setStage(next);
+      if (next === "details") loadPoints();
     });
   }
   async function input(p: Point): Promise<FundingInput> {
@@ -1051,8 +1065,18 @@ export default function TransactionDialog({
                     : "A small output from your wallet that the withdrawal also spends. Its value is added to your payout."}
                 </p>
               )}
-              {points.length === 0 && (
-                <p>No confirmed payment outputs available.</p>
+              {pointsError ? (
+                <p role="alert">
+                  Couldn't read your wallet's confirmed outputs: {pointsError}
+                </p>
+              ) : pointsLoading && points.length === 0 ? (
+                <p>Reading your wallet's confirmed outputs…</p>
+              ) : (
+                points.length === 0 && (
+                  <p>
+                    No confirmed payment outputs at {wallet.address} yet. An output appears here once it has one confirmation.
+                  </p>
+                )
               )}
               {points.map((p) => (
                 <label key={key(p)}>
@@ -1079,6 +1103,14 @@ export default function TransactionDialog({
                   </span>
                 </label>
               ))}
+              <button
+                type="button"
+                className="secondary"
+                disabled={pointsLoading || !!busy}
+                onClick={loadPoints}
+              >
+                {pointsLoading ? "Reading outputs…" : "Refresh outputs"}
+              </button>
             </fieldset>
             {deposit ? (
               <label>
