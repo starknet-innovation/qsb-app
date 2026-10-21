@@ -336,11 +336,12 @@ export default function TransactionDialog({
     }
   })();
   const savedIntentFee = savedIntent ? BigInt(savedIntent.fee) : undefined;
+  // The outputs chosen. A saved intent's helper is the backup's, whatever a read lists meanwhile.
+  const choice = savedIntent ? [key(savedIntent.helper)] : selection;
   // A read can drop an output (spent elsewhere): drop it from the choice too, so nothing chosen is
-  // hidden. A saved intent's helper stays: the backup fixes it.
+  // hidden.
   useEffect(() => {
-    if (!savedIntent)
-      setSelection((chosen) => chosen.filter((k) => points.some((p) => key(p) === k)));
+    setSelection((chosen) => chosen.filter((k) => points.some((p) => key(p) === k)));
   }, [points]);
   const withdrawalQuote = (() => {
     if (deposit || job) return undefined;
@@ -390,13 +391,11 @@ export default function TransactionDialog({
       check();
       setUnlocked(r);
       setAssemblyVerified(!!r.authorization?.assembly);
-      // Resuming a saved intent (its search never started): show its own destination and
-      // helper, which the backup binds, so the same intent is retried.
+      // Resuming a saved intent (its search never started): show its own destination, which the
+      // backup binds, so the same intent is retried. Its helper is `choice`.
       if (!job && !deposit && r.authorization)
         try {
-          const saved = withdrawalSchema.parse(JSON.parse(r.authorization.manifestJson));
-          setDestination(saved.destination);
-          setSelection([key(saved.helper)]);
+          setDestination(withdrawalSchema.parse(JSON.parse(r.authorization.manifestJson)).destination);
         } catch { /* Not a readable intent: beginWithdrawal refuses it. */ }
       const next = job || (deposit && pendingFunding) ? "review" : "details";
       setStage(next);
@@ -568,8 +567,8 @@ export default function TransactionDialog({
       check();
       if (!unlocked || !accepted)
         throw Error("Verify your backup and accept the costs first.");
-      const helper = points.find((p) => selection.includes(key(p)));
-      if (!helper || selection.length !== 1)
+      const helper = points.find((p) => choice.includes(key(p)));
+      if (!helper || choice.length !== 1)
         throw Error("Choose one helper payment output.");
       const confirmed = await api<{
         vault: PublicVault;
@@ -798,7 +797,7 @@ export default function TransactionDialog({
   }
   const btc = (n: bigint | string) => `${formatBtc(n)} BTC`;
   const sats = (n: bigint) => `${n.toLocaleString()} sats (${btc(n)})`;
-  const selected = points.filter((p) => selection.includes(key(p)));
+  const selected = points.filter((p) => choice.includes(key(p)));
   const payout = (() => {
     if (deposit || job || !vault.funding || !selected[0] || typeof withdrawalQuote !== "object") return undefined;
     try {
@@ -875,7 +874,7 @@ export default function TransactionDialog({
       : solverId === undefined
         ? "Checking the server's solver…"
         : pointsBlocker ??
-          (selection.length !== 1 || !selected[0]
+          (choice.length !== 1 || !selected[0]
             ? savedIntent
               ? "The helper output this backup fixed isn't among your wallet's confirmed outputs."
               : "Choose one helper output."
@@ -1084,7 +1083,7 @@ export default function TransactionDialog({
                 </p>
               )}
               {pointsError && (
-                <p role="alert">
+                <p role="alert" className="error-message">
                   Couldn't read your wallet's confirmed outputs: {pointsError}
                 </p>
               )}
@@ -1095,7 +1094,7 @@ export default function TransactionDialog({
                   ) : (
                     !pointsLoading && points.length === 0 && (
                       <p>
-                        No confirmed payment outputs at {wallet.address} yet. An output appears here once it has one confirmation.
+                        No confirmed payment outputs at {wallet.address} yet. An output is listed once it has one confirmation: refresh the outputs to check again.
                       </p>
                     )
                   ))}
@@ -1106,7 +1105,7 @@ export default function TransactionDialog({
                     type={deposit ? "checkbox" : "radio"}
                     name="payment-output"
                     disabled={!!savedIntent}
-                    checked={selection.includes(key(p))}
+                    checked={choice.includes(key(p))}
                     onChange={(e) =>
                       setSelection(
                         deposit
@@ -1125,15 +1124,15 @@ export default function TransactionDialog({
                   </span>
                 </label>
               ))}
-              <button
-                type="button"
-                className="secondary"
-                aria-disabled={pointsLoading || !!busy}
-                onClick={() => { if (!pointsLoading && !busy) loadPoints(); }}
-              >
-                {pointsLoading ? "Reading outputs…" : "Refresh outputs"}
-              </button>
             </fieldset>
+            <button
+              type="button"
+              className="secondary"
+              aria-disabled={pointsLoading || !!busy}
+              onClick={() => { if (!pointsLoading && !busy) loadPoints(); }}
+            >
+              {pointsLoading ? "Reading outputs…" : "Refresh outputs"}
+            </button>
             {deposit ? (
               <label>
                 Deposit amount (BTC)

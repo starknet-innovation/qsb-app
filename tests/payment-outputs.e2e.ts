@@ -88,7 +88,7 @@ test("'no outputs' appears only after a read answers with none, never while one 
   await reading.dispatchEvent("click");
   expect(await page.evaluate(() => (window as any).outputCalls)).toBe(2);
   await page.evaluate(() => (window as any).releaseOutputs([]));
-  await expect(dialog).toContainText(/No confirmed payment outputs at bc1q\w+ yet\. An output appears here once it has one confirmation\./);
+  await expect(dialog).toContainText(/No confirmed payment outputs at bc1q\w+ yet\. An output is listed once it has one confirmation: refresh the outputs to check again\./);
   await dialog.getByRole("button", { name: "Refresh outputs" }).click();
   await expect(dialog).toContainText("Reading your wallet's confirmed outputs…");
   await page.evaluate(() => (window as any).releaseOutputs([0]));
