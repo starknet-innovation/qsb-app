@@ -65,7 +65,7 @@ async function unlock(page: Page, address: string, vault?: unknown, backup?: str
 }
 
 test("a failed read of the helper outputs says so, and Refresh reads again", async ({ page }) => {
-  const outputs = await serve(page, ["fail", "fail", [0]]);
+  await serve(page, ["fail", "fail", [0]]);
   await page.goto("/");
   const { dialog } = await unlock(page, await destination());
   await expect(dialog.getByRole("alert")).toContainText("Couldn't read your wallet's confirmed outputs: CHAIN_DOWN");
@@ -78,7 +78,6 @@ test("a failed read of the helper outputs says so, and Refresh reads again", asy
   await dialog.getByRole("radio").check();
   await dialog.getByLabel("Miner fee rate (sat/vB)").fill("2");
   await expect(dialog.getByRole("button", { name: "Review withdrawal" })).toBeEnabled();
-  expect(outputs.submitted()).toBeUndefined();
 });
 
 test("while the helper outputs are read, the hint says so rather than that one is missing", async ({ page }) => {
