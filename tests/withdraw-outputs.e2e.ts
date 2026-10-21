@@ -24,9 +24,10 @@ async function serve(page: Page, reads: (Read | "hold")[]) {
     return route.fulfill({ status: 201, json: { job: { id: (submitted as any).idempotencyKey } } });
   });
   return {
-    release(answer: Read) {
-      if (!held) throw Error("No read is held");
-      held(answer);
+    // The page shows a read as pending as soon as it asks, before the request reaches the route.
+    async release(answer: Read) {
+      await expect.poll(() => held !== undefined).toBe(true);
+      held!(answer);
       held = undefined;
     },
     submitted: () => submitted,
@@ -86,7 +87,7 @@ test("while the helper outputs are read, the hint says so rather than that one i
   const { dialog } = await unlock(page, await destination());
   await expect(dialog.locator(".blocker")).toHaveText("Reading your wallet's confirmed outputs…");
   await expect(dialog.getByRole("button", { name: "Review withdrawal" })).toBeDisabled();
-  outputs.release([0]);
+  await outputs.release([0]);
   await expect(dialog.getByRole("radio")).toHaveCount(1);
   await expect(dialog.locator(".blocker")).toHaveText("Choose one helper output.");
 });
@@ -106,6 +107,8 @@ test("a saved intent keeps its helper when a read leaves it out, and resumes onc
   await dialog.getByRole("button", { name: "Save backup and start search" }).click();
   const fs = await import("node:fs/promises");
   const saved = await fs.readFile((await (await downloaded).path())!, "utf8");
+  // The backup is saved before the search is asked for: wait for that too.
+  await expect(dialog).toContainText("Keep the updated withdrawal backup");
   const first = outputs.submitted();
   expect(first).toBeDefined();
   // Reopen with it (say POST /jobs failed) while the helper isn't among the confirmed outputs.
@@ -113,7 +116,7 @@ test("a saved intent keeps its helper when a read leaves it out, and resumes onc
   await unlock(page, address, vault, saved);
   // Not "isn't among your outputs" while the read is pending: that's known only once it answers.
   await expect(dialog.locator(".blocker")).toHaveText("Reading your wallet's confirmed outputs…");
-  outputs.release([]);
+  await outputs.release([]);
   await expect(dialog.locator(".blocker")).toHaveText(
     "The helper output this backup fixed isn't among your wallet's confirmed outputs.",
   );

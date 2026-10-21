@@ -1,8 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// The wallet's confirmed outputs, as the deposit and withdrawal dialogs list them. Each read of
-// /payment-utxos takes the next answer from window.outputReads: a list of output numbers, "fail",
-// or "hold" (until window.releaseOutputs() answers it with a list, or "fail").
+// The wallet's confirmed outputs, as the deposit dialog lists them (withdraw-outputs.e2e.ts covers
+// the withdrawal dialog). Each read of /payment-utxos takes the next answer from
+// window.outputReads: a list of output numbers, "fail", or "hold" (until window.releaseOutputs()
+// answers it with a list, or "fail").
 async function open(page: Page, reads: unknown[]) {
   await page.route("**/src/lib/qsb.ts*", (r) =>
     r.fulfill({
@@ -85,6 +86,8 @@ test("'no outputs' appears only after a read answers with none, never while one 
   // Refresh stays focusable while it reads, and ignores presses.
   const reading = dialog.getByRole("button", { name: "Reading outputs…" });
   await expect(reading).toHaveAttribute("aria-disabled", "true");
+  await reading.focus();
+  await expect(reading).toBeFocused();
   await reading.dispatchEvent("click");
   expect(await page.evaluate(() => (window as any).outputCalls)).toBe(2);
   await page.evaluate(() => (window as any).releaseOutputs([]));
