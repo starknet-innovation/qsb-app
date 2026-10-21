@@ -855,7 +855,8 @@ export default function TransactionDialog({
       ))}
     </dl>
   );
-  // While the outputs are being read, or after a read failed, say so rather than that one is missing.
+  // While the outputs are being read, or after a read failed, Review waits, so the figures reviewed
+  // can't change under it, and the hint says why rather than that an output is missing.
   const pointsBlocker = pointsError
     ? "Couldn't read your wallet's confirmed outputs. Refresh them to continue."
     : pointsLoading
@@ -865,23 +866,24 @@ export default function TransactionDialog({
   const detailsBlocker = deposit
     ? selected.length > 8
       ? "Choose at most eight payment outputs."
-      : typeof depositQuote === "object"
-      ? ""
-      : depositQuote ?? (selected.length ? undefined : pointsBlocker) ?? "Select payment outputs, then enter an amount and a fee rate."
+      : pointsBlocker ??
+        (typeof depositQuote === "object"
+          ? ""
+          : depositQuote ?? "Select payment outputs, then enter an amount and a fee rate.")
     : solverId === null
       ? "No solver is available on this server, so a withdrawal can't start."
       : solverId === undefined
         ? "Checking the server's solver…"
-        : selection.length !== 1 || !selected[0]
-          ? pointsBlocker ??
-            (savedIntent
+        : pointsBlocker ??
+          (selection.length !== 1 || !selected[0]
+            ? savedIntent
               ? "The helper output this backup fixed isn't among your wallet's confirmed outputs."
-              : "Choose one helper output.")
+              : "Choose one helper output."
           : typeof withdrawalQuote !== "object"
             ? withdrawalQuote ?? "Enter a fee rate."
             : payout === undefined || payout <= 0n
               ? "The miner fee is larger than the amount."
-              : "";
+              : "");
   const stages = job ? (["unlock", "review"] as const) : (["unlock", "details", "review"] as const);
   const stageIndex = (stages as readonly string[]).indexOf(stage) + 1;
   const stageName = {

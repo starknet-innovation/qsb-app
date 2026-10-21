@@ -116,7 +116,7 @@ test("an output a read drops isn't still counted as chosen", async ({ page }) =>
   // Eight outputs chosen; a refresh drops one of them (spent elsewhere) and adds another, which is
   // then chosen: still eight, so nothing is refused.
   const all = [0, 1, 2, 3, 4, 5, 6, 7];
-  const dialog = await open(page, [all, all, [...all.slice(0, 7), 8]]);
+  const dialog = await open(page, [all, all, [...all.slice(0, 7), 8], [...all, 8]]);
   await dialog.getByRole("button", { name: "Verify backup locally" }).click();
   await expect(outputs(page)).toHaveCount(8);
   for (let i = 0; i < 8; i++) await outputs(page).nth(i).check();
@@ -128,4 +128,24 @@ test("an output a read drops isn't still counted as chosen", async ({ page }) =>
   await dialog.getByLabel("Miner fee rate (sat/vB)").fill("2");
   await expect(dialog).not.toContainText("Choose at most eight payment outputs.");
   await expect(dialog).toContainText(/Estimated size \d+ vB/);
+  // Output 7 comes back: it was dropped from the choice, so it isn't chosen behind the user's back.
+  await dialog.getByRole("button", { name: "Refresh outputs" }).click();
+  await expect(outputs(page)).toHaveCount(9);
+  await expect(page.getByRole("dialog").locator("fieldset label", { hasText: "…:7" }).getByRole("checkbox")).not.toBeChecked();
+});
+
+test("Review waits for a pending read, so the figures reviewed can't change under it", async ({ page }) => {
+  // Outputs 0 and 1 from the read at opening; the read after verifying is still pending.
+  const dialog = await open(page, [[0, 1], "hold"]);
+  await dialog.getByRole("button", { name: "Verify backup locally" }).click();
+  await expect(outputs(page)).toHaveCount(2);
+  await outputs(page).first().check();
+  await dialog.getByLabel("Deposit amount (BTC)").fill("0.0005");
+  await dialog.getByLabel("Miner fee rate (sat/vB)").fill("2");
+  const review = dialog.getByRole("button", { name: "Review deposit", exact: true });
+  await expect(dialog.locator(".blocker")).toHaveText("Reading your wallet's confirmed outputs…");
+  await expect(review).toBeDisabled();
+  await page.evaluate(() => (window as any).releaseOutputs([0]));
+  await expect(dialog.locator(".blocker")).toHaveCount(0);
+  await expect(review).toBeEnabled();
 });
