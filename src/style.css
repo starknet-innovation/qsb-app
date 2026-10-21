@@ -28,7 +28,8 @@ input {
 button {
   cursor: pointer;
 }
-button:disabled {
+button:disabled,
+button[aria-disabled="true"] {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -45,7 +46,7 @@ button {
     background 0.15s,
     transform 0.15s;
 }
-button:active:not(:disabled) {
+button:active:not(:disabled):not([aria-disabled="true"]) {
   transform: translateY(1px);
 }
 a {
@@ -465,7 +466,7 @@ a.secondary {
   border: 1px solid #214632;
   color: white;
 }
-.primary:hover:not(:disabled) {
+.primary:hover:not(:disabled):not([aria-disabled="true"]) {
   background: #153823;
 }
 .secondary {
@@ -473,7 +474,7 @@ a.secondary {
   background: #fff;
   color: #395336;
 }
-.secondary:hover:not(:disabled) {
+.secondary:hover:not(:disabled):not([aria-disabled="true"]) {
   background: #f0f5e9;
 }
 .empty-vault {
