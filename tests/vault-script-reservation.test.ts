@@ -41,7 +41,7 @@ async function fixture(store = new MemoryStore()) {
       expiresAt: Math.floor(Date.now() / 1000) + 3600,
     });
   /** What the chain API reports for each script hash: its funded output counts, or another answer. */
-  const funded = new Map<string, { chain: number; mempool: number } | (() => Response)>();
+  const funded = new Map<string, { chain: number; mempool: number; spent?: number } | (() => Response)>();
   const lookups: string[] = [];
   const network = { genesis: NETWORK_CONFIG.genesisHash };
   const chain = new Esplora("https://chain.test", async (input) => {
@@ -53,7 +53,7 @@ async function fixture(store = new MemoryStore()) {
     const counts = funded.get(hash) ?? { chain: 0, mempool: 0 };
     if (typeof counts === "function") return counts();
     return Response.json({
-      chain_stats: { funded_txo_count: counts.chain, spent_txo_count: 0 },
+      chain_stats: { funded_txo_count: counts.chain, spent_txo_count: counts.spent ?? 0 },
       mempool_stats: { funded_txo_count: counts.mempool, spent_txo_count: 0 },
       scripthash: hash,
     });
@@ -110,8 +110,18 @@ describe("POST /api/vaults registers each script once on the deployment", () => 
     }
     expect(f.rows().vaults).toEqual([first.id]);
     expect(f.rows().reservations.map((row) => row.vaultId)).toEqual([first.id]);
-    // A held reservation refuses before the chain is asked.
-    expect(f.lookups).toEqual([first.scriptHash]);
+    // The chain is asked first each time.
+    expect(f.lookups).toEqual([first.scriptHash, first.scriptHash, first.scriptHash]);
+  });
+
+  it("answers a reserved script that is paid like any paid script, so the refusal doesn't say a vault here has it", async () => {
+    const f = await fixture();
+    const scriptHex = script();
+    const first = vaultFor(owners[0], scriptHex);
+    expect((await f.register(first)).status).toBe(201);
+    f.funded.set(first.scriptHash, { chain: 1, mempool: 0 });
+    expect(await f.register(vaultFor(owners[1], scriptHex))).toMatchObject({ status: 409, body: { code: "vault_script_paid" } });
+    expect(f.rows().vaults).toEqual([first.id]);
   });
 
   it("lets exactly one of two concurrent registrations of a script, from two addresses, succeed", async () => {
@@ -164,7 +174,7 @@ describe("POST /api/vaults registers each script once on the deployment", () => 
 
   it("refuses a script that something already paid, confirmed or in the mempool, spent or not", async () => {
     const f = await fixture();
-    for (const counts of [{ chain: 1, mempool: 0 }, { chain: 0, mempool: 1 }]) {
+    for (const counts of [{ chain: 1, mempool: 0 }, { chain: 0, mempool: 1 }, { chain: 1, mempool: 0, spent: 1 }]) {
       const vault = vaultFor(owners[0], script());
       f.funded.set(vault.scriptHash, counts);
       expect(await f.register(vault)).toEqual({

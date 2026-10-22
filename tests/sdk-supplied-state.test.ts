@@ -360,7 +360,7 @@ describe("vaults.create with a supplied state", () => {
     );
     expect(error).toBeInstanceOf(RefusedState);
     expect(error.message).toBe(
-      "The deployment refused to register the vault (vault_script_registered): another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: never pay into its script, and destroy that backup only if you hold another copy of this state.",
+      "The deployment refused to register the vault (vault_script_registered): another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: pay into this script only as the one deposit of the vault that has it. Destroy that backup only if you hold another copy of this state.",
     );
     expect(saveBackup).toHaveBeenCalledOnce();
     expect(storedVaults(w)).toEqual([vault.id]);
@@ -379,9 +379,29 @@ describe("vaults.create with a supplied state", () => {
     expect(error).toBeInstanceOf(RefusedState);
     // The secrets may already lock someone's payment: the message never says to discard the backup.
     expect(error.message).toBe(
-      "The deployment refused to register the vault (vault_script_paid): something has already paid this script on chain. A script locks one vault, which takes one deposit. Nothing was registered, and the app won't spend that output. Keep the backup just saved, or another copy of this state: it holds the secrets that can spend that output. Never pay into its script again.",
+      "The deployment refused to register the vault (vault_script_paid): something has already paid this script on chain. A script locks one vault, which takes one deposit, so no new vault can have it. Nothing was registered. Keep the backup just saved, or another copy of this state: it holds the secrets that can spend what was paid. Don't pay into this script for a new vault.",
     );
     expect(storedVaults(w)).toEqual([]);
+  }, 120000);
+
+  it("says a failed chain lookup registered nothing, and that the same state can be tried again", async () => {
+    const { w, client } = await signedIn();
+    w.chain.failing.add("/scripthash/");
+    const saveBackup = vi.fn(async () => {});
+    const error = await client.vaults.create({ name: "chain down", passphrase, saveBackup, stateJson: generated.stateJson }).then(
+      () => new Error("registered"),
+      (e: Error) => e,
+    );
+    // Not a verdict on the state.
+    expect(error).not.toBeInstanceOf(RefusedState);
+    expect(error.message).toBe(
+      "The deployment couldn't check the vault's script on chain (chain_unavailable), so it registered nothing. The backup just saved is for an unregistered vault: never pay into its script. Retry with the same state.",
+    );
+    expect(saveBackup).toHaveBeenCalledOnce();
+    expect(storedVaults(w)).toEqual([]);
+    w.chain.failing.clear();
+    const { vault } = await client.vaults.create({ name: "chain back", passphrase, saveBackup, stateJson: generated.stateJson });
+    expect(storedVaults(w)).toEqual([vault.id]);
   }, 120000);
 });
 

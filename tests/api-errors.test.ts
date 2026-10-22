@@ -310,6 +310,10 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
   }],
   ["vault_invalid", 400, (f) => f.call("POST", "/vaults", vault({ paymentAddress: "bc1qunrelatedowner0000" }))],
   ["vault_script_registered", 409, async (f) => {
+    genesis(f);
+    f.routes.set(`/scripthash/${registrable().scriptHash}`, () =>
+      Response.json({ chain_stats: { funded_txo_count: 0 }, mempool_stats: { funded_txo_count: 0 } }),
+    );
     await f.store.put(scriptReservation("bc1qanotherowner", { id: other, scriptHash: registrable().scriptHash }));
     return f.call("POST", "/vaults", registrable());
   }],

@@ -670,12 +670,15 @@ export function createApp(
     const elsewhere = (held: Row | undefined) =>
       held !== undefined && (held.owner !== owner || held.vaultId !== vault.id);
     const held = await store.get(reservation.pk, reservation.sk);
+    const repeat = held !== undefined && !elsewhere(held);
+    // A paid script is never a new vault: a paid vault row here without a reservation, or a script
+    // used outside this deployment. Asked before the reservation, so a script anyone can see on
+    // chain gets this answer whether or not a vault here has it. A failed lookup refuses too:
+    // nothing is written without it.
+    if (!repeat && (await ledger.scriptFunded(vault.scriptHash)))
+      return apiError(c, 409, "vault_script_paid", "This script has already been paid on chain, so it can't be a new vault.");
     if (elsewhere(held))
       return apiError(c, 409, "vault_script_registered", "Another vault on this deployment already has this script.");
-    // A paid script is never a new vault: a paid vault row here without a reservation, or a script
-    // used outside this deployment. A failed lookup refuses too: nothing is written without it.
-    if (!held && (await ledger.scriptFunded(vault.scriptHash)))
-      return apiError(c, 409, "vault_script_paid", "This script has already been paid on chain, so it can't be a new vault.");
     try {
       await store.atomicPut([
         { row: { pk: `OWNER#${owner}`, sk: `VAULT#${vault.id}`, version: 0, vault } },

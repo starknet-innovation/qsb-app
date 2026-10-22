@@ -225,15 +225,19 @@ function refused(error: ApiRequestError, what: string, next = ""): Error {
 }
 /**
  * The server's refusals of a vault whose script isn't new: final, and nothing was registered. Each
- * says what to do with the backup just saved. A paid script's backup may be the only copy of the
- * secrets that can spend that output, which the app never spends.
+ * says what to do with the backup just saved. The vault that has the script may be the caller's
+ * own, and a paid script's backup may be the only copy of the secrets that spend what was paid.
  */
 const scriptRefusals: Record<string, string> = {
   vault_script_registered:
-    "another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: never pay into its script, and destroy that backup only if you hold another copy of this state.",
+    "another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: pay into this script only as the one deposit of the vault that has it. Destroy that backup only if you hold another copy of this state.",
   vault_script_paid:
-    "something has already paid this script on chain. A script locks one vault, which takes one deposit. Nothing was registered, and the app won't spend that output. Keep the backup just saved, or another copy of this state: it holds the secrets that can spend that output. Never pay into its script again.",
+    "something has already paid this script on chain. A script locks one vault, which takes one deposit, so no new vault can have it. Nothing was registered. Keep the backup just saved, or another copy of this state: it holds the secrets that can spend what was paid. Don't pay into this script for a new vault.",
 };
+/** The server's chain lookup failed before it wrote anything: not a verdict on the state. */
+function chainFailure(error: unknown): error is ApiRequestError & { code: string } {
+  return error instanceof ApiRequestError && (error.code === "chain_unavailable" || error.code === "chain_error");
+}
 function scriptRefusal(error: unknown): error is ApiRequestError & { code: string } {
   return (
     error instanceof ApiRequestError &&
@@ -589,6 +593,11 @@ export class QsbClient {
           if (scriptRefusal(error))
             throw new RefusedState(
               `The deployment refused to register the vault (${error.code}): ${scriptRefusals[error.code]}`,
+              { cause: error },
+            );
+          if (chainFailure(error))
+            throw new Error(
+              `The deployment couldn't check the vault's script on chain (${error.code}), so it registered nothing. The backup just saved is for an unregistered vault: never pay into its script. ${supplied ? "Retry with the same state." : "A retry makes a new vault and a new backup."}`,
               { cause: error },
             );
           throw ownerRefusal(error)

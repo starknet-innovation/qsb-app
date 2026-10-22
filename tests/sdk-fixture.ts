@@ -22,6 +22,8 @@ export const API = "http://127.0.0.1:8787";
 export class FakeChain {
   private txs = new Map<string, { raw: string; tx: btc.Transaction; height?: number }>();
   private blocks = [GENESIS];
+  /** Path prefixes that answer 503, like a failing provider. */
+  readonly failing = new Set<string>();
   add(raw: string): string {
     const tx = btc.Transaction.fromRaw(hex.decode(raw), opts);
     if (!this.txs.has(tx.id)) this.txs.set(tx.id, { raw: raw.toLowerCase(), tx });
@@ -46,6 +48,7 @@ export class FakeChain {
   }
   readonly fetch = (async (input: RequestInfo | URL) => {
     const path = new URL(String(input)).pathname;
+    if ([...this.failing].some((prefix) => path.startsWith(prefix))) return new Response("", { status: 503 });
     const text = (body: string) => new Response(body);
     const json = (body: unknown) => new Response(JSON.stringify(body));
     const missing = () => new Response("not found", { status: 404 });
