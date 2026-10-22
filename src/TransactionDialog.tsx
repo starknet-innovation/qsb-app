@@ -445,8 +445,8 @@ export default function TransactionDialog({
       result = await api(`/vaults/${vault.id}/fund/submit`, { rawTxHex, amount: amountSats, costAccepted: true });
     } catch (error) {
       // Refused before anything was recorded or sent, and final: every deposit route refuses this
-      // vault, so the guard against a second deposit has nothing left to guard, and keeping it
-      // would offer to resend.
+      // vault and none offers its stored bytes, so the guard against a second deposit has nothing
+      // left to guard, and keeping it would offer to resend.
       const refusal = depositRefusal(error);
       if (refusal) {
         rememberFunding(undefined);
@@ -479,7 +479,12 @@ export default function TransactionDialog({
     const recorded = await api<{ vault: PublicVault }>(
       `/vaults/${vault.id}/fund`,
       { txid, amount: amountSats, costAccepted: true },
-    );
+    ).catch((error) => {
+      // As in submitDeposit: final, so the guard has nothing left to guard.
+      const refusal = depositRefusal(error);
+      if (refusal) rememberFunding(undefined);
+      throw refusal ?? error;
+    });
     rememberFunding(undefined);
     setResult(
       `Deposit ${recorded.vault.status}: ${recorded.vault.funding?.txid}. Wait for confirmation before withdrawing.`,

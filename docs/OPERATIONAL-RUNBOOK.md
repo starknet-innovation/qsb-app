@@ -276,7 +276,7 @@ The withdrawal API Lambda has a 120-second timeout, but CloudFront returns a tim
    npx tsx scripts/reserve-vault-scripts.ts
    ```
 
-2. Read the report: `vaults`, `reserved` (what `--apply` writes), `alreadyReserved`, and the vault ids in `duplicates`, `unreadable` and `unsettled`. Then run it again with `--apply`. It writes each missing reservation with `attribute_not_exists` and never changes an existing one; of two rows sharing a script, it reserves one with a recorded deposit, else the one whose `createdAt` is earlier.
+2. Read the report: `vaults`, `reserved` (what `--apply` writes), `alreadyReserved`, and the vault ids in `duplicates`, `unreadable` and `unsettled`. Then run it again with `--apply`. It writes each missing reservation with `attribute_not_exists` and never changes an existing one; of two rows sharing a script, it reserves the one whose deposit got furthest (confirmed or spent, then submitted, then none), then the one whose `createdAt` is earlier.
 3. It exits non-zero when any of those three lists isn't empty, with or without `--apply`.
    - A duplicate is `{ vault, heldBy }`: a vault whose script the vault `heldBy` already holds, or, for two rows sharing a script, the row it reserved. Those are two vault records on one script, which must never both take a deposit. Once `heldBy` holds the reservation, the deposit routes refuse `vault` (`vault_script_registered`; [API](API.md#vault-registration)), but a deposit either vault already has stays. Check both vaults' funding with their owners before anything else, and don't delete or reassign a reservation to clear the report.
    - An unreadable row's `scriptHash` isn't the SHA-256 of its script, so it gets no reservation.

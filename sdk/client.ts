@@ -765,7 +765,7 @@ export class QsbClient {
       if (ownerRefusal(error))
         throw refused(error, "the deposit", " The signed deposit stays pending: resend it with deposits.resubmit once allowed; don't sign another.");
       if (scriptHeld(error))
-        throw refused(error, "the deposit", " This vault takes no deposit on this deployment: don't resend this one or sign another.");
+        throw refused(error, "the deposit", " Don't resend this deposit or sign another for this vault.");
       throw unconfirmed(error instanceof Error ? ` ${error.message}` : "");
     }
     // Only an answer about this vault and these bytes ends the pending deposit.
@@ -786,7 +786,7 @@ export class QsbClient {
       return await this.session.api<Omit<DepositSubmission, "txid">>(`/vaults/${vaultId}/fund/resubmit`, fundResubmitRequest.parse({}));
     } catch (error) {
       if (scriptHeld(error))
-        throw refused(error, "to resend the deposit", " This vault takes no deposit on this deployment: don't resend it or sign another.");
+        throw refused(error, "to resend the deposit", " Don't resend it or sign another deposit for this vault.");
       throw ownerRefusal(error) ? refused(error, "to resend the deposit", " Resend it once allowed; don't sign another.") : error;
     }
   }

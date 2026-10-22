@@ -300,20 +300,20 @@ describe("the operator's script-reservation backfill", () => {
     expect((await store.get(`SCRIPT#${first.scriptHash}`, "RESERVATION"))?.vaultId).toBe(first.id);
   });
 
-  it("gives a shared script to a row with a deposit before an earlier one without", async () => {
+  it("gives a shared script to the row whose deposit got furthest, before earlier ones", async () => {
     const store = new MemoryStore();
     const scriptHex = script();
-    const unfundedEarlier = older(vaultFor(owners[0], scriptHex), "2026-10-01T00:00:00.000Z");
-    const fundedLater = {
-      ...older(vaultFor(owners[1], scriptHex), "2026-10-02T00:00:00.000Z"),
-      status: "confirmed" as const,
-      funding: { txid: "cd".repeat(32), vout: 0, value: "50000" },
-    };
-    await unreserved(store, unfundedEarlier);
-    await unreserved(store, fundedLater);
+    const funding = { txid: "cd".repeat(32), vout: 0, value: "50000" };
+    const unfunded = older(vaultFor(owners[0], scriptHex), "2026-10-01T00:00:00.000Z");
+    const submitted = { ...older(vaultFor(owners[1], scriptHex), "2026-10-02T00:00:00.000Z"), status: "submitted" as const, funding };
+    const confirmed = { ...older(vaultFor(owners[0], scriptHex), "2026-10-03T00:00:00.000Z"), status: "confirmed" as const, funding };
+    for (const vault of [unfunded, submitted, confirmed]) await unreserved(store, vault);
     expect(await backfillScriptReservations(store, await store.vaultRows(), true)).toMatchObject({
       reserved: 1,
-      duplicates: [{ vault: unfundedEarlier.id, heldBy: fundedLater.id }],
+      duplicates: [
+        { vault: submitted.id, heldBy: confirmed.id },
+        { vault: unfunded.id, heldBy: confirmed.id },
+      ],
     });
   });
 
@@ -359,11 +359,14 @@ describe("the operator's script-reservation backfill", () => {
     const other = new MemoryStore();
     const pending = vaultFor(owners[0], script());
     await unreserved(other, pending);
+    // A later row on the same script is unsettled too, not a duplicate of a vault that holds nothing.
+    const twin = older(vaultFor(owners[1], pending.scriptHex), "2099-01-01T00:00:00.000Z");
+    await unreserved(other, twin);
     vi.spyOn(other, "put").mockRejectedValueOnce(Object.assign(new Error("in flight"), { name: "TransactionConflictException" }));
     expect(await backfillScriptReservations(other, await other.vaultRows(), true)).toMatchObject({
       reserved: 0,
       duplicates: [],
-      unsettled: [pending.id],
+      unsettled: [pending.id, twin.id],
     });
     // Any other failure stops the run.
     vi.spyOn(other, "put").mockRejectedValueOnce(Object.assign(new Error("denied"), { name: "AccessDeniedException" }));
@@ -437,12 +440,20 @@ describe("a vault whose script another vault holds takes no deposit", () => {
       expect(await f.call(method, path, owners[1], body), path).toEqual(refused);
     expect([...store.rows.entries()]).toEqual(before);
     expect(f.minerCalls).toEqual([]);
+    // Nor does /funding offer its stored bytes while the chain doesn't know the deposit: only the
+    // chain answers for it, and nothing is marked exported.
+    const funding = await f.call("GET", `/vaults/${loser.id}/funding`, owners[1]);
+    expect(funding).toMatchObject({ status: 409, body: { code: "chain_transaction_not_found" } });
+    expect(JSON.stringify(funding)).not.toContain(store.rows.get(`OWNER#${owners[1]}|VAULT#${loser.id}`)!.fundingRawTxHex as string);
+    expect([...store.rows.entries()]).toEqual(before);
     // Nor is it offered as resendable, while a submitted vault with no reservation still is.
     const unreserved = { ...vaultFor(owners[1], script()), status: "submitted" as const };
     await store.put({ pk: `OWNER#${owners[1]}`, sk: `VAULT#${unreserved.id}`, version: 0, vault: unreserved, fundingRawTxHex: "00" });
     expect((await f.call("GET", "/vaults", owners[1])).body.resendable).toEqual([unreserved.id]);
-    // The vault that holds the script, and a vault row with no reservation, get past this check.
+    // The vault that holds the script, and a vault row with no reservation, get past the check on a deposit route.
     expect(await f.call("GET", `/vaults/${holder.id}/fund/signed`, owners[0])).toMatchObject({ status: 404, body: { code: "signed_deposit_not_found" } });
+    expect(await f.call("POST", `/vaults/${unreserved.id}/fund/resubmit`, owners[1], {})).toMatchObject({ status: 409, body: { code: "signed_deposit_not_found" } });
+    expect(f.minerCalls).toEqual([]);
   });
 });
 

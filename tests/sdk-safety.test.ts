@@ -626,7 +626,7 @@ describe("per-owner limits (#89)", () => {
     const error = (await v.client.deposits.submit(prepared, signed, { costAccepted: true }).then(() => new Error("sent"), (e: Error) => e)) as Error;
     expect(error.message).toContain("refused the deposit (vault_script_registered)");
     expect(error.message).toContain("Nothing was written or sent by this request");
-    expect(error.message).toContain("don't resend this one or sign another");
+    expect(error.message).toContain("Don't resend this deposit or sign another for this vault.");
     expect(error.message).not.toContain("isn't confirmed");
     // A resend gets the same final answer.
     await expect(v.client.deposits.resubmit(v.vault.id)).rejects.toThrow("refused the deposit (vault_script_registered)");

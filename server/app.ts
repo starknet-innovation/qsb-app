@@ -574,8 +574,9 @@ export function createApp(
    * Whether another vault's reservation holds this vault's script. A vault row without a
    * reservation can share its script with another vault: a later registration of that script,
    * or the operator's backfill, gives the reservation to the other one. This vault then takes no
-   * deposit: the deposit routes refuse it before anything is recorded or sent, and it isn't
-   * listed as resendable. A vault row with no reservation for its script isn't refused.
+   * deposit: the deposit routes refuse it before anything is recorded or sent, it isn't listed as
+   * resendable, and `/funding` doesn't offer its stored bytes. A vault row with no reservation for
+   * its script isn't refused.
    */
   async function scriptHeldElsewhere(owner: string, vault: PublicVault | undefined) {
     if (typeof vault?.scriptHash !== "string") return false;
@@ -972,9 +973,12 @@ export function createApp(
     if (!vault.funding)
       return apiError(c, 409, "vault_not_funded", "Vault is not funded");
     // A Slipstream deposit isn't visible to the public chain API until it is mined. The
-    // stored signed bytes stand in until then; they never count as confirmation.
+    // stored signed bytes stand in until then; they never count as confirmation. A vault whose
+    // script another vault holds takes no deposit, so its bytes aren't offered: only the chain answers.
     const stored =
-      typeof row.fundingRawTxHex === "string" && row.fundingRawTxHex ? row.fundingRawTxHex : undefined;
+      typeof row.fundingRawTxHex === "string" && row.fundingRawTxHex && !(await scriptHeldElsewhere(c.get("owner"), vault))
+        ? row.fundingRawTxHex
+        : undefined;
     // Only a definitive 404 falls back; provider failures (429, 5xx, network) propagate.
     const unseen = (error: unknown) => stored !== undefined && error instanceof ChainNotFound;
     let fromChain = true;
