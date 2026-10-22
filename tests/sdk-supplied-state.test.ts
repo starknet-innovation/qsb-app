@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,6 +8,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { hex } from "@scure/base";
 import { ripemd160 } from "@noble/hashes/legacy.js";
 import { sha256 } from "@noble/hashes/sha2.js";
+import { loadPyodide } from "pyodide";
+import { startQsbRuntime } from "../src/lib/qsb-runtime";
 import awsRelease from "../src/lib/releases/qsb-solver-aws-v0-1-0.json";
 import { decryptRecovery } from "../src/lib/backup";
 import { QsbClient, RefusedState, loopbackTestSigner, nodeQsb, type LocalQsb } from "../sdk";
@@ -38,7 +41,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   }) as typeof actual.readFile;
   return { ...actual, readFile };
 });
-/** What the SDK's own runtimes re-open, in order with the vault registrations the transport sees. */
+/** What the SDK's own runtimes check and re-open, in order with the vault requests the transport sees. */
 const events = vi.hoisted(() => [] as string[]);
 vi.mock("../sdk/runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../sdk/runtime")>();
@@ -48,6 +51,10 @@ vi.mock("../sdk/runtime", async (importOriginal) => {
       const qsb = actual.nodeQsb();
       return {
         ...qsb,
+        adoptQsb: async (stateJson: string) => {
+          events.push("adopt");
+          return qsb.adoptQsb(stateJson);
+        },
         validateRecovery: async (stateJson: string) => {
           const scriptHash = await qsb.validateRecovery(stateJson);
           events.push(`re-open ${scriptHash}`);
@@ -70,6 +77,14 @@ beforeAll(async () => {
   generated = await qsb.generateQsb();
   qsb.lockQsb();
 }, 60000);
+
+/** The state the bridge's own setup builds from `secrets`, as a caller's generator would write it. */
+async function stateFrom(secrets: string[]): Promise<string> {
+  const py = await loadPyodide({ stdout: () => {}, stderr: () => {} });
+  await startQsbRuntime(py, async (file) => new Uint8Array(await readFile(new URL(`../public/qsb/${file}`, import.meta.url))));
+  py.globals.set("secrets", JSON.stringify(secrets));
+  return JSON.parse(py.runPython("import bridge, json\nbridge.result(bridge.setup([bytes.fromhex(s) for s in json.loads(secrets)]))")).stateJson;
+}
 
 const replaceOnce = (text: string, from: string, to: string) => {
   expect(text.split(from)).toHaveLength(2);
@@ -112,6 +127,8 @@ function edits(stateJson: string): [string, string, RegExp][] {
     ["a key that isn't a plain name", stateJson.replace(/^\{/, '{"a\\nValueError: x": 1, '), /^"a\\nValueError: x" is not a field the pipeline produces$/],
     ["not an object", "[]", /^the recovery state is not a JSON object$/],
     ["not JSON", stateJson.slice(0, -1), /^the recovery state is not JSON this check reads \(.+\)$/],
+    ["an integer too long to read", stateJson.replace(/^\{/, `{"pin_x": ${"9".repeat(5000)}, `), /^the recovery state is not JSON this check reads \(.+\)$/],
+    ["deep nesting", `${"[".repeat(5000)}${"]".repeat(5000)}`, /^the recovery state nests deeper than the pipeline's state$/],
   ];
 }
 
@@ -128,6 +145,8 @@ describe("adoptQsb in the SDK's bundled runtime", () => {
         expect(error, label).toBeInstanceOf(RefusedState);
         expect(error.message, label).toMatch(message);
       }
+      // A JavaScript caller that passes the parsed object instead of the text.
+      await expect(qsb.adoptQsb(JSON.parse(generated.stateJson))).rejects.toThrow(new RefusedState("the recovery state is not JSON text"));
     } finally {
       qsb.lockQsb();
     }
@@ -149,6 +168,12 @@ function replacedRuntime() {
     lockQsb: vi.fn(),
   } satisfies LocalQsb;
 }
+/** A transport that records the vault list and registration requests among `events`. */
+const recordVaults = (next: typeof fetch) =>
+  (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (new URL(String(input)).pathname === "/v1/vaults") events.push(init?.method === "POST" ? "register" : "list");
+    return next(input, init);
+  }) as typeof fetch;
 const vaultPosts = (w: ReturnType<typeof world>) =>
   w.requests.filter((r) => r.method === "POST" && new URL(r.url).pathname === "/v1/vaults");
 
@@ -164,16 +189,14 @@ describe("vaults.create with a supplied state", () => {
 
   it("registers the state's vault, checked and re-opened by the bundled runtime, not the qsb option", async () => {
     const qsb = replacedRuntime();
-    const { w, owner, signer, client } = await signedIn(qsb, (next) => (async (input, init) => {
-      if (init?.method === "POST" && new URL(String(input)).pathname === "/v1/vaults") events.push("register");
-      return next(input, init);
-    }) as typeof fetch);
+    const { w, owner, signer, client } = await signedIn(qsb, recordVaults);
     const saveBackup = vi.fn(async (text: string) => void events.push(`save ${text.length}`));
     events.length = 0;
     const { vault, backup } = await client.vaults.create({ name: "own state", passphrase, saveBackup, stateJson: generated.stateJson });
     expect(saveBackup).toHaveBeenCalledExactlyOnceWith(backup);
-    // The bundled runtime re-opened the saved backup before the vault was registered.
-    expect(events).toEqual([`save ${backup.length}`, `re-open ${generated.scriptHash}`, "register"]);
+    // The vaults were listed before the bundled runtime's check, and again after it re-opened the
+    // saved backup, before the vault was registered.
+    expect(events).toEqual(["list", "adopt", `save ${backup.length}`, `re-open ${generated.scriptHash}`, "list", "register"]);
     expect([vault.scriptHex, vault.scriptHash, vault.publicStateJson]).toEqual([generated.scriptHex, generated.scriptHash, generated.publicStateJson]);
     expect((await decryptRecovery(backup, passphrase)).stateJson).toBe(generated.stateJson);
     for (const call of [qsb.generateQsb, qsb.validateRecovery, qsb.assembleQsb, qsb.lockQsb]) expect(call).not.toHaveBeenCalled();
@@ -202,6 +225,7 @@ describe("vaults.create with a supplied state", () => {
         () => new Error(`${label} was accepted`),
         (e: Error) => e,
       );
+      expect(error, label).toBeInstanceOf(RefusedState);
       const reason = /^The supplied recovery state was refused: (.+)\. Nothing was saved or registered\.$/.exec(error.message);
       expect(reason?.[1], `${label}: ${error.message}`).toMatch(message);
     }
@@ -236,15 +260,35 @@ describe("vaults.create with a supplied state", () => {
     expect(vaultPosts(w)).toHaveLength(0);
   }, 120000);
 
-  it("refuses a state whose script already locks a vault of this address", async () => {
+  it("refuses a state that reuses any HORS secret of a vault of this address", async () => {
     const { w, client } = await signedIn();
     const saveBackup = vi.fn(async () => {});
     const { vault } = await client.vaults.create({ name: "first", passphrase, saveBackup, stateJson: generated.stateJson });
-    await expect(client.vaults.create({ name: "second", passphrase, saveBackup, stateJson: generated.stateJson })).rejects.toThrow(
-      `This recovery state already locks vault ${vault.id}. A state locks one vault, which takes one deposit; nothing was saved or registered.`,
-    );
+    // The same state, and a valid new one that shares a single secret, in another position.
+    const first = JSON.parse(generated.stateJson).hors_secrets as string[][];
+    const overlapping = await stateFrom([...Array.from({ length: 299 }, () => hex.encode(randomBytes(20))), first[0][42]]);
+    for (const stateJson of [generated.stateJson, overlapping])
+      await expect(client.vaults.create({ name: "second", passphrase, saveBackup, stateJson })).rejects.toThrow(
+        new RefusedState(
+          `This recovery state reuses HORS secrets of vault ${vault.id}. A state's secrets lock one vault, which takes one deposit; nothing was saved or registered.`,
+        ),
+      );
     expect(saveBackup).toHaveBeenCalledOnce();
     expect(vaultPosts(w)).toHaveLength(1);
+  }, 120000);
+
+  it("refuses to register when the same secrets were registered while its backup was saved", async () => {
+    const { w, signer, client } = await signedIn();
+    const other = new QsbClient({ baseUrl: API, signer, fetch: w.fetch, token: client.token });
+    let registered = "";
+    const saveBackup = vi.fn(async () => {
+      ({ vault: { id: registered } } = await other.vaults.create({ name: "meanwhile", passphrase, saveBackup: async () => {}, stateJson: generated.stateJson }));
+    });
+    await expect(client.vaults.create({ name: "slow save", passphrase, saveBackup, stateJson: generated.stateJson })).rejects.toThrow(
+      /^This recovery state reuses HORS secrets of vault [0-9a-f-]{36}, registered while its backup was saved\. Nothing was registered/,
+    );
+    expect(saveBackup).toHaveBeenCalledOnce();
+    expect(vaultPosts(w).map((r) => JSON.parse(r.body).id)).toEqual([registered]);
   }, 120000);
 });
 

@@ -129,7 +129,10 @@ export type QsbClientOptions = {
   signer: Signer;
   /** Transport; defaults to the global fetch. */
   fetch?: typeof fetch;
-  /** Local QSB generator and assembler; defaults to Pyodide in this process. */
+  /**
+   * Local QSB generator and assembler; defaults to Pyodide in this process. It never checks a
+   * `vaults.create` `stateJson`: the package's own runtime does.
+   */
   qsb?: LocalQsb;
   /** Where signed deposits wait until the miner has them; defaults to memory. */
   pendingDeposits?: PendingDeposits;
@@ -226,6 +229,15 @@ function assertOwnerAllowed(config: ApiConfig) {
     throw new Error("The deployment's per-owner limits are misconfigured (owner_limits_invalid). Nothing was changed; contact the operator.");
   if (config.ownerLimits?.allowlisted === false)
     throw new Error("This wallet isn't on this deployment's allowlist (owner_not_allowlisted). Nothing was changed.");
+}
+/** The vault whose HORS commitments share one with `publicStateJson`'s, if any. */
+function sharingSecrets(vaults: PublicVault[], publicStateJson: string): PublicVault | undefined {
+  const commitments = (json: string): unknown[] => {
+    const { hors_commitments: rounds } = JSON.parse(json) as { hors_commitments?: unknown };
+    return Array.isArray(rounds) ? rounds.flat() : [];
+  };
+  const own = new Set(commitments(publicStateJson));
+  return vaults.find((vault) => commitments(vault.publicStateJson).some((c) => own.has(c)));
 }
 function memoryPending(): PendingDeposits {
   const rows = new Map<string, PendingDeposit>();
@@ -490,7 +502,7 @@ export class QsbClient {
     });
   }
 
-  /** A caller's recovery state, once `qsb` accepts it and no vault of this address locks its script. */
+  /** A caller's recovery state, once `qsb` accepts it and no vault of this address shares its secrets. */
   private async adoptState(qsb: BundledQsb, stateJson: string) {
     // Listed first, so an API key without the read scope is refused before the check runs.
     const { vaults } = await this.vaults.list();
@@ -499,14 +511,14 @@ export class QsbClient {
       data = await qsb.adoptQsb(stateJson);
     } catch (error) {
       if (!(error instanceof RefusedState)) throw error;
-      throw new Error(`The supplied recovery state was refused: ${error.message.replace(/\.$/, "")}. Nothing was saved or registered.`, {
+      throw new RefusedState(`The supplied recovery state was refused: ${error.message.replace(/\.$/, "")}. Nothing was saved or registered.`, {
         cause: error,
       });
     }
-    const existing = vaults.find((vault) => vault.scriptHash === data.scriptHash);
-    if (existing)
-      throw new Error(
-        `This recovery state already locks vault ${existing.id}. A state locks one vault, which takes one deposit; nothing was saved or registered.`,
+    const sharing = sharingSecrets(vaults, data.publicStateJson);
+    if (sharing)
+      throw new RefusedState(
+        `This recovery state reuses HORS secrets of vault ${sharing.id}. A state's secrets lock one vault, which takes one deposit; nothing was saved or registered.`,
       );
     return data;
   }
@@ -542,6 +554,13 @@ export class QsbClient {
       );
       await input.saveBackup(backup);
       await this.unlock(backup, input.passphrase, vault, qsb);
+      // Again, for a vault registered from the same secrets while this backup was saved. The server
+      // doesn't refuse a repeated script, so this narrows the window but can't close it.
+      const sharing = supplied ? sharingSecrets((await this.vaults.list()).vaults, data.publicStateJson) : undefined;
+      if (sharing)
+        throw new RefusedState(
+          `This recovery state reuses HORS secrets of vault ${sharing.id}, registered while its backup was saved. Nothing was registered; the saved backup is for an unregistered vault: never pay into its script.`,
+        );
       const registered = await this.session
         .api<{ vault: PublicVault }>("/vaults", publicVaultSchema.parse(vault))
         .catch((error) => {

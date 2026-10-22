@@ -98,17 +98,44 @@ def difference(supplied, expected, path=''):
 
 def unique(pairs):
     """A JSON object whose keys each appear once; json.loads would otherwise keep the last."""
-    keys = [k for k, _ in pairs]
-    for key in keys:
-        if keys.count(key) > 1:
+    seen = set()
+    for key, _ in pairs:
+        if key in seen:
             raise RefusedError(f'{name(key)} appears twice in one object')
+        seen.add(key)
     return dict(pairs)
+
+def nesting(text):
+    """How deeply text's JSON arrays and objects nest, outside strings."""
+    level = deepest = 0
+    quoted = escaped = False
+    for ch in text:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif ch == '\\':
+                escaped = True
+            elif ch == '"':
+                quoted = False
+        elif ch == '"':
+            quoted = True
+        elif ch in '[{':
+            level += 1
+            deepest = max(deepest, level)
+        elif ch in ']}':
+            level -= 1
+    return deepest
 
 def adopt(state_json):
     """Accept a caller's recovery state only if it is exactly the state setup builds from its HORS secrets."""
+    # The pipeline's state nests 3 deep; deeper input could exhaust the interpreter's stack.
+    if nesting(state_json) > 3:
+        raise RefusedError("the recovery state nests deeper than the pipeline's state")
     try:
         state = json.loads(state_json, object_pairs_hook=unique)
-    except (json.JSONDecodeError, RecursionError) as error:
+    except RefusedError:
+        raise
+    except ValueError as error:
         raise RefusedError(f'the recovery state is not JSON this check reads ({error})')
     if not isinstance(state, dict):
         raise RefusedError('the recovery state is not a JSON object')

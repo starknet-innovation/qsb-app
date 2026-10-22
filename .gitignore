@@ -30,3 +30,6 @@ __pycache__/
 *signed-result*.json
 *signing-bundle*.json
 .DS_Store
+# Plaintext QSB state the pipeline's setup writes (sdk/README.md, "Your own recovery state").
+qsb_state.json
+qsb_scriptpubkey.hex
