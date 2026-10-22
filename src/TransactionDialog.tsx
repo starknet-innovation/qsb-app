@@ -919,7 +919,8 @@ export default function TransactionDialog({
       ? formatBtc(feeQuote.fee)
       : undefined;
   const refusedDeposit = deposit && noDeposit;
-  const blocked = (!!job && !!intentBackup && !assemblyVerified) || refusedDeposit;
+  // A withdrawal's unverified signing backup; it opens the panel that verifies that backup.
+  const blocked = !!job && !!intentBackup && !assemblyVerified;
   const blocker = refusedDeposit
     ? NO_DEPOSIT
     : !accepted
@@ -1395,7 +1396,7 @@ export default function TransactionDialog({
               )}
               <button
                 className="primary"
-                disabled={!!busy || !unlocked || !accepted || blocked}
+                disabled={!!busy || !unlocked || !accepted || blocked || refusedDeposit}
                 onClick={
                   job ? authorize : deposit ? depositFunds : beginWithdrawal
                 }

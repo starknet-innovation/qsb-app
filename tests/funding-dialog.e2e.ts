@@ -137,6 +137,10 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
       expect(await page.evaluate(() => (window as any).submitCalls ?? 0)).toBe(scenario === "no-deposit" ? 0 : 1);
       await expect(dialog.getByRole("button", { name: "Submit deposit again", exact: true })).toHaveCount(0);
       await expect(dialog.getByRole("button", { name: "Review deposit in Xverse" })).toBeDisabled();
+      // Nor does it show the withdrawal's signing-backup panel, which would offer an empty "backup".
+      await expect(dialog.getByRole("button", { name: "Download signing backup again" })).toHaveCount(0);
+      await expect(dialog.getByLabel("Verify updated signing backup")).toHaveCount(0);
+      await expect(dialog).not.toContainText("Keep this newest backup");
       return;
     }
     if (scenario === "unrecorded-failure" || scenario === "miner-unavailable" || scenario === "disabled-after-sign" || scenario === "different-bytes") {

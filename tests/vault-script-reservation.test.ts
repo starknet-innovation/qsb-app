@@ -481,7 +481,7 @@ describe("the webapp's message when the server refuses a new vault", () => {
     );
     // A broadcast Xverse already made isn't something this request could have held back.
     expect(depositRefusal(refused, "ab".repeat(32))?.message).toBe(
-      `Another vault on this server has this vault's script, so this vault takes no deposit. Don't make a deposit for it. The app won't record the transaction Xverse broadcast, ${"ab".repeat(32)}: it may still confirm, and the app never spends it.`,
+      `Another vault on this server has this vault's script, so this vault takes no deposit. Don't make a deposit for it. The app won't record the transaction Xverse broadcast, ${"ab".repeat(32)}: it may still confirm, and the app never spends it. Keep this vault's recovery backup: its secrets are what can spend that payment.`,
     );
     // Any other failure stays an uncertain submission.
     expect(depositRefusal(new ApiRequestError("Unable to complete the request. Please retry.", 502, "miner_request_failed"))).toBeUndefined();

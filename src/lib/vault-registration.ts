@@ -35,7 +35,7 @@ export function depositRefusal(error: unknown, broadcast?: string): Error | unde
   if (!(error instanceof ApiRequestError && error.status === 409 && error.code === "vault_script_registered")) return;
   return new Error(
     broadcast
-      ? `${NO_DEPOSIT} The app won't record the transaction Xverse broadcast, ${broadcast}: it may still confirm, and the app never spends it.`
+      ? `${NO_DEPOSIT} The app won't record the transaction Xverse broadcast, ${broadcast}: it may still confirm, and the app never spends it. Keep this vault's recovery backup: its secrets are what can spend that payment.`
       : `${NO_DEPOSIT} This request sent nothing. If you submitted this deposit before, it may still confirm: check the vault's status.`,
   );
 }
