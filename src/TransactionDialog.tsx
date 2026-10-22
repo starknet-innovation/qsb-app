@@ -7,6 +7,7 @@ import "./styles.css";
 import { CostDisclosure } from "./Costs";
 import { base64, hex } from "@scure/base";
 import { api } from "./lib/api";
+import { depositRefusal } from "./lib/vault-registration";
 import { signPsbt, type Wallet } from "./lib/wallet";
 import {
   fundingFeeForRate,
@@ -444,6 +445,9 @@ export default function TransactionDialog({
       result = await api(`/vaults/${vault.id}/fund/submit`, { rawTxHex, amount: amountSats, costAccepted: true });
     } catch (error) {
       setPendingFunding(readFundingGuard());
+      // Refused before anything was recorded or sent, and final: resending can't help.
+      const refusal = depositRefusal(error);
+      if (refusal) throw refusal;
       // The server may or may not have recorded the intent before failing; ask it.
       void confirmRecorded(rawTxHex);
       const detail = error instanceof Error ? ` ${error.message}` : "";

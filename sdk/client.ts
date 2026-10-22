@@ -234,6 +234,10 @@ const scriptRefusals: Record<NonNullable<RefusedState["code"]>, string> = {
   vault_script_paid:
     "something has already paid this script on chain. A script locks one vault, which takes one deposit, so no new vault can have it. Nothing was registered. Keep the backup just saved, or another copy of this state: it holds the secrets that can spend what was paid. Don't pay into this script for a new vault.",
 };
+/** A deposit route's refusal of a vault whose script another vault holds: final, nothing was sent. */
+function scriptHeld(error: unknown): error is ApiRequestError {
+  return error instanceof ApiRequestError && error.status === 409 && error.code === "vault_script_registered";
+}
 /** The server's chain lookup failed before it wrote anything: not a verdict on the state. */
 function chainFailure(error: unknown): error is ApiRequestError & { code: string } {
   return error instanceof ApiRequestError && (error.code === "chain_unavailable" || error.code === "chain_error");
@@ -760,6 +764,8 @@ export class QsbClient {
       // attempts may still have been sent, so the signed bytes stay pending either way.
       if (ownerRefusal(error))
         throw refused(error, "the deposit", " The signed deposit stays pending: resend it with deposits.resubmit once allowed; don't sign another.");
+      if (scriptHeld(error))
+        throw refused(error, "the deposit", " This vault takes no deposit on this deployment: don't resend this one or sign another.");
       throw unconfirmed(error instanceof Error ? ` ${error.message}` : "");
     }
     // Only an answer about this vault and these bytes ends the pending deposit.
@@ -779,6 +785,8 @@ export class QsbClient {
     try {
       return await this.session.api<Omit<DepositSubmission, "txid">>(`/vaults/${vaultId}/fund/resubmit`, fundResubmitRequest.parse({}));
     } catch (error) {
+      if (scriptHeld(error))
+        throw refused(error, "to resend the deposit", " This vault takes no deposit on this deployment: don't resend it or sign another.");
       throw ownerRefusal(error) ? refused(error, "to resend the deposit", " Resend it once allowed; don't sign another.") : error;
     }
   }

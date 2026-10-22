@@ -20,3 +20,14 @@ export function registrationError(error: unknown): unknown {
     );
   return error;
 }
+
+/**
+ * A deposit route's refusal of a vault whose script another vault holds. It comes before anything
+ * is recorded or sent, and it's final: resending the deposit gets it again.
+ */
+export function depositRefusal(error: unknown): Error | undefined {
+  if (error instanceof ApiRequestError && error.status === 409 && error.code === "vault_script_registered")
+    return new Error(
+      "Another vault on this server has this vault's script, so this vault takes no deposit. Nothing was sent: don't send this deposit or make another for this vault.",
+    );
+}

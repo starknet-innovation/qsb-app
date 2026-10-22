@@ -45,7 +45,7 @@ export const apiErrorCodes = {
   vault_invalid:
     "The vault's ownership, funding state or script commitment is wrong.",
   vault_script_registered:
-    "Another vault on this deployment, of any address, already has this script. Nothing was registered.",
+    "Another vault on this deployment, of any address, already has this script. A new vault with it isn't registered, and a vault whose script another vault holds takes no deposit. Nothing was written or sent.",
   vault_script_paid:
     "Something already paid this script on chain, confirmed or in the mempool, so it isn't new. Nothing was registered.",
   vault_not_found: "No vault with this id for the signed-in owner.",

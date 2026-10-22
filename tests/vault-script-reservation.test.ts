@@ -6,12 +6,13 @@ import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { createApp } from "../server/app";
 import { Conflict, DynamoStore, MemoryStore, scriptReservation, type AtomicWrite, type Row } from "../server/store";
 import { Esplora } from "../server/chain";
+import type { Slipstream } from "../server/providers";
 import { backfillScriptReservations } from "../server/script-reservations";
 import { BITCOIN_NETWORK, NETWORK_CONFIG } from "../src/lib/network";
 import type { PublicVault } from "../src/lib/model";
 import { withVaultConfiguration } from "../src/lib/provenance";
 import { ApiRequestError } from "../src/lib/session";
-import { registrationError } from "../src/lib/vault-registration";
+import { depositRefusal, registrationError } from "../src/lib/vault-registration";
 
 // One script, one vault, on the whole deployment. A fake chain API behind the real Esplora
 // client and the in-memory store; no keys and no network.
@@ -36,6 +37,14 @@ function vaultFor(paymentAddress: string, scriptHex: string): PublicVault {
 }
 
 async function fixture(store = new MemoryStore(), options: { scriptLookupMs?: number } = {}) {
+  /** Deposits are on; the miner is never reached in these tests, so any call to it fails. */
+  const minerCalls: string[] = [];
+  const miner = new Proxy({}, {
+    get: (_, name) => () => {
+      minerCalls.push(String(name));
+      throw new Error("The miner was called.");
+    },
+  }) as Slipstream;
   for (const [owner, token] of tokens)
     await store.put({
       pk: `SESSION#${createHash("sha256").update(token).digest("hex")}`,
@@ -78,15 +87,16 @@ async function fixture(store = new MemoryStore(), options: { scriptLookupMs?: nu
       scripthash: hash,
     });
   });
-  const app = createApp(store, { chain, scriptLookupMs: options.scriptLookupMs });
-  const register = async (vault: PublicVault) => {
-    const response = await app.request("/api/vaults", {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${tokens.get(vault.paymentAddress)}` },
-      body: JSON.stringify(vault),
+  const app = createApp(store, { chain, scriptLookupMs: options.scriptLookupMs, enabled: true, exactSubmit: true, miner });
+  const call = async (method: "GET" | "POST", path: string, owner: string, body?: unknown) => {
+    const response = await app.request(`/api${path}`, {
+      method,
+      headers: { "content-type": "application/json", authorization: `Bearer ${tokens.get(owner)}` },
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
     return { status: response.status, body: await response.json() };
   };
+  const register = (vault: PublicVault) => call("POST", "/vaults", vault.paymentAddress, vault);
   /** Every vault row and script reservation in the store. */
   const rows = () => {
     const all = [...store.rows.values()];
@@ -95,7 +105,7 @@ async function fixture(store = new MemoryStore(), options: { scriptLookupMs?: nu
       reservations: all.filter((row) => row.pk.startsWith("SCRIPT#")),
     };
   };
-  return { store, funded, network, latency, signals, lookups, register, rows };
+  return { store, funded, network, latency, signals, lookups, minerCalls, call, register, rows };
 }
 
 const script = () => randomBytes(100).toString("hex");
@@ -371,6 +381,43 @@ describe("the operator's script-reservation backfill", () => {
   });
 });
 
+describe("a vault whose script another vault holds takes no deposit", () => {
+  const legacy = async (store: MemoryStore, vault: PublicVault) =>
+    store.put({ pk: `OWNER#${vault.paymentAddress}`, sk: `VAULT#${vault.id}`, version: 0, vault });
+  const refused = {
+    status: 409,
+    body: { error: "Another vault on this deployment holds this vault's script, so this vault takes no deposit.", code: "vault_script_registered" },
+  };
+
+  it("refuses every deposit route before anything is recorded or sent", async () => {
+    const store = new MemoryStore();
+    const f = await fixture(store);
+    // Two vault rows on one script, both older than reservations; the backfill gave the script to the first.
+    const scriptHex = script();
+    const holder = vaultFor(owners[0], scriptHex);
+    const loser = vaultFor(owners[1], scriptHex);
+    await legacy(store, holder);
+    await legacy(store, loser);
+    await store.put(scriptReservation(owners[0], holder));
+    const before = structuredClone([...store.rows.entries()]);
+    const deposit = { rawTxHex: "00", amount: "50000", costAccepted: true };
+    for (const [method, path, body] of [
+      ["POST", `/vaults/${loser.id}/fund`, { txid: "ab".repeat(32), amount: "50000", costAccepted: true }],
+      ["POST", `/vaults/${loser.id}/fund/submit`, deposit],
+      ["GET", `/vaults/${loser.id}/fund/signed`, undefined],
+      ["POST", `/vaults/${loser.id}/fund/resubmit`, {}],
+    ] as const)
+      expect(await f.call(method, path, owners[1], body), path).toEqual(refused);
+    expect([...store.rows.entries()]).toEqual(before);
+    expect(f.minerCalls).toEqual([]);
+    // The vault that holds the script, and a vault row with no reservation, get past this check.
+    const unreserved = vaultFor(owners[1], script());
+    await legacy(store, unreserved);
+    for (const [owner, vault] of [[owners[0], holder], [owners[1], unreserved]] as const)
+      expect(await f.call("GET", `/vaults/${vault.id}/fund/signed`, owner)).toMatchObject({ status: 404, body: { code: "signed_deposit_not_found" } });
+  });
+});
+
 describe("the webapp's message when the server refuses a new vault", () => {
   it("says nothing was saved, and to keep the downloaded backup when the script isn't new", () => {
     const message = (code: string, status = 409) => (registrationError(new ApiRequestError("server text", status, code)) as Error).message;
@@ -382,5 +429,15 @@ describe("the webapp's message when the server refuses a new vault", () => {
     }
     const other = new ApiRequestError("Invalid vault ownership or funding state.", 400, "vault_invalid");
     expect(registrationError(other)).toBe(other);
+  });
+
+  it("says a refused deposit sent nothing and shouldn't be resent", () => {
+    const refusal = depositRefusal(new ApiRequestError("server text", 409, "vault_script_registered"));
+    expect(refusal?.message).toBe(
+      "Another vault on this server has this vault's script, so this vault takes no deposit. Nothing was sent: don't send this deposit or make another for this vault.",
+    );
+    // Any other failure stays an uncertain submission.
+    expect(depositRefusal(new ApiRequestError("Unable to complete the request. Please retry.", 502, "miner_request_failed"))).toBeUndefined();
+    expect(depositRefusal(new Error("fetch failed"))).toBeUndefined();
   });
 });

@@ -734,6 +734,8 @@ const ownerLimitsRead = source(
 );
 // Routes that check the owner allowlist (QSB_OWNER_ALLOWLIST).
 const allowlisted = merge(ownerLimitsRead, { 403: ["owner_not_allowlisted"] });
+// A vault whose script another vault's reservation holds takes no deposit.
+const scriptHeld: Errors = { 409: ["vault_script_registered"] };
 // The owner's single webhook row: a registration or deletion that keeps losing its version race.
 const webhookRow = source(["webhooks.ts | update"], { 409: ["state_conflict"] });
 
@@ -908,7 +910,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     responses: {
       201: { description: "The deposit was recorded.", schema: vaultResponse },
     },
-    errors: merge(chainLookup, writes, fundingMatch, allowlisted, {
+    errors: merge(chainLookup, writes, fundingMatch, allowlisted, scriptHeld, {
       404: ["vault_not_found"],
       409: ["network_mismatch", "funding_intent_exists"],
       503: ["operations_disabled"],
@@ -930,7 +932,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: fundingSubmissionResponse,
       },
     },
-    errors: merge(deposit, allowlisted, { 503: ["operations_disabled", "submit_disabled"] }),
+    errors: merge(deposit, allowlisted, scriptHeld, { 503: ["operations_disabled", "submit_disabled"] }),
   },
   {
     method: "get",
@@ -952,7 +954,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         }),
       },
     },
-    errors: merge(fundingExport, allowlisted, {
+    errors: merge(fundingExport, allowlisted, scriptHeld, {
       404: ["signed_deposit_not_found"],
       503: ["submit_disabled"],
     }),
@@ -974,7 +976,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: fundingSubmissionResponse,
       },
     },
-    errors: merge(deposit, allowlisted, {
+    errors: merge(deposit, allowlisted, scriptHeld, {
       404: ["vault_not_found"],
       409: ["signed_deposit_not_found"],
       503: ["operations_disabled", "submit_disabled"],
