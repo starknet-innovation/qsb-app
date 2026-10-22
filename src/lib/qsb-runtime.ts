@@ -12,7 +12,7 @@ export const QSB_SOURCES = [
   "qsb_pipeline.py",
   "bridge.py",
 ] as const;
-export type QsbMethod = "generate" | "validate" | "assemble";
+export type QsbMethod = "generate" | "adopt" | "validate" | "assemble";
 /** The part of a loaded Pyodide instance the bridge needs. */
 export type PythonRuntime = {
   FS: { writeFile(path: string, data: Uint8Array): void };

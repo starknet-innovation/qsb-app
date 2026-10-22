@@ -53,15 +53,17 @@ try {
   // 4. The SDK loads from the package and runs the pinned Python there, after its manifest check.
   const env = { ...process.env, QSB_NETWORK: "mainnet" };
   const smoke = `
-    import { ApiRequestError, QsbClient, loopbackTestSigner, nodeQsb, preparedDepositSchema } from "${name}";
-    const exported = [ApiRequestError, QsbClient, loopbackTestSigner, nodeQsb, preparedDepositSchema].every(Boolean);
+    import { ApiRequestError, QsbClient, RefusedState, loopbackTestSigner, nodeQsb, preparedDepositSchema } from "${name}";
+    const exported = [ApiRequestError, QsbClient, RefusedState, loopbackTestSigner, nodeQsb, preparedDepositSchema].every(Boolean);
     const qsb = nodeQsb();
     const generated = await qsb.generateQsb();
     const valid = (await qsb.validateRecovery(generated.stateJson)) === generated.scriptHash;
+    const adopted = JSON.stringify(await qsb.adoptQsb(generated.stateJson)) === JSON.stringify(generated);
     qsb.lockQsb();
-    console.log(JSON.stringify({ exported, valid }));`;
+    console.log(JSON.stringify({ exported, valid, adopted }));`;
   const result = JSON.parse(run("node", ["--input-type=module", "-e", smoke], { cwd: consumer, env }).trim().split("\n").pop());
-  if (!result.exported || !result.valid) fail(`the installed SDK didn't generate and validate a vault: ${JSON.stringify(result)}`);
+  if (!result.exported || !result.valid || !result.adopted)
+    fail(`the installed SDK didn't generate, validate and adopt a vault's state: ${JSON.stringify(result)}`);
 
   // 5. The qsb bin runs, and refuses to guess a network.
   const help = run(path.join(consumer, "node_modules", ".bin", "qsb"), ["--help"], { cwd: consumer, env });
@@ -81,7 +83,8 @@ try {
     declare const signer: Signer;
     const authorizations: AuthorizationStore = { getItem: () => null, setItem: () => {} };
     const client: QsbClient = new QsbClient({ baseUrl: "https://app.example", signer, authorizations });
-    void client; void nodeQsb;`);
+    const own = (stateJson: string) => client.vaults.create({ name: "own", passphrase: "p", saveBackup: async () => {}, stateJson });
+    void own; void nodeQsb;`);
   const consumers = {
     bundler: { module: "ESNext", moduleResolution: "Bundler", skipLibCheck: true },
     nodenext: { module: "NodeNext", moduleResolution: "NodeNext", skipLibCheck: false },
@@ -100,7 +103,7 @@ try {
   }
 
   console.log(`SDK package check passed: ${files.length} files, ${(packed.size / 1024).toFixed(0)} KiB packed. ` +
-    "Installed outside the repository, it generated and validated a vault in Pyodide, ran qsb, and type-checked for " +
+    "Installed outside the repository, it generated, validated and adopted a vault's state in Pyodide, ran qsb, and type-checked for " +
     "bundler and NodeNext consumers.");
 } finally {
   rmSync(work, { recursive: true, force: true });

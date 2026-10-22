@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from types import SimpleNamespace
 import qsb_pipeline as pipeline
 from bitcoin_tx import QSBScriptBuilder
@@ -11,9 +12,10 @@ from bitcoin_tx import QSBScriptBuilder
 PUBLIC_FIELDS = ('config', 'hash_mode', 'n', 't1s', 't1b', 't2s', 't2b',
                  'hors_commitments', 'dummy_sigs', 'pin_r', 'pin_s', 'pin_sig',
                  'round_sigs', 'full_script_hex')
+CONFIG_A = {'config': 'A', 'hash_mode': 'sha256', 'n': 150, 't1s': 8, 't1b': 1, 't2s': 7, 't2b': 2}
 
 def validate_state(state):
-    if (state['config'], state['hash_mode'], state['n'], state['t1s'], state['t1b'], state['t2s'], state['t2b']) != ('A', 'sha256', 150, 8, 1, 7, 2):
+    if tuple(state[k] for k in CONFIG_A) != tuple(CONFIG_A.values()):
         raise ValueError('Unsupported recovery configuration')
     builder = QSBScriptBuilder(150, 8, 1, 7, 2, hash_mode='sha256')
     builder.hors_commitments = [[bytes.fromhex(c) for c in r] for r in state['hors_commitments']]
@@ -32,16 +34,130 @@ def validate_state(state):
         raise ValueError('Recovery script mismatch')
     return script
 
-def generate():
-    with contextlib.redirect_stdout(io.StringIO()):
-        pipeline.cmd_setup(SimpleNamespace(config='A', seed=None))
+def setup(secrets=None):
+    """Run the pipeline's Config A setup and return the state it saves. `secrets`, the HORS secrets in
+    the order generate_keys draws them, replace its 20-byte os.urandom draws."""
+    original = os.urandom
+    draws = iter(secrets or ())
+    def urandom(size):
+        if size != 20:
+            return original(size)
+        secret = next(draws, None)
+        if secret is None:
+            raise ValueError('The pipeline drew more HORS secrets than the state holds')
+        return secret
+    if secrets is not None:
+        os.urandom = urandom
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            pipeline.cmd_setup(SimpleNamespace(config='A', seed=None))
+    finally:
+        os.urandom = original
     with open('qsb_state.json') as f:
         state = json.load(f)
+    os.unlink('qsb_state.json')
+    return state
+
+def result(state):
     script = validate_state(state)
     public = {k: state[k] for k in PUBLIC_FIELDS}
     public['round_sigs'] = [{k: r[k] for k in ('r', 's', 'sig')} for r in state['round_sigs']]
-    os.unlink('qsb_state.json')
     return json.dumps({'stateJson': json.dumps(state), 'publicStateJson': json.dumps(public), 'scriptHex': script.hex(), 'scriptHash': hashlib.sha256(script).hexdigest()})
+
+def generate():
+    return result(setup())
+
+class RefusedError(ValueError):
+    """adopt's refusal of a supplied state: the message says what didn't match."""
+
+def name(key):
+    """A caller's JSON key as it appears in a message, quoted unless it's a plain name."""
+    return key if re.fullmatch('[A-Za-z_][A-Za-z0-9_]*', key) else json.dumps(key)
+
+def difference(supplied, expected, path=''):
+    """The first place `supplied` differs from `expected` in shape, type or value, or None."""
+    if isinstance(expected, dict) and isinstance(supplied, dict):
+        at = lambda key: f'{path}.{key}' if path else key
+        for key in supplied:
+            if key not in expected:
+                return f'{at(name(key))} is not a field the pipeline produces'
+        for key in expected:
+            found = f'{at(key)} is missing' if key not in supplied else difference(supplied[key], expected[key], at(key))
+            if found:
+                return found
+        return None
+    if isinstance(expected, list) and isinstance(supplied, list) and len(supplied) == len(expected):
+        for i, (a, b) in enumerate(zip(supplied, expected)):
+            found = difference(a, b, f'{path}[{i}]')
+            if found:
+                return found
+        return None
+    if isinstance(expected, (dict, list)) or json.dumps(supplied) != json.dumps(expected):
+        return f'{path} is not what the pipeline builds from these HORS secrets'
+    return None
+
+def unique(pairs):
+    """A JSON object whose keys each appear once; json.loads would otherwise keep the last."""
+    seen = set()
+    for key, _ in pairs:
+        if key in seen:
+            raise RefusedError(f'{name(key)} appears twice in one object')
+        seen.add(key)
+    return dict(pairs)
+
+def nesting(text):
+    """How deeply text's JSON arrays and objects nest, outside strings."""
+    level = deepest = 0
+    quoted = escaped = False
+    for ch in text:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif ch == '\\':
+                escaped = True
+            elif ch == '"':
+                quoted = False
+        elif ch == '"':
+            quoted = True
+        elif ch in '[{':
+            level += 1
+            deepest = max(deepest, level)
+        elif ch in ']}':
+            level -= 1
+    return deepest
+
+def adopt(state_json):
+    """Accept a caller's recovery state only if it is exactly the state setup builds from its HORS secrets."""
+    # The pipeline's state nests 3 deep; deeper input could exhaust the interpreter's stack.
+    if nesting(state_json) > 3:
+        raise RefusedError("the recovery state nests deeper than the pipeline's state")
+    try:
+        state = json.loads(state_json, object_pairs_hook=unique)
+    except RefusedError:
+        raise
+    except ValueError as error:
+        raise RefusedError(f'the recovery state is not JSON this check reads ({error})')
+    if not isinstance(state, dict):
+        raise RefusedError('the recovery state is not a JSON object')
+    for key in (*CONFIG_A, 'hors_secrets'):
+        if key not in state:
+            raise RefusedError(f'{key} is missing')
+    for key, value in CONFIG_A.items():
+        if json.dumps(state[key]) != json.dumps(value):
+            raise RefusedError(f"{key} is not Config A's {json.dumps(value)}")
+    secrets = state['hors_secrets']
+    if not isinstance(secrets, list) or len(secrets) != 2 or any(not isinstance(r, list) or len(r) != 150 for r in secrets):
+        raise RefusedError('hors_secrets is not 2 rounds of 150 secrets')
+    flat = [s for r in secrets for s in r]
+    if not all(isinstance(s, str) and re.fullmatch('[0-9a-f]{40}', s) for s in flat):
+        raise RefusedError('a HORS secret is not 20 bytes of lowercase hex')
+    if len(set(flat)) != len(flat):
+        raise RefusedError('a HORS secret repeats')
+    expected = setup([bytes.fromhex(s) for s in flat])
+    found = difference(state, expected)
+    if found:
+        raise RefusedError(found)
+    return result(expected)
 
 def validate(state_json):
     script = validate_state(json.loads(state_json))

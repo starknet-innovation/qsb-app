@@ -38,6 +38,8 @@ await qsb.login();
 
 // Vault: generated and encrypted here; only the public record is registered.
 const { vault } = await qsb.vaults.create({ name: "cold-1", passphrase, saveBackup: keep });
+// Or from recovery state you generated yourself, checked here first (see "Your own recovery state").
+const { vault: own } = await qsb.vaults.create({ name: "cold-2", passphrase, saveBackup: keep, stateJson });
 
 // Deposit: one per vault. You sign the PSBT; the server relays it to MARA Slipstream.
 const prepared = await qsb.deposits.prepare(vault.id, { backup, passphrase, amount: 200_000n, feeRate: "2", utxos });
@@ -53,7 +55,7 @@ const tx = await qsb.withdrawals.assemble(job.id, { backup: withdrawalBackup, pa
 await qsb.withdrawals.submit(tx, { approve: async (review) => (await askUser(review)) ? review.txid : false });
 ```
 
-`QsbClient` options: `baseUrl`, `signer`, and optionally `basePath` (`/v1`, the default, or the `/api` compatibility alias), `appOrigin` (the app origin the server names in its sign-in challenge: its `APP_ORIGIN` when set, otherwise, on the deployment, its `SYSTEM#DEPLOYMENT` row; default `baseUrl`'s origin), `fetch`, `qsb` (the local runtime, default Pyodide in-process), `pendingDeposits` (where a signed deposit waits until MARA has it), `authorizations` (this device's one intent and one assembly per vault), `token` (a cached session), `apiKey` and `timeoutMs`.
+`QsbClient` options: `baseUrl`, `signer`, and optionally `basePath` (`/v1`, the default, or the `/api` compatibility alias), `appOrigin` (the app origin the server names in its sign-in challenge: its `APP_ORIGIN` when set, otherwise, on the deployment, its `SYSTEM#DEPLOYMENT` row; default `baseUrl`'s origin), `fetch`, `qsb` (the local runtime, default Pyodide in-process; a supplied `stateJson` is always checked by the package's own), `pendingDeposits` (where a signed deposit waits until MARA has it), `authorizations` (this device's one intent and one assembly per vault), `token` (a cached session), `apiKey` and `timeoutMs`.
 
 `apiKey` is an API key the owner minted with a wallet session ([docs/API.md](../docs/API.md#api-keys)). The SDK sends it as `X-Qsb-Authorization: Bearer qsb_mainnet_…` instead of signing in ([request headers](../docs/API.md#request-headers)); its scopes decide what it can do. Minting, listing and revoking keys still need a wallet session, and the SDK doesn't wrap those routes. The key goes only in that header: never in a URL, body, error or log. The signer is still needed for the PSBTs. `pendingDeposits` and `authorizations` default to memory; the CLI keeps both under `~/.qsb`. `QSB_NETWORK=mainnet` must be set when the SDK is imported; it refuses a server on another network.
 
@@ -63,7 +65,7 @@ The routes below are shown under `/api`; the SDK, like the mainnet webapp, calls
 | --- | --- | --- |
 | `login()` | `POST /api/auth/challenge`, `/verify` | checks the challenge text, then `signer.signMessage` |
 | `config()`, `rates()`, `utxos()` | `GET /api/config`, `/rates`, `/payment-utxos` | |
-| `vaults.create` | `POST /api/vaults` | generate, encrypt, `saveBackup`, re-open and validate |
+| `vaults.create` | `GET /api/vaults` (with `stateJson` only), `POST /api/vaults` | generate, or check `stateJson`; encrypt, `saveBackup`, re-open and validate |
 | `vaults.list` | `GET /api/vaults` | |
 | `deposits.prepare` | `/payment-input`, `/rates` | validate the backup against the vault, build the PSBT, check MARA's floor |
 | `deposits.submit` | `POST /api/vaults/:id/fund/submit` | rebuild the expected PSBT, verify the signed one, keep it pending |
@@ -84,6 +86,28 @@ Rules that carry over from the webapp:
 - `withdrawals.submit` shows values only after checking that the stored intent hashes to the one bound at assembly. Only the server's own disabled refusal counts as "nothing was accepted"; any other failure, including a gateway 503 or the API's 502 and 503 for a failed chain or miner request (`chain_unavailable`, `chain_error`, `miner_unavailable`, `miner_request_failed`), is reported as an uncertain outcome that must not be submitted again.
 - `deposits.submit` keeps the signed deposit pending on any failure other than a per-owner refusal, including those 502s and 503s, so `deposits.resubmit` can resend exactly those bytes.
 
+## Your own recovery state
+
+`vaults.create({ name, passphrase, saveBackup, stateJson })` registers a vault from recovery state you generated yourself, on an offline machine for example, instead of state the SDK generates; `qsb vault create --state <file>` does the same from a file. It's an option of `vaults.create`, not a separate import, because everything after the state is the same (encrypt, `saveBackup`, re-open, register). It makes a new vault, so the state must never have locked one: the app never takes in an existing vault, which has its one deposit.
+
+`stateJson` is the `qsb_state.json` that `python3 qsb_pipeline.py setup --config A` writes with the sources in [`public/qsb`](../public/qsb). Run it under `umask 077` so other users of that machine can't read the file, and outside any repository so it can't be committed (this repository ignores `qsb_state.json`; others may not). The state's only random input is the 2 × 150 HORS secrets: setup derives every other field from them or from fixed constants. Before the state is encrypted or saved, and before the vault is registered, the SDK checks the state in a fresh interpreter of its own bundled runtime, the manifest-checked Pyodide sources, and never with the `qsb` option: a replaced runtime could pass a script that the secrets can't spend, and the deposit would be locked for good.
+
+- It's JSON text of at most a million characters, nested no deeper than the pipeline's state, with no key twice in one object. It's Config A (sha256, n = 150) with 2 × 150 HORS secrets, each 20 bytes of lowercase hex, none repeated.
+- `adopt` in [`bridge.py`](../public/qsb/bridge.py) runs the pipeline's setup again with those secrets in place of its random draws, and every field must equal what that builds, in type and value: each commitment (its secret's HASH160), the dummy signatures, the pinning and round signatures with their nonces, and the full script, which setup builds only within the 10,000-byte and 201-opcode limits. A missing field is refused, and so is any field setup doesn't write, in a round signature too.
+- No vault of the signed-in address on this deployment has a script that pushes any of its HORS commitments, so none shares its script or one of its secrets. The SDK reads each vault's script, which the server binds to the vault's hash, not the commitments its public state declares. The SDK lists that address's vaults before the check, so an API key needs the `read` scope as well as `vaults`, and lists them again just before registering.
+
+`vaults.create` throws a `RefusedState` for a refused state, with a message that says what didn't match, naming the field: for example `The supplied recovery state was refused: hors_commitments[0][17] is not what the pipeline builds from these HORS secrets. Nothing was saved or registered.` Every refusal comes before `saveBackup`, except one: when the second listing finds a vault registered from the same secrets while the backup was saved. Nothing is registered then, and the message says to discard the backup just saved. Any other error (a name or passphrase it won't take, a runtime or deployment failure) is not a verdict on the state. An accepted state gives the same public state and script as when the SDK draws the same secrets itself, and its backup holds the same state; the same bundled runtime re-opens the backup after `saveBackup`.
+
+Pass the text as written. The state holds integers above 2^53 (`pin_r`, `pin_s`, `pin_k` and each round's `r`, `s` and `k`) that `JSON.parse` rounds, and a rounded state is refused.
+
+The SDK can't check these, so they're up to you:
+
+- The secrets are random and nobody else has them. Draw them from a cryptographically secure source; setup's `--seed` makes them predictable. Anyone who has them can spend the vault.
+- The secrets lock no other vault. The SDK only refuses secrets whose commitments a vault script of the signed-in address on this deployment already pushes. It can't see vaults of other addresses or deployments, or payments to the script made outside the app. And two `vaults.create` calls running at once with the same secrets can both register: the server doesn't refuse a repeated script, and the second listing only narrows that window. A state is for one vault and one deposit, and its secrets are for one state, in part or reordered: the first withdrawal discloses 15 of them, which would help someone else spend any other output whose script uses them.
+- The plaintext copy. The backup holds the state encrypted. Keep the plaintext as safe as the backup until the saved backup reads back as the `backup` that `vaults.create` returned (the CLI checks this before it finishes), then destroy it.
+
+`nodeQsb().adoptQsb(stateJson)` runs the same bridge check on its own, without the address check, and returns what `generateQsb` would. It throws `RefusedState` when it refuses the state.
+
 ## CLI
 
 ```sh
@@ -91,6 +115,7 @@ export QSB_NETWORK=mainnet QSB_API_URL=https://app.example
 export QSB_ADDRESS=bc1q... QSB_PUBLIC_KEY=02...
 npm run qsb -- login --message-out challenge.txt      # sign the message (BIP-322), paste the signature
 npm run qsb -- vault create --name cold-1 --backup vault.json
+#   or, from recovery state you generated: vault create --name cold-2 --backup vault2.json --state qsb_state.json
 npm run qsb -- utxos
 npm run qsb -- deposit prepare <vault> --backup vault.json --amount 0.002 --fee-rate 2 --utxo <txid:vout> --out deposit.json
 #   sign deposit.psbt in your wallet (Sparrow, HWI, …) without broadcasting
@@ -124,7 +149,7 @@ node sdk/check-package.mjs                      # packs it, installs it outside 
 
 The build ([`build.mjs`](build.mjs)) bundles the app's own `src/lib`, `src/mainnet` and `server/api-schemas` code into the package, so the SDK runs the same checks and signing preparation as the webapp. npm dependencies stay external, pinned to the repository's versions. The declarations get explicit `.js` extensions for Node ESM (`NodeNext`) consumers, and the release JSON they refer to is inlined as the type TypeScript infers for it, checked against that type at build time. It copies the pinned Python sources, `manifest.json` and their MIT `LICENSE` into `public/qsb`. At run time the SDK checks every Python file against that manifest before running it, as the webapp does. The network comes only from `QSB_NETWORK` at run time; the package has no default.
 
-[`check-package.mjs`](check-package.mjs) runs in CI. It checks that the tarball holds only the bundles, declarations, Python sources and README, and that the bundles reach nothing outside it. Then it installs the tarball into an empty project, generates and validates a vault in Pyodide through it, runs `qsb`, and type-checks two TypeScript consumers: a bundler, and a strict `NodeNext` project with declaration checking on and no DOM types.
+[`check-package.mjs`](check-package.mjs) runs in CI. It checks that the tarball holds only the bundles, declarations, Python sources and README, and that the bundles reach nothing outside it. Then it installs the tarball into an empty project, generates, validates and adopts a vault's state in Pyodide through it, runs `qsb`, and type-checks two TypeScript consumers: a bundler, and a strict `NodeNext` project with declaration checking on and no DOM types.
 
 Publishing needs two decisions first: a licence for this code (the package stays `"private": true` until then; [`tests/sdk-package.test.ts`](../tests/sdk-package.test.ts) holds that), and npm access for the `@starknet-innovation` scope.
 

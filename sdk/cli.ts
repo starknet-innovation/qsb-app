@@ -34,7 +34,10 @@ Account
   logout                        Forget the cached session
   config | rates | utxos        Server configuration, MARA fee rates, confirmed payment outputs
 Vaults
-  vault create --name <name> --backup <new file>
+  vault create --name <name> --backup <new file> [--state <file>]
+                  --state uses recovery state you generated (the JSON the pipeline's setup writes)
+                  instead of generating it. It's refused unless it's exactly what the pipeline builds
+                  from its HORS secrets, checked locally before the backup is saved or the vault registered.
   vault list
 Deposits (one per vault)
   deposit prepare <vault> --backup <file> --amount <BTC> --fee-rate <sat/vB> --utxo <txid:vout>... --out <file>
@@ -85,6 +88,7 @@ const options = {
   "signed-psbt": { type: "string" },
   name: { type: "string" },
   backup: { type: "string" },
+  state: { type: "string" },
   "out-backup": { type: "string" },
   amount: { type: "string" },
   "fee-rate": { type: "string" },
@@ -237,16 +241,20 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
       case "vault create": {
         arity(2);
         const file = need("backup"), name = need("name");
-        assertOutputs(io, [file], [], [values["message-out"]]);
+        assertOutputs(io, [file], [values.state], [values["message-out"]]);
+        const stateJson = values.state === undefined ? undefined : await readTextFile(io, values.state);
         const secret = await passphrase(true);
         await signIn();
-        say("Generating QSB keys locally…");
+        say(stateJson === undefined ? "Generating QSB keys locally…" : `Checking the recovery state in ${values.state} locally…`);
         const { vault } = await client.vaults.create({
           name,
           passphrase: secret,
           saveBackup: (text) => writeNewPrivateFile(io, file, text),
+          ...(stateJson === undefined ? {} : { stateJson }),
         });
         say(`Encrypted recovery backup saved to ${file}. Keep it and its passphrase: the server holds only public data, and nobody can recover the vault without both.`);
+        if (stateJson !== undefined)
+          say(`${values.state} still holds the recovery state unencrypted. Once the backup is safe, destroy that copy, and never use the state for another vault.`);
         print({ vault });
         return 0;
       }

@@ -19,7 +19,7 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB) vaults: vault secrets are 
 
 ## How a withdrawal runs
 
-1. The browser (or the SDK) generates the vault locally and registers only its public record. The user signs the one deposit in their wallet, and the API relays it to MARA Slipstream.
+1. The browser (or the SDK) generates the vault locally, or the SDK checks recovery state its caller generated ([own state](sdk/README.md#your-own-recovery-state)), and registers only its public record. The user signs the one deposit in their wallet, and the API relays it to MARA Slipstream.
 2. `POST /api/jobs` in `createApp` (`server/app.ts`) checks the served solver release, reserves the vault's outpoints atomically, writes the job and calls `startWorkflow`, which starts the withdrawal state machine.
 3. The state machine's `CoordinateSearch` task invokes the coordinator Lambda (`terraform/workflow.tf`). The coordinator submits GPU work to AWS Batch, polls it, and has the reference Lambda (`worker/cpu`) re-check every hit.
 4. Once solved, the browser assembles and signs the withdrawal locally. `POST /api/jobs/:id/submit` checks the exact spend, runs the offline Core check and posts it once to MARA Slipstream ([exact submission](docs/EXACT-SUBMIT.md)).
