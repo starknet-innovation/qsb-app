@@ -74,7 +74,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 - **User**: the supported service flow requires their backup, passphrase and original wallet. The vault script does not bind that wallet; possession of decrypted recovery state can enable an outside-service spend using another controlled helper.
 - **QSB service**: can refuse or delay a withdrawal, but not redirect it: the destination is fixed by signatures made on the user's machine.
 - **GPU solver**: untrusted compute on public data. Only independently CPU-verified hits can be used as solutions; verification does not necessarily examine every returned hit.
-- **Operator**: an MFA-backed role that reconciles records after an unknown outcome. It can't sign, and the tool never resubmits.
+- **Operator**: an MFA-backed role that reconciles records after an unknown outcome and writes missing script reservations. It can't sign, and its tools never resubmit.
 - **MARA**: receives fully signed transactions and optional authorization/client-code credentials; withdrawals include the disclosed HORS preimages.
 
 **Trust note.** The web app is served from the deployment, so whoever can deploy controls the code that runs in the browser and can read the MARA credential. The SDK and CLI run code the user installs.

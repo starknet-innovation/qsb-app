@@ -232,7 +232,7 @@ describe("the operator's script-reservation backfill", () => {
     await unreserved(store, legacy);
     // Without a reservation, a second vault of the script would be registered.
     const dry = await backfillScriptReservations(store, await store.vaultRows(), false);
-    expect(dry).toEqual({ applied: false, vaults: 1, reserved: 1, alreadyReserved: 0, duplicates: [], unreadable: [] });
+    expect(dry).toEqual({ applied: false, vaults: 1, reserved: 1, alreadyReserved: 0, duplicates: [], unreadable: [], unsettled: [] });
     expect(f.rows().reservations).toEqual([]);
     const applied = await backfillScriptReservations(store, await store.vaultRows(), true);
     expect(applied).toMatchObject({ applied: true, reserved: 1, duplicates: [] });
@@ -254,7 +254,7 @@ describe("the operator's script-reservation backfill", () => {
     for (const apply of [false, true])
       expect(await backfillScriptReservations(store, await store.vaultRows(), apply)).toMatchObject({
         reserved: 1,
-        duplicates: [second.id],
+        duplicates: [{ vault: second.id, heldBy: first.id }],
       });
     expect((await store.get(`SCRIPT#${first.scriptHash}`, "RESERVATION"))?.vaultId).toBe(first.id);
   });
@@ -273,22 +273,43 @@ describe("the operator's script-reservation backfill", () => {
       vaults: 2,
       reserved: 0,
       alreadyReserved: 0,
-      duplicates: [legacy.id],
+      duplicates: [{ vault: legacy.id, heldBy: newer.id }],
       unreadable: [broken.id],
+      unsettled: [],
     });
     expect((await store.get(`SCRIPT#${legacy.scriptHash}`, "RESERVATION"))?.vaultId).toBe(newer.id);
     expect(await store.get(`SCRIPT#${broken.scriptHash}`, "RESERVATION")).toBeUndefined();
   });
 
-  it("reports a script reserved between its read and its write as a duplicate", async () => {
+  it("reports a script reserved between its read and its write as a duplicate, and an unsettled write as such", async () => {
     const store = new MemoryStore();
     const legacy = vaultFor(owners[0], script());
     await unreserved(store, legacy);
-    vi.spyOn(store, "put").mockRejectedValueOnce(new Conflict("Concurrent update"));
+    const put = store.put.bind(store);
+    // A registration of the same script commits between the backfill's read and its write.
+    const newer = vaultFor(owners[1], legacy.scriptHex);
+    vi.spyOn(store, "put").mockImplementationOnce(async () => {
+      await put(scriptReservation(owners[1], newer));
+      throw new Conflict("Concurrent update");
+    });
     expect(await backfillScriptReservations(store, await store.vaultRows(), true)).toMatchObject({
       reserved: 0,
-      duplicates: [legacy.id],
+      duplicates: [{ vault: legacy.id, heldBy: newer.id }],
+      unsettled: [],
     });
+    // DynamoDB's answer to a PutItem on an item a transaction still holds: nothing to read yet.
+    const other = new MemoryStore();
+    const pending = vaultFor(owners[0], script());
+    await unreserved(other, pending);
+    vi.spyOn(other, "put").mockRejectedValueOnce(Object.assign(new Error("in flight"), { name: "TransactionConflictException" }));
+    expect(await backfillScriptReservations(other, await other.vaultRows(), true)).toMatchObject({
+      reserved: 0,
+      duplicates: [],
+      unsettled: [pending.id],
+    });
+    // Any other failure stops the run.
+    vi.spyOn(other, "put").mockRejectedValueOnce(Object.assign(new Error("denied"), { name: "AccessDeniedException" }));
+    await expect(backfillScriptReservations(other, await other.vaultRows(), true)).rejects.toThrow("denied");
   });
 
   it("scans every page of the table for vault rows, with consistent reads", async () => {

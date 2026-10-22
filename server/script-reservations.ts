@@ -10,10 +10,15 @@ export type ScriptBackfill = {
   reserved: number;
   /** Vaults that already hold their script's reservation. */
   alreadyReserved: number;
-  /** Vaults whose script another vault holds, or an older vault row shares. Left as they are. */
-  duplicates: string[];
+  /**
+   * Vaults whose script another vault holds, or an older vault row shares, each with that vault's
+   * id (`heldBy`). Left as they are.
+   */
+  duplicates: { vault: string; heldBy: string }[];
   /** Vault rows whose script hash isn't the SHA-256 of their script. Left as they are. */
   unreadable: string[];
+  /** Vaults whose write met another write to the reservation that hadn't settled. Run again. */
+  unsettled: string[];
 };
 
 /**
@@ -34,11 +39,12 @@ export async function backfillScriptReservations(
     alreadyReserved: 0,
     duplicates: [],
     unreadable: [],
+    unsettled: [],
   };
   const createdAt = (row: Row) => String((row.vault as Partial<PublicVault> | undefined)?.createdAt ?? "");
   const rows = [...vaultRows].sort((a, b) => createdAt(a).localeCompare(createdAt(b)) || a.sk.localeCompare(b.sk));
-  // Scripts this run reserved, or would: a dry run sees no reservation it would have written.
-  const claimed = new Set<string>();
+  // Scripts this run reserved, or would, by vault: a dry run sees no reservation it would have written.
+  const claimed = new Map<string, string>();
   for (const row of rows) {
     const vault = row.vault as Partial<PublicVault> | undefined;
     const vaultId = typeof vault?.id === "string" ? vault.id : row.sk.slice("VAULT#".length);
@@ -54,22 +60,30 @@ export async function backfillScriptReservations(
     const owner = row.pk.slice("OWNER#".length);
     const reservation = scriptReservation(owner, { id: vaultId, scriptHash });
     const mine = (held: Row | undefined) => held?.owner === owner && held.vaultId === vaultId;
-    const held = await store.get(reservation.pk, reservation.sk);
-    if (held && mine(held)) result.alreadyReserved++;
-    else if (held || claimed.has(scriptHash)) result.duplicates.push(vaultId);
-    else {
-      claimed.add(scriptHash);
-      if (apply)
-        try {
-          await store.put(reservation);
-        } catch (error) {
-          // A registration of the same script, between the read and the write.
-          if (!(error instanceof Conflict)) throw error;
-          result.duplicates.push(vaultId);
-          continue;
-        }
-      result.reserved++;
+    const settle = (held: Row | undefined) => {
+      if (held && mine(held)) result.alreadyReserved++;
+      else if (held) result.duplicates.push({ vault: vaultId, heldBy: String(held.vaultId) });
+      return held !== undefined;
+    };
+    const earlier = claimed.get(scriptHash);
+    if (settle(await store.get(reservation.pk, reservation.sk))) continue;
+    if (earlier) {
+      result.duplicates.push({ vault: vaultId, heldBy: earlier });
+      continue;
     }
+    claimed.set(scriptHash, vaultId);
+    if (apply)
+      try {
+        await store.put(reservation);
+      } catch (error) {
+        // Another write to this reservation between the read and the write: a registration of
+        // the same script, or another run. A plain PutItem meets a transaction still in flight
+        // as TransactionConflictException, which the store doesn't turn into a Conflict.
+        if (!(error instanceof Conflict) && (error as Error).name !== "TransactionConflictException") throw error;
+        if (!settle(await store.get(reservation.pk, reservation.sk))) result.unsettled.push(vaultId);
+        continue;
+      }
+    result.reserved++;
   }
   return result;
 }

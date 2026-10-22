@@ -276,16 +276,17 @@ The withdrawal API Lambda has a 120-second timeout, but CloudFront returns a tim
    npx tsx scripts/reserve-vault-scripts.ts
    ```
 
-2. Read the report: `vaults`, `reserved` (what `--apply` writes), `alreadyReserved`, and the vault ids in `duplicates` and `unreadable`. Then run it again with `--apply`. It writes each missing reservation with `attribute_not_exists` and never changes an existing one; of two rows sharing a script, it reserves the older.
-3. It exits non-zero when `duplicates` or `unreadable` isn't empty, with or without `--apply`.
-   - A duplicate is a vault whose script another vault already holds, or an older vault row shares. Those are two vault records on one script, which must never both take a deposit. Check both vaults' funding with their owners before anything else, and don't delete or reassign a reservation to clear the report.
+2. Read the report: `vaults`, `reserved` (what `--apply` writes), `alreadyReserved`, and the vault ids in `duplicates`, `unreadable` and `unsettled`. Then run it again with `--apply`. It writes each missing reservation with `attribute_not_exists` and never changes an existing one; of two rows sharing a script, it reserves the older.
+3. It exits non-zero when any of those three lists isn't empty, with or without `--apply`.
+   - A duplicate is `{ vault, heldBy }`: a vault whose script the vault `heldBy` already holds, or, for two rows sharing a script, the older row's vault. Those are two vault records on one script, which must never both take a deposit. Check both vaults' funding with their owners before anything else, and don't delete or reassign a reservation to clear the report.
    - An unreadable row's `scriptHash` isn't the SHA-256 of its script, so it gets no reservation.
+   - An unsettled vault's write met another write to the same reservation that hadn't committed, such as a registration of that script still in flight. Run the tool again.
 
 It reads the table with a Scan and writes only `SCRIPT#` rows, with PutItem. Its report names vault ids, never owner addresses.
 
 ## Operator session
 
-Reconciliation and plans run as `qsb-operator`. In the current account it is assumed from the Identity Center permission set; see the profiles in [ops/github-aws/README.md](../ops/github-aws/README.md#human-access-without-root). Sessions last at most an hour. The scoped runtime reconcile role Terraform declares (`operator_reconcile_role_arn`) stays dormant: `qsb-operator` is denied role chaining, so don't configure a profile for it.
+Reconciliation, plans and the script-reservation backfill run as `qsb-operator`. In the current account it is assumed from the Identity Center permission set; see the profiles in [ops/github-aws/README.md](../ops/github-aws/README.md#human-access-without-root). Sessions last at most an hour. The scoped runtime reconcile role Terraform declares (`operator_reconcile_role_arn`) stays dormant: `qsb-operator` is denied role chaining, so don't configure a profile for it.
 
 The `qsb-operator` session has deployment privileges, including `dynamodb:*` on QSB tables. It is not restricted to `OWNER#` partitions and can Query, Scan, Update and Delete, and read `SYSTEM#` and `OUTPOINT#` records. The reconcile CLIs' exact-record, conditional-version and audit checks restrict what they do; the session's IAM policy doesn't. Don't describe it as a least-privilege reconciliation identity.
 
