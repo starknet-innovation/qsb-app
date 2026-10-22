@@ -35,7 +35,7 @@ function vaultFor(paymentAddress: string, scriptHex: string): PublicVault {
   });
 }
 
-async function fixture(store = new MemoryStore()) {
+async function fixture(store = new MemoryStore(), options: { scriptLookupMs?: number } = {}) {
   for (const [owner, token] of tokens)
     await store.put({
       pk: `SESSION#${createHash("sha256").update(token).digest("hex")}`,
@@ -49,8 +49,23 @@ async function fixture(store = new MemoryStore()) {
   const funded = new Map<string, { chain: number; mempool: number; spent?: number } | (() => Response)>();
   const lookups: string[] = [];
   const network = { genesis: NETWORK_CONFIG.genesisHash };
-  const chain = new Esplora("https://chain.test", async (input) => {
+  /** How long each chain answer takes; a request whose signal ends first fails as fetch's does. */
+  const latency = { ms: 0 };
+  /** Each chain request's signal, by path. */
+  const signals = new Map<string, AbortSignal>();
+  const chain = new Esplora("https://chain.test", async (input, init) => {
     const path = new URL(String(input)).pathname;
+    const signal = init?.signal ?? undefined;
+    if (signal) signals.set(path, signal);
+    signal?.throwIfAborted();
+    if (latency.ms)
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, latency.ms);
+        signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(signal.reason);
+        });
+      });
     if (path === "/block-height/0") return new Response(network.genesis);
     const hash = /^\/scripthash\/([0-9a-f]{64})$/.exec(path)?.[1];
     if (!hash) return new Response("", { status: 404 });
@@ -63,7 +78,7 @@ async function fixture(store = new MemoryStore()) {
       scripthash: hash,
     });
   });
-  const app = createApp(store, { chain });
+  const app = createApp(store, { chain, scriptLookupMs: options.scriptLookupMs });
   const register = async (vault: PublicVault) => {
     const response = await app.request("/api/vaults", {
       method: "POST",
@@ -80,7 +95,7 @@ async function fixture(store = new MemoryStore()) {
       reservations: all.filter((row) => row.pk.startsWith("SCRIPT#")),
     };
   };
-  return { store, funded, network, lookups, register, rows };
+  return { store, funded, network, latency, signals, lookups, register, rows };
 }
 
 const script = () => randomBytes(100).toString("hex");
@@ -196,6 +211,21 @@ describe("POST /api/vaults registers each script once on the deployment", () => 
       });
     }
     expect(f.rows()).toEqual({ vaults: [], reservations: [] });
+  });
+
+  it("gives both chain reads one deadline, and writes nothing once it has passed", async () => {
+    // Each read alone is well inside the deadline; the two together aren't.
+    const f = await fixture(new MemoryStore(), { scriptLookupMs: 150 });
+    f.latency.ms = 100;
+    const vault = vaultFor(owners[0], script());
+    expect(await f.register(vault)).toMatchObject({ status: 503, body: { code: "chain_unavailable" } });
+    expect(f.rows()).toEqual({ vaults: [], reservations: [] });
+    // The deadline ended the network check's request too, not only the script's.
+    expect(f.signals.get("/block-height/0")?.aborted).toBe(true);
+    expect(f.signals.get(`/scripthash/${vault.scriptHash}`)?.aborted).toBe(true);
+    // Slow but inside the deadline: registered.
+    f.latency.ms = 20;
+    expect((await f.register(vault)).status).toBe(201);
   });
 
   it("writes nothing when the chain lookup fails, answers badly or is for another network", async () => {

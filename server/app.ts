@@ -147,6 +147,11 @@ export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
  */
 const REQUEST_BUDGET_MS = 25_000;
 const REQUEST_LIMIT_MS = 28_000;
+/**
+ * Both chain reads of a new vault's script, together. A slower answer refuses the vault, so it is
+ * written well inside CloudFront's 30 seconds or not at all, never after the caller got a 504.
+ */
+const SCRIPT_LOOKUP_MS = 15_000;
 /** How long a container keeps the deployment's app origin before reading its row again. */
 const ORIGIN_TTL_MS = 5 * 60_000;
 /** How long before a container reads the row again after finding it missing, or failing to read it. */
@@ -170,6 +175,8 @@ export function createApp(
     versionedAlias?: boolean;
     /** Trusted test configuration; the deployment reads QSB_OWNER_* from the environment. */
     ownerLimits?: OwnerLimits;
+    /** Tests only: a shorter SCRIPT_LOOKUP_MS. */
+    scriptLookupMs?: number;
   } = {},
 ) {
   // Routes write through `store`, so withdrawal and deposit status changes become owner
@@ -675,7 +682,8 @@ export function createApp(
     // used outside this deployment. Asked before the reservation, so a script anyone can see on
     // chain gets this answer whether or not a vault here has it. A failed lookup refuses too:
     // nothing is written without it.
-    if (!repeat && (await ledger.scriptFunded(vault.scriptHash)))
+    const lookup = () => AbortSignal.timeout(dependencies.scriptLookupMs ?? SCRIPT_LOOKUP_MS);
+    if (!repeat && (await ledger.scriptFunded(vault.scriptHash, lookup())))
       return apiError(c, 409, "vault_script_paid", "This script has already been paid on chain, so it can't be a new vault.");
     if (elsewhere(held))
       return apiError(c, 409, "vault_script_registered", "Another vault on this deployment already has this script.");
