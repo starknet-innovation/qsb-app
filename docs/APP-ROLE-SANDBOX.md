@@ -12,7 +12,7 @@ With an AWS CLI profile allowed to call `iam:SimulateCustomPolicy`, from the rep
 python3 scripts/simulate-app-role-iam.py
 ```
 
-This writes `APP-ROLE-IAM-SIMULATION.json` next to this doc: both policy files, a dummy table ARN, six actions (`GetItem`, `PutItem`, `DeleteItem`, `ConditionCheckItem`, `UpdateItem`, `BatchWriteItem`) and five key contexts (owner, outpoint, system, mixed owner/system, missing key). No role is assumed or changed and no table is accessed. The output records each source policy's hash and the simulator's decisions. Run it after changing either policy and commit its output with that change.
+This writes `APP-ROLE-IAM-SIMULATION.json` next to this doc: both policy files, a dummy table ARN, six actions (`GetItem`, `PutItem`, `DeleteItem`, `ConditionCheckItem`, `UpdateItem`, `BatchWriteItem`) and six key contexts (owner, outpoint, script, system, mixed owner/system, missing key). No role is assumed or changed and no table is accessed. The output records each source policy's hash and the simulator's decisions. Run it after changing either policy and commit its output with that change.
 
 ## 2–3. Live transaction and batch checks
 
@@ -26,6 +26,8 @@ The human access roles can't assume a test role by design, so [`ops/iam-sandbox/
 | Conditional re-create of the outpoint | `ConditionalCheckFailedException` |
 | Delete the outpoint | denied; the reservation remains |
 | After deleting the owner row: BatchWriteItem `OWNER#` + `SYSTEM#` | denied; neither row written, no partial success or `UnprocessedItems` |
+
+The live steps use `OUTPOINT#` rows. `SCRIPT#` reservations, which `POST /api/vaults` writes in a transaction of two Puts with the vault row, sit in the same deny statement (`DenyReservationDelete`), so only the simulation in step 1 covers them.
 
 Rows are read back with consistent reads between steps. A denial counts only when AWS attributes it to the role's own identity policy: a denial from the permissions boundary or an SCP fails the check, because it wouldn't be testing `app-records.json`.
 

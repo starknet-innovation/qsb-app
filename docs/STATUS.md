@@ -17,7 +17,7 @@ As of 2 October 2026. #8, the plan to a first mainnet withdrawal, is complete; w
 - One pipeline: the Step Functions coordinator. QSB runs on mainnet only.
 - GPU work runs on AWS Batch. Runpod is neither the default nor a fallback.
 - No test chains: testing happens on mainnet with small deposits. Before submit, an offline consensus check runs Bitcoin Core's script interpreter on the exact signed transaction (#20).
-- One deposit per vault. The server flags a payment to a vault's script beyond its deposit, and no withdrawal spends it ([API](API.md#stray-payments)).
+- One deposit per vault. The server registers each script once on the deployment, by any address, and refuses one already paid on chain ([API](API.md#vault-registration)). It flags a payment to a vault's script beyond its deposit, and no withdrawal spends it ([API](API.md#stray-payments)).
 
 `AGENTS.md` lists these with the funds-safety invariants.
 

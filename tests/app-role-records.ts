@@ -15,6 +15,7 @@ export const coordinatorPathWrites = {
     { prefix: "OWNER#", actions: ["PutItem"] },
     { prefix: "WEBHOOK#", actions: ["PutItem"] },
     { prefix: "OUTPOINT#", actions: ["PutItem"] },
+    { prefix: "SCRIPT#", actions: ["PutItem"] },
   ],
   coordinator: [
     { prefix: "OWNER#", actions: ["PutItem"] },

@@ -89,6 +89,21 @@ export async function canonicalReservationWrites(
   }));
 }
 
+/**
+ * A vault's script reservation: one row per script on this deployment, keyed by the script's
+ * SHA-256 (the vault's checked, lowercase `scriptHash`). It is written with the vault row, with
+ * attribute_not_exists(pk), so a second vault for the same script, by any owner, conflicts.
+ */
+export function scriptReservation(owner: string, vault: { id: string; scriptHash: string }): Row {
+  return {
+    pk: `SCRIPT#${vault.scriptHash}`,
+    sk: "RESERVATION",
+    version: 0,
+    owner,
+    vaultId: vault.id,
+  };
+}
+
 export class MemoryStore implements Store {
   readonly rows = new Map<string, Row>();
   async atomicPut(writes: AtomicWrite[]) {

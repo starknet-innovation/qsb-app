@@ -44,6 +44,10 @@ export const apiErrorCodes = {
     "The deployment's owner-limit settings are malformed, so this action is refused.",
   vault_invalid:
     "The vault's ownership, funding state or script commitment is wrong.",
+  vault_script_registered:
+    "Another vault on this deployment, of any address, already has this script. Nothing was registered.",
+  vault_script_paid:
+    "Something already paid this script on chain, confirmed or in the mempool, so it isn't new. Nothing was registered.",
   vault_not_found: "No vault with this id for the signed-in owner.",
   vault_not_funded: "The vault has no deposit yet.",
   vault_not_confirmed: "The vault's deposit isn't confirmed yet.",

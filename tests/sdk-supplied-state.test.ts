@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { ripemd160 } from "@noble/hashes/legacy.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -340,6 +341,44 @@ describe("vaults.create with a supplied state", () => {
     );
     expect(saveBackup).toHaveBeenCalledOnce();
     expect(vaultPosts(w).map((r) => JSON.parse(r.body).id)).toEqual([registered]);
+  }, 120000);
+
+  const scriptRefused = (code: string, reason: string) =>
+    `The deployment refused to register the vault (${code}): ${reason}. A script locks one vault, which takes one deposit. Nothing was registered: discard the backup just saved, and never pay into its script.`;
+  const storedVaults = (w: ReturnType<typeof world>) =>
+    [...w.store.rows.values()].filter((row) => row.sk.startsWith("VAULT#")).map((row) => (row.vault as { id: string }).id);
+
+  it("reports the server's refusal of a script another address registered as a refused state", async () => {
+    const { w, client } = await signedIn();
+    const someone = wallet(w.chain);
+    const theirs = new QsbClient({ baseUrl: API, signer: loopbackTestSigner(someone.wif, API), fetch: w.fetch, qsb: replacedRuntime() });
+    await theirs.login();
+    const { vault } = await theirs.vaults.create({ name: "theirs", passphrase, saveBackup: async () => {}, stateJson: generated.stateJson });
+    // This address has no vault, so only the server can see that the script is taken.
+    const saveBackup = vi.fn(async () => {});
+    const error = await client.vaults.create({ name: "mine", passphrase, saveBackup, stateJson: generated.stateJson }).then(
+      () => new Error("registered"),
+      (e: Error) => e,
+    );
+    expect(error).toBeInstanceOf(RefusedState);
+    expect(error.message).toBe(scriptRefused("vault_script_registered", "another vault on this deployment already has this script"));
+    expect(saveBackup).toHaveBeenCalledOnce();
+    expect(storedVaults(w)).toEqual([vault.id]);
+  }, 120000);
+
+  it("reports the server's refusal of a script already paid on chain as a refused state", async () => {
+    const { w, client } = await signedIn();
+    const payment = new btc.Transaction({ allowUnknownInputs: true, allowUnknownOutputs: true });
+    payment.addInput({ txid: randomBytes(32), index: 0 });
+    payment.addOutput({ script: hex.decode(generated.scriptHex), amount: 10_000n });
+    w.chain.add(hex.encode(payment.toBytes(true, false)));
+    const error = await client.vaults.create({ name: "paid", passphrase, saveBackup: async () => {}, stateJson: generated.stateJson }).then(
+      () => new Error("registered"),
+      (e: Error) => e,
+    );
+    expect(error).toBeInstanceOf(RefusedState);
+    expect(error.message).toBe(scriptRefused("vault_script_paid", "something has already paid this script on chain"));
+    expect(storedVaults(w)).toEqual([]);
   }, 120000);
 });
 

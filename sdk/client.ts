@@ -223,6 +223,19 @@ function refused(error: ApiRequestError, what: string, next = ""): Error {
     cause: error,
   });
 }
+/** The server's refusals of a vault whose script isn't new: final, and nothing was registered. */
+const scriptRefusals: Record<string, string> = {
+  vault_script_registered: "another vault on this deployment already has this script",
+  vault_script_paid: "something has already paid this script on chain",
+};
+function scriptRefusal(error: unknown): error is ApiRequestError & { code: string } {
+  return (
+    error instanceof ApiRequestError &&
+    error.status === 409 &&
+    error.code !== undefined &&
+    Object.hasOwn(scriptRefusals, error.code)
+  );
+}
 /** Refuse early when the deployment says this owner can't act, or its limits are misconfigured. */
 function assertOwnerAllowed(config: ApiConfig) {
   if (config.ownerLimits === null)
@@ -360,7 +373,8 @@ export class QsbClient {
      * With `stateJson`, the vault uses that recovery state instead, once this
      * package's own runtime finds it is exactly the state the pipeline builds
      * from its HORS secrets, and no vault of this address has a script that
-     * pushes one of its HORS commitments. Refusals are `RefusedState`s.
+     * pushes one of its HORS commitments. Refusals are `RefusedState`s, as is the server's
+     * refusal of a script that isn't new (`vault_script_registered`, `vault_script_paid`).
      */
     create: (input: { name: string; passphrase: string; saveBackup: SaveBackup; stateJson?: string }) =>
       this.createVault(input),
@@ -557,7 +571,7 @@ export class QsbClient {
       await input.saveBackup(backup);
       await this.unlock(backup, input.passphrase, vault, qsb);
       // Again, for a vault registered from the same secrets while this backup was saved. The server
-      // doesn't refuse a repeated script, so this narrows the window but can't close it.
+      // refuses only the same script, by any address; this also finds the secrets in another script.
       const sharing = supplied ? sharingSecrets((await this.vaults.list()).vaults, data.publicStateJson) : undefined;
       if (sharing)
         throw new RefusedState(
@@ -566,6 +580,11 @@ export class QsbClient {
       const registered = await this.session
         .api<{ vault: PublicVault }>("/vaults", publicVaultSchema.parse(vault))
         .catch((error) => {
+          if (scriptRefusal(error))
+            throw new RefusedState(
+              `The deployment refused to register the vault (${error.code}): ${scriptRefusals[error.code]}. A script locks one vault, which takes one deposit. Nothing was registered: discard the backup just saved, and never pay into its script.`,
+              { cause: error },
+            );
           throw ownerRefusal(error)
             ? refused(error, "to register the vault", " The saved backup is for an unregistered vault: never pay into its script.")
             : error;

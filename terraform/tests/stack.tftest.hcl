@@ -26,7 +26,7 @@ run "app_role_record_denies" {
       for role in ["api"] :
       length([
         for statement in jsondecode(aws_iam_role_policy.records[role].policy).Statement : statement
-        if statement.Sid == "DenyOutpointDelete" && statement.Effect == "Deny" && contains(statement.Action, "dynamodb:DeleteItem") && contains(try(statement.Condition["ForAnyValue:StringLike"]["dynamodb:LeadingKeys"], []), "OUTPOINT#*") && !contains(statement.Action, "dynamodb:PutItem")
+        if statement.Sid == "DenyReservationDelete" && statement.Effect == "Deny" && contains(statement.Action, "dynamodb:DeleteItem") && contains(try(statement.Condition["ForAnyValue:StringLike"]["dynamodb:LeadingKeys"], []), "OUTPOINT#*") && contains(try(statement.Condition["ForAnyValue:StringLike"]["dynamodb:LeadingKeys"], []), "SCRIPT#*") && !contains(statement.Action, "dynamodb:PutItem")
         ]) == 1 && length([
         for statement in jsondecode(aws_iam_role_policy.records[role].policy).Statement : statement
         if statement.Sid == "DenySystemRowWrites" && statement.Effect == "Deny" && contains(statement.Action, "dynamodb:PutItem") && contains(statement.Action, "dynamodb:DeleteItem") && contains(try(statement.Condition["ForAnyValue:StringLike"]["dynamodb:LeadingKeys"], []), "SYSTEM#*")
@@ -35,7 +35,7 @@ run "app_role_record_denies" {
         if statement.Sid == "TableDataAccess" && statement.Effect == "Allow" && contains(statement.Action, "dynamodb:PutItem") && contains(statement.Action, "dynamodb:ConditionCheckItem") && !contains(keys(statement), "Condition")
       ]) == 1
     ])
-    error_message = "App roles must be able to create a reservation, must deny deleting one, and must deny system-row writes."
+    error_message = "App roles must be able to create an outpoint or script reservation, must deny deleting one, and must deny system-row writes."
   }
 }
 run "coordinator_least_privilege" {

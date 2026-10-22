@@ -13,15 +13,17 @@ describe("app role record access", () => {
       "OWNER#",
       "WEBHOOK#",
       "OUTPOINT#",
+      "SCRIPT#",
     ]);
     expect(coordinatorPathWrites.coordinator).toEqual([
       { prefix: "OWNER#", actions: ["PutItem"] },
       { prefix: "WEBHOOK#", actions: ["PutItem"] },
     ]);
-    expect(
-      coordinatorPathWrites.api.find((entry) => entry.prefix === "OUTPOINT#")
-        ?.actions,
-    ).toEqual(["PutItem"]);
+    for (const reserved of ["OUTPOINT#", "SCRIPT#"])
+      expect(
+        coordinatorPathWrites.api.find((entry) => entry.prefix === reserved)
+          ?.actions,
+      ).toEqual(["PutItem"]);
     expect(
       [...coordinatorPathWrites.api, ...coordinatorPathWrites.coordinator].some(
         (entry) => entry.prefix.startsWith("SYSTEM#"),
@@ -46,6 +48,19 @@ describe("app role record access", () => {
         "OWNER#wallet",
         reservation[0]!,
       ]),
+    ).toBe("deny");
+  });
+
+  it("lets the API reserve a vault's script with its vault row and refuses to delete the reservation", () => {
+    const reservation = [`SCRIPT#${"cd".repeat(32)}`];
+    expect(decideAppRoleAccess("dynamodb:PutItem", reservation)).toBe("allow");
+    expect(decideAppRoleAccess("dynamodb:GetItem", reservation)).toBe("allow");
+    // The vault row and the reservation, in one transaction: each item is authorized on its own.
+    expect(decideAppRoleAccess("dynamodb:PutItem", ["OWNER#wallet"])).toBe("allow");
+    for (const action of ["DeleteItem", "UpdateItem", "BatchWriteItem"])
+      expect(decideAppRoleAccess(`dynamodb:${action}`, reservation)).toBe("deny");
+    expect(
+      decideAppRoleAccess("dynamodb:DeleteItem", ["OWNER#wallet", reservation[0]!]),
     ).toBe("deny");
   });
 
@@ -87,6 +102,7 @@ it("restricts coordinator writes including mixed and empty keys", () => {
   for (const keys of [
     [],
     ["OUTPOINT#x"],
+    ["SCRIPT#x"],
     ["SYSTEM#x"],
     ["OWNER#wallet", "OUTPOINT#x"],
     ["WEBHOOK#wallet", "SYSTEM#x"],

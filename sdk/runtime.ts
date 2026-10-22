@@ -13,8 +13,9 @@ type GeneratedQsb = Awaited<ReturnType<LocalQsb["generateQsb"]>>;
  */
 export type BundledQsb = LocalQsb & { adoptQsb(stateJson: string): Promise<GeneratedQsb> };
 /**
- * A refused supplied recovery state, from `adoptQsb` or `vaults.create`; the message says what didn't
- * match. Any other error is not a verdict on the state.
+ * A refused supplied recovery state, from `adoptQsb` or `vaults.create`, or the deployment's refusal of
+ * a vault script that isn't new; the message says what didn't match. Any other error is not a verdict
+ * on the state.
  */
 export class RefusedState extends Error {
   override name = "RefusedState";

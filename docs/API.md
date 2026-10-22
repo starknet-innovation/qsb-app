@@ -1,6 +1,6 @@
 # API
 
-The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side, except the HORS preimages a signed withdrawal reveals by design. This page covers its prefixes, request headers, OpenAPI document, errors, per-owner limits, stray payments, idempotency, API keys, and its event log and webhooks.
+The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side, except the HORS preimages a signed withdrawal reveals by design. This page covers its prefixes, request headers, OpenAPI document, errors, per-owner limits, vault registration, stray payments, idempotency, API keys, and its event log and webhooks.
 
 ## Prefixes
 
@@ -58,7 +58,7 @@ Errors produced in front of the app have no `code`. That includes errors from Cl
 | Switches | `operations_disabled`, `submit_disabled` |
 | Idempotency | `idempotency_conflict`, `idempotency_in_progress` |
 | Owner limits | `owner_not_allowlisted`, `owner_active_withdrawal_limit`, `owner_gpu_budget_reached`, `owner_limits_invalid` |
-| Vaults and deposits | `vault_invalid`, `vault_not_found`, `vault_not_funded`, `vault_not_confirmed`, `funding_intent_exists`, `funding_transaction_invalid`, `signed_deposit_not_found` |
+| Vaults and deposits | `vault_invalid`, `vault_script_registered`, `vault_script_paid`, `vault_not_found`, `vault_not_funded`, `vault_not_confirmed`, `funding_intent_exists`, `funding_transaction_invalid`, `signed_deposit_not_found` |
 | Withdrawal jobs | `job_not_found`, `job_unsupported`, `job_state_invalid`, `withdrawal_invalid`, `solver_not_served`, `solved_result_unavailable`, `reconcile_required`, `operator_review_required` |
 | Withdrawal submission | `intent_not_found`, `intent_conflict`, `exact_spend_mismatch`, `consensus_rejected`, `inclusion_check_failed` |
 | Inputs | `input_not_found`, `input_mismatch`, `input_unconfirmed`, `input_spent` |
@@ -81,6 +81,20 @@ A malformed value, including a GPU budget smaller than one submission's reservat
 Sign-in, reads and pause stay open, and so does `POST /api/jobs/:id/submit`: it sends the owner's own solved withdrawal and uses no GPU. Replaying an `idempotencyKey` returns the existing job and takes no slot.
 
 `GET /api/config` reports `ownerLimits`: `allowlist` (whether one is set), `allowlisted` (the caller's standing, from its session or API key, or `null` without either or without an allowlist), `maxActiveJobs` and `maxGpuSeconds`. It never returns the list.
+
+## Vault registration
+
+`POST /api/vaults` registers the public record of a vault the client generated. A script belongs to one vault and takes one deposit, so the server registers a script only once, under any address. Before writing anything it refuses a script that isn't new:
+
+- **409 `vault_script_registered`**: another vault on this deployment already has this script. Each registration writes a reservation row, `SCRIPT#<scriptHash>` / `RESERVATION` (the owner and the vault id), in the same transaction as the vault row, with `attribute_not_exists`. Of two registrations of one script, at once or not, exactly one succeeds. The one that loses a race gets `vault_script_registered`, or `state_conflict` while the winner's transaction is still in flight; a retry then gets `vault_script_registered`. The message never names the other vault or its address. The API role can create reservation rows but not delete or update them, as with `OUTPOINT#` rows.
+- **409 `vault_script_paid`**: the chain API reports an output paying the script, confirmed or in the mempool, spent or not (Esplora's `/scripthash/<scriptHash>`, `funded_txo_count`). This covers a script used outside this deployment, and a vault registered here before reservations existed once it has been paid.
+- **A failed chain lookup refuses too** (503 `chain_unavailable`, or `chain_error`), and nothing is written; retry later. The check fails closed: a vault can't be funded without the chain API anyway (`/payment-utxos`, `/payment-input`), and registering a script that may already be paid could give it a second deposit.
+
+A repeat of a request that succeeded (same owner, same vault `id`) gets 409 `state_conflict`.
+
+What this doesn't cover:
+- A vault registered before reservations existed and never paid has no reservation, so a second registration of its script isn't refused.
+- The reservation is for one exact script. HORS secrets reused in a different script (part of a state, or reordered) aren't refused by the server. The SDK refuses a supplied state whose commitments a vault script of the signed-in address already pushes ([SDK](../sdk/README.md#your-own-recovery-state)).
 
 ## Stray payments
 

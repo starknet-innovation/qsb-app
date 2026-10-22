@@ -15,7 +15,7 @@ import {
   type ApiErrorCode,
 } from "../server/api-errors";
 import { apiRoutes, routeErrors } from "../server/openapi";
-import { Conflict, MemoryStore } from "../server/store";
+import { Conflict, MemoryStore, scriptReservation } from "../server/store";
 import { ChainError, Esplora } from "../server/chain";
 import { ConsensusError } from "../server/consensus";
 import {
@@ -81,6 +81,11 @@ function vault(overrides: Partial<PublicVault> = {}): PublicVault {
     }),
     ...overrides,
   };
+}
+/** A vault the server would register: its public state passes validation. */
+function registrable(): PublicVault {
+  const publicStateJson = JSON.stringify({ config: "A", hash_mode: "sha256", n: 150, round_sigs: [], full_script_hex: scriptHex });
+  return withVaultConfiguration({ ...vault(), publicStateJson });
 }
 function job(overrides: Partial<Job> & Record<string, unknown> = {}): Job {
   return {
@@ -304,6 +309,17 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
     return f.call("GET", "/rates");
   }],
   ["vault_invalid", 400, (f) => f.call("POST", "/vaults", vault({ paymentAddress: "bc1qunrelatedowner0000" }))],
+  ["vault_script_registered", 409, async (f) => {
+    await f.store.put(scriptReservation("bc1qanotherowner", { id: other, scriptHash: registrable().scriptHash }));
+    return f.call("POST", "/vaults", registrable());
+  }],
+  ["vault_script_paid", 409, (f) => {
+    genesis(f);
+    f.routes.set(`/scripthash/${registrable().scriptHash}`, () =>
+      Response.json({ chain_stats: { funded_txo_count: 0 }, mempool_stats: { funded_txo_count: 1 } }),
+    );
+    return f.call("POST", "/vaults", registrable());
+  }],
   ["operations_disabled", 503, (f) => f.call("POST", `/vaults/${vaultId}/fund`, {}, { app: { enabled: false } })],
   ["submit_disabled", 503, (f) => f.call("POST", `/vaults/${vaultId}/fund/submit`, {}, { app: { exactSubmit: false } })],
   ["vault_not_found", 404, (f) => f.call("GET", `/vaults/${other}/funding`)],

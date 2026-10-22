@@ -51,7 +51,9 @@ import {
 import {
   canonicalReservationWrites,
   Conflict,
+  scriptReservation,
   store as defaultStore,
+  type Row,
   type Store,
 } from "./store";
 import {
@@ -659,12 +661,32 @@ export function createApp(
         "vault_invalid",
         "Vault script does not match its commitment.",
       );
-    await store.put({
-      pk: `OWNER#${c.get("owner")}`,
-      sk: `VAULT#${vault.id}`,
-      version: 0,
-      vault,
-    });
+    // One vault per script on this deployment, by any address: a second record of a script would
+    // let it take a second deposit, which the first withdrawal's disclosed HORS preimages weaken.
+    const owner = c.get("owner");
+    const reservation = scriptReservation(owner, vault);
+    // Another vault's reservation. This vault's own means a repeat of this request, whose
+    // vault row write conflicts below with state_conflict, as before reservations existed.
+    const elsewhere = (held: Row | undefined) =>
+      held !== undefined && (held.owner !== owner || held.vaultId !== vault.id);
+    const held = await store.get(reservation.pk, reservation.sk);
+    if (elsewhere(held))
+      return apiError(c, 409, "vault_script_registered", "Another vault on this deployment already has this script.");
+    // A paid script is never a new vault: one registered before reservations, or used outside
+    // this deployment. A failed lookup refuses too, so nothing is written without its answer.
+    if (!held && (await ledger.scriptFunded(vault.scriptHash)))
+      return apiError(c, 409, "vault_script_paid", "This script has already been paid on chain, so it can't be a new vault.");
+    try {
+      await store.atomicPut([
+        { row: { pk: `OWNER#${owner}`, sk: `VAULT#${vault.id}`, version: 0, vault } },
+        { row: reservation },
+      ]);
+    } catch (error) {
+      // A registration of the same script won the race.
+      if (error instanceof Conflict && elsewhere(await store.get(reservation.pk, reservation.sk)))
+        return apiError(c, 409, "vault_script_registered", "Another vault on this deployment already has this script.");
+      throw error;
+    }
     return c.json({ vault }, 201);
   });
   app.post("/api/vaults/:id/fund", async (c) => {

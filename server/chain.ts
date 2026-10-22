@@ -239,6 +239,20 @@ export class Esplora {
       confirmed: x.status.confirmed,
     }));
   }
+  /**
+   * Whether any output, confirmed or in the mempool, has ever paid the script whose SHA-256 is
+   * `scriptHash`, including outputs spent since. Esplora answers an unseen script with zeros.
+   */
+  async scriptFunded(scriptHash: string) {
+    await this.assertNetwork();
+    txid.parse(scriptHash);
+    const text = await this.read(`/scripthash/${scriptHash.toLowerCase()}`);
+    const funded = z.object({ funded_txo_count: z.number().int().nonnegative() });
+    const stats = answer(() =>
+      z.object({ chain_stats: funded, mempool_stats: funded }).parse(JSON.parse(text)),
+    );
+    return stats.chain_stats.funded_txo_count + stats.mempool_stats.funded_txo_count > 0;
+  }
   async paymentUtxos(address: string) {
     await this.assertNetwork();
     outputScript(address); // Configured-network address checksum validation before URL construction.
