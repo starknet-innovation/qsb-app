@@ -1,3 +1,4 @@
+import { assertCurrentVaultScript } from "../src/lib/script-version";
 import { createHash } from "node:crypto";
 import { type Job, type PublicVault } from "../src/lib/model";
 import { Conflict, type Row, type Store } from "./store";
@@ -82,6 +83,8 @@ export async function submitExact(
   const vault = vaultRow?.vault as PublicVault | undefined;
   if (!vault || vault.network !== "mainnet" || vault.id !== job.vaultId)
     throw new ChainError("Mainnet vault not found.", "vault_not_found");
+  try { assertCurrentVaultScript(vault); }
+  catch { throw new ChainError("This vault requires script migration before authorization.", "job_unsupported"); }
   await checkWithdrawal(raw, vault, job, chain);
   // Every input is checked against real chain outputs by Core, before TX# exists.
   await consensus.verify(raw, chain);

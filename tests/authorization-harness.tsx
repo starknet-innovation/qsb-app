@@ -1,3 +1,4 @@
+import { fixtureVault } from "./script-fixture";
 // UI-only fixture: QSB assembly is stubbed by Playwright, never a consensus proof.
 import { createRoot } from "react-dom/client";
 import * as btc from "@scure/btc-signer";
@@ -20,7 +21,7 @@ export async function mount(changedSolution = false, localSolved = false) {
   const previous = new btc.Transaction(options);
   previous.addInput({ txid: "55".repeat(32), index: 0 });
   previous.addOutputAddress(address, 20000n);
-  previous.addOutput({ script: hex.decode("51".repeat(100)), amount: 100000n });
+  previous.addOutput({ script: hex.decode(fixtureVault.scriptHex), amount: 100000n });
   const previousTxHex = hex.encode(previous.toBytes(true, true));
   const vault: PublicVault = withVaultConfiguration({
     id: crypto.randomUUID(),
@@ -28,10 +29,10 @@ export async function mount(changedSolution = false, localSolved = false) {
     createdAt: new Date().toISOString(),
     network: "mainnet",
     config: "A",
-    scriptHex: "51".repeat(100),
-    scriptHash: hex.encode(sha256(hex.decode("51".repeat(100)))),
+    scriptHex: fixtureVault.scriptHex,
+    scriptHash: fixtureVault.scriptHash,
     paymentAddress: address,
-    publicStateJson: "{}",
+    publicStateJson: fixtureVault.publicStateJson,
     status: "confirmed",
     funding: { txid: previous.id, vout: 1, value: "100000" },
   });

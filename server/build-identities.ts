@@ -6,7 +6,7 @@ export function buildIdentities(solverId: string, appCommit: string, referenceSh
   if (!/^[a-f0-9]{40}$/.test(appCommit) || !/^[a-f0-9]{64}$/.test(referenceSha256))
     throw new Error("InvalidBuildIdentity");
   const descriptor = solverId ? solverRelease(solverId) : null;
-  if (descriptor && (!("schemaVersion" in descriptor) || descriptor.schemaVersion !== 3))
+  if (descriptor && (!("schemaVersion" in descriptor) || descriptor.schemaVersion !== 4))
     throw new Error("SolverDeploymentContractRequired");
   if (descriptor) assertPaidSolverContract(descriptor);
   return {

@@ -1,7 +1,9 @@
+import { CURRENT_SCRIPT_VERSION, assertCurrentVaultScript } from "../src/lib/script-version";
 import { z } from "zod";
 import { deployedSolver } from "./solver-deployment";
 import {
   assertPaidSolverContract,
+  solverScriptVersion,
   assertSolverPin,
   solverRelease,
 } from "../src/lib/provenance";
@@ -228,11 +230,21 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   const selected = job.solver
     ? assertSolverPin(job.solver, vault)
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
-  if (
-    selected.searchVersion !== searchVersion ||
-    selected.generatorCommit !== release.qsbCommit
-  )
-    throw new Error("SolverRuntimeMismatch");
+  try {
+    assertCurrentVaultScript(vault);
+    if (selected.searchVersion !== searchVersion ||
+        selected.generatorCommit !== release.qsbCommit ||
+        solverScriptVersion(selected) !== CURRENT_SCRIPT_VERSION)
+      throw new Error("SolverRuntimeMismatch");
+  } catch {
+    const uncertain = unknown() || job.error?.includes("Submission outcome unknown");
+    job.status = "paused";
+    delete job.oneSubmissionAllowed;
+    job.error = (uncertain ? "Submission outcome unknown. Reconcile compute provider before resuming. " : "") +
+      "Script migration required; existing provider IDs and coverage retained. No new work submitted.";
+    await persist();
+    return { ...event, done: !slots.some((slot) => Boolean(slot.runpodId)), waitSeconds: 5 };
+  }
   // A slot saved before a POST that never recorded its ID: never replay it.
   if (job.status === "searching" && unknown()) {
     job.status = "paused";
@@ -242,6 +254,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     return { ...event, done: true };
   }
   const referenceInput = () => ({
+    scriptVersion: CURRENT_SCRIPT_VERSION,
     publicStateJson: vault.publicStateJson,
     manifest: job.manifest,
     stage: job.stage,
@@ -283,6 +296,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     const output = candidateOutput.parse(r.output);
     const expectedRange = workRange(slot.stage, slot.attempt);
     if (
+      output.scriptVersion !== CURRENT_SCRIPT_VERSION ||
       output.kernelCommit !== selected.kernelCommit ||
       output.manifestHash !== job.manifestHash ||
       output.stage !== slot.stage ||
@@ -312,6 +326,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       action: "verify",
       candidates: output.candidates,
     });
+    if (checked.scriptVersion !== CURRENT_SCRIPT_VERSION) throw new Error("ReferenceScriptVersionMismatch");
     if (checked.valid === true) {
       applyVerifiedHit(job, checked, expectedRange);
       job.attempt = 0;
@@ -354,7 +369,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       slots.filter((s) => s.stage === job.stage).map((s) => s.attempt),
     );
     let attempt = job.attempt;
-    let parameters: { parameterBase64: string; parameterSha256: string } | undefined;
+    let parameters: { scriptVersion: typeof CURRENT_SCRIPT_VERSION; parameterBase64: string; parameterSha256: string } | undefined;
     let sent = 0;
     const ownerBudget = await OwnerGpuBudget.open(store, event.owner);
     while (slots.length < gpuSpendLimits.workersMax) {
@@ -389,7 +404,8 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       if (!parameters) {
         parameters = z
           .object({
-            parameterBase64: z.string().max(140000),
+            scriptVersion: z.literal(CURRENT_SCRIPT_VERSION),
+        parameterBase64: z.string().max(140000),
             parameterSha256: z.string().regex(/^[a-f0-9]{64}$/),
           })
           .parse(await cpu({ ...referenceInput(), action: "export" }));

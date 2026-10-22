@@ -4340,7 +4340,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `vault_not_found`, `funding_intent_exists`, `funding_transaction_invalid`, `signed_deposit_not_found`, `idempotency_conflict`, `idempotency_in_progress`, `state_conflict`.",
+            "description": "Conflict: `vault_invalid`, `vault_not_found`, `funding_intent_exists`, `funding_transaction_invalid`, `signed_deposit_not_found`, `idempotency_conflict`, `idempotency_in_progress`, `state_conflict`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4352,6 +4352,7 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "vault_invalid",
                             "vault_not_found",
                             "funding_intent_exists",
                             "funding_transaction_invalid",
@@ -4803,7 +4804,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `vault_not_found`, `funding_intent_exists`, `funding_transaction_invalid`, `idempotency_conflict`, `idempotency_in_progress`, `state_conflict`.",
+            "description": "Conflict: `vault_invalid`, `vault_not_found`, `funding_intent_exists`, `funding_transaction_invalid`, `idempotency_conflict`, `idempotency_in_progress`, `state_conflict`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4815,6 +4816,7 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "vault_invalid",
                             "vault_not_found",
                             "funding_intent_exists",
                             "funding_transaction_invalid",
@@ -7012,7 +7014,17 @@
               },
               "generatorCommit": {
                 "type": "string",
-                "const": "2c9172051d5c150ef0a994ca6b988a08a3ef9e85"
+                "enum": [
+                  "2c9172051d5c150ef0a994ca6b988a08a3ef9e85",
+                  "b22f81c093488d09b9cd59c171c79b6c40812cf1"
+                ]
+              },
+              "scriptVersion": {
+                "type": "string",
+                "enum": [
+                  "qsb-config-a-legacy-v1",
+                  "qsb-config-a-cmsverify-v1"
+                ]
               },
               "network": {
                 "type": "string"

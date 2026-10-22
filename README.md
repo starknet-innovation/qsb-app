@@ -4,6 +4,8 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB) vaults: vault secrets are 
 
 **Not a production release.** It runs on Bitcoin mainnet without production hardening, and mainnet operations are off unless the deployment's switches turn them on. Do not use this repository to hold real funds. [Status](docs/STATUS.md) lists what's deployed and what's open.
 
+The locking-script compatibility and legacy recovery rules are documented in [Script versions](docs/SCRIPT-VERSIONS.md). Corrected withdrawals require a separately qualified, enrolled schema-v4 solver release; existing descriptors are preserved.
+
 ## What is included
 
 - `src/`: React application: encrypted local backups, wallet integration, and staged signing and recovery flows.

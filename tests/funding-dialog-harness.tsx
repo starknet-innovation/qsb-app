@@ -1,8 +1,8 @@
+import { fixtureVault } from "./script-fixture";
 // Local public-key UI fixture. No real wallet or network broadcast.
 import { createRoot } from "react-dom/client";
 import * as btc from "@scure/btc-signer";
 import { base64, hex } from "@scure/base";
-import { sha256 } from "@noble/hashes/sha2.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import TransactionDialog from "../src/TransactionDialog";
 import { encryptRecovery } from "../src/lib/backup";
@@ -21,10 +21,10 @@ export async function mount() {
     createdAt: new Date().toISOString(),
     network: "mainnet",
     config: "A",
-    scriptHex: "51".repeat(100),
-    scriptHash: hex.encode(sha256(hex.decode("51".repeat(100)))),
+    scriptHex: fixtureVault.scriptHex,
+    scriptHash: fixtureVault.scriptHash,
     paymentAddress: address,
-    publicStateJson: "{}",
+    publicStateJson: fixtureVault.publicStateJson,
     status: "unfunded",
   });
   const password = "public browser test password";

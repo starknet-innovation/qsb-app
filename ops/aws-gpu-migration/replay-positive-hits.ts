@@ -1,4 +1,5 @@
-/** Historical public replay only. No AWS client, paid submit, signing or broadcast.
+import { assertCurrentVaultScript, CURRENT_SCRIPT_VERSION } from "../../src/lib/script-version";
+/** Corrected-script public replay only. No AWS client, paid submit, signing or broadcast.
  * Usage: npx tsx ops/aws-gpu-migration/replay-positive-hits.ts /path/to/public-signing-bundle.json
  * The external bundle is intentionally never copied into this repository.
  */
@@ -26,6 +27,8 @@ const bundle = z
     }),
   })
   .parse(JSON.parse(readFileSync(path, "utf8")));
+const publicState = JSON.parse(bundle.request.vault.publicStateJson);
+assertCurrentVaultScript({ publicStateJson: bundle.request.vault.publicStateJson, scriptHex: publicState.full_script_hex });
 const reference = (event: unknown): any => {
   const result = spawnSync(
     "python3",
@@ -56,6 +59,7 @@ const token = "11111111-1111-1111-1111-111111111111";
 const rows = [];
 for (const stage of ["pinning", "round1", "round2"] as const) {
   const context = {
+    scriptVersion: CURRENT_SCRIPT_VERSION,
     publicStateJson: bundle.request.vault.publicStateJson,
     manifest: bundle.fixture.manifest,
     stage,

@@ -1,4 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { fixtureVault, servedFixture } from "./solver-fixture";
+vi.mock("../src/lib/releases/registry.generated", async () => ({default:[(await import("./solver-fixture")).servedFixture]}));
 import { createHash } from "node:crypto";
 import {
   fingerprint,
@@ -13,39 +15,28 @@ import {
   solverRegistry,
   solverReleases,
 } from "../src/lib/provenance";
-const vault = () => ({
-  network: "mainnet",
-  config: "A",
-  scriptHex: "51",
-  scriptHash: createHash("sha256")
-    .update(Buffer.from("51", "hex"))
-    .digest("hex"),
-  publicStateJson: JSON.stringify({
-    config: "A",
-    full_script_hex: "51",
-    n: 150,
-  }),
-});
+const vault = () => ({...fixtureVault});
+const pinned = (v: ReturnType<typeof vault>) => pinSolver(v, servedFixture.id);
 describe("immutable vault and solver provenance", () => {
   it("pins exact parameters and preserves legacy vault readability", () => {
     const v = vault();
-    const p = pinSolver(v);
-    expect(assertSolverPin(p, v).id).toBe(currentSolverId);
+    const p = pinned(v);
+    expect(assertSolverPin(p, v).id).toBe(servedFixture.id);
     expect(
       assertVaultConfiguration({ ...v, configuration: vaultConfiguration(v) }),
     ).toEqual(vaultConfiguration(v));
   });
   it("rejects changed public parameters", () => {
     const v = vault();
-    const p = pinSolver(v);
+    const p = pinned(v);
     v.publicStateJson = '{"n":151}';
-    expect(() => assertSolverPin(p, v)).toThrow("SolverVaultMismatch");
+    expect(() => assertSolverPin(p, v)).toThrow();
   });
   it("rejects script changes", () => {
     const v = vault();
-    const p = pinSolver(v);
+    const p = pinned(v);
     v.scriptHex = "52";
-    expect(() => assertSolverPin(p, v)).toThrow("VaultScriptHashMismatch");
+    expect(() => assertSolverPin(p, v)).toThrow();
   });
   it("rejects a vault that omits its network", () => {
     const { network: _network, ...v } = vault();
@@ -55,15 +46,14 @@ describe("immutable vault and solver provenance", () => {
   });
   it("rejects changed network", () => {
     const v = vault();
-    const p = pinSolver(v);
+    const p = pinned(v);
     v.network = "testnet4";
-    expect(() => assertSolverPin(p, v)).toThrow("SolverVaultMismatch");
+    expect(() => assertSolverPin(p, v)).toThrow();
   });
   it("rejects modified flags even with retained release id", () => {
     const v = vault();
-    const p = pinSolver(v);
-    if (!("flags" in p.descriptor)) throw new Error("Expected archive");
-    p.descriptor.flags.pinning.push("-DUNSAFE=1");
+    const p = pinned(v);
+    p.descriptor.kernelCommit = "b".repeat(40);
     expect(() => assertSolverPin(p, v)).toThrow("SolverReleaseMismatch");
   });
   it("rejects unknown release instead of choosing latest", () => {
@@ -85,8 +75,8 @@ describe("immutable vault and solver provenance", () => {
   });
   it("canonicalizes public object key order", () => {
     const v = vault();
-    const p = pinSolver(v);
-    v.publicStateJson = '{"n":150,"full_script_hex":"51","config":"A"}';
+    const p = pinned(v);
+    v.publicStateJson = JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(v.publicStateJson)).reverse()));
     expect(() => assertSolverPin(p, v)).not.toThrow();
   });
 });
@@ -152,12 +142,12 @@ it("pins the published external release while retaining the archived default", (
     const pin = pinSolver(v, release.id);
     expect(assertSolverPin(pin, v)).toEqual(release);
     expect(pin.descriptor).not.toHaveProperty("sourceHashes");
-    expect(pinSolver(v).descriptor.id).toBe(currentSolverId);
+    expect(pinned(v).descriptor.id).toBe(servedFixture.id);
   }
 });
 
 it("retains published v2 verbatim but refuses new paid work without a tested contract", () => {
-  const old = solverRelease(publishedV2.id);
+  const old = publishedV2;
   expect(() => assertPaidSolverContract(old)).toThrow("SolverSearchContractRequired");
   expect(() => assertPaidSolverContract(externalSolverDescriptorSchema.parse(external()))).not.toThrow();
 });

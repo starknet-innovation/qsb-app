@@ -174,7 +174,7 @@ describe("owner event log", () => {
     const miner = new Slipstream("https://slipstream.test", async () => undefined);
     const f = await setup({ miner, exactSubmit: true });
     const a = await f.as(address);
-    const scriptHex = "51".repeat(100);
+    const scriptHex = fixtureVault.scriptHex;
     const deposit = (seed: number) => {
       const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true, version: 2 });
       tx.addInput({ txid: new Uint8Array(32).fill(seed), index: 0, sequence: 0xfffffffe });
@@ -184,8 +184,8 @@ describe("owner event log", () => {
     const vaults = [crypto.randomUUID(), crypto.randomUUID()];
     for (const id of vaults)
       await f.store.put({ pk: `OWNER#${address}`, sk: `VAULT#${id}`, version: 0, vault: {
-        id, scriptHex, config: "A", publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
-        scriptHash: sha(Buffer.from(scriptHex, "hex").toString("latin1")), paymentAddress: address, network: "mainnet", status: "unfunded",
+        id, scriptHex, config: "A", publicStateJson: fixtureVault.publicStateJson,
+        scriptHash: fixtureVault.scriptHash, paymentAddress: address, network: "mainnet", status: "unfunded",
       } });
     vi.spyOn(miner, "credential").mockResolvedValue({} as never);
     vi.spyOn(miner, "seen").mockResolvedValue(false);
@@ -205,14 +205,14 @@ describe("owner event log", () => {
     const miner = new Slipstream("https://slipstream.test", async () => undefined);
     const f = await setup({ miner, exactSubmit: true });
     const a = await f.as(address);
-    const scriptHex = "51".repeat(100);
+    const scriptHex = fixtureVault.scriptHex;
     const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true, version: 2 });
     tx.addInput({ txid: new Uint8Array(32).fill(4), index: 0, sequence: 0xfffffffe });
     tx.addOutput({ amount: 50_000n, script: hex.decode(scriptHex) });
     const raw = hex.encode(tx.toBytes(true, false));
     const id = crypto.randomUUID();
     await f.store.put({ pk: `OWNER#${address}`, sk: `VAULT#${id}`, version: 0, vault: {
-      id, scriptHex, config: "A", publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
+      id, scriptHex, config: "A", publicStateJson: fixtureVault.publicStateJson,
       scriptHash: createHash("sha256").update(Buffer.from(scriptHex, "hex")).digest("hex"), paymentAddress: address, network: "mainnet", status: "unfunded",
     } });
     const order: string[] = [];
@@ -380,7 +380,7 @@ describe("owner event log", () => {
   it("finishes a slow request's event work by the 28 s mark, even with a hanging table", async () => {
     vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
     const address = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20) });
-    const scriptHex = "51".repeat(100);
+    const scriptHex = fixtureVault.scriptHex;
     const deposit = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true, version: 2 });
     deposit.addInput({ txid: new Uint8Array(32).fill(5), index: 0, sequence: 0xfffffffe });
     deposit.addOutput({ amount: 50_000n, script: hex.decode(scriptHex) });
@@ -396,7 +396,7 @@ describe("owner event log", () => {
     const a = await f.as(address);
     const id = crypto.randomUUID();
     await f.store.put({ pk: `OWNER#${address}`, sk: `VAULT#${id}`, version: 0, vault: {
-      id, scriptHex, config: "A", publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
+      id, scriptHex, config: "A", publicStateJson: fixtureVault.publicStateJson,
       scriptHash: createHash("sha256").update(Buffer.from(scriptHex, "hex")).digest("hex"), paymentAddress: address, network: "mainnet", status: "unfunded",
     } });
     const put = MemoryStore.prototype.put.bind(f.store);
@@ -504,7 +504,7 @@ describe("owner event log", () => {
 describe("the resend path", () => {
   it("records a submitted deposit the miner no longer has, after the resend decides, and nothing else changes", async () => {
     const address = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20) });
-    const scriptHex = "51".repeat(100);
+    const scriptHex = fixtureVault.scriptHex;
     const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true, version: 2 });
     tx.addInput({ txid: new Uint8Array(32).fill(3), index: 0, sequence: 0xfffffffe });
     tx.addOutput({ amount: 50_000n, script: hex.decode(scriptHex) });
@@ -515,7 +515,7 @@ describe("the resend path", () => {
       const a = await f.as(address);
       const id = crypto.randomUUID();
       await f.store.put({ pk: `OWNER#${address}`, sk: `VAULT#${id}`, version: 0, fundingRawTxHex: raw, fundingSubmission: "submitted", vault: {
-        id, scriptHex, config: "A", publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
+        id, scriptHex, config: "A", publicStateJson: fixtureVault.publicStateJson,
         scriptHash: createHash("sha256").update(Buffer.from(scriptHex, "hex")).digest("hex"), paymentAddress: address, network: "mainnet", status: "submitted",
         funding: { txid: transactionId(raw), vout: 0, value: "50000" },
       } });
@@ -540,7 +540,7 @@ describe("the resend path", () => {
 describe("error codes", () => {
   it("pass through the watched miner and the event recorder unchanged", async () => {
     const address = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20) });
-    const scriptHex = "51".repeat(100);
+    const scriptHex = fixtureVault.scriptHex;
     const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true, version: 2 });
     tx.addInput({ txid: new Uint8Array(32).fill(6), index: 0, sequence: 0xfffffffe });
     tx.addOutput({ amount: 50_000n, script: hex.decode(scriptHex) });
@@ -550,7 +550,7 @@ describe("error codes", () => {
     const a = await f.as(address);
     const vault = (status: string, id = crypto.randomUUID()) => ({
       pk: `OWNER#${address}`, sk: `VAULT#${id}`, version: 0, fundingRawTxHex: raw, vault: {
-        id, scriptHex, config: "A", publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
+        id, scriptHex, config: "A", publicStateJson: fixtureVault.publicStateJson,
         scriptHash: createHash("sha256").update(Buffer.from(scriptHex, "hex")).digest("hex"), paymentAddress: address, network: "mainnet", status,
         ...(status === "submitted" ? { funding: { txid: transactionId(raw), vout: 0, value: "50000" } } : {}),
       },

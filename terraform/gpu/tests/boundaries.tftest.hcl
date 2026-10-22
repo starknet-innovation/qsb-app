@@ -8,7 +8,7 @@ variables {
   gpu_ami                      = "ami-0123456789abcdef0"
   gpu_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/qsb-gpu-boundary"
   source_commit                = jsondecode(file("../.build/manifest.json")).commit
-  image                        = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../../src/lib/releases/qsb-solver-aws-v0-1-0.json")).image)[1]}"
+  image                        = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../.build/test-gpu-valid.json")).identities.solver.image)[1]}"
   subnets                      = ["subnet-0123456789abcdef0"]
   vpc_id                       = "vpc-0123456789abcdef0"
 }
@@ -109,6 +109,26 @@ run "region_follows_the_variable" {
 }
 run "reject_image_from_another_region" {
   command = plan
-  variables { image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../../src/lib/releases/qsb-solver-aws-v0-1-0.json")).image)[1]}" }
+  variables { image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../.build/test-gpu-valid.json")).identities.solver.image)[1]}" }
   expect_failures = [var.image]
+}
+
+run "reject_wrong_script_version" {
+  command = plan
+  variables { release_manifest_path = "../.build/test-wrong-script.json" }
+  expect_failures = [terraform_data.release_identity]
+}
+run "reject_wrong_generator_version" {
+  command = plan
+  variables { release_manifest_path = "../.build/test-wrong-generator.json" }
+  expect_failures = [terraform_data.release_identity]
+}
+
+run "reject_legacy_schema3" {
+  command = plan
+  variables {
+    release_manifest_path = "../.build/test-gpu-legacy-schema3.json"
+    image                 = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../.build/test-gpu-legacy-schema3.json")).identities.solver.image)[1]}"
+  }
+  expect_failures = [terraform_data.release_identity]
 }

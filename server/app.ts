@@ -1,3 +1,4 @@
+import { assertCurrentVaultScript } from "../src/lib/script-version";
 import { deployedSolver, deployedSolverId } from "./solver-deployment";
 import { observeWithdrawal } from "./withdrawal-status";
 import { submitExact, SubmitDisabled } from "./submit-exact";
@@ -28,7 +29,7 @@ import {
   verifyRequest,
   webhookRequest,
 } from "./api-schemas";
-import { assertVaultConfiguration, pinSolver } from "../src/lib/provenance";
+import { assertVaultConfiguration, assertSolverScriptCompatibility, pinSolver } from "../src/lib/provenance";
 import { Hono } from "hono";
 import { BODY_HASH_HEADER, CREDENTIAL_HEADER } from "../src/lib/session";
 import { getPath } from "hono/utils/url";
@@ -638,6 +639,7 @@ export function createApp(
     try {
       validatePublicState(vault.publicStateJson);
       assertVaultConfiguration(vault);
+      assertCurrentVaultScript(vault);
       publicState = JSON.parse(vault.publicStateJson);
     } catch {
       return apiError(
@@ -1097,6 +1099,8 @@ export function createApp(
         "The requested solver is not served by this deployment. No withdrawal was reserved.",
       );
     }
+    try { assertSolverScriptCompatibility(v, selectedSolver); }
+    catch { return apiError(c, 400, "withdrawal_invalid", "Vault script and solver release are not compatible. No withdrawal was reserved."); }
     await ledger.unspent(manifest.funding, v.scriptHex);
     await ledger.unspent(manifest.helper, hex.encode(outputScript(owner)));
     const now = new Date().toISOString();

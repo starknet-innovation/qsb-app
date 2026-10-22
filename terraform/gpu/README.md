@@ -22,7 +22,7 @@ gpu_permissions_boundary_arn = "arn:aws:iam::123456789012:policy/qsb/bootstrap/q
 
 Replace the example account with `aws_account_id`; other accounts, policy names and paths are rejected. All four GPU roles (`qsb-gpu-instance`, `qsb-gpu-job`, `qsb-gpu-execution`, `qsb-gpu-watchdog`) keep `/qsb/runtime/` and use this same boundary. There is no unbounded default, including when applying as an administrator. The boundary must already exist from the [access bootstrap](../../ops/github-aws/README.md); this stack references it and can't create or modify its policy, and the operator's grant requires that exact boundary. Supplying an ARN doesn't establish that its live policy document matches reviewed source: check that with `update_installed.py` before applying.
 
-First build the app with the served release (`--solver-release`); this creates the generated manifest without an ECR repository or GPU deployment. On an account's first deployment only, supply that manifest and target the ECR repository, verify the published GHCR release and its build-provenance attestation, then use a digest-preserving registry copy into ECR. Verify that both registry manifest digests are identical before a full plan/apply; do not substitute a Docker load/push or an unattested workflow tarball for the attested release. The GPU plan reads the same generated app manifest and requires an enrolled schema-3 descriptor with matching ID, image and solver commit, binds the CPU reference identity, and verifies every listed artifact hash relative to the manifest directory. These are local consistency checks, not independent build attestation. Never use a mutable tag or substitute the Docker config digest for the registry manifest digest. Save plans, source/build receipt, outputs and smoke-test records outside Git.
+First build the app with the served release (`--solver-release`); this creates the generated manifest without an ECR repository or GPU deployment. On an account's first deployment only, supply that manifest and target the ECR repository, verify the published GHCR release and its build-provenance attestation, then use a digest-preserving registry copy into ECR. Verify that both registry manifest digests are identical before a full plan/apply; do not substitute a Docker load/push or an unattested workflow tarball for the attested release. The GPU plan reads the same generated app manifest and requires an enrolled schema-4 corrected-script descriptor with matching ID, image, solver commit and generator/script identities, binds the CPU reference identity, and verifies every listed artifact hash relative to the manifest directory. These are local consistency checks, not independent build attestation. Never use a mutable tag or substitute the Docker config digest for the registry manifest digest. Save plans, source/build receipt, outputs and smoke-test records outside Git.
 
 Bind outputs `queue`, `definition`, and `bucket` to the application stack's `batch_job_queue`, `batch_job_definition`, and `batch_job_bucket`. A new image means a new job-definition revision: follow "Job-definition revision changes and recovery" in the [runbook](../../docs/OPERATIONAL-RUNBOOK.md#job-definition-revision-changes-and-recovery). The coordinator refuses a changed image, retry count, timeout, instance type or capacity before paid submission.
 
@@ -36,10 +36,12 @@ Jobs store the Batch job ID in the legacy `runpodId` field, and `computeProvider
 terraform -chdir=terraform/gpu init -backend=false -input=false
 terraform -chdir=terraform/gpu validate
 node --import tsx terraform/scripts/review-fixtures.mjs
-terraform -chdir=terraform/gpu test
+node --import tsx terraform/scripts/test-fixture-tree.mjs
 ```
 
 These mocked-provider plans assert the boundary on every GPU role, the retained
 role path and zero minimum capacity, and reject empty, cross-account or wrong-path
 boundary values. They do not certify live operator authorization, bootstrap policy
 contents or deployment success.
+
+Mock tests run in a disposable copied tree containing an explicitly synthetic schema-4 descriptor. The real enrollment registry remains untouched; synthetic manifests are not deployment evidence.

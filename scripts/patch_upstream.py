@@ -13,13 +13,60 @@ def apply(root: Path):
     builder._seed_witness(model, 0)
     model.push(('pin_kp',)); model.push(('pin_kn',))
     builder._model_pinning(model)
-    r1_sub, _ = builder._emit_round(model, 0, h2b(state['round_sigs'][0]['sig']), builder._canonical_subset(0))
-    r2_sub, _ = builder._emit_round(model, 1, h2b(state['round_sigs'][1]['sig']), builder._canonical_subset(1))"""
+    r1_sub, _ = builder._emit_round(model, 0, h2b(state['round_sigs'][0]['sig']), builder._canonical_subset(0), terminal=False)
+    r2_sub, _ = builder._emit_round(model, 1, h2b(state['round_sigs'][1]['sig']), builder._canonical_subset(1), terminal=True)"""
     if old in text:
         text = text.replace(old, new, 1)
         pipeline.write_text(text)
     elif new not in text:
         raise RuntimeError('Upstream exporter changed; re-review the layout patch')
+
+    # Keep one generated classifier shared by the browser and CPU runtime.
+    # Legacy reconstruction is read-only and never selected by assembly/export.
+    builder_file = root / 'config_a/pipeline/bitcoin_tx.py'
+    builder_text = builder_file.read_text()
+    classifier = """
+
+SCRIPT_VERSION = 'qsb-config-a-cmsverify-v1'
+LEGACY_SCRIPT_VERSION = 'qsb-config-a-legacy-v1'
+
+
+def classify_qsb_script(state):
+    if (state['config'], state['hash_mode'], state['n'], state['t1s'], state['t1b'], state['t2s'], state['t2b']) != ('A', 'sha256', 150, 8, 1, 7, 2):
+        raise ValueError('Unsupported script configuration')
+    builder = QSBScriptBuilder(150, 8, 1, 7, 2, hash_mode='sha256')
+    builder.hors_commitments = [[bytes.fromhex(c) for c in r] for r in state['hors_commitments']]
+    builder.dummy_sigs = [[bytes.fromhex(s) for s in r] for r in state['dummy_sigs']]
+    if any(len(rows) != 2 or any(len(row) != 150 for row in rows) for rows in (builder.hors_commitments, builder.dummy_sigs)):
+        raise ValueError('Invalid script commitment count')
+    pin = bytes.fromhex(state['pin_sig'])
+    rounds = [bytes.fromhex(r['sig']) for r in state['round_sigs']]
+    if len(rounds) != 2:
+        raise ValueError('Invalid round count')
+    actual = bytes.fromhex(state['full_script_hex'])
+    corrected = builder.build_full_script(pin, *rounds)
+    if actual == corrected:
+        version = SCRIPT_VERSION
+    else:
+        model = _StackModel()
+        builder._seed_witness(model, 1)
+        builder._seed_witness(model, 0)
+        model.push(('pin_kp',)); model.push(('pin_kn',))
+        builder._model_pinning(model)
+        r1, _ = builder._emit_round(model, 0, rounds[0], builder._canonical_subset(0), terminal=True)
+        r2, _ = builder._emit_round(model, 1, rounds[1], builder._canonical_subset(1), terminal=True)
+        legacy = builder.build_pinning_script(pin) + r1 + r2
+        if actual != legacy:
+            raise ValueError('Recovery script mismatch')
+        version = LEGACY_SCRIPT_VERSION
+    if state.get('scriptVersion', version) != version:
+        raise ValueError('Script version does not match script bytes')
+    if len(actual) > 10000 or builder.count_opcodes_runtime(actual)[0] > 201:
+        raise ValueError('Script exceeds consensus budget')
+    return version
+"""
+    if 'def classify_qsb_script(' not in builder_text:
+        builder_file.write_text(builder_text + classifier)
 
     # DER syntax alone does not imply a recoverable ECDSA puzzle signature.
     curve = root / 'config_a/pipeline/secp256k1.py'

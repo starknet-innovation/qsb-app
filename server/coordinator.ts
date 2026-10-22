@@ -1,6 +1,8 @@
+import { CURRENT_SCRIPT_VERSION, assertCurrentVaultScript } from "../src/lib/script-version";
 import { deployedSolver } from "./solver-deployment";
 import {
   assertPaidSolverContract,
+  solverScriptVersion,
   assertSolverPin,
   solverRelease,
 } from "../src/lib/provenance";
@@ -182,12 +184,23 @@ async function coordinate(event: Event, store: Store) {
   const selected = job.solver
     ? assertSolverPin(job.solver, vault)
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
-  if (
-    selected.searchVersion !== searchVersion ||
-    selected.generatorCommit !== release.qsbCommit
-  )
-    throw new Error("SolverRuntimeMismatch");
+  try {
+    assertCurrentVaultScript(vault);
+    if (selected.searchVersion !== searchVersion ||
+        selected.generatorCommit !== release.qsbCommit ||
+        solverScriptVersion(selected) !== CURRENT_SCRIPT_VERSION)
+      throw new Error("SolverRuntimeMismatch");
+  } catch {
+    const uncertain = job.status === "searching" && !job.runpodId || job.error?.includes("Submission outcome unknown");
+    job.status = "paused";
+    delete job.oneSubmissionAllowed;
+    job.error = (uncertain ? "Submission outcome unknown. Reconcile compute provider before resuming. " : "") +
+      "Script migration required; existing provider IDs and coverage retained. No new work submitted.";
+    await save();
+    return { ...event, done: !Boolean(job.runpodId), waitSeconds: 5 };
+  }
   const referenceInput = {
+    scriptVersion: CURRENT_SCRIPT_VERSION,
     publicStateJson: vault.publicStateJson,
     manifest: job.manifest,
     stage: job.stage,
@@ -237,6 +250,7 @@ async function coordinate(event: Event, store: Store) {
     }
     const parameters = z
       .object({
+        scriptVersion: z.literal(CURRENT_SCRIPT_VERSION),
         parameterBase64: z.string().max(140000),
         parameterSha256: z.string().regex(/^[a-f0-9]{64}$/),
       })
@@ -330,6 +344,7 @@ async function coordinate(event: Event, store: Store) {
     const output = candidateOutput.parse(result.output);
     const expectedRange = workRange(job.stage, job.attempt);
     if (
+      output.scriptVersion !== CURRENT_SCRIPT_VERSION ||
       output.kernelCommit !== selected.kernelCommit ||
       output.manifestHash !== job.manifestHash ||
       output.stage !== job.stage ||
@@ -360,7 +375,8 @@ async function coordinate(event: Event, store: Store) {
         action: "verify",
         candidates: output.candidates,
       });
-      if (checked.valid === true) {
+      if (checked.scriptVersion !== CURRENT_SCRIPT_VERSION) throw new Error("ReferenceScriptVersionMismatch");
+    if (checked.valid === true) {
         delete job.retryRequested;
         applyVerifiedHit(job, checked, expectedRange);
         job.attempt = 0;

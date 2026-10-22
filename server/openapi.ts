@@ -659,6 +659,7 @@ const deposit = source(
   ],
   merge(writes, fundingMatch, minerCredential, minerLookup, {
     409: [
+      "vault_invalid",
       "funding_transaction_invalid",
       "vault_not_found",
       "funding_intent_exists",

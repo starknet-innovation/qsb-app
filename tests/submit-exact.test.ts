@@ -1,3 +1,4 @@
+import { fixtureVault, publicScriptFixture } from "./solver-fixture";
 import { createHash } from "node:crypto";
 import { createApp } from "../server/app";
 import { MinerAuthenticationError, Slipstream, MinerCredential } from "../server/providers";
@@ -144,8 +145,7 @@ async function fixture() {
     pk = `OWNER#${stored.owner}`;
   const vault = {
     id: stored.vaultId,
-    network: "mainnet",
-    scriptHex: "51",
+    ...fixtureVault,
     paymentAddress: address,
     status: "confirmed",
     funding: manifest.funding,
@@ -178,6 +178,13 @@ async function fixture() {
   return { store, stored, pk, consensus, miner, deps, raw, id, unspent };
 }
 describe("submitExact durable one-shot submission", () => {
+  it("refuses legacy authorization before chain, Core, credentials or submission", async () => {
+    const f=await fixture();const key=`VAULT#${f.stored.vaultId}`;const row=(await f.store.get(f.pk,key))!;
+    await f.store.put({...row,version:1,vault:{...(row.vault as PublicVault),...publicScriptFixture("qsb-config-a-legacy-v1")}},0);
+    const write=vi.spyOn(f.store,"atomicPut");
+    await expect(submitExact(address,f.stored.id,f.raw,f.deps)).rejects.toThrow("script migration");
+    expect(f.unspent).not.toHaveBeenCalled();expect(f.consensus.verify).not.toHaveBeenCalled();expect(f.miner.credential).not.toHaveBeenCalled();expect(f.miner.submit).not.toHaveBeenCalled();expect(write).not.toHaveBeenCalled();
+  });
   it("rejects a persisted supervised job before chain, Core, credential or miner calls", async () => {
     const f = await fixture();
     const row = (await f.store.get(f.pk, `JOB#${f.stored.id}`))!;

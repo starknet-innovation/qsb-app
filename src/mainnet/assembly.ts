@@ -1,3 +1,4 @@
+import { assertCurrentVaultScript } from "../lib/script-version";
 import {z} from 'zod';
 import {hex} from '@scure/base';
 import {sha256} from '@noble/hashes/sha2.js';
@@ -19,7 +20,7 @@ export function localAssembly(guard:Guard,local:Local){
   try{
    const b=schema.parse(input),binding=fingerprint(b),walletBinding=fingerprint(wallet);
    if(b.vault.network!=='mainnet'||b.vault.id!==b.manifest.vaultId||b.vault.paymentAddress!==wallet.address||fingerprint(b.wallet)!==walletBinding)throw Error('Mainnet vault/wallet mismatch');
-   validatePublicState(b.vault.publicStateJson);assertVaultConfiguration(b.vault);
+   validatePublicState(b.vault.publicStateJson);assertVaultConfiguration(b.vault);assertCurrentVaultScript(b.vault);
    if(b.vault.status!=='confirmed'||!b.vault.funding||fingerprint(b.vault.funding)!==fingerprint(b.manifest.funding))throw Error('Vault funding mismatch');
    if(expected!==undefined&&backup!==expected)throw Error('Reimport the exact downloaded signing backup');
    const original=await decryptRecovery(backup,password);

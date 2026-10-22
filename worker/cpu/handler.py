@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import qsb_pipeline as pipeline
 import verify_hit
+from bitcoin_tx import classify_qsb_script, SCRIPT_VERSION
 
 PUBLIC_FIELDS = {'config', 'hash_mode', 'n', 't1s', 't1b', 't2s', 't2b',
                  'hors_commitments', 'dummy_sigs', 'pin_r', 'pin_s', 'pin_sig',
@@ -24,13 +25,17 @@ FILES = {'pinning': 'pinning.bin', 'round1': 'digest_r1.bin', 'round2': 'digest_
 
 
 def handler(event, context=None):
-    if set(event) - {'action', 'publicStateJson', 'manifest', 'stage', 'sequence', 'locktime', 'candidates'}:
+    if set(event) - {'action', 'publicStateJson', 'manifest', 'stage', 'sequence', 'locktime', 'candidates', 'scriptVersion'}:
         raise ValueError('Unexpected fields')
+    if event.get('scriptVersion') != SCRIPT_VERSION:
+        raise ValueError('Unsupported request script version')
     state = json.loads(event['publicStateJson'])
-    if set(state) != PUBLIC_FIELDS or any(set(r) != {'r', 's', 'sig'} for r in state['round_sigs']):
+    if set(state) not in (PUBLIC_FIELDS, PUBLIC_FIELDS | {'scriptVersion'}) or any(set(r) != {'r', 's', 'sig'} for r in state['round_sigs']):
         raise ValueError('Private or unsupported state')
     if (state['config'], state['hash_mode'], state['n'], state['t1s'], state['t1b'], state['t2s'], state['t2b']) != ('A', 'sha256', 150, 8, 1, 7, 2):
         raise ValueError('Unsupported configuration')
+    if classify_qsb_script(state) != SCRIPT_VERSION:
+        raise ValueError('Legacy script is not supported for search')
     stage = event['stage']
     if stage not in FILES or event['action'] not in ('export', 'verify'):
         raise ValueError('Unsupported action')
@@ -52,7 +57,7 @@ def handler(event, context=None):
             pipeline.cmd_export(args)
             raw = Path(FILES[stage]).read_bytes()
             if event['action'] == 'export':
-                return {'parameterBase64': base64.b64encode(raw).decode(), 'parameterSha256': hashlib.sha256(raw).hexdigest()}
+                return {'scriptVersion': SCRIPT_VERSION, 'parameterBase64': base64.b64encode(raw).decode(), 'parameterSha256': hashlib.sha256(raw).hexdigest()}
             candidates = event.get('candidates', [])
             if len(candidates) > 32 or any(not isinstance(c, str) or len(c) > 16384 for c in candidates):
                 raise ValueError('Invalid candidate records')
@@ -71,7 +76,7 @@ def handler(event, context=None):
                     verdict = verify_hit.verify_pin(check)
                     if verdict == 3: der_only += 1
                     if verdict == 0:
-                        return {'valid': True, 'sequence': check.sequence, 'locktime': check.locktime}
+                        return {'scriptVersion': SCRIPT_VERSION, 'valid': True, 'sequence': check.sequence, 'locktime': check.locktime}
                 else:
                     indices = fields.get('indices', '')
                     if not re.fullmatch(r'\d+(?:,\d+){8}', indices):
@@ -85,10 +90,10 @@ def handler(event, context=None):
                     verdict = verify_hit.verify_digest(check)
                     if verdict == 3: der_only += 1
                     if verdict == 0:
-                        return {'valid': True, 'indices': sorted(values)}
+                        return {'scriptVersion': SCRIPT_VERSION, 'valid': True, 'indices': sorted(values)}
             if records and der_only == len(records):
-                return {'valid': False, 'derOnly': True}
-            return {'valid': False}
+                return {'scriptVersion': SCRIPT_VERSION, 'valid': False, 'derOnly': True}
+            return {'scriptVersion': SCRIPT_VERSION, 'valid': False}
     finally:
         os.chdir(previous)
         pipeline.p2pkh_script = encoder

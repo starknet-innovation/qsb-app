@@ -1,3 +1,4 @@
+import { fixtureVault } from "./solver-fixture";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -33,7 +34,8 @@ import { outputScript } from "../src/lib/transactions";
 import type { Job, PublicVault, Withdrawal } from "../src/lib/model";
 import { withVaultConfiguration } from "../src/lib/provenance";
 import { GPU_SECONDS_SK, type OwnerLimits } from "../server/owner-limits";
-import servedRelease from "../src/lib/releases/qsb-solver-aws-v0-1-0.json";
+import { servedFixture as servedRelease } from "./solver-fixture";
+vi.mock("../src/lib/releases/registry.generated", async () => ({default:[(await import("./solver-fixture")).servedFixture]}));
 
 // Hermetic: the chain is a real Esplora over an in-memory fetch, the miner and
 // consensus are fakes, and a seeded session stands in for sign-in.
@@ -45,7 +47,7 @@ const pk = `OWNER#${owner}`;
 const token = "A".repeat(43);
 const vaultId = "11111111-1111-4111-8111-111111111111";
 const jobId = "22222222-2222-4222-8222-222222222222";
-const scriptHex = "51".repeat(100);
+const scriptHex = fixtureVault.scriptHex;
 const manifest: Withdrawal = {
   vaultId,
   funding: { txid: "33".repeat(32), vout: 0, value: "100000" },
@@ -76,7 +78,7 @@ function vault(overrides: Partial<PublicVault> = {}): PublicVault {
       .update(Buffer.from(scriptHex, "hex"))
       .digest("hex"),
     paymentAddress: owner,
-    publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
+    publicStateJson: fixtureVault.publicStateJson,
     status: "unfunded",
     }),
     ...overrides,
@@ -742,7 +744,7 @@ describe("client refusals before any side effect", () => {
     await f.putVault();
     const untouched = watch(f);
     const large = btc.Transaction.fromRaw(hex.decode(deposit()), opts);
-    large.addOutput({ amount: 1n, script: new Uint8Array(76_000) });
+    large.addOutput({ amount: 1n, script: new Uint8Array(76_000 - scriptHex.length / 2) });
     const rawTxHex = hex.encode(large.toBytes(true, false));
     expect(rawTxHex.length).toBeGreaterThan(150_000);
     const response = await f.call("POST", `/vaults/${vaultId}/fund/submit`, { rawTxHex, amount: "50000", costAccepted: true });

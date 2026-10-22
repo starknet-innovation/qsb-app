@@ -126,7 +126,7 @@ jobs:
           terraform -chdir=terraform/gpu validate
           terraform -chdir=terraform/gpu fmt -check
           node --import tsx terraform/scripts/review-fixtures.mjs
-          terraform -chdir=terraform/gpu test
+          node --import tsx terraform/scripts/test-fixture-tree.mjs
           terraform -chdir=terraform test -json -verbose -var="source_commit=$(git rev-parse HEAD)" > /tmp/qsb-terraform-test.jsonl
           python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-test.jsonl
           python3 terraform/tests/check-single-pipeline.py
@@ -164,15 +164,24 @@ jobs:
         run: |
           terraform -chdir=terraform init -backend=false -input=false -lockfile=readonly
           terraform -chdir=terraform/gpu init -backend=false -input=false -lockfile=readonly
-      - name: Test explicitly selected solver deployment identities
+      - name: Reject incompatible selection and test unconfigured deployment identities
         run: |
           git status --porcelain
           test -z "$(git status --porcelain)"
-          node terraform/scripts/build.mjs --network=mainnet --solver-release="$(node -p 'require("./src/lib/releases/qsb-solver-aws-v0-1-0.json").id')"
+          # No corrected image is enrolled yet. Never attest the old schema-3
+          # image as compatible merely to exercise a non-null CI selection.
+          node --import tsx --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import { buildIdentities } from './server/build-identities.ts';
+          const old = JSON.parse(readFileSync('src/lib/releases/qsb-solver-aws-v0-1-0.json'));
+          assert.throws(() => buildIdentities(old.id, 'a'.repeat(40), 'b'.repeat(64)), /SolverDeploymentContractRequired/);
+          JS
+          node terraform/scripts/build.mjs --network=mainnet
           node --import tsx terraform/scripts/review-fixtures.mjs
           terraform -chdir=terraform test -json -verbose -var="source_commit=$(git rev-parse HEAD)" > /tmp/qsb-terraform-selected-test.jsonl
           python3 terraform/tests/check-single-pipeline.py /tmp/qsb-terraform-selected-test.jsonl
-          terraform -chdir=terraform/gpu test
+          node --import tsx terraform/scripts/test-fixture-tree.mjs
       - name: Fail if the build or Terraform tests changed the tree
         run: |
           git status --porcelain

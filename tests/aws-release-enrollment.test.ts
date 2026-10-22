@@ -1,25 +1,25 @@
 import { afterEach, expect, it, vi } from "vitest";
 import published from "../src/lib/releases/qsb-solver-aws-v0-1-0.json";
 import archived from "../src/lib/releases/qsb-config-a-ranked-v2.json";
-import { assertSolverPin, pinSolver, solverRelease } from "../src/lib/provenance";
+import { assertSolverPin, pinSolver, solverRelease, fingerprint, vaultConfiguration } from "../src/lib/provenance";
 import { deployedSolver } from "../server/solver-deployment";
 import { buildIdentities } from "../server/build-identities";
 import { batchImageMatches } from "../server/aws-batch";
-import { fixtureVault } from "./solver-fixture";
+import { fixtureVault, publicScriptFixture } from "./solver-fixture";
 
 afterEach(() => vi.unstubAllEnvs());
 it("selects the enrolled AWS release while existing archived pins still verify", () => {
   vi.stubEnv("SOLVER_RELEASE_ID", published.id);
-  const selected = deployedSolver();
+  expect(() => deployedSolver()).toThrow("SolverDeploymentContractRequired");
+  const fixtureVault = publicScriptFixture("qsb-config-a-legacy-v1");
+  const selected = solverRelease(process.env.SOLVER_RELEASE_ID!);
   expect(selected).toEqual(published);
-  expect(assertSolverPin(pinSolver(fixtureVault, selected.id), fixtureVault)).toEqual(published);
-  expect(assertSolverPin(pinSolver(fixtureVault, archived.id), fixtureVault)).toEqual(archived);
+  expect(assertSolverPin({descriptor:selected,releaseHash:fingerprint(selected),vaultConfigurationHash:fingerprint(vaultConfiguration(fixtureVault))}, fixtureVault)).toEqual(published);
+  expect(assertSolverPin({descriptor:archived,releaseHash:fingerprint(archived),vaultConfigurationHash:fingerprint(vaultConfiguration(fixtureVault))}, fixtureVault)).toEqual(archived);
   expect(solverRelease(archived.id)).toEqual(archived);
 });
 it("generates deployment identities from the enrolled producer asset", () => {
-  const identities = buildIdentities(published.id, "e".repeat(40), "f".repeat(64));
-  expect(identities.solver).toMatchObject({id: published.id, image: published.image, solverCommit: published.solverCommit});
-  expect(identities.reference.appCommit).not.toBe(published.solverCommit);
+  expect(() => buildIdentities(published.id, "e".repeat(40), "f".repeat(64))).toThrow("SolverDeploymentContractRequired");
 });
 it("binds the enrolled canonical manifest to a same-digest AWS mirror only", () => {
   const queue = "arn:aws:batch:eu-west-1:123456789012:job-queue/qsb-gpu";

@@ -4,6 +4,7 @@ import { searchVersion, subsetRank, workRange } from "./search-ranges";
 
 /** A GPU worker's result for one bounded work unit. */
 export const candidateOutput = z.object({
+  scriptVersion: z.string().optional(),
   status: z.enum(["completed", "interrupted", "failed", "exhausted"]),
   stage: z.string(),
   manifestHash: z.string(),

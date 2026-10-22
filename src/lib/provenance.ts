@@ -1,3 +1,4 @@
+import { assertCurrentVaultScript, CURRENT_SCRIPT_VERSION, LEGACY_SCRIPT_VERSION, CORRECTED_GENERATOR_COMMIT, LEGACY_GENERATOR_COMMIT, vaultScriptVersion } from "./script-version";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import rankedContract from "../../contracts/ranked-v2.json";
@@ -7,7 +8,7 @@ import { z } from "zod";
 import externalDescriptors from "./releases/registry.generated";
 import type { PublicVault } from "./model";
 
-export const externalSolverDescriptorSchema = z
+const historicalSolverDescriptorSchema = z
   .object({
     schemaVersion: z.literal(3),
     searchContract: z.string().regex(/^[a-f0-9]{64}$/),
@@ -28,6 +29,23 @@ export const externalSolverDescriptorSchema = z
       .regex(/^ghcr\.io\/starknet-innovation\/qsb-solver@sha256:[a-f0-9]{64}$/),
   })
   .strict();
+export const externalSolverDescriptorSchema = z.union([
+  historicalSolverDescriptorSchema,
+  historicalSolverDescriptorSchema.extend({
+    schemaVersion: z.literal(4),
+    generatorCommit: z.literal(CORRECTED_GENERATOR_COMMIT),
+    scriptVersion: z.literal(CURRENT_SCRIPT_VERSION),
+  }).strict(),
+]);
+export function solverScriptVersion(descriptor: {schemaVersion?: number; generatorCommit: string; scriptVersion?: string}) {
+  if (descriptor.schemaVersion === 4 && descriptor.generatorCommit === CORRECTED_GENERATOR_COMMIT && descriptor.scriptVersion === CURRENT_SCRIPT_VERSION) return CURRENT_SCRIPT_VERSION;
+  if (descriptor.generatorCommit === LEGACY_GENERATOR_COMMIT && descriptor.scriptVersion === undefined) return LEGACY_SCRIPT_VERSION;
+  throw Error("UnsupportedSolverScriptVersion");
+}
+export function assertSolverScriptCompatibility(v: VaultInput, descriptor: SolverDescriptor) {
+  assertCurrentVaultScript(v);
+  if (solverScriptVersion(descriptor) !== CURRENT_SCRIPT_VERSION) throw Error("SolverScriptVersionMismatch");
+}
 export type SolverDescriptor =
   | typeof archived
   | typeof publishedV2
@@ -98,9 +116,14 @@ export function vaultConfiguration(v: VaultInput) {
   if (typeof v.network !== "string" || v.network === "")
     throw new Error("Unsupported QSB network configuration");
   const network = v.network;
+  const state = JSON.parse(v.publicStateJson);
+  let corrected = state.scriptVersion === CURRENT_SCRIPT_VERSION;
+  if (corrected) assertCurrentVaultScript(v);
+  else if (state.hors_commitments) corrected = vaultScriptVersion(v) === CURRENT_SCRIPT_VERSION;
   return {
+    ...(corrected ? {scriptVersion: CURRENT_SCRIPT_VERSION} : {}),
     protocol: "qsb-config-a-v1" as const,
-    generatorCommit: "2c9172051d5c150ef0a994ca6b988a08a3ef9e85" as const,
+    generatorCommit: (corrected ? CORRECTED_GENERATOR_COMMIT : LEGACY_GENERATOR_COMMIT) as typeof CORRECTED_GENERATOR_COMMIT | typeof LEGACY_GENERATOR_COMMIT,
     network,
     config: "A" as const,
     scriptHash: v.scriptHash,
@@ -135,6 +158,7 @@ export function pinSolver(
   const configuration = assertVaultConfiguration(v);
   if (v.config !== "A") throw new Error("UnsupportedVaultProtocol");
   const descriptor = solverRelease(solverId);
+  assertSolverScriptCompatibility(v, descriptor);
   return {
     descriptor,
     releaseHash: fingerprint(descriptor),

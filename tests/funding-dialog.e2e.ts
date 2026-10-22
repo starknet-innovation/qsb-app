@@ -78,7 +78,7 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
     await dialog.locator("fieldset").getByRole("checkbox").check();
     await dialog.getByLabel("Deposit amount (BTC)").fill("0.0005");
     await dialog.getByLabel("Miner fee rate (sat/vB)").fill("2");
-    await expect(dialog).toContainText(/Estimated size \d+ vB · miner fee \d+ sats/);
+    await expect(dialog).toContainText(/Estimated size [\d,]+ vB · miner fee [\d,]+ sats/);
     await dialog.getByRole("button", { name: "Review deposit", exact: true }).click();
     await expect(dialog).toContainText("Leaves your wallet");
     await dialog.getByLabel("I have read these statements and accept them").check();
