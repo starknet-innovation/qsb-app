@@ -125,14 +125,18 @@ describe("POST /api/vaults registers each script once on the deployment", () => 
   });
 
   it("lets exactly one of two concurrent registrations of a script, from two addresses, succeed", async () => {
-    const f = await fixture();
+    const store = new MemoryStore();
+    const f = await fixture(store);
+    const writes = vi.spyOn(store, "atomicPut");
     const scriptHex = script();
     const vaults = owners.map((owner) => vaultFor(owner, scriptHex));
     const results = await Promise.all(vaults.map((vault) => f.register(vault)));
     expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
     const winner = vaults[results.findIndex((r) => r.status === 201)];
     expect(results.find((r) => r.status === 409)).toEqual(registered);
-    // Both requests passed the reservation and chain checks; the transaction decided.
+    // Both requests passed the checks before the write; the transaction decided.
+    expect(writes.mock.settledResults.map((r) => r.type).sort()).toEqual(["fulfilled", "rejected"]);
+    expect(writes.mock.settledResults.find((r) => r.type === "rejected")?.value).toBeInstanceOf(Conflict);
     expect(f.lookups).toEqual([winner.scriptHash, winner.scriptHash]);
     expect(f.rows().vaults).toEqual([winner.id]);
     expect(f.rows().reservations.map((row) => [row.owner, row.vaultId])).toEqual([[winner.paymentAddress, winner.id]]);
