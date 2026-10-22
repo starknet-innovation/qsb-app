@@ -93,7 +93,7 @@ Sign-in, reads and pause stay open, and so does `POST /api/jobs/:id/submit`: it 
 A repeat of a request that succeeded (same owner, same vault `id`) gets 409 `state_conflict` without a chain lookup when its vault holds the script's reservation. A vault row without one gets the chain lookup and its answers first. Within 24 hours, a repeat that sends the first request's `Idempotency-Key` gets the 201 replayed instead.
 
 What this doesn't cover:
-- Some vault rows on this deployment have no `SCRIPT#` reservation. A second registration of such a vault's script is refused only once a payment to it shows on the chain API (`vault_script_paid`). A Slipstream deposit shows there once it's mined.
+- A vault row without a `SCRIPT#` reservation doesn't stop a second registration of its script until a payment to it shows on the chain API (`vault_script_paid`); a Slipstream deposit shows there once it's mined. The operator's backfill writes the missing reservations ([runbook](OPERATIONAL-RUNBOOK.md#reserve-the-scripts-of-existing-vaults)).
 - A script registered on another deployment is refused here only once a payment to it shows on the chain API.
 - The reservation is for one exact script. HORS secrets reused in a different script (part of a state, or reordered) aren't refused by the server. The SDK refuses a supplied state whose commitments a vault script of the signed-in address already pushes ([SDK](../sdk/README.md#your-own-recovery-state)).
 

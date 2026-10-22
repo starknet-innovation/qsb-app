@@ -37,6 +37,9 @@ export type AtomicWrite = {
 export function isReservationRow(row: Row): boolean {
   return row.sk === "RESERVATION" && row.pk.startsWith("OUTPOINT#");
 }
+export function isVaultRow(row: Row): boolean {
+  return row.pk.startsWith("OWNER#") && row.sk.startsWith("VAULT#");
+}
 
 function transactItem(
   table: string,
@@ -161,6 +164,10 @@ export class MemoryStore implements Store {
       .filter(isReservationRow)
       .map((row) => structuredClone(row));
   }
+  /** Every owner's vault rows, for the operator's script-reservation backfill. */
+  async vaultRows(): Promise<Row[]> {
+    return [...this.rows.values()].filter(isVaultRow).map((row) => structuredClone(row));
+  }
 }
 export class DynamoStore implements Store {
   private client = DynamoDBDocumentClient.from(
@@ -284,6 +291,25 @@ export class DynamoStore implements Store {
       start = page.LastEvaluatedKey;
     } while (start);
     return rows.filter(isReservationRow);
+  }
+  /** Every owner's vault rows, for the operator's script-reservation backfill: a Scan the API role can't make. */
+  async vaultRows(): Promise<Row[]> {
+    const rows: Row[] = [];
+    let start: Record<string, unknown> | undefined;
+    do {
+      const page = await this.client.send(
+        new ScanCommand({
+          TableName: this.table,
+          FilterExpression: "begins_with(pk, :owner) AND begins_with(sk, :vault)",
+          ExpressionAttributeValues: { ":owner": "OWNER#", ":vault": "VAULT#" },
+          ExclusiveStartKey: start,
+          ConsistentRead: true,
+        }),
+      );
+      rows.push(...((page.Items ?? []) as Row[]));
+      start = page.LastEvaluatedKey;
+    } while (start);
+    return rows.filter(isVaultRow);
   }
 }
 export const store: Store = process.env.TABLE_NAME

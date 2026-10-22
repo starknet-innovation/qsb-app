@@ -266,6 +266,23 @@ Each transactional Put is authorized as `dynamodb:PutItem` with its own leading 
 
 The withdrawal API Lambda has a 120-second timeout, but CloudFront returns a timeout after its 30-second origin response timeout. A caller timeout doesn't stop an already running Lambda or prove the miner never received the POST: treat it as uncertain and follow the steps above. Never retry the POST or reset its intent.
 
+## Reserve the scripts of existing vaults
+
+`POST /api/vaults` reserves each new vault's script (`SCRIPT#<scriptHash>`; [API](API.md#vault-registration)). A vault row without a reservation doesn't stop a second registration of its script until a payment to it shows on chain. `scripts/reserve-vault-scripts.ts` writes the missing reservations. Run it after deploying an API that reserves scripts; running it again is safe.
+
+1. In an [operator session](#operator-session), set `TABLE_NAME`, `AWS_REGION` and `QSB_NETWORK=mainnet`, then run it without options. It scans the table for vault rows and reports what it would write, writing nothing:
+
+   ```sh
+   npx tsx scripts/reserve-vault-scripts.ts
+   ```
+
+2. Read the report: `vaults`, `reserved` (what `--apply` writes), `alreadyReserved`, and the vault ids in `duplicates` and `unreadable`. Then run it again with `--apply`. It writes each missing reservation with `attribute_not_exists` and never changes an existing one; of two rows sharing a script, it reserves the older.
+3. It exits non-zero when `duplicates` or `unreadable` isn't empty, with or without `--apply`.
+   - A duplicate is a vault whose script another vault already holds, or an older vault row shares. Those are two vault records on one script, which must never both take a deposit. Check both vaults' funding with their owners before anything else, and don't delete or reassign a reservation to clear the report.
+   - An unreadable row's `scriptHash` isn't the SHA-256 of its script, so it gets no reservation.
+
+It reads the table with a Scan and writes only `SCRIPT#` rows, with PutItem. Its report names vault ids, never owner addresses.
+
 ## Operator session
 
 Reconciliation and plans run as `qsb-operator`. In the current account it is assumed from the Identity Center permission set; see the profiles in [ops/github-aws/README.md](../ops/github-aws/README.md#human-access-without-root). Sessions last at most an hour. The scoped runtime reconcile role Terraform declares (`operator_reconcile_role_arn`) stays dormant: `qsb-operator` is denied role chaining, so don't configure a profile for it.

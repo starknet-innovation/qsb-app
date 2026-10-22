@@ -1,12 +1,17 @@
+import { spawnSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
+import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { createApp } from "../server/app";
-import { Conflict, MemoryStore, type AtomicWrite } from "../server/store";
+import { Conflict, DynamoStore, MemoryStore, scriptReservation, type AtomicWrite, type Row } from "../server/store";
 import { Esplora } from "../server/chain";
+import { backfillScriptReservations } from "../server/script-reservations";
 import { BITCOIN_NETWORK, NETWORK_CONFIG } from "../src/lib/network";
 import type { PublicVault } from "../src/lib/model";
 import { withVaultConfiguration } from "../src/lib/provenance";
+import { ApiRequestError } from "../src/lib/session";
+import { registrationError } from "../src/lib/vault-registration";
 
 // One script, one vault, on the whole deployment. A fake chain API behind the real Esplora
 // client and the in-memory store; no keys and no network.
@@ -210,5 +215,121 @@ describe("POST /api/vaults registers each script once on the deployment", () => 
     expect(f.rows()).toEqual({ vaults: [], reservations: [] });
     f.network.genesis = NETWORK_CONFIG.genesisHash;
     expect((await f.register(vault)).status).toBe(201);
+  });
+});
+
+describe("the operator's script-reservation backfill", () => {
+  afterEach(() => vi.restoreAllMocks());
+  /** A vault row written without a reservation, as POST /api/vaults once did. */
+  const unreserved = async (store: MemoryStore, vault: PublicVault) =>
+    store.put({ pk: `OWNER#${vault.paymentAddress}`, sk: `VAULT#${vault.id}`, version: 0, vault });
+  const older = (vault: PublicVault, createdAt: string) => withVaultConfiguration({ ...vault, createdAt });
+
+  it("reports first, then reserves each unreserved vault's script, after which the API refuses it", async () => {
+    const store = new MemoryStore();
+    const f = await fixture(store);
+    const legacy = vaultFor(owners[0], script());
+    await unreserved(store, legacy);
+    // Without a reservation, a second vault of the script would be registered.
+    const dry = await backfillScriptReservations(store, await store.vaultRows(), false);
+    expect(dry).toEqual({ applied: false, vaults: 1, reserved: 1, alreadyReserved: 0, duplicates: [], unreadable: [] });
+    expect(f.rows().reservations).toEqual([]);
+    const applied = await backfillScriptReservations(store, await store.vaultRows(), true);
+    expect(applied).toMatchObject({ applied: true, reserved: 1, duplicates: [] });
+    expect(f.rows().reservations).toEqual([scriptReservation(owners[0], legacy)]);
+    expect(await f.register(vaultFor(owners[1], legacy.scriptHex))).toEqual(registered);
+    // The report names vaults, never their owners.
+    expect(JSON.stringify(applied)).not.toContain(owners[0]);
+    // Run again, it changes nothing.
+    expect(await backfillScriptReservations(store, await store.vaultRows(), true)).toMatchObject({ reserved: 0, alreadyReserved: 1 });
+  });
+
+  it("reserves the older of two rows sharing a script and reports the other, as a dry run does", async () => {
+    const store = new MemoryStore();
+    const scriptHex = script();
+    const first = older(vaultFor(owners[1], scriptHex), "2026-10-01T00:00:00.000Z");
+    const second = older(vaultFor(owners[0], scriptHex), "2026-10-02T00:00:00.000Z");
+    await unreserved(store, second);
+    await unreserved(store, first);
+    for (const apply of [false, true])
+      expect(await backfillScriptReservations(store, await store.vaultRows(), apply)).toMatchObject({
+        reserved: 1,
+        duplicates: [second.id],
+      });
+    expect((await store.get(`SCRIPT#${first.scriptHash}`, "RESERVATION"))?.vaultId).toBe(first.id);
+  });
+
+  it("leaves a script another vault holds, and a row whose hash isn't its script's, as they are", async () => {
+    const store = new MemoryStore();
+    const legacy = vaultFor(owners[0], script());
+    await unreserved(store, legacy);
+    // Registered after the deploy, before the backfill ran.
+    const newer = vaultFor(owners[1], legacy.scriptHex);
+    await store.put(scriptReservation(owners[1], newer));
+    const broken = { ...vaultFor(owners[1], script()), scriptHash: "00".repeat(32) };
+    await unreserved(store, broken);
+    expect(await backfillScriptReservations(store, await store.vaultRows(), true)).toEqual({
+      applied: true,
+      vaults: 2,
+      reserved: 0,
+      alreadyReserved: 0,
+      duplicates: [legacy.id],
+      unreadable: [broken.id],
+    });
+    expect((await store.get(`SCRIPT#${legacy.scriptHash}`, "RESERVATION"))?.vaultId).toBe(newer.id);
+    expect(await store.get(`SCRIPT#${broken.scriptHash}`, "RESERVATION")).toBeUndefined();
+  });
+
+  it("reports a script reserved between its read and its write as a duplicate", async () => {
+    const store = new MemoryStore();
+    const legacy = vaultFor(owners[0], script());
+    await unreserved(store, legacy);
+    vi.spyOn(store, "put").mockRejectedValueOnce(new Conflict("Concurrent update"));
+    expect(await backfillScriptReservations(store, await store.vaultRows(), true)).toMatchObject({
+      reserved: 0,
+      duplicates: [legacy.id],
+    });
+  });
+
+  it("scans every page of the table for vault rows, with consistent reads", async () => {
+    const vault: Row = { pk: "OWNER#a", sk: "VAULT#1", version: 0 };
+    const send = vi
+      .spyOn(DynamoDBDocumentClient.prototype, "send")
+      .mockResolvedValueOnce({ Items: [vault], LastEvaluatedKey: { pk: "OWNER#a", sk: "VAULT#1" } } as never)
+      .mockResolvedValueOnce({ Items: [{ pk: "OWNER#a", sk: "JOB#1", version: 0 }] } as never);
+    expect(await new DynamoStore("qsb-test-records").vaultRows()).toEqual([vault]);
+    const scans = send.mock.calls.map(([command]) => (command as ScanCommand).input);
+    expect(scans.map((input) => input.ExclusiveStartKey)).toEqual([undefined, { pk: "OWNER#a", sk: "VAULT#1" }]);
+    expect(scans.every((input) => input.ConsistentRead && input.TableName === "qsb-test-records")).toBe(true);
+  });
+
+  it.each([
+    [{ AWS_REGION: "eu-west-2", QSB_NETWORK: "mainnet" }, [], "TableNameRequired"],
+    [{ TABLE_NAME: "qsb-test-records", QSB_NETWORK: "mainnet" }, [], "AwsRegionRequired"],
+    [{ TABLE_NAME: "qsb-test-records", AWS_REGION: "eu-west-2" }, [], "MainnetEnvironmentRequired"],
+    [{ TABLE_NAME: "qsb-test-records", AWS_REGION: "eu-west-2", QSB_NETWORK: "mainnet" }, ["--force"], "InvalidOptions"],
+  ])("the CLI refuses before touching the table: %o %o", (env, args, reason) => {
+    const result = spawnSync(process.execPath, ["--import", "tsx", "scripts/reserve-vault-scripts.ts", ...args], {
+      env: { PATH: process.env.PATH, ...env },
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stderr)).toEqual({ action: "refuse", reason });
+    expect(result.stdout).toBe("");
+  });
+});
+
+describe("the webapp's message when the server refuses a new vault", () => {
+  it("says nothing was saved, and to keep the downloaded backup when the script isn't new", () => {
+    const message = (code: string, status = 409) => (registrationError(new ApiRequestError("server text", status, code)) as Error).message;
+    expect(message("chain_unavailable", 503)).toBe("The server couldn't check this vault's script on chain, so it saved nothing. Try again shortly.");
+    expect(message("chain_error", 502)).toBe(message("chain_unavailable", 503));
+    for (const code of ["vault_script_paid", "vault_script_registered"]) {
+      expect(message(code)).toContain("nothing was saved");
+      expect(message(code)).toMatch(/keep the backup you downloaded/i);
+    }
+    const other = new ApiRequestError("Invalid vault ownership or funding state.", 400, "vault_invalid");
+    expect(registrationError(other)).toBe(other);
   });
 });
