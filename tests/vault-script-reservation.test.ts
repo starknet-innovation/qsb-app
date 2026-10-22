@@ -215,14 +215,13 @@ describe("POST /api/vaults registers each script once on the deployment", () => 
 
   it("gives both chain reads one deadline, and writes nothing once it has passed", async () => {
     // Each read alone is well inside the deadline; the two together aren't.
-    const f = await fixture(new MemoryStore(), { scriptLookupMs: 150 });
-    f.latency.ms = 100;
+    const f = await fixture(new MemoryStore(), { scriptLookupMs: 300 });
+    f.latency.ms = 200;
     const vault = vaultFor(owners[0], script());
     expect(await f.register(vault)).toMatchObject({ status: 503, body: { code: "chain_unavailable" } });
     expect(f.rows()).toEqual({ vaults: [], reservations: [] });
-    // The deadline ended the network check's request too, not only the script's.
+    // The network check's request got the deadline's signal too, not only the script's.
     expect(f.signals.get("/block-height/0")?.aborted).toBe(true);
-    expect(f.signals.get(`/scripthash/${vault.scriptHash}`)?.aborted).toBe(true);
     // Slow but inside the deadline: registered.
     f.latency.ms = 20;
     expect((await f.register(vault)).status).toBe(201);

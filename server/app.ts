@@ -148,8 +148,8 @@ export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
 const REQUEST_BUDGET_MS = 25_000;
 const REQUEST_LIMIT_MS = 28_000;
 /**
- * Both chain reads of a new vault's script, together. A slower answer refuses the vault, so it is
- * written well inside CloudFront's 30 seconds or not at all, never after the caller got a 504.
+ * Both chain reads of a new vault's script, together. A slower answer refuses the vault, so the
+ * chain reads can't push its write past CloudFront's 30 seconds.
  */
 const SCRIPT_LOOKUP_MS = 15_000;
 /** How long a container keeps the deployment's app origin before reading its row again. */
