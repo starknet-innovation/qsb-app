@@ -20,7 +20,7 @@ export type BundledQsb = LocalQsb & { adoptQsb(stateJson: string): Promise<Gener
  */
 export class RefusedState extends Error {
   override name = "RefusedState";
-  /** The deployment's refusal of the vault's script; absent when this package refused the state. */
+  /** The deployment's refusal of the vault's script; `undefined` when this package refused the state. */
   readonly code?: "vault_script_registered" | "vault_script_paid";
   constructor(message: string, options?: ErrorOptions & { code?: RefusedState["code"] }) {
     super(message, options);

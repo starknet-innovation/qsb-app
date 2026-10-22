@@ -397,7 +397,7 @@ describe("vaults.create with a supplied state", () => {
     // Not a verdict on the state.
     expect(error).not.toBeInstanceOf(RefusedState);
     expect(error.message).toBe(
-      "The deployment couldn't check the vault's script on chain (chain_unavailable), so it registered nothing. Don't pay into its script until a retry with the same state registers it.",
+      "The deployment couldn't check the vault's script on chain (chain_unavailable), so it registered nothing. The backup just saved is for a vault id that won't be registered: keep the state, retry with it, and use the backup that retry saves. Don't pay into the script until a retry registers it.",
     );
     expect(saveBackup).toHaveBeenCalledOnce();
     expect(storedVaults(w)).toEqual([]);

@@ -97,10 +97,12 @@ describe("POST /api/vaults registers each script once on the deployment", () => 
   });
 
   it("refuses the same script from a second address, or a second vault of the first, before any write", async () => {
-    const f = await fixture();
+    const store = new MemoryStore();
+    const f = await fixture(store);
     const scriptHex = script();
     const first = vaultFor(owners[0], scriptHex);
     expect((await f.register(first)).status).toBe(201);
+    const writes = vi.spyOn(store, "atomicPut");
     for (const second of [vaultFor(owners[1], scriptHex), vaultFor(owners[0], scriptHex)]) {
       const refusal = await f.register(second);
       expect(refusal).toEqual(registered);
@@ -108,6 +110,8 @@ describe("POST /api/vaults registers each script once on the deployment", () => 
       expect(JSON.stringify(refusal)).not.toContain(first.id);
       expect(JSON.stringify(refusal)).not.toContain(owners[0]);
     }
+    // Refused on the reservation read: no transaction was even tried.
+    expect(writes).not.toHaveBeenCalled();
     expect(f.rows().vaults).toEqual([first.id]);
     expect(f.rows().reservations.map((row) => row.vaultId)).toEqual([first.id]);
     // The chain is asked first each time.

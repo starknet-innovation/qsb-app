@@ -599,7 +599,7 @@ export class QsbClient {
             throw new Error(
               `The deployment couldn't check the vault's script on chain (${error.code}), so it registered nothing. ${
                 supplied
-                  ? "Don't pay into its script until a retry with the same state registers it."
+                  ? "The backup just saved is for a vault id that won't be registered: keep the state, retry with it, and use the backup that retry saves. Don't pay into the script until a retry registers it."
                   : "The backup just saved is for an unregistered vault: never pay into its script. A retry makes a new vault and a new backup."
               }`,
               { cause: error },
