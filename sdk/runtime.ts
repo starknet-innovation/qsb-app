@@ -14,7 +14,7 @@ type GeneratedQsb = Awaited<ReturnType<LocalQsb["generateQsb"]>>;
 export type BundledQsb = LocalQsb & { adoptQsb(stateJson: string): Promise<GeneratedQsb> };
 /**
  * A refused supplied recovery state, from `adoptQsb` or `vaults.create`; the message says what didn't
- * match. Any other failure is a plain Error.
+ * match. Any other error is not a verdict on the state.
  */
 export class RefusedState extends Error {
   override name = "RefusedState";
@@ -66,6 +66,8 @@ export function nodeQsb(): BundledQsb {
     ...qsbOperations(run),
     async adoptQsb(stateJson) {
       if (typeof stateJson !== "string") throw new RefusedState("the recovery state is not JSON text");
+      // The pipeline's state is about 60 KB; the bridge's checks run on this thread.
+      if (stateJson.length > 1000000) throw new RefusedState("the recovery state is larger than the pipeline's state");
       return JSON.parse(await run("adopt", [stateJson])) as GeneratedQsb;
     },
     lockQsb() {

@@ -78,12 +78,26 @@ beforeAll(async () => {
   qsb.lockQsb();
 }, 60000);
 
-/** The state the bridge's own setup builds from `secrets`, as a caller's generator would write it. */
-async function stateFrom(secrets: string[]): Promise<string> {
+/** A Python with the pinned sources loaded as the SDK's runtime loads them, to run the pipeline directly. */
+async function pipelinePython() {
   const py = await loadPyodide({ stdout: () => {}, stderr: () => {} });
   await startQsbRuntime(py, async (file) => new Uint8Array(await readFile(new URL(`../public/qsb/${file}`, import.meta.url))));
+  return py;
+}
+/** What the bridge's own setup builds from `secrets`, as generateQsb returns it. */
+async function generatedFrom(secrets: string[]): Promise<Generated> {
+  const py = await pipelinePython();
   py.globals.set("secrets", JSON.stringify(secrets));
-  return JSON.parse(py.runPython("import bridge, json\nbridge.result(bridge.setup([bytes.fromhex(s) for s in json.loads(secrets)]))")).stateJson;
+  return JSON.parse(py.runPython("import bridge, json\nbridge.result(bridge.setup([bytes.fromhex(s) for s in json.loads(secrets)]))"));
+}
+/** The two files the pipeline's `setup --config A` writes: the state a caller passes, and its script. */
+async function setupFiles(): Promise<[string, string]> {
+  const py = await pipelinePython();
+  return py
+    .runPython(
+      "import contextlib, io, qsb_pipeline\nfrom types import SimpleNamespace\nwith contextlib.redirect_stdout(io.StringIO()):\n    qsb_pipeline.cmd_setup(SimpleNamespace(config='A', seed=None))\n[open(f).read() for f in ('qsb_state.json', 'qsb_scriptpubkey.hex')]",
+    )
+    .toJs();
 }
 
 const replaceOnce = (text: string, from: string, to: string) => {
@@ -140,6 +154,12 @@ describe("adoptQsb in the SDK's bundled runtime", () => {
       // Key order and whitespace aren't part of the state.
       const reordered = replaceOnce(generated.stateJson, '{"config": "A", ', "{\n  ").replace(/\}$/, ', "config": "A"}');
       expect(await qsb.adoptQsb(reordered)).toEqual(generated);
+      // The file the pipeline's setup writes, indented, as a caller passes it.
+      const [file, script] = await setupFiles();
+      expect(file).toContain('{\n  "config": "A",\n');
+      const adopted = await qsb.adoptQsb(file);
+      expect(adopted.scriptHex).toBe(script.trim());
+      expect(await qsb.validateRecovery(adopted.stateJson)).toBe(adopted.scriptHash);
       for (const [label, stateJson, message] of edits(generated.stateJson)) {
         const error = await qsb.adoptQsb(stateJson).then(() => new Error(`${label} was accepted`), (e: Error) => e);
         expect(error, label).toBeInstanceOf(RefusedState);
@@ -266,7 +286,7 @@ describe("vaults.create with a supplied state", () => {
     const { vault } = await client.vaults.create({ name: "first", passphrase, saveBackup, stateJson: generated.stateJson });
     // The same state, and a valid new one that shares a single secret, in another position.
     const first = JSON.parse(generated.stateJson).hors_secrets as string[][];
-    const overlapping = await stateFrom([...Array.from({ length: 299 }, () => hex.encode(randomBytes(20))), first[0][42]]);
+    const { stateJson: overlapping } = await generatedFrom([...Array.from({ length: 299 }, () => hex.encode(randomBytes(20))), first[0][42]]);
     for (const stateJson of [generated.stateJson, overlapping])
       await expect(client.vaults.create({ name: "second", passphrase, saveBackup, stateJson })).rejects.toThrow(
         new RefusedState(
@@ -275,6 +295,31 @@ describe("vaults.create with a supplied state", () => {
       );
     expect(saveBackup).toHaveBeenCalledOnce();
     expect(vaultPosts(w)).toHaveLength(1);
+  }, 120000);
+
+  it("finds a vault another client registered with the script, or with commitments in another case", async () => {
+    const first = JSON.parse(generated.stateJson).hors_secrets as string[][];
+    const overlapping = await generatedFrom([first[1][7], ...Array.from({ length: 299 }, () => hex.encode(randomBytes(20)))]);
+    const commitments = (data: Generated, edit: (c: string) => string) => ({
+      ...data,
+      publicStateJson: data.publicStateJson.replace(/"([0-9a-f]{40})"/g, (_, c: string) => `"${edit(c)}"`),
+    });
+    for (const [label, registered] of [
+      // Another script, sharing one secret: only the commitments match, once their case is folded.
+      ["uppercase commitments", commitments(overlapping, (c) => c.toUpperCase())],
+      // The same script under commitments the server doesn't check against it.
+      ["the same script", commitments(generated, () => hex.encode(randomBytes(20)))],
+    ] as const) {
+      const { w, signer, client } = await signedIn();
+      const other = new QsbClient({ baseUrl: API, signer, fetch: w.fetch, token: client.token, qsb: { ...nodeQsb(), generateQsb: async () => registered } });
+      const { vault } = await other.vaults.create({ name: "other client", passphrase, saveBackup: async () => {} });
+      expect(vault.publicStateJson, label).toBe(registered.publicStateJson);
+      const saveBackup = vi.fn(async () => {});
+      await expect(client.vaults.create({ name: "mine", passphrase, saveBackup, stateJson: generated.stateJson }), label).rejects.toThrow(
+        `This recovery state reuses HORS secrets of vault ${vault.id}.`,
+      );
+      expect(saveBackup, label).not.toHaveBeenCalled();
+    }
   }, 120000);
 
   it("refuses to register when the same secrets were registered while its backup was saved", async () => {
