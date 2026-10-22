@@ -162,6 +162,7 @@
   "submit-exact.ts | submitExact | ChainError | intent_conflict | A withdrawal intent already exists. Reconcile it.",
   "submit-exact.ts | submitExact | ChainError | vault_not_found | Mainnet vault not found.",
   "submit-exact.ts | submitExact | ChainError | intent_conflict | Original intent unavailable after submission.",
+  "submit-funding.ts | scriptFence | ChainError | vault_script_registered | Another vault on this deployment holds this vault's script, so this vault takes no deposit.",
   "submit-funding.ts | exportFunding | ChainError | state_conflict | Funding intent changed during export. Refresh the vault.",
   "submit-funding.ts | exportFunding | Conflict | state_conflict | -",
   "submit-funding.ts | submitFunding | SubmitDisabled | submit_disabled | Deposit submission to the miner is disabled.",

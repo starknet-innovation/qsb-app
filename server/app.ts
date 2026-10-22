@@ -1,7 +1,7 @@
 import { deployedSolver, deployedSolverId } from "./solver-deployment";
 import { observeWithdrawal } from "./withdrawal-status";
 import { submitExact, SubmitDisabled } from "./submit-exact";
-import { exportFunding, submitFunding, type FundingDependencies } from "./submit-funding";
+import { exportFunding, scriptFence, submitFunding, type FundingDependencies } from "./submit-funding";
 import { flagStrayPayments, strayPaymentsOf } from "./stray-outputs";
 import {
   CoreConsensus,
@@ -576,7 +576,8 @@ export function createApp(
    * or the operator's backfill, gives the reservation to the other one. This vault then takes no
    * deposit: the deposit routes refuse it before anything is recorded or sent, `GET /api/vaults`
    * lists it in `noDeposit` and not as resendable, and `/funding` doesn't offer its stored bytes.
-   * A vault row with no reservation for its script isn't refused.
+   * A vault row with no reservation for its script isn't refused; its first deposit write claims
+   * one (scriptFence), and that write fails if another vault reserved the script in between.
    */
   async function scriptHeldElsewhere(owner: string, vault: PublicVault | undefined) {
     if (typeof vault?.scriptHash !== "string") return false;
@@ -775,7 +776,10 @@ export function createApp(
       value: payment.value,
     };
     vault.status = chainStatus.confirmed ? "confirmed" : "submitted";
-    await store.put({ ...row, vault, version: row.version + 1 }, row.version);
+    await store.atomicPut([
+      { row: { ...row, vault, version: row.version + 1 }, expected: row.version },
+      await scriptFence(store, c.get("owner"), vault),
+    ]);
     return c.json({ vault }, 201);
   });
   // Deposits pay a bare, non-standard QSB script that public relay refuses, so the signed

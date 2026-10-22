@@ -578,13 +578,13 @@ describe("deposit routes", () => {
     });
     const first = f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
     await ready;
-    const put = f.store.put.bind(f.store);
-    vi.spyOn(f.store, "put").mockImplementation(async (row, expected) => {
-      if (row.fundingExportedAt) {
+    const atomicPut = f.store.atomicPut.bind(f.store);
+    vi.spyOn(f.store, "atomicPut").mockImplementation(async (writes) => {
+      if (writes[0]?.row.fundingExportedAt) {
         release();
         await first;
       }
-      return put(row, expected);
+      return atomicPut(writes);
     });
     const exported = await f.call(`/vaults/${f.vault.id}/${endpoint}`);
     expect(exported.status).toBe(endpoint === "fund/signed" ? 404 : 409);
@@ -598,13 +598,14 @@ describe("deposit routes", () => {
     const raw = deposit();
     await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true });
     const put = f.store.put.bind(f.store);
+    const atomicPut = f.store.atomicPut.bind(f.store);
     let exports = 0;
-    vi.spyOn(f.store, "put").mockImplementation(async (row, expected) => {
-      if (row.fundingExportedAt && ++exports === 1) {
+    vi.spyOn(f.store, "atomicPut").mockImplementation(async (writes) => {
+      if (writes[0]?.row.fundingExportedAt && ++exports === 1) {
         const current = (await f.row())!;
         await put({ ...current, version: current.version + 1, concurrentNote: "preserved" }, current.version);
       }
-      return put(row, expected);
+      return atomicPut(writes);
     });
     const response = await f.call(`/vaults/${f.vault.id}/${endpoint}`);
     expect(response.status).toBe(200);
@@ -616,7 +617,8 @@ describe("deposit routes", () => {
   it("bounds export conflicts and never retries a non-conflict storage error", async () => {
     const f = await app();
     await f.call(`/vaults/${f.vault.id}/fund/submit`, { rawTxHex: deposit(), amount: "50000", costAccepted: true });
-    const put = vi.spyOn(f.store, "put").mockRejectedValue(new Conflict());
+    // The export writes with atomicPut, fenced by the script's reservation.
+    const put = vi.spyOn(f.store, "atomicPut").mockRejectedValue(new Conflict());
     expect((await f.call(`/vaults/${f.vault.id}/fund/signed`)).status).toBe(409);
     expect(put).toHaveBeenCalledTimes(5);
     put.mockClear().mockRejectedValue(new ChainError("storage unavailable"));

@@ -37,15 +37,15 @@ function vaultFor(paymentAddress: string, scriptHex: string): PublicVault {
   });
 }
 
-async function fixture(store = new MemoryStore(), options: { scriptLookupMs?: number } = {}) {
-  /** Deposits are on; the miner is never reached in these tests, so any call to it fails. */
+async function fixture(store = new MemoryStore(), options: { scriptLookupMs?: number; miner?: Slipstream } = {}) {
+  /** Deposits are on; unless a test brings its own, the miner is never reached, so any call fails. */
   const minerCalls: string[] = [];
-  const miner = new Proxy({}, {
+  const miner = options.miner ?? (new Proxy({}, {
     get: (_, name) => () => {
       minerCalls.push(String(name));
       throw new Error("The miner was called.");
     },
-  }) as Slipstream;
+  }) as Slipstream);
   for (const [owner, token] of tokens)
     await store.put({
       pk: `SESSION#${createHash("sha256").update(token).digest("hex")}`,
@@ -458,6 +458,84 @@ describe("a vault whose script another vault holds takes no deposit", () => {
     expect(await f.call("GET", `/vaults/${holder.id}/fund/signed`, owners[0])).toMatchObject({ status: 404, body: { code: "signed_deposit_not_found" } });
     expect(await f.call("POST", `/vaults/${unreserved.id}/fund/resubmit`, owners[1], {})).toMatchObject({ status: 409, body: { code: "signed_deposit_not_found" } });
     expect(f.minerCalls).toEqual([]);
+  });
+});
+
+describe("a deposit write and its script's reservation change together", () => {
+  /** A script a transaction can carry (OP_1 to OP_16), and a deposit paying it. */
+  const payable = () => {
+    const scriptHex = Array.from(randomBytes(100), (b) => (0x51 + (b % 16)).toString(16)).join("");
+    const tx = new btc.Transaction({ allowUnknownInputs: true, allowUnknownOutputs: true, version: 2 });
+    tx.addInput({ txid: randomBytes(32), index: 0 });
+    tx.addOutput({ script: hex.decode(scriptHex), amount: 50_000n });
+    return { scriptHex, rawTxHex: hex.encode(tx.toBytes(true, false)) };
+  };
+  const working = () => {
+    const submitted: string[] = [];
+    const miner = {
+      credential: async () => ({}),
+      seen: async () => false,
+      submitFunding: async (raw: string) => {
+        submitted.push(raw);
+        return { status: "success" as const, message: btc.Transaction.fromRaw(hex.decode(raw), { allowUnknownInputs: true, allowUnknownOutputs: true }).id };
+      },
+    } as unknown as Slipstream;
+    return { miner, submitted };
+  };
+  /** A vault row written without a reservation, as POST /api/vaults once did. */
+  const legacy = async (store: MemoryStore, vault: PublicVault, extra: Record<string, unknown> = {}) =>
+    store.put({ pk: `OWNER#${vault.paymentAddress}`, sk: `VAULT#${vault.id}`, version: 0, vault, ...extra });
+  /** Another vault's registration of the same script, landing just before the next transaction. */
+  const registrationLandsFirst = (store: MemoryStore, vault: PublicVault) => {
+    const atomicPut = store.atomicPut.bind(store);
+    vi.spyOn(store, "atomicPut").mockImplementationOnce(async (writes) => {
+      await store.put(scriptReservation(owners[1], { id: randomUUID(), scriptHash: vault.scriptHash }));
+      return atomicPut(writes);
+    });
+  };
+
+  it("claims an unreserved vault's script with its deposit intent", async () => {
+    const store = new MemoryStore();
+    const { miner, submitted } = working();
+    const f = await fixture(store, { miner });
+    const { scriptHex, rawTxHex } = payable();
+    const vault = vaultFor(owners[0], scriptHex);
+    await legacy(store, vault);
+    const answer = await f.call("POST", `/vaults/${vault.id}/fund/submit`, owners[0], { rawTxHex, amount: "50000", costAccepted: true });
+    expect(answer).toMatchObject({ status: 201, body: { submission: "submitted" } });
+    expect(submitted).toEqual([rawTxHex]);
+    expect(f.rows().reservations).toEqual([scriptReservation(owners[0], vault)]);
+  });
+
+  it("records and sends nothing when another vault reserves the script between the check and the intent", async () => {
+    const store = new MemoryStore();
+    const { miner, submitted } = working();
+    const f = await fixture(store, { miner });
+    const { scriptHex, rawTxHex } = payable();
+    const vault = vaultFor(owners[0], scriptHex);
+    await legacy(store, vault);
+    registrationLandsFirst(store, vault);
+    const body = { rawTxHex, amount: "50000", costAccepted: true };
+    expect(await f.call("POST", `/vaults/${vault.id}/fund/submit`, owners[0], body)).toMatchObject({ status: 409, body: { code: "state_conflict" } });
+    expect(submitted).toEqual([]);
+    const row = store.rows.get(`OWNER#${owners[0]}|VAULT#${vault.id}`)!;
+    expect([(row.vault as PublicVault).status, row.fundingRawTxHex]).toEqual(["unfunded", undefined]);
+    // The retry is refused outright.
+    expect(await f.call("POST", `/vaults/${vault.id}/fund/submit`, owners[0], body)).toMatchObject({ status: 409, body: { code: "vault_script_registered" } });
+    expect(submitted).toEqual([]);
+  });
+
+  it("resends nothing when another vault reserves the script just before a resend", async () => {
+    const store = new MemoryStore();
+    const { miner, submitted } = working();
+    const f = await fixture(store, { miner });
+    const { scriptHex, rawTxHex } = payable();
+    const txid = btc.Transaction.fromRaw(hex.decode(rawTxHex), { allowUnknownInputs: true, allowUnknownOutputs: true }).id;
+    const vault = { ...vaultFor(owners[0], scriptHex), status: "submitted" as const, funding: { txid, vout: 0, value: "50000" } };
+    await legacy(store, vault, { fundingRawTxHex: rawTxHex, fundingSubmission: "uncertain" });
+    registrationLandsFirst(store, vault);
+    expect(await f.call("POST", `/vaults/${vault.id}/fund/resubmit`, owners[0], {})).toMatchObject({ status: 409, body: { code: "vault_script_registered" } });
+    expect(submitted).toEqual([]);
   });
 });
 

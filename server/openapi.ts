@@ -646,9 +646,12 @@ const consensusCheck = source(
 const fundingMatch = source(["transaction-checks.ts | invalid"], {
   409: ["funding_transaction_invalid"],
 });
+// A vault whose script another vault's reservation holds takes no deposit: the deposit routes
+// refuse it, and scriptFence refuses each deposit write it fences.
+const scriptHeld = source(["submit-funding.ts | scriptFence"], { 409: ["vault_script_registered"] });
 const fundingExport = source(
   ["submit-funding.ts | exportFunding"],
-  merge(writes),
+  merge(writes, scriptHeld),
 );
 // submitFunding; a retry asks the miner whether it already has the deposit.
 const deposit = source(
@@ -657,7 +660,7 @@ const deposit = source(
     "submit-funding.ts | touch",
     "submit-funding.ts | record",
   ],
-  merge(writes, fundingMatch, minerCredential, minerLookup, {
+  merge(writes, fundingMatch, minerCredential, minerLookup, scriptHeld, {
     409: [
       "funding_transaction_invalid",
       "vault_not_found",
@@ -734,8 +737,6 @@ const ownerLimitsRead = source(
 );
 // Routes that check the owner allowlist (QSB_OWNER_ALLOWLIST).
 const allowlisted = merge(ownerLimitsRead, { 403: ["owner_not_allowlisted"] });
-// A vault whose script another vault's reservation holds takes no deposit.
-const scriptHeld: Errors = { 409: ["vault_script_registered"] };
 // The owner's single webhook row: a registration or deletion that keeps losing its version race.
 const webhookRow = source(["webhooks.ts | update"], { 409: ["state_conflict"] });
 

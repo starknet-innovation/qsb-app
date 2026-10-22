@@ -5071,7 +5071,7 @@
             }
           },
           "409": {
-            "description": "Conflict: `network_mismatch`, `vault_not_funded`, `chain_transaction_not_found`, `chain_error`, `state_conflict`.",
+            "description": "Conflict: `network_mismatch`, `vault_script_registered`, `vault_not_funded`, `chain_transaction_not_found`, `chain_error`, `state_conflict`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5084,6 +5084,7 @@
                         "code": {
                           "enum": [
                             "network_mismatch",
+                            "vault_script_registered",
                             "vault_not_funded",
                             "chain_transaction_not_found",
                             "chain_error",

@@ -27,7 +27,7 @@ The human access roles can't assume a test role by design, so [`ops/iam-sandbox/
 | Delete the outpoint | denied; the reservation remains |
 | After deleting the owner row: BatchWriteItem `OWNER#` + `SYSTEM#` | denied; neither row written, no partial success or `UnprocessedItems` |
 
-The live steps use `OUTPOINT#` rows only. `POST /api/vaults` writes a `SCRIPT#` reservation with the vault row in one transaction of two Puts, which `TableDataAccess` allows. `DenyReservationDelete` denies deleting or updating a reservation; step 1 simulates that for a `SCRIPT#` key.
+The live steps use `OUTPOINT#` rows only. `POST /api/vaults` writes a `SCRIPT#` reservation with the vault row in one transaction of two Puts, and each deposit write puts or condition-checks the reservation in a transaction with the vault row; `TableDataAccess` allows both. `DenyReservationDelete` denies deleting or updating a reservation; step 1 simulates that for a `SCRIPT#` key.
 
 Rows are read back with consistent reads between steps. A denial counts only when AWS attributes it to the role's own identity policy: a denial from the permissions boundary or an SCP fails the check, because it wouldn't be testing `app-records.json`.
 
