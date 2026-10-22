@@ -106,7 +106,7 @@ const replaceOnce = (text: string, from: string, to: string) => {
 };
 const hash160 = (bytes: Uint8Array) => hex.encode(ripemd160(sha256(bytes)));
 const derived = (field: string) =>
-  new RegExp(`^${field.replace(/[[\].]/g, "\\$&")} is not what the pipeline builds from these HORS secrets$`);
+  new RegExp(`^${field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} is not what the pipeline builds from these HORS secrets$`);
 /**
  * Mismatched states and what the bridge says about each. The edits are made on the JSON text: the
  * state holds integers above 2^53 (pin_r, pin_s, pin_k, each round's r, s and k) that JavaScript numbers round.
