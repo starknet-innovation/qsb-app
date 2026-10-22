@@ -55,6 +55,8 @@ describe("app role record access", () => {
     const reservation = [`SCRIPT#${"cd".repeat(32)}`];
     expect(decideAppRoleAccess("dynamodb:PutItem", reservation)).toBe("allow");
     expect(decideAppRoleAccess("dynamodb:GetItem", reservation)).toBe("allow");
+    // A deposit write condition-checks the vault's own reservation in its transaction.
+    expect(decideAppRoleAccess("dynamodb:ConditionCheckItem", reservation)).toBe("allow");
     // The vault row and the reservation, in one transaction: each item is authorized on its own.
     expect(decideAppRoleAccess("dynamodb:PutItem", ["OWNER#wallet"])).toBe("allow");
     // DeleteItem is granted for other rows (CHALLENGE#), so only the deny refuses it here.

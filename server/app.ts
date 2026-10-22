@@ -573,7 +573,8 @@ export function createApp(
   /**
    * Whether another vault's reservation holds this vault's script. A vault row without a
    * reservation can share its script with another vault: a later registration of that script,
-   * or the operator's backfill, gives the reservation to the other one. This vault then takes no
+   * the first deposit write of another row on it, or the operator's backfill gives the
+   * reservation to the other one. This vault then takes no
    * deposit: the deposit routes refuse it before anything is recorded or sent, `GET /api/vaults`
    * lists it in `noDeposit` and not as resendable, and `/funding` doesn't offer its stored bytes.
    * A vault row with no reservation for its script isn't refused; its first deposit write claims

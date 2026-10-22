@@ -130,12 +130,12 @@ export type StatusMemory = Map<string, string>;
  * - atomicPut adds the event rows to the caller's transaction. Their keys are new (a fresh
  *   timestamp and the subject's new version), so they can't be why a transaction is refused.
  * - put returns when the caller's write returns and only notes the event.
- * Either way no event I/O sits between a paid intent and its POST: a deposit's intent, written
- * with atomicPut, carries its event row in its own transaction.
  * - settle(), after the unit's work, writes the noted event rows (cancelled when they run out
  *   of time, retried once), queues webhooks for all the unit's events even when there's no
  *   time to send them, then delivers the given owners' due ones within the delivery budget.
- * Errors from recording or delivery are logged and swallowed.
+ * Either way no event I/O sits between a paid intent and its POST: a deposit's intent, written
+ * with atomicPut, carries its event row in its own transaction. Errors from recording or
+ * delivery are logged and swallowed.
  */
 export function recordOwnerEvents(inner: Store, seen: StatusMemory = new Map()): OwnerEventStore {
   /** Events to write at settle(). */
