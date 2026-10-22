@@ -1,6 +1,6 @@
 # Status
 
-As of 2 October 2026. #8, the plan to a first mainnet withdrawal, is complete; what's open is listed below.
+As of 22 October 2026. #8, the plan to a first mainnet withdrawal, is complete; what's open is listed below.
 
 ## Deployed
 
