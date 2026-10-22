@@ -24,10 +24,11 @@ export type ScriptBackfill = {
 /**
  * Reserve the script of each vault row that has no reservation, the row POST /api/vaults writes
  * with a new vault: `SCRIPT#<scriptHash>`, with attribute_not_exists. Without `apply` it only
- * reports. A script another vault holds is reported and never reassigned. Rows go by the time
- * their `createdAt` names, earliest first, so of two rows sharing a script the earlier one is
- * reserved. `createdAt` is set by the client, so the order only decides which of the two keeps the
- * reservation: the other is reported either way. Run again, it changes nothing.
+ * reports. A script another vault holds is reported and never reassigned. Of two rows sharing a
+ * script, one with a recorded deposit keeps it, else the one whose `createdAt` names the earlier
+ * time: the deposit routes then refuse the other, an unfunded one where they can. `createdAt` is
+ * set by the client, so it only breaks the tie; the other row is reported either way. Run again,
+ * it changes nothing.
  */
 export async function backfillScriptReservations(
   store: Pick<Store, "get" | "put">,
@@ -43,14 +44,18 @@ export async function backfillScriptReservations(
     unreadable: [],
     unsettled: [],
   };
+  const vaultOf = (row: Row) => row.vault as Partial<PublicVault> | undefined;
+  // Refusing deposits to a vault that has one changes nothing, so a funded row goes first.
+  const unfunded = (row: Row) => (vaultOf(row)?.funding ? 0 : 1);
   // A time, not text: `createdAt` may carry milliseconds or not. One that doesn't parse goes last.
-  const createdAt = (row: Row) =>
-    Date.parse(String((row.vault as Partial<PublicVault> | undefined)?.createdAt)) || Number.POSITIVE_INFINITY;
-  const rows = [...vaultRows].sort((a, b) => createdAt(a) - createdAt(b) || a.sk.localeCompare(b.sk));
+  const createdAt = (row: Row) => Date.parse(String(vaultOf(row)?.createdAt)) || Number.POSITIVE_INFINITY;
+  const rows = [...vaultRows].sort(
+    (a, b) => unfunded(a) - unfunded(b) || createdAt(a) - createdAt(b) || a.sk.localeCompare(b.sk),
+  );
   // Scripts this run reserved, or would, by vault: a dry run sees no reservation it would have written.
   const claimed = new Map<string, string>();
   for (const row of rows) {
-    const vault = row.vault as Partial<PublicVault> | undefined;
+    const vault = vaultOf(row);
     const vaultId = typeof vault?.id === "string" ? vault.id : row.sk.slice("VAULT#".length);
     const { scriptHex, scriptHash } = vault ?? {};
     if (

@@ -444,10 +444,15 @@ export default function TransactionDialog({
     try {
       result = await api(`/vaults/${vault.id}/fund/submit`, { rawTxHex, amount: amountSats, costAccepted: true });
     } catch (error) {
-      setPendingFunding(readFundingGuard());
-      // Refused before anything was recorded or sent, and final: resending can't help.
+      // Refused before anything was recorded or sent, and final: every deposit route refuses this
+      // vault, so the guard against a second deposit has nothing left to guard, and keeping it
+      // would offer to resend.
       const refusal = depositRefusal(error);
-      if (refusal) throw refusal;
+      if (refusal) {
+        rememberFunding(undefined);
+        throw refusal;
+      }
+      setPendingFunding(readFundingGuard());
       // The server may or may not have recorded the intent before failing; ask it.
       void confirmRecorded(rawTxHex);
       const detail = error instanceof Error ? ` ${error.message}` : "";

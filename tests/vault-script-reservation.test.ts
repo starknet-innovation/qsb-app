@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
+import { hex } from "@scure/base";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { createApp } from "../server/app";
 import { Conflict, DynamoStore, MemoryStore, scriptReservation, type AtomicWrite, type Row } from "../server/store";
@@ -299,6 +300,23 @@ describe("the operator's script-reservation backfill", () => {
     expect((await store.get(`SCRIPT#${first.scriptHash}`, "RESERVATION"))?.vaultId).toBe(first.id);
   });
 
+  it("gives a shared script to a row with a deposit before an earlier one without", async () => {
+    const store = new MemoryStore();
+    const scriptHex = script();
+    const unfundedEarlier = older(vaultFor(owners[0], scriptHex), "2026-10-01T00:00:00.000Z");
+    const fundedLater = {
+      ...older(vaultFor(owners[1], scriptHex), "2026-10-02T00:00:00.000Z"),
+      status: "confirmed" as const,
+      funding: { txid: "cd".repeat(32), vout: 0, value: "50000" },
+    };
+    await unreserved(store, unfundedEarlier);
+    await unreserved(store, fundedLater);
+    expect(await backfillScriptReservations(store, await store.vaultRows(), true)).toMatchObject({
+      reserved: 1,
+      duplicates: [{ vault: unfundedEarlier.id, heldBy: fundedLater.id }],
+    });
+  });
+
   it("leaves a script another vault holds, and a row whose hash isn't its script's, as they are", async () => {
     const store = new MemoryStore();
     const legacy = vaultFor(owners[0], script());
@@ -392,12 +410,21 @@ describe("a vault whose script another vault holds takes no deposit", () => {
   it("refuses every deposit route before anything is recorded or sent", async () => {
     const store = new MemoryStore();
     const f = await fixture(store);
-    // Two vault rows on one script, both older than reservations; the backfill gave the script to the first.
-    const scriptHex = script();
+    // Two vault rows on one script, both older than reservations; the backfill gave the script to
+    // the first. The second holds a submitted deposit, which a resend would send to the miner and
+    // an export would mark as exported.
+    // A script a transaction can carry: OP_1 to OP_16 only.
+    const scriptHex = Array.from(randomBytes(100), (b) => (0x51 + (b % 16)).toString(16)).join("");
     const holder = vaultFor(owners[0], scriptHex);
-    const loser = vaultFor(owners[1], scriptHex);
+    const tx = new btc.Transaction({ allowUnknownInputs: true, allowUnknownOutputs: true, version: 2 });
+    tx.addInput({ txid: new Uint8Array(32).fill(7), index: 0 });
+    tx.addOutput({ script: hex.decode(scriptHex), amount: 50_000n });
+    const loser = { ...vaultFor(owners[1], scriptHex), status: "submitted" as const, funding: { txid: tx.id, vout: 0, value: "50000" } };
     await legacy(store, holder);
-    await legacy(store, loser);
+    await store.put({
+      pk: `OWNER#${owners[1]}`, sk: `VAULT#${loser.id}`, version: 0, vault: loser,
+      fundingRawTxHex: hex.encode(tx.toBytes(true, false)),
+    });
     await store.put(scriptReservation(owners[0], holder));
     const before = structuredClone([...store.rows.entries()]);
     const deposit = { rawTxHex: "00", amount: "50000", costAccepted: true };
@@ -410,11 +437,12 @@ describe("a vault whose script another vault holds takes no deposit", () => {
       expect(await f.call(method, path, owners[1], body), path).toEqual(refused);
     expect([...store.rows.entries()]).toEqual(before);
     expect(f.minerCalls).toEqual([]);
+    // Nor is it offered as resendable, while a submitted vault with no reservation still is.
+    const unreserved = { ...vaultFor(owners[1], script()), status: "submitted" as const };
+    await store.put({ pk: `OWNER#${owners[1]}`, sk: `VAULT#${unreserved.id}`, version: 0, vault: unreserved, fundingRawTxHex: "00" });
+    expect((await f.call("GET", "/vaults", owners[1])).body.resendable).toEqual([unreserved.id]);
     // The vault that holds the script, and a vault row with no reservation, get past this check.
-    const unreserved = vaultFor(owners[1], script());
-    await legacy(store, unreserved);
-    for (const [owner, vault] of [[owners[0], holder], [owners[1], unreserved]] as const)
-      expect(await f.call("GET", `/vaults/${vault.id}/fund/signed`, owner)).toMatchObject({ status: 404, body: { code: "signed_deposit_not_found" } });
+    expect(await f.call("GET", `/vaults/${holder.id}/fund/signed`, owners[0])).toMatchObject({ status: 404, body: { code: "signed_deposit_not_found" } });
   });
 });
 
@@ -434,7 +462,7 @@ describe("the webapp's message when the server refuses a new vault", () => {
   it("says a refused deposit sent nothing and shouldn't be resent", () => {
     const refusal = depositRefusal(new ApiRequestError("server text", 409, "vault_script_registered"));
     expect(refusal?.message).toBe(
-      "Another vault on this server has this vault's script, so this vault takes no deposit. Nothing was sent: don't send this deposit or make another for this vault.",
+      "Another vault on this server has this vault's script, so this vault takes no deposit, and this request sent nothing. Don't make another deposit for this vault. If you submitted this deposit before, it may still confirm: check the vault's status.",
     );
     // Any other failure stays an uncertain submission.
     expect(depositRefusal(new ApiRequestError("Unable to complete the request. Please retry.", 502, "miner_request_failed"))).toBeUndefined();

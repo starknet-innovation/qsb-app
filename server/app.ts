@@ -571,23 +571,25 @@ export function createApp(
     return c.json({ deleted: true });
   });
   /**
+   * Whether another vault's reservation holds this vault's script. A vault row without a
+   * reservation can share its script with another vault: a later registration of that script,
+   * or the operator's backfill, gives the reservation to the other one. This vault then takes no
+   * deposit: the deposit routes refuse it before anything is recorded or sent, and it isn't
+   * listed as resendable. A vault row with no reservation for its script isn't refused.
+   */
+  async function scriptHeldElsewhere(owner: string, vault: PublicVault | undefined) {
+    if (typeof vault?.scriptHash !== "string") return false;
+    const { pk, sk } = scriptReservation(owner, vault);
+    const held = await store.get(pk, sk);
+    return held !== undefined && (held.owner !== owner || held.vaultId !== vault.id);
+  }
+  const vaultScriptHeldElsewhere = async (owner: string, vaultId: string) =>
+    scriptHeldElsewhere(owner, (await store.get(`OWNER#${owner}`, `VAULT#${vaultId}`))?.vault as PublicVault | undefined);
+  /**
    * submitFunding, watching the miner's answers without changing them. When the resend logic
    * finds the miner no longer has a submitted deposit, and the resend isn't accepted either,
    * the deposit is recorded as dropped after the decision is made.
    */
-  /**
-   * Whether another vault's reservation holds this vault's script. Two vault rows can share one
-   * only if both predate reservations; the backfill gives the script to one of them, and the other
-   * takes no deposit: the deposit routes refuse it before anything is recorded or sent. A vault
-   * row with no reservation for its script isn't refused.
-   */
-  async function scriptHeldElsewhere(owner: string, vaultId: string) {
-    const vault = (await store.get(`OWNER#${owner}`, `VAULT#${vaultId}`))?.vault as PublicVault | undefined;
-    if (typeof vault?.scriptHash !== "string") return false;
-    const { pk, sk } = scriptReservation(owner, vault);
-    const held = await store.get(pk, sk);
-    return held !== undefined && (held.owner !== owner || held.vaultId !== vaultId);
-  }
   async function submitDeposit(owner: string, vaultId: string, raw: string, amount: bigint) {
     const observed = { unknown: false, accepted: false };
     const watched: FundingDependencies["miner"] = {
@@ -614,18 +616,19 @@ export function createApp(
   }
   installApiKeyRoutes(app, store, apiKeys);
   app.get("/api/vaults", async (c) => {
-    const rows = await store.list(`OWNER#${c.get("owner")}`, "VAULT#");
+    const owner = c.get("owner");
+    const rows = await store.list(`OWNER#${owner}`, "VAULT#");
+    // Vaults whose unconfirmed deposit the server can resend: stored Slipstream bytes only, and
+    // not for a vault whose script another vault holds, which the resend would refuse.
+    const resendable: string[] = [];
+    for (const r of rows) {
+      const vault = r.vault as PublicVault;
+      if (typeof r.fundingRawTxHex === "string" && r.fundingRawTxHex !== "" && vault.status === "submitted")
+        if (!(await scriptHeldElsewhere(owner, vault))) resendable.push(vault.id);
+    }
     return c.json({
       vaults: rows.map((r) => r.vault),
-      // Vaults whose unconfirmed deposit the server can resend: stored Slipstream bytes only.
-      resendable: rows
-        .filter(
-          (r) =>
-            typeof r.fundingRawTxHex === "string" &&
-            r.fundingRawTxHex !== "" &&
-            (r.vault as PublicVault).status === "submitted",
-        )
-        .map((r) => (r.vault as PublicVault).id),
+      resendable,
       // Payments to a vault's script beyond its recorded deposit, as last checked. Never spent.
       strayPayments: rows.flatMap((r) => strayPaymentsOf(r) ?? []),
     });
@@ -723,7 +726,7 @@ export function createApp(
         { checks: release.checks },
       );
     if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
-    if (await scriptHeldElsewhere(c.get("owner"), c.req.param("id")))
+    if (await vaultScriptHeldElsewhere(c.get("owner"), c.req.param("id")))
       return apiError(c, 409, "vault_script_registered", "Another vault on this deployment holds this vault's script, so this vault takes no deposit.");
     const body = fundRequest.parse(await jsonBody(c));
     const pk = `OWNER#${c.get("owner")}`,
@@ -785,7 +788,7 @@ export function createApp(
         "Deposit submission to the miner is disabled.",
       );
     if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
-    if (await scriptHeldElsewhere(c.get("owner"), c.req.param("id")))
+    if (await vaultScriptHeldElsewhere(c.get("owner"), c.req.param("id")))
       return apiError(c, 409, "vault_script_registered", "Another vault on this deployment holds this vault's script, so this vault takes no deposit.");
     const body = fundSubmitRequest.parse(await jsonBody(c));
     const result = await submitDeposit(
@@ -809,7 +812,7 @@ export function createApp(
         "Deposit submission is switched off.",
       );
     if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
-    if (await scriptHeldElsewhere(c.get("owner"), c.req.param("id")))
+    if (await vaultScriptHeldElsewhere(c.get("owner"), c.req.param("id")))
       return apiError(c, 409, "vault_script_registered", "Another vault on this deployment holds this vault's script, so this vault takes no deposit.");
     const row = await exportFunding(store, c.get("owner"), c.req.param("id"));
     if (!row)
@@ -845,7 +848,7 @@ export function createApp(
         "Deposit submission to the miner is disabled.",
       );
     if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
-    if (await scriptHeldElsewhere(c.get("owner"), c.req.param("id")))
+    if (await vaultScriptHeldElsewhere(c.get("owner"), c.req.param("id")))
       return apiError(c, 409, "vault_script_registered", "Another vault on this deployment holds this vault's script, so this vault takes no deposit.");
     fundResubmitRequest.parse(await c.req.json().catch(() => ({})));
     const row = await store.get(`OWNER#${c.get("owner")}`, `VAULT#${c.req.param("id")}`);

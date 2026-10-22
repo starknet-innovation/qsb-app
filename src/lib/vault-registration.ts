@@ -22,12 +22,13 @@ export function registrationError(error: unknown): unknown {
 }
 
 /**
- * A deposit route's refusal of a vault whose script another vault holds. It comes before anything
- * is recorded or sent, and it's final: resending the deposit gets it again.
+ * A deposit route's refusal of a vault whose script another vault holds. It comes before this
+ * request records or sends anything, and it's final: resending the deposit gets it again. An
+ * earlier submission of the same bytes may still have reached MARA.
  */
 export function depositRefusal(error: unknown): Error | undefined {
   if (error instanceof ApiRequestError && error.status === 409 && error.code === "vault_script_registered")
     return new Error(
-      "Another vault on this server has this vault's script, so this vault takes no deposit. Nothing was sent: don't send this deposit or make another for this vault.",
+      "Another vault on this server has this vault's script, so this vault takes no deposit, and this request sent nothing. Don't make another deposit for this vault. If you submitted this deposit before, it may still confirm: check the vault's status.",
     );
 }
