@@ -589,7 +589,8 @@ export class QsbClient {
       await input.saveBackup(backup);
       await this.unlock(backup, input.passphrase, vault, qsb);
       // Again, for a vault registered from the same secrets while this backup was saved. The server
-      // refuses only the same script, by any address; this also finds the secrets in another script.
+      // refuses a reserved or paid script, by any address; this also finds this address's vaults whose
+      // scripts push the secrets: another script, or one with no reservation.
       const sharing = supplied ? sharingSecrets((await this.vaults.list()).vaults, data.publicStateJson) : undefined;
       if (sharing)
         throw new RefusedState(
