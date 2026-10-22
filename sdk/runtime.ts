@@ -5,6 +5,13 @@ import { qsbOperations } from "../src/lib/qsb-operations";
 
 /** The local QSB operations the SDK needs; the same operations src/lib/qsb.ts runs in the browser. */
 export type LocalQsb = ReturnType<typeof qsbOperations> & { lockQsb(): void };
+type GeneratedQsb = Awaited<ReturnType<LocalQsb["generateQsb"]>>;
+/**
+ * This package's own runtime. `adoptQsb` takes recovery state generated elsewhere and returns what
+ * `generateQsb` returns for it, after the bridge rebuilds it with the pipeline's setup from its HORS
+ * secrets and finds every field the same.
+ */
+export type BundledQsb = LocalQsb & { adoptQsb(stateJson: string): Promise<GeneratedQsb> };
 
 // The vendored generator sources the browser serves from /qsb/, checked against the same manifest.
 const sources = new URL("../public/qsb/", import.meta.url);
@@ -27,7 +34,7 @@ function pythonError(error: unknown): Error {
  * source is checked against public/qsb/manifest.json before it runs. Calls
  * after `lockQsb` start a fresh interpreter.
  */
-export function nodeQsb(): LocalQsb {
+export function nodeQsb(): BundledQsb {
   let runtime: ReturnType<typeof startQsbRuntime> | undefined;
   const start = () =>
     (runtime ??= (async () => {
@@ -50,6 +57,7 @@ export function nodeQsb(): LocalQsb {
   };
   return {
     ...qsbOperations(run),
+    adoptQsb: async (stateJson) => JSON.parse(await run("adopt", [stateJson])) as GeneratedQsb,
     lockQsb() {
       runtime = undefined;
     },

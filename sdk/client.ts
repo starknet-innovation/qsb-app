@@ -55,7 +55,7 @@ import { persistentGuard } from "../src/mainnet/persistentGuard";
 // The request bodies the server's handlers parse, so a request can't drift from the API.
 import { fundResubmitRequest, fundSubmitRequest, submitRequest } from "../server/api-schemas";
 import type { Wallet } from "../src/lib/wallet";
-import { nodeQsb, type LocalQsb } from "./runtime";
+import { nodeQsb, type BundledQsb, type LocalQsb } from "./runtime";
 import { apiBase, isLoopback, signerWallet, type Signer } from "./signer";
 
 export { ApiRequestError };
@@ -344,8 +344,11 @@ export class QsbClient {
     /**
      * Generate QSB state locally, encrypt the recovery backup locally, hand it
      * to `saveBackup`, check it unlocks, then register only the public vault.
+     * With `stateJson`, the vault uses that recovery state instead, once this
+     * package's own runtime finds it is exactly the state the pipeline builds
+     * from its HORS secrets and no vault of this address has its script.
      */
-    create: (input: { name: string; passphrase: string; saveBackup: SaveBackup }) =>
+    create: (input: { name: string; passphrase: string; saveBackup: SaveBackup; stateJson?: string }) =>
       this.createVault(input),
     list: () =>
       this.session.api<{ vaults: PublicVault[]; resendable?: string[]; strayPayments?: StrayPayments[] }>(
@@ -450,14 +453,14 @@ export class QsbClient {
       throw new Error(`The fee rate is below MARA's current minimum of ${floor} sat/vB. Nothing was submitted.`);
   }
   /** Decrypt locally and check the state against the vault's script, as the webapp does. */
-  private async unlock(backup: string, passphrase: string, vault: PublicVault): Promise<Recovery> {
+  private async unlock(backup: string, passphrase: string, vault: PublicVault, qsb = this.qsb): Promise<Recovery> {
     const recovery = await decryptRecovery(backup, passphrase);
     assertVaultConfiguration(vault);
     if (
       recovery.vault.id !== vault.id ||
       recovery.vault.scriptHash !== vault.scriptHash ||
       recovery.vault.scriptHex !== vault.scriptHex ||
-      (await this.qsb.validateRecovery(recovery.stateJson)) !== vault.scriptHash
+      (await qsb.validateRecovery(recovery.stateJson)) !== vault.scriptHash
     )
       throw new Error("This backup belongs to a different vault.");
     return recovery;
@@ -487,14 +490,35 @@ export class QsbClient {
     });
   }
 
-  private async createVault(input: { name: string; passphrase: string; saveBackup: SaveBackup }) {
+  /** A caller's recovery state, once `qsb` accepts it and no vault of this address locks its script. */
+  private async adoptState(qsb: BundledQsb, stateJson: string) {
+    let data: Awaited<ReturnType<BundledQsb["adoptQsb"]>>;
+    try {
+      data = await qsb.adoptQsb(stateJson);
+    } catch (error) {
+      const reason = (error instanceof Error ? error.message : String(error)).replace(/\.$/, "");
+      throw new Error(`The supplied recovery state was refused: ${reason}. Nothing was saved or registered.`, { cause: error });
+    }
+    const existing = (await this.vaults.list()).vaults.find((vault) => vault.scriptHash === data.scriptHash);
+    if (existing)
+      throw new Error(
+        `This recovery state already locks vault ${existing.id}. A state locks one vault, which takes one deposit; nothing was saved or registered.`,
+      );
+    return data;
+  }
+
+  private async createVault(input: { name: string; passphrase: string; saveBackup: SaveBackup; stateJson?: string }) {
     const name = input.name.trim();
     if (!name || name.length > 60) throw new Error("Give the vault a name of 1 to 60 characters.");
     if (input.passphrase.length < 14)
       throw new Error("Use a recovery passphrase of at least 14 characters.");
     assertOwnerAllowed(await this.assertServerNetwork());
+    // A supplied state is checked, and its backup re-opened, only by a fresh interpreter of this package's
+    // runtime: a replaced `qsb` could pass a script the state's secrets can't spend, locking the deposit.
+    const supplied = input.stateJson === undefined ? undefined : { qsb: nodeQsb(), stateJson: input.stateJson };
+    const qsb = supplied?.qsb ?? this.qsb;
     try {
-      const data = await this.qsb.generateQsb();
+      const data = supplied ? await this.adoptState(supplied.qsb, supplied.stateJson) : await qsb.generateQsb();
       validatePublicState(data.publicStateJson);
       const vault = withVaultConfiguration({
         id: randomUUID(),
@@ -513,7 +537,7 @@ export class QsbClient {
         input.passphrase,
       );
       await input.saveBackup(backup);
-      await this.unlock(backup, input.passphrase, vault);
+      await this.unlock(backup, input.passphrase, vault, qsb);
       const registered = await this.session
         .api<{ vault: PublicVault }>("/vaults", publicVaultSchema.parse(vault))
         .catch((error) => {
@@ -523,7 +547,7 @@ export class QsbClient {
         });
       return { vault: registered.vault, backup };
     } finally {
-      this.qsb.lockQsb();
+      qsb.lockQsb();
     }
   }
 

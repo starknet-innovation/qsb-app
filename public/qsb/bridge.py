@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from types import SimpleNamespace
 import qsb_pipeline as pipeline
 from bitcoin_tx import QSBScriptBuilder
@@ -32,16 +33,81 @@ def validate_state(state):
         raise ValueError('Recovery script mismatch')
     return script
 
-def generate():
-    with contextlib.redirect_stdout(io.StringIO()):
-        pipeline.cmd_setup(SimpleNamespace(config='A', seed=None))
+def setup(secrets=None):
+    """Run the pipeline's Config A setup and return the state it saves. `secrets`, the HORS secrets in
+    the order generate_keys draws them, replace its 20-byte os.urandom draws."""
+    original = os.urandom
+    draws = iter(secrets or ())
+    def urandom(size):
+        if size != 20:
+            return original(size)
+        secret = next(draws, None)
+        if secret is None:
+            raise ValueError('The pipeline drew more HORS secrets than the state holds')
+        return secret
+    if secrets is not None:
+        os.urandom = urandom
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            pipeline.cmd_setup(SimpleNamespace(config='A', seed=None))
+    finally:
+        os.urandom = original
     with open('qsb_state.json') as f:
         state = json.load(f)
+    os.unlink('qsb_state.json')
+    return state
+
+def result(state):
     script = validate_state(state)
     public = {k: state[k] for k in PUBLIC_FIELDS}
     public['round_sigs'] = [{k: r[k] for k in ('r', 's', 'sig')} for r in state['round_sigs']]
-    os.unlink('qsb_state.json')
     return json.dumps({'stateJson': json.dumps(state), 'publicStateJson': json.dumps(public), 'scriptHex': script.hex(), 'scriptHash': hashlib.sha256(script).hexdigest()})
+
+def generate():
+    return result(setup())
+
+def difference(supplied, expected, path=''):
+    """The first place `supplied` differs from `expected` in shape, type or value, or None."""
+    if isinstance(expected, dict) and isinstance(supplied, dict):
+        at = lambda key: f'{path}.{key}' if path else key
+        for key in supplied:
+            if key not in expected:
+                return f'{at(key)} is not a field the pipeline produces'
+        for key in expected:
+            found = f'{at(key)} is missing' if key not in supplied else difference(supplied[key], expected[key], at(key))
+            if found:
+                return found
+        return None
+    if isinstance(expected, list) and isinstance(supplied, list) and len(supplied) == len(expected):
+        for i, (a, b) in enumerate(zip(supplied, expected)):
+            found = difference(a, b, f'{path}[{i}]')
+            if found:
+                return found
+        return None
+    if isinstance(expected, (dict, list)) or json.dumps(supplied) != json.dumps(expected):
+        return f'{path} is not what the pipeline builds from these HORS secrets'
+    return None
+
+def adopt(state_json):
+    """Accept a caller's recovery state only if it is exactly the state setup builds from its HORS secrets."""
+    state = json.loads(state_json)
+    if not isinstance(state, dict):
+        raise ValueError('The recovery state is not a JSON object')
+    if tuple(state.get(k) for k in ('config', 'hash_mode', 'n', 't1s', 't1b', 't2s', 't2b')) != ('A', 'sha256', 150, 8, 1, 7, 2):
+        raise ValueError('Unsupported recovery configuration')
+    secrets = state.get('hors_secrets')
+    if not isinstance(secrets, list) or len(secrets) != 2 or any(not isinstance(r, list) or len(r) != 150 for r in secrets):
+        raise ValueError('Invalid secret count')
+    flat = [s for r in secrets for s in r]
+    if not all(isinstance(s, str) and re.fullmatch('[0-9a-f]{40}', s) for s in flat):
+        raise ValueError('Each HORS secret is 20 bytes of lowercase hex')
+    if len(set(flat)) != len(flat):
+        raise ValueError('A HORS secret repeats')
+    expected = setup([bytes.fromhex(s) for s in flat])
+    found = difference(state, expected)
+    if found:
+        raise ValueError(found)
+    return result(expected)
 
 def validate(state_json):
     script = validate_state(json.loads(state_json))
