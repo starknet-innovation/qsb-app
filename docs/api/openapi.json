@@ -4964,7 +4964,7 @@
       "get": {
         "operationId": "getVaultFunding",
         "summary": "The deposit's chain status and transaction",
-        "description": "Until a Slipstream deposit is mined the chain provider doesn't know it. Then the stored signed bytes stand in for `previousTxHex` and `status` is unconfirmed; they never count as confirmation. The check also looks up the vault script's confirmed outputs and flags any beyond the recorded deposit, with a `deposit.stray_payment` event.",
+        "description": "Until a Slipstream deposit is mined the chain provider doesn't know it. Then the stored signed bytes stand in for `previousTxHex` and `status` is unconfirmed; they never count as confirmation. A vault whose script another vault holds gets no such stand-in: only the chain answers, so an unmined deposit is a 409 `chain_transaction_not_found`. The check also looks up the vault script's confirmed outputs and flags any beyond the recorded deposit, with a `deposit.stray_payment` event.",
         "security": [
           {
             "session": []

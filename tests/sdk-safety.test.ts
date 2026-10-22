@@ -628,8 +628,9 @@ describe("per-owner limits (#89)", () => {
     expect(error.message).toContain("Nothing was written or sent by this request");
     expect(error.message).toContain("Don't resend this deposit or sign another for this vault.");
     expect(error.message).not.toContain("isn't confirmed");
-    // A resend gets the same final answer.
-    await expect(v.client.deposits.resubmit(v.vault.id)).rejects.toThrow("refused the deposit (vault_script_registered)");
+    // The pending deposit is dropped: nothing for this vault can be resent, and the server's own
+    // resend gets the same final answer.
+    await expect(v.client.deposits.resubmit(v.vault.id)).rejects.toThrow("refused to resend the deposit (vault_script_registered)");
     expect(v.w.minerSubmissions).toEqual([]);
   }, 120000);
 

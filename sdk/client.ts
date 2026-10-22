@@ -764,8 +764,12 @@ export class QsbClient {
       // attempts may still have been sent, so the signed bytes stay pending either way.
       if (ownerRefusal(error))
         throw refused(error, "the deposit", " The signed deposit stays pending: resend it with deposits.resubmit once allowed; don't sign another.");
-      if (scriptHeld(error))
+      // Final for this vault, not just this request: every deposit route refuses it, so the pending
+      // bytes guard nothing and would only offer a resend that's refused.
+      if (scriptHeld(error)) {
+        await this.pending.delete(vaultId);
         throw refused(error, "the deposit", " Don't resend this deposit or sign another for this vault.");
+      }
       throw unconfirmed(error instanceof Error ? ` ${error.message}` : "");
     }
     // Only an answer about this vault and these bytes ends the pending deposit.
