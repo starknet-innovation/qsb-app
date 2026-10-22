@@ -165,6 +165,7 @@ describe("adoptQsb in the SDK's bundled runtime", () => {
         expect(error, label).toBeInstanceOf(RefusedState);
         expect(error.message, label).toMatch(message);
       }
+      await expect(qsb.adoptQsb(" ".repeat(1000001))).rejects.toThrow(new RefusedState("the recovery state is larger than the pipeline's state"));
       // A JavaScript caller that passes the parsed object instead of the text.
       await expect(qsb.adoptQsb(JSON.parse(generated.stateJson))).rejects.toThrow(new RefusedState("the recovery state is not JSON text"));
     } finally {
@@ -220,9 +221,14 @@ describe("vaults.create with a supplied state", () => {
     expect([vault.scriptHex, vault.scriptHash, vault.publicStateJson]).toEqual([generated.scriptHex, generated.scriptHash, generated.publicStateJson]);
     expect((await decryptRecovery(backup, passphrase)).stateJson).toBe(generated.stateJson);
     for (const call of [qsb.generateQsb, qsb.validateRecovery, qsb.assembleQsb, qsb.lockQsb]) expect(call).not.toHaveBeenCalled();
-    // Only the public record went to the server.
+    // Only the public record went to the server: no secret, nonce or passphrase.
     const [posted] = vaultPosts(w);
-    for (const value of ["hors_secrets", "pin_k", '"k"', generated.stateJson, passphrase, ...JSON.parse(generated.stateJson).hors_secrets.flat()])
+    const sent = JSON.parse(JSON.parse(posted.body).publicStateJson);
+    expect(Object.keys(sent)).not.toContain("hors_secrets");
+    expect(sent.round_sigs.map(Object.keys)).toEqual([["r", "s", "sig"], ["r", "s", "sig"]]);
+    const nonces = [...generated.stateJson.matchAll(/"(?:pin_k|k)":\s*(\d+)/g)].map((m) => m[1]);
+    expect(nonces).toHaveLength(3);
+    for (const value of ["hors_secrets", "pin_k", passphrase, ...nonces, ...JSON.parse(generated.stateJson).hors_secrets.flat()])
       expect(posted.body.includes(value), value).toBe(false);
     // The backup works like a generated vault's from here on.
     const usual = new QsbClient({ baseUrl: API, signer, fetch: w.fetch, token: client.token });
@@ -297,18 +303,18 @@ describe("vaults.create with a supplied state", () => {
     expect(vaultPosts(w)).toHaveLength(1);
   }, 120000);
 
-  it("finds a vault another client registered with the script, or with commitments in another case", async () => {
+  it("finds the secrets in the script of a vault another client registered, whatever commitments it declares", async () => {
     const first = JSON.parse(generated.stateJson).hors_secrets as string[][];
     const overlapping = await generatedFrom([first[1][7], ...Array.from({ length: 299 }, () => hex.encode(randomBytes(20)))]);
     const commitments = (data: Generated, edit: (c: string) => string) => ({
       ...data,
       publicStateJson: data.publicStateJson.replace(/"([0-9a-f]{40})"/g, (_, c: string) => `"${edit(c)}"`),
     });
+    // The server checks a vault's script, not the commitments its public state declares.
+    const unrelated = () => hex.encode(randomBytes(20));
     for (const [label, registered] of [
-      // Another script, sharing one secret: only the commitments match, once their case is folded.
-      ["uppercase commitments", commitments(overlapping, (c) => c.toUpperCase())],
-      // The same script under commitments the server doesn't check against it.
-      ["the same script", commitments(generated, () => hex.encode(randomBytes(20)))],
+      ["another script sharing one secret", commitments(overlapping, unrelated)],
+      ["the same script", commitments(generated, unrelated)],
     ] as const) {
       const { w, signer, client } = await signedIn();
       const other = new QsbClient({ baseUrl: API, signer, fetch: w.fetch, token: client.token, qsb: { ...nodeQsb(), generateQsb: async () => registered } });

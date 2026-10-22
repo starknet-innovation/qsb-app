@@ -231,16 +231,14 @@ function assertOwnerAllowed(config: ApiConfig) {
     throw new Error("This wallet isn't on this deployment's allowlist (owner_not_allowlisted). Nothing was changed.");
 }
 /**
- * The vault with this script, or with a HORS commitment in common, if any. Another client may have
- * registered a vault's commitments in another case: the server checks only its script.
+ * The vault whose script pushes one of these HORS commitments, if any. The script is what the server
+ * binds a vault to (its hash); the commitments its public state declares are never checked against it.
  */
-function sharingSecrets(vaults: PublicVault[], scriptHash: string, publicStateJson: string): PublicVault | undefined {
-  const commitments = (json: string): string[] => {
-    const { hors_commitments: rounds } = JSON.parse(json) as { hors_commitments?: unknown };
-    return Array.isArray(rounds) ? rounds.flat().map((c) => String(c).toLowerCase()) : [];
-  };
-  const own = new Set(commitments(publicStateJson));
-  return vaults.find((vault) => vault.scriptHash === scriptHash || commitments(vault.publicStateJson).some((c) => own.has(c)));
+function sharingSecrets(vaults: PublicVault[], publicStateJson: string): PublicVault | undefined {
+  const { hors_commitments: rounds } = JSON.parse(publicStateJson) as { hors_commitments: string[][] };
+  // Each commitment is a 20-byte push. A chance match elsewhere in a script would only refuse.
+  const pushes = rounds.flat().map((commitment) => `14${commitment}`);
+  return vaults.find((vault) => pushes.some((push) => vault.scriptHex.toLowerCase().includes(push)));
 }
 function memoryPending(): PendingDeposits {
   const rows = new Map<string, PendingDeposit>();
@@ -361,8 +359,8 @@ export class QsbClient {
      * to `saveBackup`, check it unlocks, then register only the public vault.
      * With `stateJson`, the vault uses that recovery state instead, once this
      * package's own runtime finds it is exactly the state the pipeline builds
-     * from its HORS secrets, and no vault of this address has its script or
-     * shares one of its HORS secrets. Refusals are `RefusedState`s.
+     * from its HORS secrets, and no vault of this address has a script that
+     * pushes one of its HORS commitments. Refusals are `RefusedState`s.
      */
     create: (input: { name: string; passphrase: string; saveBackup: SaveBackup; stateJson?: string }) =>
       this.createVault(input),
@@ -519,7 +517,7 @@ export class QsbClient {
         cause: error,
       });
     }
-    const sharing = sharingSecrets(vaults, data.scriptHash, data.publicStateJson);
+    const sharing = sharingSecrets(vaults, data.publicStateJson);
     if (sharing)
       throw new RefusedState(
         `This recovery state reuses HORS secrets of vault ${sharing.id}. A state's secrets lock one vault, which takes one deposit; nothing was saved or registered.`,
@@ -560,7 +558,7 @@ export class QsbClient {
       await this.unlock(backup, input.passphrase, vault, qsb);
       // Again, for a vault registered from the same secrets while this backup was saved. The server
       // doesn't refuse a repeated script, so this narrows the window but can't close it.
-      const sharing = supplied ? sharingSecrets((await this.vaults.list()).vaults, data.scriptHash, data.publicStateJson) : undefined;
+      const sharing = supplied ? sharingSecrets((await this.vaults.list()).vaults, data.publicStateJson) : undefined;
       if (sharing)
         throw new RefusedState(
           `This recovery state reuses HORS secrets of vault ${sharing.id}, registered while its backup was saved. Nothing was registered: discard the backup just saved, which duplicates secrets of vault ${sharing.id}.`,
