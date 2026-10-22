@@ -280,7 +280,7 @@ The withdrawal API Lambda has a 120-second timeout, but CloudFront returns a tim
 3. It exits non-zero when any of those three lists isn't empty, with or without `--apply`.
    - A duplicate is `{ vault, heldBy }`: a vault whose script the vault `heldBy` already holds, or, for two rows sharing a script, the row it reserves (or, without `--apply`, would reserve). Those are two vault records on one script, which must never both take a deposit. Once `heldBy` holds the reservation, the deposit routes refuse `vault` (`vault_script_registered`; [API](API.md#vault-registration)), but a deposit either vault already has stays. Check both vaults' funding with their owners before anything else, and don't delete or reassign a reservation to clear the report.
    - An unreadable row's `scriptHash` isn't the SHA-256 of its script, so it gets no reservation.
-   - An unsettled vault's write met another write to the same reservation that hadn't committed, such as a registration of that script still in flight. Run the tool again.
+   - An unsettled vault's write met another write to the same reservation that hadn't committed, such as a registration of that script still in flight, or an earlier row on its script did. Run the tool again.
 
 It reads the table with a Scan and writes only `SCRIPT#` rows, with PutItem. Its report names vault ids, never owner addresses.
 

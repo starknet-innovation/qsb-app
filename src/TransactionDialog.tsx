@@ -483,12 +483,10 @@ export default function TransactionDialog({
       `/vaults/${vault.id}/fund`,
       { txid, amount: amountSats, costAccepted: true },
     ).catch((error) => {
-      // As in submitDeposit: final, so the guard has nothing left to guard.
+      // Final, but Xverse already broadcast this deposit and the server won't record it, so the
+      // guard stays: it's this browser's only record of the txid. Nothing more can be done here.
       const refusal = depositRefusal(error, txid);
-      if (refusal) {
-        rememberFunding(undefined);
-        setNoDeposit(true);
-      }
+      if (refusal) setNoDeposit(true);
       throw refusal ?? error;
     });
     rememberFunding(undefined);

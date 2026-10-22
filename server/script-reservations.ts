@@ -17,7 +17,10 @@ export type ScriptBackfill = {
   duplicates: { vault: string; heldBy: string }[];
   /** Vault rows whose script hash isn't the SHA-256 of their script. Left as they are. */
   unreadable: string[];
-  /** Vaults whose write met another write to the reservation that hadn't settled. Run again. */
+  /**
+   * Vaults whose write met another write to the reservation that hadn't settled, or that share a
+   * script with such a vault, so this run didn't write for them. Run again.
+   */
   unsettled: string[];
 };
 

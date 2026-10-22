@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-for (const scenario of ["success", "uncertain-submission", "miner-rejected", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor", "below-current-rate", "submit-disabled", "unrecorded-failure", "miner-unavailable", "disabled-after-sign", "different-bytes", "no-deposit", "held-at-submit"]) {
+for (const scenario of ["success", "uncertain-submission", "miner-rejected", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor", "below-current-rate", "submit-disabled", "unrecorded-failure", "miner-unavailable", "disabled-after-sign", "different-bytes", "no-deposit", "held-at-submit", "held-at-record"]) {
   const uncertain = scenario === "uncertain-submission";
   test(`deposit dialog preserves one-deposit guard (${scenario})`, async ({
     page,
@@ -44,7 +44,11 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
           if(outcome==='rejected')return {vault:f.vault,submission:'rejected',reason:'min relay fee not met'};
           return {vault:{...f.vault,status:'submitted',funding:{txid:'cd'.repeat(32),vout:0,value:body.amount}},submission:outcome};
         }
-        if(path.endsWith('/fund')){window.recordCalls++;return {vault:{...f.vault,status:'submitted',funding:{txid:body.txid}}};}
+        if(path.endsWith('/fund')){
+          window.recordCalls++;
+          if(window.recordHeld){const {ApiRequestError}=await import('/src/lib/session.ts');throw new ApiRequestError("Another vault on this deployment holds this vault's script, so this vault takes no deposit.",409,'vault_script_registered');}
+          return {vault:{...f.vault,status:'submitted',funding:{txid:body.txid}}};
+        }
         throw Error('Unexpected API '+path);
       }`,
       }),
@@ -93,7 +97,7 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
         status: scenario === "server-funding" ? "unfunded" : scenario.slice(7),
         funding: { txid: "ab".repeat(32), vout: 0, value: "50000" },
       }];
-      if (["local-guard", "unknown-guard", "malformed-guard"].includes(scenario))
+      if (["local-guard", "unknown-guard", "malformed-guard", "held-at-record"].includes(scenario))
         localStorage.setItem("qsb-funding:" + vault.id, scenario === "malformed-guard" ? "{" : JSON.stringify({txid: scenario === "unknown-guard" ? "" : "ab".repeat(32), amount:"50000"}));
       if (scenario === "local-guard-during-fetch") w.guardDuringFetch = true;
       if (scenario === "below-floor") w.minerFloor = 5;
@@ -110,6 +114,7 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
       // The server lists this vault as taking no deposit, or says so only at submit.
       if (scenario === "no-deposit") w.noDeposit = [vault.id];
       if (scenario === "held-at-submit") w.minerOutcomes = ["held"];
+      if (scenario === "held-at-record") w.recordHeld = true;
     }, scenario);
     await dialog
       .getByRole("button", { name: "Review deposit in Xverse" })
@@ -128,6 +133,18 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
     }
     const guard = () =>
       page.evaluate(() => localStorage.getItem("qsb-funding:11111111-1111-4111-8111-111111111111"));
+    if (scenario === "held-at-record") {
+      // A deposit Xverse broadcast, which the server won't record: the guard keeps its txid.
+      await expect(dialog).toContainText("do not deposit again.");
+      await dialog.getByRole("button", { name: "Record deposit", exact: true }).click();
+      await expect(dialog).toContainText(`won't record the transaction Xverse broadcast, ${"ab".repeat(32)}`);
+      expect(JSON.parse((await guard())!).txid).toBe("ab".repeat(32));
+      expect(await page.evaluate(() => (window as any).recordCalls)).toBe(1);
+      expect(await page.evaluate(() => (window as any).walletCalls)).toBe(0);
+      await expect(dialog.getByRole("button", { name: "Record deposit", exact: true })).toBeDisabled();
+      await expect(dialog.getByRole("button", { name: "Download signing backup again" })).toHaveCount(0);
+      return;
+    }
     if (scenario === "no-deposit" || scenario === "held-at-submit") {
       await expect(dialog).toContainText("so this vault takes no deposit");
       await expect(dialog).toContainText(scenario === "no-deposit" ? "Nothing was signed." : "This request sent nothing.");
