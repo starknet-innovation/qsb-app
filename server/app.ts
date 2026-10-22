@@ -665,15 +665,15 @@ export function createApp(
     // let it take a second deposit, which the first withdrawal's disclosed HORS preimages weaken.
     const owner = c.get("owner");
     const reservation = scriptReservation(owner, vault);
-    // Another vault's reservation. This vault's own means a repeat of this request, whose
-    // vault row write conflicts below with state_conflict, as before reservations existed.
+    // Another vault's reservation. This vault's own means a repeat of this request: its vault
+    // row write conflicts below, with state_conflict.
     const elsewhere = (held: Row | undefined) =>
       held !== undefined && (held.owner !== owner || held.vaultId !== vault.id);
     const held = await store.get(reservation.pk, reservation.sk);
     if (elsewhere(held))
       return apiError(c, 409, "vault_script_registered", "Another vault on this deployment already has this script.");
-    // A paid script is never a new vault: one registered before reservations, or used outside
-    // this deployment. A failed lookup refuses too, so nothing is written without its answer.
+    // A paid script is never a new vault: a paid vault row here without a reservation, or a script
+    // used outside this deployment. A failed lookup refuses too: nothing is written without it.
     if (!held && (await ledger.scriptFunded(vault.scriptHash)))
       return apiError(c, 409, "vault_script_paid", "This script has already been paid on chain, so it can't be a new vault.");
     try {

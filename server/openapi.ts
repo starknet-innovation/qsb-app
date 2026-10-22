@@ -858,7 +858,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     operationId: "createVault",
     summary: "Register a new vault's public record",
     description:
-      "The vault is generated on the client; only its public record is sent. It must be unfunded, for this network and owned by the signed-in address. Its script must be new: no other vault on this deployment, of any address, has it, and nothing has paid it on chain. Nothing is written when the chain lookup fails.",
+      "The vault is generated on the client; only its public record is sent. It must be unfunded, for this network and owned by the signed-in address. Its script must be new: no other vault's reservation on this deployment, of any address, holds it, and nothing has paid it on chain. Nothing is written when the chain lookup fails.",
     auth: true,
     body: publicVaultSchema,
     responses: {

@@ -343,8 +343,6 @@ describe("vaults.create with a supplied state", () => {
     expect(vaultPosts(w).map((r) => JSON.parse(r.body).id)).toEqual([registered]);
   }, 120000);
 
-  const scriptRefused = (code: string, reason: string) =>
-    `The deployment refused to register the vault (${code}): ${reason}. A script locks one vault, which takes one deposit. Nothing was registered: discard the backup just saved, and never pay into its script.`;
   const storedVaults = (w: ReturnType<typeof world>) =>
     [...w.store.rows.values()].filter((row) => row.sk.startsWith("VAULT#")).map((row) => (row.vault as { id: string }).id);
 
@@ -361,7 +359,9 @@ describe("vaults.create with a supplied state", () => {
       (e: Error) => e,
     );
     expect(error).toBeInstanceOf(RefusedState);
-    expect(error.message).toBe(scriptRefused("vault_script_registered", "another vault on this deployment already has this script"));
+    expect(error.message).toBe(
+      "The deployment refused to register the vault (vault_script_registered): another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: never pay into its script, and destroy that backup only if you hold another copy of this state.",
+    );
     expect(saveBackup).toHaveBeenCalledOnce();
     expect(storedVaults(w)).toEqual([vault.id]);
   }, 120000);
@@ -377,7 +377,10 @@ describe("vaults.create with a supplied state", () => {
       (e: Error) => e,
     );
     expect(error).toBeInstanceOf(RefusedState);
-    expect(error.message).toBe(scriptRefused("vault_script_paid", "something has already paid this script on chain"));
+    // The secrets may already lock someone's payment: the message never says to discard the backup.
+    expect(error.message).toBe(
+      "The deployment refused to register the vault (vault_script_paid): something has already paid this script on chain. A script locks one vault, which takes one deposit. Nothing was registered, and the app won't spend that output. Keep the backup just saved, or another copy of this state: it holds the secrets that can spend that output. Never pay into its script again.",
+    );
     expect(storedVaults(w)).toEqual([]);
   }, 120000);
 });

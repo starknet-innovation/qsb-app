@@ -40,17 +40,18 @@ async function fixture(store = new MemoryStore()) {
       network: "mainnet",
       expiresAt: Math.floor(Date.now() / 1000) + 3600,
     });
-  /** What the chain API reports for each script hash: its funded output counts, or a failure. */
-  const funded = new Map<string, { chain: number; mempool: number } | "down">();
+  /** What the chain API reports for each script hash: its funded output counts, or another answer. */
+  const funded = new Map<string, { chain: number; mempool: number } | (() => Response)>();
   const lookups: string[] = [];
+  const network = { genesis: NETWORK_CONFIG.genesisHash };
   const chain = new Esplora("https://chain.test", async (input) => {
     const path = new URL(String(input)).pathname;
-    if (path === "/block-height/0") return new Response(NETWORK_CONFIG.genesisHash);
+    if (path === "/block-height/0") return new Response(network.genesis);
     const hash = /^\/scripthash\/([0-9a-f]{64})$/.exec(path)?.[1];
     if (!hash) return new Response("", { status: 404 });
     lookups.push(hash);
     const counts = funded.get(hash) ?? { chain: 0, mempool: 0 };
-    if (counts === "down") return new Response("", { status: 502 });
+    if (typeof counts === "function") return counts();
     return Response.json({
       chain_stats: { funded_txo_count: counts.chain, spent_txo_count: 0 },
       mempool_stats: { funded_txo_count: counts.mempool, spent_txo_count: 0 },
@@ -74,7 +75,7 @@ async function fixture(store = new MemoryStore()) {
       reservations: all.filter((row) => row.pk.startsWith("SCRIPT#")),
     };
   };
-  return { store, funded, lookups, register, rows };
+  return { store, funded, network, lookups, register, rows };
 }
 
 const script = () => randomBytes(100).toString("hex");
@@ -174,13 +175,22 @@ describe("POST /api/vaults registers each script once on the deployment", () => 
     expect(f.rows()).toEqual({ vaults: [], reservations: [] });
   });
 
-  it("writes nothing when the chain lookup fails", async () => {
+  it("writes nothing when the chain lookup fails, answers badly or is for another network", async () => {
     const f = await fixture();
     const vault = vaultFor(owners[0], script());
-    f.funded.set(vault.scriptHash, "down");
-    expect(await f.register(vault)).toMatchObject({ status: 503, body: { code: "chain_unavailable" } });
-    expect(f.rows()).toEqual({ vaults: [], reservations: [] });
+    for (const [answer, status] of [
+      [() => new Response("", { status: 502 }), 503],
+      [() => new Response("not json"), 502],
+      [() => Response.json({ chain_stats: {}, mempool_stats: {} }), 502],
+    ] as const) {
+      f.funded.set(vault.scriptHash, answer);
+      expect(await f.register(vault)).toMatchObject({ status, body: { code: status === 503 ? "chain_unavailable" : "chain_error" } });
+    }
     f.funded.delete(vault.scriptHash);
+    f.network.genesis = "00".repeat(32);
+    expect(await f.register(vault)).toMatchObject({ status: 409, body: { code: "chain_error" } });
+    expect(f.rows()).toEqual({ vaults: [], reservations: [] });
+    f.network.genesis = NETWORK_CONFIG.genesisHash;
     expect((await f.register(vault)).status).toBe(201);
   });
 });

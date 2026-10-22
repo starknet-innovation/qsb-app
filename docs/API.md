@@ -84,16 +84,16 @@ Sign-in, reads and pause stay open, and so does `POST /api/jobs/:id/submit`: it 
 
 ## Vault registration
 
-`POST /api/vaults` registers the public record of a vault the client generated. A script belongs to one vault and takes one deposit, so the server registers a script only once, under any address. Before writing anything it refuses a script that isn't new:
+`POST /api/vaults` registers the public record of a vault the client generated. A script belongs to one vault and takes one deposit, so the server reserves each vault's script on the deployment, under any address. Before writing anything it refuses a script that isn't new:
 
-- **409 `vault_script_registered`**: another vault on this deployment already has this script. Each registration writes a reservation row, `SCRIPT#<scriptHash>` / `RESERVATION` (the owner and the vault id), in the same transaction as the vault row, with `attribute_not_exists`. Of two registrations of one script, at once or not, exactly one succeeds. The one that loses a race gets `vault_script_registered`, or `state_conflict` while the winner's transaction is still in flight; a retry then gets `vault_script_registered`. The message never names the other vault or its address. The API role can create reservation rows but not delete or update them, as with `OUTPOINT#` rows.
-- **409 `vault_script_paid`**: the chain API reports an output paying the script, confirmed or in the mempool, spent or not (Esplora's `/scripthash/<scriptHash>`, `funded_txo_count`). This covers a script used outside this deployment, and a vault registered here before reservations existed once it has been paid.
+- **409 `vault_script_registered`**: another vault on this deployment already has this script. Each registration writes a reservation row, `SCRIPT#<scriptHash>` / `RESERVATION` (the owner and the vault id), in the same transaction as the vault row, with `attribute_not_exists`. Of two registrations of one script, at once or not, at most one succeeds. The one that loses a race gets `vault_script_registered`, or `state_conflict` while the winner's transaction is still in flight; a retry then gets `vault_script_registered`. The message never names the other vault or its address. As for `OUTPOINT#` rows, the API role's policy denies `DeleteItem`, `UpdateItem` and `BatchWriteItem` on them, and the code writes them only with `attribute_not_exists`.
+- **409 `vault_script_paid`**: the chain API reports an output paying the script, confirmed or in the mempool, spent or not (Esplora's `/scripthash/<scriptHash>`, `funded_txo_count`). This covers a script used outside this deployment, and a paid vault row here that has no reservation.
 - **A failed chain lookup refuses too** (503 `chain_unavailable`, or `chain_error`), and nothing is written; retry later. The check fails closed: a vault can't be funded without the chain API anyway (`/payment-utxos`, `/payment-input`), and registering a script that may already be paid could give it a second deposit.
 
 A repeat of a request that succeeded (same owner, same vault `id`) gets 409 `state_conflict`.
 
 What this doesn't cover:
-- A vault registered before reservations existed and never paid has no reservation, so a second registration of its script isn't refused.
+- Some vault rows on this deployment have no `SCRIPT#` reservation. A second registration of such a vault's script is refused only once something has paid it (`vault_script_paid`).
 - The reservation is for one exact script. HORS secrets reused in a different script (part of a state, or reordered) aren't refused by the server. The SDK refuses a supplied state whose commitments a vault script of the signed-in address already pushes ([SDK](../sdk/README.md#your-own-recovery-state)).
 
 ## Stray payments

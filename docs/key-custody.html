@@ -240,7 +240,7 @@
 
   <!-- service <-> external -->
   <div class="conn-label">service ⇅ outside</div>
-  <div class="conn"><span class="empty">nothing leaves</span></div>
+  <div class="conn"><span class="pill"><span class="a">↓</span>script hash (public)</span></div>
   <div class="conn"><span class="pill"><span class="a">↓</span>raw deposit transaction</span><span class="pill">optional MARA credentials</span></div>
   <div class="conn"><span class="pill"><span class="a">↓</span>public search parameters</span><span class="pill"><span class="a">↑</span>candidate hits</span></div>
   <div class="conn"><span class="pill"><span class="a">↓</span>raw withdrawal + disclosed preimages</span><span class="pill">optional MARA credentials</span></div>
@@ -250,7 +250,9 @@
     <h2>Outside parties</h2>
     <p>The GPU solver receives public search inputs. MARA receives signed transactions and optional authorization/client-code credentials. MARA and Bitcoin see the selected HORS preimages disclosed in withdrawals.</p>
   </div>
-  <div class="cell external"><div class="empty">—</div></div>
+  <div class="cell external">
+    <div class="step"><b>Chain API</b> (Esplora) looks up the script hash, so the service can refuse a script something has already paid.</div>
+  </div>
   <div class="cell external">
     <div class="step"><b>MARA: possible mining.</b> Submission can fail or remain uncertain; acceptance is not inclusion. The deposit completes only after inclusion is independently confirmed.</div>
   </div>
