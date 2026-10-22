@@ -31,6 +31,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { api, authenticate, clearSession } from "./lib/api";
+import { ApiRequestError } from "./lib/session";
 import TransactionDialog from "./TransactionDialog";
 import WalletCheck from "./WalletCheck";
 import Costs from "./Costs";
@@ -634,7 +635,12 @@ export default function App() {
   async function save() {
     await action("Saving vault metadata", async () => {
       if (!recovery || !verified) throw new Error("Verify your backup first.");
-      await api("/vaults", recovery.vault);
+      await api("/vaults", recovery.vault).catch((e) => {
+        // The server checks the new script on chain before it saves anything.
+        if (e instanceof ApiRequestError && (e.code === "chain_unavailable" || e.code === "chain_error"))
+          throw new Error("The server couldn't check this vault's script on chain, so it saved nothing. Try again shortly.");
+        throw e;
+      });
       setVaults((v) => [...v, recovery.vault]);
       setCreated(recovery.vault);
       setStep(3);

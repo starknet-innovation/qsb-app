@@ -15,10 +15,17 @@ export type BundledQsb = LocalQsb & { adoptQsb(stateJson: string): Promise<Gener
 /**
  * A refused supplied recovery state, from `adoptQsb` or `vaults.create`, or the deployment's refusal of
  * a vault script that isn't new; the message says what didn't match. Any other error is not a verdict
- * on the state.
+ * on the state. Some come after `vaults.create` saved the backup, and the message says what to do with
+ * it. The deployment's refusals carry its `code`; after `vault_script_paid`, keep the backup.
  */
 export class RefusedState extends Error {
   override name = "RefusedState";
+  /** The deployment's refusal of the vault's script; absent when this package refused the state. */
+  readonly code?: "vault_script_registered" | "vault_script_paid";
+  constructor(message: string, options?: ErrorOptions & { code?: RefusedState["code"] }) {
+    super(message, options);
+    if (options?.code) this.code = options.code;
+  }
 }
 
 // The vendored generator sources the browser serves from /qsb/, checked against the same manifest.

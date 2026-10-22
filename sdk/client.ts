@@ -228,7 +228,7 @@ function refused(error: ApiRequestError, what: string, next = ""): Error {
  * says what to do with the backup just saved. The vault that has the script may be the caller's
  * own, and a paid script's backup may be the only copy of the secrets that spend what was paid.
  */
-const scriptRefusals: Record<string, string> = {
+const scriptRefusals: Record<NonNullable<RefusedState["code"]>, string> = {
   vault_script_registered:
     "another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: pay into this script only as the one deposit of the vault that has it. Destroy that backup only if you hold another copy of this state.",
   vault_script_paid:
@@ -238,7 +238,7 @@ const scriptRefusals: Record<string, string> = {
 function chainFailure(error: unknown): error is ApiRequestError & { code: string } {
   return error instanceof ApiRequestError && (error.code === "chain_unavailable" || error.code === "chain_error");
 }
-function scriptRefusal(error: unknown): error is ApiRequestError & { code: string } {
+function scriptRefusal(error: unknown): error is ApiRequestError & { code: keyof typeof scriptRefusals } {
   return (
     error instanceof ApiRequestError &&
     error.status === 409 &&
@@ -593,7 +593,7 @@ export class QsbClient {
           if (scriptRefusal(error))
             throw new RefusedState(
               `The deployment refused to register the vault (${error.code}): ${scriptRefusals[error.code]}`,
-              { cause: error },
+              { cause: error, code: error.code },
             );
           if (chainFailure(error))
             throw new Error(

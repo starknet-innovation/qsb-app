@@ -57,6 +57,9 @@ describe("app role record access", () => {
     expect(decideAppRoleAccess("dynamodb:GetItem", reservation)).toBe("allow");
     // The vault row and the reservation, in one transaction: each item is authorized on its own.
     expect(decideAppRoleAccess("dynamodb:PutItem", ["OWNER#wallet"])).toBe("allow");
+    // DeleteItem is granted for other rows (CHALLENGE#), so only the deny refuses it here.
+    // UpdateItem and BatchWriteItem aren't granted at all; the deny keeps them off reservations if they are.
+    expect(decideAppRoleAccess("dynamodb:DeleteItem", ["CHALLENGE#nonce"])).toBe("allow");
     for (const action of ["DeleteItem", "UpdateItem", "BatchWriteItem"])
       expect(decideAppRoleAccess(`dynamodb:${action}`, reservation)).toBe("deny");
     expect(

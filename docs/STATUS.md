@@ -43,6 +43,7 @@ As of 2 October 2026. #8, the plan to a first mainnet withdrawal, is complete; w
 
 ## Known gaps
 
+- Some vault rows have no `SCRIPT#` reservation, so a second registration of one of their scripts is refused only once a payment to it shows on chain ([API](API.md#vault-registration)). A one-off operator backfill of their reservations would close this; the API role can't scan the table.
 - A "GPU hit output exceeds supported capacity" failure is terminal, and that withdrawal's deposit can't be withdrawn through the app until a reviewed recovery change lands ([runbook](OPERATIONAL-RUNBOOK.md#deterministic-pinning-failures)).
 - A resume can't use a new solver release: a withdrawal keeps the release it pinned at creation.
 - The GPU-time allowance (4,096 GPU-hours per withdrawal) is a planning figure from a code comment, not a measurement ([runbook](OPERATIONAL-RUNBOOK.md#gpu-time-allowance)). Measured `usage` from real withdrawals is the data to reassess it with.
