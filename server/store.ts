@@ -94,8 +94,9 @@ export async function canonicalReservationWrites(
 
 /**
  * A vault's script reservation: one row per script on this deployment, keyed by the script's
- * SHA-256 (the vault's checked, lowercase `scriptHash`). It is written with the vault row, with
- * attribute_not_exists(pk), so a second vault for the same script, by any owner, conflicts.
+ * SHA-256 (the vault's checked, lowercase `scriptHash`). It is written with attribute_not_exists(pk),
+ * with the vault row at registration, by an unreserved vault's first deposit write, or by the
+ * operator's backfill, so a second vault for the same script, by any owner, conflicts.
  */
 export function scriptReservation(owner: string, vault: { id: string; scriptHash: string }): Row {
   return {

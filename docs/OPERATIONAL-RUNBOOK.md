@@ -288,7 +288,7 @@ It reads the table with a Scan and writes only `SCRIPT#` rows, with PutItem. Its
 
 Reconciliation, plans and the script-reservation backfill run as `qsb-operator`. In the current account it is assumed from the Identity Center permission set; see the profiles in [ops/github-aws/README.md](../ops/github-aws/README.md#human-access-without-root). Sessions last at most an hour. The scoped runtime reconcile role Terraform declares (`operator_reconcile_role_arn`) stays dormant: `qsb-operator` is denied role chaining, so don't configure a profile for it.
 
-The `qsb-operator` session has deployment privileges, including `dynamodb:*` on QSB tables. It is not restricted to `OWNER#` partitions and can Query, Scan, Update and Delete, and read `SYSTEM#` and `OUTPOINT#` records. The reconcile CLIs' exact-record, conditional-version and audit checks restrict what they do; the session's IAM policy doesn't. Don't describe it as a least-privilege reconciliation identity.
+The `qsb-operator` session has deployment privileges, including `dynamodb:*` on QSB tables. It is not restricted to `OWNER#` partitions and can Query, Scan, Update and Delete, and read `SYSTEM#`, `OUTPOINT#` and `SCRIPT#` records. The reconcile CLIs' exact-record, conditional-version and audit checks restrict what they do; the session's IAM policy doesn't. Don't describe it as a least-privilege reconciliation identity.
 
 The human signs in first; agents use the cached session and never handle the MFA code. Run inside a subshell to keep exported credentials out of the parent shell, and never print them:
 
