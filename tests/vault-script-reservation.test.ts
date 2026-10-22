@@ -449,7 +449,11 @@ describe("a vault whose script another vault holds takes no deposit", () => {
     // Nor is it offered as resendable, while a submitted vault with no reservation still is.
     const unreserved = { ...vaultFor(owners[1], script()), status: "submitted" as const };
     await store.put({ pk: `OWNER#${owners[1]}`, sk: `VAULT#${unreserved.id}`, version: 0, vault: unreserved, fundingRawTxHex: "00" });
-    expect((await f.call("GET", "/vaults", owners[1])).body.resendable).toEqual([unreserved.id]);
+    const listed = (await f.call("GET", "/vaults", owners[1])).body;
+    expect(listed.resendable).toEqual([unreserved.id]);
+    // It's listed as taking no deposit, so clients refuse before anything is signed; the holder isn't.
+    expect(listed.noDeposit).toEqual([loser.id]);
+    expect((await f.call("GET", "/vaults", owners[0])).body.noDeposit).toEqual([]);
     // The vault that holds the script, and a vault row with no reservation, get past the check on a deposit route.
     expect(await f.call("GET", `/vaults/${holder.id}/fund/signed`, owners[0])).toMatchObject({ status: 404, body: { code: "signed_deposit_not_found" } });
     expect(await f.call("POST", `/vaults/${unreserved.id}/fund/resubmit`, owners[1], {})).toMatchObject({ status: 409, body: { code: "signed_deposit_not_found" } });
@@ -471,9 +475,13 @@ describe("the webapp's message when the server refuses a new vault", () => {
   });
 
   it("says a refused deposit sent nothing and shouldn't be resent", () => {
-    const refusal = depositRefusal(new ApiRequestError("server text", 409, "vault_script_registered"));
-    expect(refusal?.message).toBe(
-      "Another vault on this server has this vault's script, so this vault takes no deposit, and this request sent nothing. Don't make another deposit for this vault. If you submitted this deposit before, it may still confirm: check the vault's status.",
+    const refused = new ApiRequestError("server text", 409, "vault_script_registered");
+    expect(depositRefusal(refused)?.message).toBe(
+      "Another vault on this server has this vault's script, so this vault takes no deposit. Don't make a deposit for it. This request sent nothing. If you submitted this deposit before, it may still confirm: check the vault's status.",
+    );
+    // A broadcast Xverse already made isn't something this request could have held back.
+    expect(depositRefusal(refused, "ab".repeat(32))?.message).toBe(
+      `Another vault on this server has this vault's script, so this vault takes no deposit. Don't make a deposit for it. The app won't record the transaction Xverse broadcast, ${"ab".repeat(32)}: it may still confirm, and the app never spends it.`,
     );
     // Any other failure stays an uncertain submission.
     expect(depositRefusal(new ApiRequestError("Unable to complete the request. Please retry.", 502, "miner_request_failed"))).toBeUndefined();

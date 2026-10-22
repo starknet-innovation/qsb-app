@@ -230,7 +230,7 @@ function refused(error: ApiRequestError, what: string, next = ""): Error {
  */
 const scriptRefusals: Record<NonNullable<RefusedState["code"]>, string> = {
   vault_script_registered:
-    "another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: pay into this script only as the one deposit of the vault that has it. Destroy that backup only if you hold another copy of this state.",
+    "another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: don't pay into this script. Destroy that backup only if you hold another copy of this state.",
   vault_script_paid:
     "something has already paid this script on chain. A script locks one vault, which takes one deposit, so no new vault can have it. Nothing was registered. Keep the backup just saved, or another copy of this state: it holds the secrets that can spend what was paid. Don't pay into this script for a new vault.",
 };
@@ -393,9 +393,13 @@ export class QsbClient {
     create: (input: { name: string; passphrase: string; saveBackup: SaveBackup; stateJson?: string }) =>
       this.createVault(input),
     list: () =>
-      this.session.api<{ vaults: PublicVault[]; resendable?: string[]; strayPayments?: StrayPayments[] }>(
-        "/vaults",
-      ),
+      this.session.api<{
+        vaults: PublicVault[];
+        resendable?: string[];
+        /** Vaults that take no deposit: another vault on the deployment holds their script. */
+        noDeposit?: string[];
+        strayPayments?: StrayPayments[];
+      }>("/vaults"),
   };
   readonly deposits = {
     /** An unsigned deposit PSBT paying the vault, after checking the backup matches its script. */
@@ -634,7 +638,14 @@ export class QsbClient {
       throw new Error("Deposits are submitted to MARA Slipstream, which is switched off right now. Nothing was prepared.");
     if (await this.pending.get(vaultId))
       throw new Error("A signed deposit for this vault is waiting for MARA. Resubmit it; do not deposit again.");
-    const vault = await this.vault(vaultId);
+    id(vaultId, "vault");
+    const listed = await this.vaults.list();
+    const vault = listed.vaults.find((v) => v.id === vaultId);
+    if (!vault) throw new Error("Vault not found for this address.");
+    if (listed.noDeposit?.includes(vaultId))
+      throw new Error(
+        "Another vault on this deployment holds this vault's script, so this vault takes no deposit. Nothing was prepared; don't pay into its script.",
+      );
     if (vault.status !== "unfunded" || vault.funding)
       throw new Error("This vault already has a deposit. A vault takes one deposit; do not deposit again.");
     try {

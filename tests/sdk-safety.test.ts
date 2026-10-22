@@ -631,6 +631,13 @@ describe("per-owner limits (#89)", () => {
     // The pending deposit is dropped: nothing for this vault can be resent, and the server's own
     // resend gets the same final answer.
     await expect(v.client.deposits.resubmit(v.vault.id)).rejects.toThrow("refused to resend the deposit (vault_script_registered)");
+    // And a new deposit is refused before anything is signed.
+    expect((await v.client.vaults.list()).noDeposit).toEqual([v.vault.id]);
+    await expect(
+      v.client.deposits.prepare(v.vault.id, {
+        backup: v.backups[0], passphrase, amount: 200000n, feeRate: "2", utxos: [{ txid: v.owner.fundingTxid, vout: 0 }],
+      }),
+    ).rejects.toThrow("so this vault takes no deposit. Nothing was prepared; don't pay into its script.");
     expect(v.w.minerSubmissions).toEqual([]);
   }, 120000);
 

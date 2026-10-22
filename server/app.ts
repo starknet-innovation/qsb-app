@@ -574,9 +574,9 @@ export function createApp(
    * Whether another vault's reservation holds this vault's script. A vault row without a
    * reservation can share its script with another vault: a later registration of that script,
    * or the operator's backfill, gives the reservation to the other one. This vault then takes no
-   * deposit: the deposit routes refuse it before anything is recorded or sent, it isn't listed as
-   * resendable, and `/funding` doesn't offer its stored bytes. A vault row with no reservation for
-   * its script isn't refused.
+   * deposit: the deposit routes refuse it before anything is recorded or sent, `GET /api/vaults`
+   * lists it in `noDeposit` and not as resendable, and `/funding` doesn't offer its stored bytes.
+   * A vault row with no reservation for its script isn't refused.
    */
   async function scriptHeldElsewhere(owner: string, vault: PublicVault | undefined) {
     if (typeof vault?.scriptHash !== "string") return false;
@@ -619,17 +619,25 @@ export function createApp(
   app.get("/api/vaults", async (c) => {
     const owner = c.get("owner");
     const rows = await store.list(`OWNER#${owner}`, "VAULT#");
-    // Vaults whose unconfirmed deposit the server can resend: stored Slipstream bytes only, and
-    // not for a vault whose script another vault holds, which the resend would refuse.
-    const resendable: string[] = [];
-    for (const r of rows) {
-      const vault = r.vault as PublicVault;
-      if (typeof r.fundingRawTxHex === "string" && r.fundingRawTxHex !== "" && vault.status === "submitted")
-        if (!(await scriptHeldElsewhere(owner, vault))) resendable.push(vault.id);
-    }
+    // Vaults that take no deposit, because another vault holds their script: the deposit routes
+    // refuse them, so clients refuse before anything is signed.
+    const noDeposit: string[] = [];
+    for (const r of rows)
+      if (await scriptHeldElsewhere(owner, r.vault as PublicVault)) noDeposit.push((r.vault as PublicVault).id);
     return c.json({
       vaults: rows.map((r) => r.vault),
-      resendable,
+      // Vaults whose unconfirmed deposit the server can resend: stored Slipstream bytes only, and
+      // not for a vault that takes no deposit, which the resend would refuse.
+      resendable: rows
+        .filter(
+          (r) =>
+            typeof r.fundingRawTxHex === "string" &&
+            r.fundingRawTxHex !== "" &&
+            (r.vault as PublicVault).status === "submitted" &&
+            !noDeposit.includes((r.vault as PublicVault).id),
+        )
+        .map((r) => (r.vault as PublicVault).id),
+      noDeposit,
       // Payments to a vault's script beyond its recorded deposit, as last checked. Never spent.
       strayPayments: rows.flatMap((r) => strayPaymentsOf(r) ?? []),
     });

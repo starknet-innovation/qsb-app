@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-for (const scenario of ["success", "uncertain-submission", "miner-rejected", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor", "below-current-rate", "submit-disabled", "unrecorded-failure", "miner-unavailable", "disabled-after-sign", "different-bytes"]) {
+for (const scenario of ["success", "uncertain-submission", "miner-rejected", "server-submitted", "server-confirmed", "server-funding", "server-missing", "server-read-failure", "local-guard", "local-guard-during-fetch", "unknown-guard", "malformed-guard", "below-floor", "below-current-rate", "submit-disabled", "unrecorded-failure", "miner-unavailable", "disabled-after-sign", "different-bytes", "no-deposit", "held-at-submit"]) {
   const uncertain = scenario === "uncertain-submission";
   test(`deposit dialog preserves one-deposit guard (${scenario})`, async ({
     page,
@@ -25,7 +25,7 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
         if(path==='/vaults'){
           if(window.serverReadFailure)throw Error('SERVER_READ_FAILED');
           if(window.guardDuringFetch)localStorage.setItem('qsb-funding:'+f.vault.id,JSON.stringify({txid:'ab'.repeat(32),amount:'50000'}));
-          return {vaults:window.serverVaults??[f.vault]};
+          return {vaults:window.serverVaults??[f.vault],noDeposit:window.noDeposit??[]};
         }
         if(path.endsWith('/fund/signed')){
           if(window.exactSubmit===false||!window.serverSigned)throw Error('NOT_RECORDED');
@@ -37,6 +37,8 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
           if(outcome==='throw')throw Error('NETWORK_DOWN');
           // The API's 503 when the miner credential can't be read, before anything is recorded.
           if(outcome==='unavailable'){const {ApiRequestError}=await import('/src/lib/session.ts');throw new ApiRequestError('Miner API credential is unavailable. Contact the service operator.',503,'miner_unavailable');}
+          // Another vault holds this vault's script: refused before anything is recorded or sent.
+          if(outcome==='held'){const {ApiRequestError}=await import('/src/lib/session.ts');throw new ApiRequestError("Another vault on this deployment holds this vault's script, so this vault takes no deposit.",409,'vault_script_registered');}
           if(outcome!=='rejected')window.serverSigned=body.rawTxHex;
           if(window.disableAfterSubmit)window.exactSubmit=false;
           if(outcome==='rejected')return {vault:f.vault,submission:'rejected',reason:'min relay fee not met'};
@@ -105,6 +107,9 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
       if (scenario === "different-bytes") { w.minerOutcomes = ["uncertain"]; w.serverSignedOverride = "02" + "00".repeat(60); }
       if (scenario === "uncertain-submission") w.minerOutcomes = ["uncertain", "submitted"];
       if (scenario === "miner-rejected") w.minerOutcomes = ["rejected"];
+      // The server lists this vault as taking no deposit, or says so only at submit.
+      if (scenario === "no-deposit") w.noDeposit = [vault.id];
+      if (scenario === "held-at-submit") w.minerOutcomes = ["held"];
     }, scenario);
     await dialog
       .getByRole("button", { name: "Review deposit in Xverse" })
@@ -123,6 +128,17 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
     }
     const guard = () =>
       page.evaluate(() => localStorage.getItem("qsb-funding:11111111-1111-4111-8111-111111111111"));
+    if (scenario === "no-deposit" || scenario === "held-at-submit") {
+      await expect(dialog).toContainText("so this vault takes no deposit");
+      await expect(dialog).toContainText(scenario === "no-deposit" ? "Nothing was signed." : "This request sent nothing.");
+      // Nothing left to sign or send: no guard, no resend, and the primary action stays off.
+      expect(await guard()).toBeNull();
+      expect(await page.evaluate(() => (window as any).walletCalls)).toBe(scenario === "no-deposit" ? 0 : 1);
+      expect(await page.evaluate(() => (window as any).submitCalls ?? 0)).toBe(scenario === "no-deposit" ? 0 : 1);
+      await expect(dialog.getByRole("button", { name: "Submit deposit again", exact: true })).toHaveCount(0);
+      await expect(dialog.getByRole("button", { name: "Review deposit in Xverse" })).toBeDisabled();
+      return;
+    }
     if (scenario === "unrecorded-failure" || scenario === "miner-unavailable" || scenario === "disabled-after-sign" || scenario === "different-bytes") {
       // The signed deposit is kept, but manual submission stays hidden: the server hasn't
       // recorded these bytes, or deposits were switched off.

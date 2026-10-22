@@ -21,14 +21,21 @@ export function registrationError(error: unknown): unknown {
   return error;
 }
 
+/** Why a vault in `GET /vaults`'s `noDeposit` takes no deposit. */
+export const NO_DEPOSIT =
+  "Another vault on this server has this vault's script, so this vault takes no deposit. Don't make a deposit for it.";
+
 /**
  * A deposit route's refusal of a vault whose script another vault holds. It comes before this
- * request records or sends anything, and it's final: resending the deposit gets it again. An
- * earlier submission of the same bytes may still have reached MARA.
+ * request records or sends anything, and it's final: resending gets it again. An earlier
+ * submission of the same bytes may still have reached MARA. `broadcast` is the txid of a deposit
+ * Xverse broadcast, which the server refused to record.
  */
-export function depositRefusal(error: unknown): Error | undefined {
-  if (error instanceof ApiRequestError && error.status === 409 && error.code === "vault_script_registered")
-    return new Error(
-      "Another vault on this server has this vault's script, so this vault takes no deposit, and this request sent nothing. Don't make another deposit for this vault. If you submitted this deposit before, it may still confirm: check the vault's status.",
-    );
+export function depositRefusal(error: unknown, broadcast?: string): Error | undefined {
+  if (!(error instanceof ApiRequestError && error.status === 409 && error.code === "vault_script_registered")) return;
+  return new Error(
+    broadcast
+      ? `${NO_DEPOSIT} The app won't record the transaction Xverse broadcast, ${broadcast}: it may still confirm, and the app never spends it.`
+      : `${NO_DEPOSIT} This request sent nothing. If you submitted this deposit before, it may still confirm: check the vault's status.`,
+  );
 }

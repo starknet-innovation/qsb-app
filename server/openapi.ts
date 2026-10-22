@@ -845,6 +845,10 @@ export const apiRoutes: readonly ApiRoute[] = [
             z.array(z.string()),
             "Ids of vaults whose unconfirmed deposit the server stored and can resend.",
           ),
+          noDeposit: describe(
+            z.array(z.string()),
+            "Ids of vaults that take no deposit: another vault on this deployment holds their script, so the deposit routes refuse them with `vault_script_registered`.",
+          ),
           strayPayments: describe(
             z.array(strayPayments),
             "One record per vault with flagged stray payments, as last checked by `GET /api/vaults/{id}/funding`.",

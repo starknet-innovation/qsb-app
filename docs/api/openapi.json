@@ -6843,6 +6843,13 @@
             },
             "description": "Ids of vaults whose unconfirmed deposit the server stored and can resend."
           },
+          "noDeposit": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of vaults that take no deposit: another vault on this deployment holds their script, so the deposit routes refuse them with `vault_script_registered`."
+          },
           "strayPayments": {
             "type": "array",
             "items": {
@@ -6854,6 +6861,7 @@
         "required": [
           "vaults",
           "resendable",
+          "noDeposit",
           "strayPayments"
         ],
         "additionalProperties": false

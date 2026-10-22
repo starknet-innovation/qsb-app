@@ -7,7 +7,7 @@ import "./styles.css";
 import { CostDisclosure } from "./Costs";
 import { base64, hex } from "@scure/base";
 import { api } from "./lib/api";
-import { depositRefusal } from "./lib/vault-registration";
+import { NO_DEPOSIT, depositRefusal } from "./lib/vault-registration";
 import { signPsbt, type Wallet } from "./lib/wallet";
 import {
   fundingFeeForRate,
@@ -131,6 +131,8 @@ export default function TransactionDialog({
   const [signedReview, setSignedReview] = useState<{rawTxHex: string; txid: string; manifest: Withdrawal; generation: number; epoch: number}>();
   const [signedDownload, setSignedDownload] = useState<string>();
   const [submitAllowed, setSubmitAllowed] = useState(false);
+  // The server said this vault takes no deposit: nothing more to sign or send here.
+  const [noDeposit, setNoDeposit] = useState(false);
   const [copyNotice, setCopyNotice] = useState("");
   const submitAttempted = useRef(false);
   // Unlock the backup, choose the details, then review. An authorization, or a deposit that
@@ -450,6 +452,7 @@ export default function TransactionDialog({
       const refusal = depositRefusal(error);
       if (refusal) {
         rememberFunding(undefined);
+        setNoDeposit(true);
         throw refusal;
       }
       setPendingFunding(readFundingGuard());
@@ -481,8 +484,11 @@ export default function TransactionDialog({
       { txid, amount: amountSats, costAccepted: true },
     ).catch((error) => {
       // As in submitDeposit: final, so the guard has nothing left to guard.
-      const refusal = depositRefusal(error);
-      if (refusal) rememberFunding(undefined);
+      const refusal = depositRefusal(error, txid);
+      if (refusal) {
+        rememberFunding(undefined);
+        setNoDeposit(true);
+      }
       throw refusal ?? error;
     });
     rememberFunding(undefined);
@@ -545,12 +551,15 @@ export default function TransactionDialog({
           throw Error("The deposit fee estimate doesn't match the transaction. No transaction was submitted.");
         check();
         refusePendingDeposit();
-        const latest = (await api<{ vaults: PublicVault[] }>("/vaults")).vaults.find(
-          (item) => item.id === vault.id,
-        );
+        const listed = await api<{ vaults: PublicVault[]; noDeposit?: string[] }>("/vaults");
+        const latest = listed.vaults.find((item) => item.id === vault.id);
         check();
         // A second tab may have broadcast while the server lookup was pending.
         refusePendingDeposit();
+        if (listed.noDeposit?.includes(vault.id)) {
+          setNoDeposit(true);
+          throw Error(`${NO_DEPOSIT} Nothing was signed.`);
+        }
         if (!latest || latest.status !== "unfunded" || latest.funding)
           throw Error("This vault already has a deposit or is unavailable. Reopen it to refresh its funding state; do not deposit again.");
         // This preflight cannot serialize prompts approved simultaneously on two devices.
@@ -909,12 +918,15 @@ export default function TransactionDialog({
     : typeof feeQuote === "object"
       ? formatBtc(feeQuote.fee)
       : undefined;
-  const blocked = !!job && !!intentBackup && !assemblyVerified;
-  const blocker = !accepted
-    ? "Tick the box above to continue."
-    : blocked
-      ? "Select the signing backup you just saved to continue."
-      : "";
+  const refusedDeposit = deposit && noDeposit;
+  const blocked = (!!job && !!intentBackup && !assemblyVerified) || refusedDeposit;
+  const blocker = refusedDeposit
+    ? NO_DEPOSIT
+    : !accepted
+      ? "Tick the box above to continue."
+      : blocked
+        ? "Select the signing backup you just saved to continue."
+        : "";
   const errorLine = error && (
     <p role="alert" className="error-message">
       {error}

@@ -361,7 +361,7 @@ describe("vaults.create with a supplied state", () => {
     expect(error).toBeInstanceOf(RefusedState);
     expect((error as RefusedState).code).toBe("vault_script_registered");
     expect(error.message).toBe(
-      "The deployment refused to register the vault (vault_script_registered): another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: pay into this script only as the one deposit of the vault that has it. Destroy that backup only if you hold another copy of this state.",
+      "The deployment refused to register the vault (vault_script_registered): another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: don't pay into this script. Destroy that backup only if you hold another copy of this state.",
     );
     expect(saveBackup).toHaveBeenCalledOnce();
     expect(storedVaults(w)).toEqual([vault.id]);
