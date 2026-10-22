@@ -53,8 +53,8 @@ try {
   // 4. The SDK loads from the package and runs the pinned Python there, after its manifest check.
   const env = { ...process.env, QSB_NETWORK: "mainnet" };
   const smoke = `
-    import { ApiRequestError, QsbClient, loopbackTestSigner, nodeQsb, preparedDepositSchema } from "${name}";
-    const exported = [ApiRequestError, QsbClient, loopbackTestSigner, nodeQsb, preparedDepositSchema].every(Boolean);
+    import { ApiRequestError, QsbClient, RefusedState, loopbackTestSigner, nodeQsb, preparedDepositSchema } from "${name}";
+    const exported = [ApiRequestError, QsbClient, RefusedState, loopbackTestSigner, nodeQsb, preparedDepositSchema].every(Boolean);
     const qsb = nodeQsb();
     const generated = await qsb.generateQsb();
     const valid = (await qsb.validateRecovery(generated.stateJson)) === generated.scriptHash;

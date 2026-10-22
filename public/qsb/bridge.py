@@ -67,13 +67,20 @@ def result(state):
 def generate():
     return result(setup())
 
+class RefusedError(ValueError):
+    """adopt's refusal of a supplied state: the message says what didn't match."""
+
+def name(key):
+    """A caller's JSON key as it appears in a message, quoted unless it's a plain name."""
+    return key if re.fullmatch('[A-Za-z_][A-Za-z0-9_]*', key) else json.dumps(key)
+
 def difference(supplied, expected, path=''):
     """The first place `supplied` differs from `expected` in shape, type or value, or None."""
     if isinstance(expected, dict) and isinstance(supplied, dict):
         at = lambda key: f'{path}.{key}' if path else key
         for key in supplied:
             if key not in expected:
-                return f'{at(key)} is not a field the pipeline produces'
+                return f'{at(name(key))} is not a field the pipeline produces'
         for key in expected:
             found = f'{at(key)} is missing' if key not in supplied else difference(supplied[key], expected[key], at(key))
             if found:
@@ -94,32 +101,35 @@ def unique(pairs):
     keys = [k for k, _ in pairs]
     for key in keys:
         if keys.count(key) > 1:
-            raise ValueError(f'{key} appears twice in one object')
+            raise RefusedError(f'{name(key)} appears twice in one object')
     return dict(pairs)
 
 def adopt(state_json):
     """Accept a caller's recovery state only if it is exactly the state setup builds from its HORS secrets."""
-    state = json.loads(state_json, object_pairs_hook=unique)
+    try:
+        state = json.loads(state_json, object_pairs_hook=unique)
+    except (json.JSONDecodeError, RecursionError) as error:
+        raise RefusedError(f'the recovery state is not JSON this check reads ({error})')
     if not isinstance(state, dict):
-        raise ValueError('The recovery state is not a JSON object')
+        raise RefusedError('the recovery state is not a JSON object')
     for key in (*CONFIG_A, 'hors_secrets'):
         if key not in state:
-            raise ValueError(f'{key} is missing')
+            raise RefusedError(f'{key} is missing')
     for key, value in CONFIG_A.items():
         if json.dumps(state[key]) != json.dumps(value):
-            raise ValueError(f"{key} is not Config A's {json.dumps(value)}")
+            raise RefusedError(f"{key} is not Config A's {json.dumps(value)}")
     secrets = state['hors_secrets']
     if not isinstance(secrets, list) or len(secrets) != 2 or any(not isinstance(r, list) or len(r) != 150 for r in secrets):
-        raise ValueError('hors_secrets is not 2 rounds of 150 secrets')
+        raise RefusedError('hors_secrets is not 2 rounds of 150 secrets')
     flat = [s for r in secrets for s in r]
     if not all(isinstance(s, str) and re.fullmatch('[0-9a-f]{40}', s) for s in flat):
-        raise ValueError('Each HORS secret is 20 bytes of lowercase hex')
+        raise RefusedError('a HORS secret is not 20 bytes of lowercase hex')
     if len(set(flat)) != len(flat):
-        raise ValueError('A HORS secret repeats')
+        raise RefusedError('a HORS secret repeats')
     expected = setup([bytes.fromhex(s) for s in flat])
     found = difference(state, expected)
     if found:
-        raise ValueError(found)
+        raise RefusedError(found)
     return result(expected)
 
 def validate(state_json):

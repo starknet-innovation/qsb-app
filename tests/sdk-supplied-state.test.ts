@@ -9,17 +9,53 @@ import { ripemd160 } from "@noble/hashes/legacy.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import awsRelease from "../src/lib/releases/qsb-solver-aws-v0-1-0.json";
 import { decryptRecovery } from "../src/lib/backup";
-import { QsbClient, loopbackTestSigner, nodeQsb, type LocalQsb } from "../sdk";
+import { QsbClient, RefusedState, loopbackTestSigner, nodeQsb, type LocalQsb } from "../sdk";
 import { runCli } from "../sdk/cli";
 import { API, wallet, world } from "./sdk-fixture";
 
-// Stands in for a damaged install while set: bridge.py no longer matches the manifest.
-const damaged = vi.hoisted(() => ({ bridge: false }));
+/**
+ * While `bridge` is set, the runtime reads a damaged install: "altered" no longer matches the
+ * manifest; "failing" is listed in it, but its setup raises after adopt's checks pass.
+ */
+const damaged = vi.hoisted(() => ({ bridge: undefined as "altered" | "failing" | undefined }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
-  const readFile = (async (file: Parameters<typeof actual.readFile>[0], ...rest: [never]) =>
-    damaged.bridge && String(file).endsWith("/bridge.py") ? Buffer.from("import os\n") : actual.readFile(file, ...rest)) as typeof actual.readFile;
+  const { createHash } = await import("node:crypto");
+  const failing = async () =>
+    Buffer.concat([
+      await actual.readFile(new URL("../public/qsb/bridge.py", import.meta.url)),
+      Buffer.from("\ndef setup(secrets=None):\n    raise ValueError('setup failed')\n"),
+    ]);
+  const readFile = (async (file: Parameters<typeof actual.readFile>[0], ...rest: [never]) => {
+    const name = String(file);
+    if (damaged.bridge === "altered" && name.endsWith("/qsb/bridge.py")) return Buffer.from("import os\n");
+    if (damaged.bridge === "failing" && name.endsWith("/qsb/bridge.py")) return failing();
+    if (damaged.bridge === "failing" && name.endsWith("/qsb/manifest.json")) {
+      const manifest = JSON.parse(String(await actual.readFile(file)));
+      return Buffer.from(JSON.stringify({ ...manifest, "bridge.py": createHash("sha256").update(await failing()).digest("hex") }));
+    }
+    return actual.readFile(file, ...rest);
+  }) as typeof actual.readFile;
   return { ...actual, readFile };
+});
+/** What the SDK's own runtimes re-open, in order with the vault registrations the transport sees. */
+const events = vi.hoisted(() => [] as string[]);
+vi.mock("../sdk/runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../sdk/runtime")>();
+  return {
+    ...actual,
+    nodeQsb: () => {
+      const qsb = actual.nodeQsb();
+      return {
+        ...qsb,
+        validateRecovery: async (stateJson: string) => {
+          const scriptHash = await qsb.validateRecovery(stateJson);
+          events.push(`re-open ${scriptHash}`);
+          return scriptHash;
+        },
+      };
+    },
+  };
 });
 
 beforeEach(() => vi.stubEnv("SOLVER_RELEASE_ID", awsRelease.id));
@@ -66,14 +102,16 @@ function edits(stateJson: string): [string, string, RegExp][] {
     ["a private field", stateJson.replace(/^\{/, '{"pin_privkey": 1, '), /^pin_privkey is not a field the pipeline produces$/],
     ["a private round field", replaceOnce(stateJson, '"round_sigs": [{', '"round_sigs": [{"seed": "00", '), /^round_sigs\[0\]\.seed is not a field the pipeline produces$/],
     ["a missing field", stateJson.replace(/"dummy_sigs": \[\[[^\]]*\], \[[^\]]*\]\], /, ""), /^dummy_sigs is missing$/],
-    ["a repeated secret", replaceOnce(stateJson, `"${state.hors_secrets[1][9]}"`, `"${state.hors_secrets[0][2]}"`), /^A HORS secret repeats$/],
-    ["an uppercase secret", replaceOnce(stateJson, `"${state.hors_secrets[0][0]}"`, `"${state.hors_secrets[0][0].toUpperCase()}"`), /^Each HORS secret is 20 bytes of lowercase hex$/],
+    ["a repeated secret", replaceOnce(stateJson, `"${state.hors_secrets[1][9]}"`, `"${state.hors_secrets[0][2]}"`), /^a HORS secret repeats$/],
+    ["an uppercase secret", replaceOnce(stateJson, `"${state.hors_secrets[0][0]}"`, `"${state.hors_secrets[0][0].toUpperCase()}"`), /^a HORS secret is not 20 bytes of lowercase hex$/],
     ["another configuration", replaceOnce(stateJson, '"n": 150,', '"n": 140,'), /^n is not Config A's 150$/],
     ["a configuration of another type", replaceOnce(stateJson, '"t1b": 1,', '"t1b": true,'), /^t1b is not Config A's 1$/],
     ["no secrets", replaceOnce(stateJson, '"hors_secrets"', '"secrets"'), /^hors_secrets is missing$/],
     ["a short round of secrets", replaceOnce(stateJson, `, "${state.hors_secrets[1][149]}"]`, "]"), /^hors_secrets is not 2 rounds of 150 secrets$/],
     ["a repeated key", stateJson.replace(/^\{/, '{"hors_secrets": [[], []], '), /^hors_secrets appears twice in one object$/],
-    ["not an object", "[]", /^The recovery state is not a JSON object$/],
+    ["a key that isn't a plain name", stateJson.replace(/^\{/, '{"a\\nValueError: x": 1, '), /^"a\\nValueError: x" is not a field the pipeline produces$/],
+    ["not an object", "[]", /^the recovery state is not a JSON object$/],
+    ["not JSON", stateJson.slice(0, -1), /^the recovery state is not JSON this check reads \(.+\)$/],
   ];
 }
 
@@ -85,8 +123,11 @@ describe("adoptQsb in the SDK's bundled runtime", () => {
       // Key order and whitespace aren't part of the state.
       const reordered = replaceOnce(generated.stateJson, '{"config": "A", ', "{\n  ").replace(/\}$/, ', "config": "A"}');
       expect(await qsb.adoptQsb(reordered)).toEqual(generated);
-      for (const [label, stateJson, message] of edits(generated.stateJson))
-        await expect(qsb.adoptQsb(stateJson), label).rejects.toThrow(message);
+      for (const [label, stateJson, message] of edits(generated.stateJson)) {
+        const error = await qsb.adoptQsb(stateJson).then(() => new Error(`${label} was accepted`), (e: Error) => e);
+        expect(error, label).toBeInstanceOf(RefusedState);
+        expect(error.message, label).toMatch(message);
+      }
     } finally {
       qsb.lockQsb();
     }
@@ -112,21 +153,27 @@ const vaultPosts = (w: ReturnType<typeof world>) =>
   w.requests.filter((r) => r.method === "POST" && new URL(r.url).pathname === "/v1/vaults");
 
 describe("vaults.create with a supplied state", () => {
-  async function signedIn(qsb: LocalQsb = replacedRuntime()) {
+  async function signedIn(qsb: LocalQsb = replacedRuntime(), wrap = (next: typeof fetch) => next) {
     const w = world();
     const owner = wallet(w.chain);
     const signer = loopbackTestSigner(owner.wif, API);
-    const client = new QsbClient({ baseUrl: API, signer, fetch: w.fetch, qsb });
+    const client = new QsbClient({ baseUrl: API, signer, fetch: wrap(w.fetch), qsb });
     await client.login();
     return { w, owner, signer, client };
   }
 
   it("registers the state's vault, checked and re-opened by the bundled runtime, not the qsb option", async () => {
     const qsb = replacedRuntime();
-    const { w, owner, signer, client } = await signedIn(qsb);
-    const saveBackup = vi.fn(async (_: string) => {});
+    const { w, owner, signer, client } = await signedIn(qsb, (next) => (async (input, init) => {
+      if (init?.method === "POST" && new URL(String(input)).pathname === "/v1/vaults") events.push("register");
+      return next(input, init);
+    }) as typeof fetch);
+    const saveBackup = vi.fn(async (text: string) => void events.push(`save ${text.length}`));
+    events.length = 0;
     const { vault, backup } = await client.vaults.create({ name: "own state", passphrase, saveBackup, stateJson: generated.stateJson });
     expect(saveBackup).toHaveBeenCalledExactlyOnceWith(backup);
+    // The bundled runtime re-opened the saved backup before the vault was registered.
+    expect(events).toEqual([`save ${backup.length}`, `re-open ${generated.scriptHash}`, "register"]);
     expect([vault.scriptHex, vault.scriptHash, vault.publicStateJson]).toEqual([generated.scriptHex, generated.scriptHash, generated.publicStateJson]);
     expect((await decryptRecovery(backup, passphrase)).stateJson).toBe(generated.stateJson);
     for (const call of [qsb.generateQsb, qsb.validateRecovery, qsb.assembleQsb, qsb.lockQsb]) expect(call).not.toHaveBeenCalled();
@@ -166,16 +213,24 @@ describe("vaults.create with a supplied state", () => {
     expect(vaultPosts(w)).toHaveLength(0);
   }, 120000);
 
-  it("reports a runtime that fails its manifest check as that, not as a refused state", async () => {
+  it("reports a runtime failure as that, not as a refused state", async () => {
     const { w, client } = await signedIn();
     const saveBackup = vi.fn(async () => {});
-    damaged.bridge = true;
-    try {
-      await expect(client.vaults.create({ name: "damaged", passphrase, saveBackup, stateJson: generated.stateJson })).rejects.toThrow(
-        /^QSB source integrity check failed$/,
-      );
-    } finally {
-      damaged.bridge = false;
+    for (const [bridge, message] of [
+      ["altered", /^QSB source integrity check failed$/],
+      ["failing", /^setup failed$/],
+    ] as const) {
+      damaged.bridge = bridge;
+      try {
+        const error = await client.vaults.create({ name: "damaged", passphrase, saveBackup, stateJson: generated.stateJson }).then(
+          () => new Error(`${bridge} was accepted`),
+          (e: Error) => e,
+        );
+        expect(error, bridge).not.toBeInstanceOf(RefusedState);
+        expect(error.message, bridge).toMatch(message);
+      } finally {
+        damaged.bridge = undefined;
+      }
     }
     expect(saveBackup).not.toHaveBeenCalled();
     expect(vaultPosts(w)).toHaveLength(0);

@@ -12,22 +12,22 @@ type GeneratedQsb = Awaited<ReturnType<LocalQsb["generateQsb"]>>;
  * secrets and finds every field the same.
  */
 export type BundledQsb = LocalQsb & { adoptQsb(stateJson: string): Promise<GeneratedQsb> };
-/** The bridge refused a supplied recovery state; the message says what didn't match. */
+/** `adoptQsb` refused the supplied recovery state; the message says what didn't match. Any other failure is a plain Error. */
 export class RefusedState extends Error {}
 
 // The vendored generator sources the browser serves from /qsb/, checked against the same manifest.
 const sources = new URL("../public/qsb/", import.meta.url);
 
-/** A Python error's message is its whole traceback; keep only the raised message. */
+/**
+ * A Python error's message is its whole traceback; keep only the raised message. The bridge's
+ * RefusedError, raised only by adopt, becomes a RefusedState.
+ */
 function pythonError(error: unknown): Error {
   if (!(error instanceof Error)) return new Error("QSB operation failed");
+  if (error.constructor.name !== "PythonError") return new Error(error.message);
   const lines = error.message.trim().split("\n");
-  const last = lines[lines.length - 1] ?? "";
-  return new Error(
-    error.constructor.name === "PythonError"
-      ? last.replace(/^[A-Za-z_.]+(?:Error|Exception): /, "")
-      : error.message,
-  );
+  const message = (lines[lines.length - 1] ?? "").replace(/^[A-Za-z_.]+(?:Error|Exception): /, "");
+  return (error as { type?: unknown }).type === "RefusedError" ? new RefusedState(message) : new Error(message);
 }
 
 /**
@@ -59,15 +59,7 @@ export function nodeQsb(): BundledQsb {
   };
   return {
     ...qsbOperations(run),
-    async adoptQsb(stateJson) {
-      // A runtime that fails to load or to pass its manifest check hasn't refused anything.
-      await start();
-      try {
-        return JSON.parse(await run("adopt", [stateJson])) as GeneratedQsb;
-      } catch (error) {
-        throw new RefusedState((error as Error).message, { cause: error });
-      }
-    },
+    adoptQsb: async (stateJson) => JSON.parse(await run("adopt", [stateJson])) as GeneratedQsb,
     lockQsb() {
       runtime = undefined;
     },

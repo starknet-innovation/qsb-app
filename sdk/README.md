@@ -104,7 +104,9 @@ The SDK can't check these, so they're up to you:
 
 - The secrets are random and nobody else has them. Draw them from a cryptographically secure source; setup's `--seed` makes them predictable. Anyone who has them can spend the vault.
 - The state locks no other vault. The SDK only refuses a script that's already a vault of the signed-in address on this deployment. It can't see vaults of other addresses or deployments, or payments to the script made outside the app. A state is for one vault and one deposit: the first withdrawal discloses 15 of its secrets, which would help someone else spend any other output paying the same script.
-- The plaintext copy. The backup holds the state encrypted. Keep the plaintext as safe as the backup until the backup is saved, then destroy it.
+- The plaintext copy. The backup holds the state encrypted. Keep the plaintext as safe as the backup until the saved backup reads back as the `backup` that `vaults.create` returned (the CLI checks this before it finishes), then destroy it.
+
+`nodeQsb().adoptQsb(stateJson)` runs the same bridge check on its own, without the address check, and returns what `generateQsb` would. It throws `RefusedState` when it refuses the state; any other error is the runtime's, not a verdict on the state.
 
 ## CLI
 
