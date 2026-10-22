@@ -31,7 +31,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { api, authenticate, clearSession } from "./lib/api";
-import { NO_DEPOSIT, registrationError } from "./lib/vault-registration";
+import { NO_DEPOSIT, NO_DEPOSIT_SENT, registrationError } from "./lib/vault-registration";
 import TransactionDialog from "./TransactionDialog";
 import WalletCheck from "./WalletCheck";
 import Costs from "./Costs";
@@ -939,6 +939,12 @@ export default function App() {
                                 {v.configuration && ` · generator ${v.configuration.generatorCommit.slice(0, 7)}`}
                                 {v.funding && ` · deposit ${short(v.funding.txid)}:${v.funding.vout}`}
                               </p>
+                              {v.status === "unfunded" && noDeposit.has(v.id) && (
+                                <p className="vault-warning" role="status">{NO_DEPOSIT}</p>
+                              )}
+                              {v.status === "submitted" && noDeposit.has(v.id) && (
+                                <p className="vault-warning" role="status">{NO_DEPOSIT_SENT}</p>
+                              )}
                               {flagged && (
                                 <p className="vault-warning" role="status">
                                   {flagged.count === 1 ? "1 payment" : `${flagged.count} payments`} of{" "}
@@ -987,7 +993,7 @@ export default function App() {
                                 </button>
                               )}
                               {v.status === "unfunded" && noDeposit.has(v.id) && (
-                                <button className="secondary" disabled title={NO_DEPOSIT}>
+                                <button className="secondary" disabled>
                                   Takes no deposit
                                 </button>
                               )}

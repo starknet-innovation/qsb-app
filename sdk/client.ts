@@ -782,7 +782,7 @@ export class QsbClient {
         throw refused(
           error,
           "the deposit",
-          " Don't resend this deposit or sign another for this vault. If it was sent before, it may still confirm: check deposits.status, and keep this vault's backup.",
+          " Don't resend this deposit or sign another for this vault. If it was sent before, it may still confirm: deposits.status shows it once it's mined, so keep this vault's backup.",
         );
       }
       throw unconfirmed(error instanceof Error ? ` ${error.message}` : "");
@@ -808,7 +808,7 @@ export class QsbClient {
         throw refused(
           error,
           "to resend the deposit",
-          " Don't resend it or sign another deposit for this vault. If it was sent before, it may still confirm: check deposits.status, and keep this vault's backup.",
+          " Don't resend it or sign another deposit for this vault. If it was sent before, it may still confirm: deposits.status shows it once it's mined, so keep this vault's backup.",
         );
       throw ownerRefusal(error) ? refused(error, "to resend the deposit", " Resend it once allowed; don't sign another.") : error;
     }

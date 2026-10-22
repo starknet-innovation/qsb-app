@@ -143,6 +143,8 @@ for (const scenario of ["success", "uncertain-submission", "miner-rejected", "se
       expect(await page.evaluate(() => (window as any).walletCalls)).toBe(0);
       await expect(dialog.getByRole("button", { name: "Record deposit", exact: true })).toBeDisabled();
       await expect(dialog.getByRole("button", { name: "Download signing backup again" })).toHaveCount(0);
+      // The notice that says to record it is gone; the refusal says what's left of the deposit.
+      await expect(dialog).not.toContainText("Record the deposit once it is visible on the network");
       return;
     }
     if (scenario === "no-deposit" || scenario === "held-at-submit") {

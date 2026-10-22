@@ -931,8 +931,9 @@ export default function TransactionDialog({
       {error}
     </p>
   );
-  // Shown from the first step, before the backup is unlocked: there's already a deposit.
-  const pendingNotice = deposit && pendingFunding && (
+  // Shown from the first step, before the backup is unlocked: there's already a deposit. Not once
+  // the server said this vault takes no deposit: the refusal says what's left of it.
+  const pendingNotice = deposit && pendingFunding && !noDeposit && (
     <p role="status">
       {pendingFunding.rawTxHex
         ? <>A signed deposit {pendingFunding.txid.slice(0, 12)}… is waiting for MARA Slipstream. Do not deposit again. Submit it again: it resends the same transaction, which can only confirm once.</>

@@ -477,7 +477,7 @@ describe("the webapp's message when the server refuses a new vault", () => {
   it("says a refused deposit sent nothing and shouldn't be resent", () => {
     const refused = new ApiRequestError("server text", 409, "vault_script_registered");
     expect(depositRefusal(refused)?.message).toBe(
-      "Another vault on this server has this vault's script, so this vault takes no deposit. Don't make a deposit for it. This request sent nothing. If you submitted this deposit before, it may still confirm: check the vault's status.",
+      "Another vault on this server has this vault's script, so this vault takes no deposit. Don't make a deposit for it. This request sent nothing. If you submitted this deposit before, it may still confirm: the vault shows it once it's mined, so keep this vault's recovery backup.",
     );
     // A broadcast Xverse already made isn't something this request could have held back.
     expect(depositRefusal(refused, "ab".repeat(32))?.message).toBe(

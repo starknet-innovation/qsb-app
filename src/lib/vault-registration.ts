@@ -24,6 +24,9 @@ export function registrationError(error: unknown): unknown {
 /** Why a vault in `GET /vaults`'s `noDeposit` takes no deposit. */
 export const NO_DEPOSIT =
   "Another vault on this server has this vault's script, so this vault takes no deposit. Don't make a deposit for it.";
+/** For a vault in `noDeposit` whose deposit was already sent: the app won't resend it, and only the chain shows it. */
+export const NO_DEPOSIT_SENT =
+  "Another vault on this server has this vault's script, so the app won't resend this deposit. It shows here once it's mined, and until then its checks fail. Keep this vault's recovery backup.";
 
 /**
  * A deposit route's refusal of a vault whose script another vault holds. It comes before this
@@ -36,6 +39,6 @@ export function depositRefusal(error: unknown, broadcast?: string): Error | unde
   return new Error(
     broadcast
       ? `${NO_DEPOSIT} The app won't record the transaction Xverse broadcast, ${broadcast}: it may still confirm, and the app never spends it. Keep this vault's recovery backup: its secrets are what can spend that payment.`
-      : `${NO_DEPOSIT} This request sent nothing. If you submitted this deposit before, it may still confirm: check the vault's status.`,
+      : `${NO_DEPOSIT} This request sent nothing. If you submitted this deposit before, it may still confirm: the vault shows it once it's mined, so keep this vault's recovery backup.`,
   );
 }
