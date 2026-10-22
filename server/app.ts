@@ -621,9 +621,8 @@ export function createApp(
     const rows = await store.list(`OWNER#${owner}`, "VAULT#");
     // Vaults that take no deposit, because another vault holds their script: the deposit routes
     // refuse them, so clients refuse before anything is signed.
-    const noDeposit: string[] = [];
-    for (const r of rows)
-      if (await scriptHeldElsewhere(owner, r.vault as PublicVault)) noDeposit.push((r.vault as PublicVault).id);
+    const held = await Promise.all(rows.map((r) => scriptHeldElsewhere(owner, r.vault as PublicVault)));
+    const noDeposit = rows.filter((_, i) => held[i]).map((r) => (r.vault as PublicVault).id);
     return c.json({
       vaults: rows.map((r) => r.vault),
       // Vaults whose unconfirmed deposit the server can resend: stored Slipstream bytes only, and

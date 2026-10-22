@@ -779,7 +779,11 @@ export class QsbClient {
       // bytes guard nothing and would only offer a resend that's refused.
       if (scriptHeld(error)) {
         await this.pending.delete(vaultId);
-        throw refused(error, "the deposit", " Don't resend this deposit or sign another for this vault.");
+        throw refused(
+          error,
+          "the deposit",
+          " Don't resend this deposit or sign another for this vault. If it was sent before, it may still confirm: check deposits.status, and keep this vault's backup.",
+        );
       }
       throw unconfirmed(error instanceof Error ? ` ${error.message}` : "");
     }
@@ -801,7 +805,11 @@ export class QsbClient {
       return await this.session.api<Omit<DepositSubmission, "txid">>(`/vaults/${vaultId}/fund/resubmit`, fundResubmitRequest.parse({}));
     } catch (error) {
       if (scriptHeld(error))
-        throw refused(error, "to resend the deposit", " Don't resend it or sign another deposit for this vault.");
+        throw refused(
+          error,
+          "to resend the deposit",
+          " Don't resend it or sign another deposit for this vault. If it was sent before, it may still confirm: check deposits.status, and keep this vault's backup.",
+        );
       throw ownerRefusal(error) ? refused(error, "to resend the deposit", " Resend it once allowed; don't sign another.") : error;
     }
   }

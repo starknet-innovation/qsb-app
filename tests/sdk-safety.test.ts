@@ -627,6 +627,8 @@ describe("per-owner limits (#89)", () => {
     expect(error.message).toContain("refused the deposit (vault_script_registered)");
     expect(error.message).toContain("Nothing was written or sent by this request");
     expect(error.message).toContain("Don't resend this deposit or sign another for this vault.");
+    // An earlier send may still confirm, so the backup still matters.
+    expect(error.message).toContain("If it was sent before, it may still confirm: check deposits.status, and keep this vault's backup.");
     expect(error.message).not.toContain("isn't confirmed");
     // The pending deposit is dropped: nothing for this vault can be resent, and the server's own
     // resend gets the same final answer.

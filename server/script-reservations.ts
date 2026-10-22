@@ -11,8 +11,8 @@ export type ScriptBackfill = {
   /** Vaults that already hold their script's reservation. */
   alreadyReserved: number;
   /**
-   * Vaults whose script another vault holds, or an older vault row shares, each with that vault's
-   * id (`heldBy`). Left as they are.
+   * Vaults whose script another vault holds, or another vault row shares, each with the vault that
+   * holds it or that this run reserves it for, or would without `apply` (`heldBy`). Left as they are.
    */
   duplicates: { vault: string; heldBy: string }[];
   /** Vault rows whose script hash isn't the SHA-256 of their script. Left as they are. */
