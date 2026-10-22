@@ -55,7 +55,7 @@ import { persistentGuard } from "../src/mainnet/persistentGuard";
 // The request bodies the server's handlers parse, so a request can't drift from the API.
 import { fundResubmitRequest, fundSubmitRequest, submitRequest } from "../server/api-schemas";
 import type { Wallet } from "../src/lib/wallet";
-import { nodeQsb, type BundledQsb, type LocalQsb } from "./runtime";
+import { RefusedState, nodeQsb, type BundledQsb, type LocalQsb } from "./runtime";
 import { apiBase, isLoopback, signerWallet, type Signer } from "./signer";
 
 export { ApiRequestError };
@@ -492,14 +492,18 @@ export class QsbClient {
 
   /** A caller's recovery state, once `qsb` accepts it and no vault of this address locks its script. */
   private async adoptState(qsb: BundledQsb, stateJson: string) {
+    // Listed first, so an API key without the read scope is refused before the check runs.
+    const { vaults } = await this.vaults.list();
     let data: Awaited<ReturnType<BundledQsb["adoptQsb"]>>;
     try {
       data = await qsb.adoptQsb(stateJson);
     } catch (error) {
-      const reason = (error instanceof Error ? error.message : String(error)).replace(/\.$/, "");
-      throw new Error(`The supplied recovery state was refused: ${reason}. Nothing was saved or registered.`, { cause: error });
+      if (!(error instanceof RefusedState)) throw error;
+      throw new Error(`The supplied recovery state was refused: ${error.message.replace(/\.$/, "")}. Nothing was saved or registered.`, {
+        cause: error,
+      });
     }
-    const existing = (await this.vaults.list()).vaults.find((vault) => vault.scriptHash === data.scriptHash);
+    const existing = vaults.find((vault) => vault.scriptHash === data.scriptHash);
     if (existing)
       throw new Error(
         `This recovery state already locks vault ${existing.id}. A state locks one vault, which takes one deposit; nothing was saved or registered.`,

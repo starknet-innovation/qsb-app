@@ -13,6 +13,15 @@ import { QsbClient, loopbackTestSigner, nodeQsb, type LocalQsb } from "../sdk";
 import { runCli } from "../sdk/cli";
 import { API, wallet, world } from "./sdk-fixture";
 
+// Stands in for a damaged install while set: bridge.py no longer matches the manifest.
+const damaged = vi.hoisted(() => ({ bridge: false }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  const readFile = (async (file: Parameters<typeof actual.readFile>[0], ...rest: [never]) =>
+    damaged.bridge && String(file).endsWith("/bridge.py") ? Buffer.from("import os\n") : actual.readFile(file, ...rest)) as typeof actual.readFile;
+  return { ...actual, readFile };
+});
+
 beforeEach(() => vi.stubEnv("SOLVER_RELEASE_ID", awsRelease.id));
 afterEach(() => vi.unstubAllEnvs());
 const passphrase = "disposable supplied state passphrase";
@@ -35,10 +44,10 @@ const derived = (field: string) =>
   new RegExp(`^${field.replace(/[[\].]/g, "\\$&")} is not what the pipeline builds from these HORS secrets$`);
 /**
  * Mismatched states and what the bridge says about each. The edits are made on the JSON text: the
- * state holds 256-bit integers (pin_r, pin_s, pin_k, each round's r, s and k) that JavaScript numbers round.
+ * state holds integers above 2^53 (pin_r, pin_s, pin_k, each round's r, s and k) that JavaScript numbers round.
  */
 function edits(stateJson: string): [string, string, RegExp][] {
-  const state = JSON.parse(stateJson) as { hors_secrets: string[][]; hors_commitments: string[][]; full_script_hex: string };
+  const state = JSON.parse(stateJson) as { hors_secrets: string[][]; hors_commitments: string[][]; pin_sig: string; full_script_hex: string };
   const secret = hex.encode(randomBytes(20));
   const script = state.full_script_hex;
   // The secret and its commitment agree, but the script still holds the old commitment.
@@ -53,14 +62,17 @@ function edits(stateJson: string): [string, string, RegExp][] {
     ["a script the commitments don't build", swapped, derived("full_script_hex")],
     ["an edited script", replaceOnce(stateJson, `"${script}"`, `"${script.slice(0, -2)}${script.endsWith("00") ? "01" : "00"}"`), derived("full_script_hex")],
     ["integers rounded by JavaScript", JSON.stringify(JSON.parse(stateJson)), derived("pin_r")],
-    ["a changed type", replaceOnce(stateJson, '"t1b": 1,', '"t1b": true,'), derived("t1b")],
+    ["a changed type", replaceOnce(stateJson, `"pin_sig": "${state.pin_sig}"`, `"pin_sig": ["${state.pin_sig}"]`), derived("pin_sig")],
     ["a private field", stateJson.replace(/^\{/, '{"pin_privkey": 1, '), /^pin_privkey is not a field the pipeline produces$/],
     ["a private round field", replaceOnce(stateJson, '"round_sigs": [{', '"round_sigs": [{"seed": "00", '), /^round_sigs\[0\]\.seed is not a field the pipeline produces$/],
     ["a missing field", stateJson.replace(/"dummy_sigs": \[\[[^\]]*\], \[[^\]]*\]\], /, ""), /^dummy_sigs is missing$/],
     ["a repeated secret", replaceOnce(stateJson, `"${state.hors_secrets[1][9]}"`, `"${state.hors_secrets[0][2]}"`), /^A HORS secret repeats$/],
     ["an uppercase secret", replaceOnce(stateJson, `"${state.hors_secrets[0][0]}"`, `"${state.hors_secrets[0][0].toUpperCase()}"`), /^Each HORS secret is 20 bytes of lowercase hex$/],
-    ["another configuration", replaceOnce(stateJson, '"n": 150,', '"n": 140,'), /^Unsupported recovery configuration$/],
-    ["no secrets", replaceOnce(stateJson, '"hors_secrets"', '"secrets"'), /^Invalid secret count$/],
+    ["another configuration", replaceOnce(stateJson, '"n": 150,', '"n": 140,'), /^n is not Config A's 150$/],
+    ["a configuration of another type", replaceOnce(stateJson, '"t1b": 1,', '"t1b": true,'), /^t1b is not Config A's 1$/],
+    ["no secrets", replaceOnce(stateJson, '"hors_secrets"', '"secrets"'), /^hors_secrets is missing$/],
+    ["a short round of secrets", replaceOnce(stateJson, `, "${state.hors_secrets[1][149]}"]`, "]"), /^hors_secrets is not 2 rounds of 150 secrets$/],
+    ["a repeated key", stateJson.replace(/^\{/, '{"hors_secrets": [[], []], '), /^hors_secrets appears twice in one object$/],
     ["not an object", "[]", /^The recovery state is not a JSON object$/],
   ];
 }
@@ -147,8 +159,25 @@ describe("vaults.create with a supplied state", () => {
       expect(reason?.[1], `${label}: ${error.message}`).toMatch(message);
     }
     expect(saveBackup).not.toHaveBeenCalled();
-    // Each attempt read only the deployment's configuration.
-    expect(w.requests.slice(requests).every((r) => r.method === "GET" && r.url.endsWith("/v1/config"))).toBe(true);
+    // Each attempt only read the deployment's configuration and this address's vaults.
+    expect(new Set(w.requests.slice(requests).map((r) => `${r.method} ${new URL(r.url).pathname}`))).toEqual(
+      new Set(["GET /v1/config", "GET /v1/vaults"]),
+    );
+    expect(vaultPosts(w)).toHaveLength(0);
+  }, 120000);
+
+  it("reports a runtime that fails its manifest check as that, not as a refused state", async () => {
+    const { w, client } = await signedIn();
+    const saveBackup = vi.fn(async () => {});
+    damaged.bridge = true;
+    try {
+      await expect(client.vaults.create({ name: "damaged", passphrase, saveBackup, stateJson: generated.stateJson })).rejects.toThrow(
+        /^QSB source integrity check failed$/,
+      );
+    } finally {
+      damaged.bridge = false;
+    }
+    expect(saveBackup).not.toHaveBeenCalled();
     expect(vaultPosts(w)).toHaveLength(0);
   }, 120000);
 

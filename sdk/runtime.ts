@@ -12,6 +12,8 @@ type GeneratedQsb = Awaited<ReturnType<LocalQsb["generateQsb"]>>;
  * secrets and finds every field the same.
  */
 export type BundledQsb = LocalQsb & { adoptQsb(stateJson: string): Promise<GeneratedQsb> };
+/** The bridge refused a supplied recovery state; the message says what didn't match. */
+export class RefusedState extends Error {}
 
 // The vendored generator sources the browser serves from /qsb/, checked against the same manifest.
 const sources = new URL("../public/qsb/", import.meta.url);
@@ -57,7 +59,15 @@ export function nodeQsb(): BundledQsb {
   };
   return {
     ...qsbOperations(run),
-    adoptQsb: async (stateJson) => JSON.parse(await run("adopt", [stateJson])) as GeneratedQsb,
+    async adoptQsb(stateJson) {
+      // A runtime that fails to load or to pass its manifest check hasn't refused anything.
+      await start();
+      try {
+        return JSON.parse(await run("adopt", [stateJson])) as GeneratedQsb;
+      } catch (error) {
+        throw new RefusedState((error as Error).message, { cause: error });
+      }
+    },
     lockQsb() {
       runtime = undefined;
     },

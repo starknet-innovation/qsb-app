@@ -12,9 +12,10 @@ from bitcoin_tx import QSBScriptBuilder
 PUBLIC_FIELDS = ('config', 'hash_mode', 'n', 't1s', 't1b', 't2s', 't2b',
                  'hors_commitments', 'dummy_sigs', 'pin_r', 'pin_s', 'pin_sig',
                  'round_sigs', 'full_script_hex')
+CONFIG_A = {'config': 'A', 'hash_mode': 'sha256', 'n': 150, 't1s': 8, 't1b': 1, 't2s': 7, 't2b': 2}
 
 def validate_state(state):
-    if (state['config'], state['hash_mode'], state['n'], state['t1s'], state['t1b'], state['t2s'], state['t2b']) != ('A', 'sha256', 150, 8, 1, 7, 2):
+    if tuple(state[k] for k in CONFIG_A) != tuple(CONFIG_A.values()):
         raise ValueError('Unsupported recovery configuration')
     builder = QSBScriptBuilder(150, 8, 1, 7, 2, hash_mode='sha256')
     builder.hors_commitments = [[bytes.fromhex(c) for c in r] for r in state['hors_commitments']]
@@ -88,16 +89,28 @@ def difference(supplied, expected, path=''):
         return f'{path} is not what the pipeline builds from these HORS secrets'
     return None
 
+def unique(pairs):
+    """A JSON object whose keys each appear once; json.loads would otherwise keep the last."""
+    keys = [k for k, _ in pairs]
+    for key in keys:
+        if keys.count(key) > 1:
+            raise ValueError(f'{key} appears twice in one object')
+    return dict(pairs)
+
 def adopt(state_json):
     """Accept a caller's recovery state only if it is exactly the state setup builds from its HORS secrets."""
-    state = json.loads(state_json)
+    state = json.loads(state_json, object_pairs_hook=unique)
     if not isinstance(state, dict):
         raise ValueError('The recovery state is not a JSON object')
-    if tuple(state.get(k) for k in ('config', 'hash_mode', 'n', 't1s', 't1b', 't2s', 't2b')) != ('A', 'sha256', 150, 8, 1, 7, 2):
-        raise ValueError('Unsupported recovery configuration')
-    secrets = state.get('hors_secrets')
+    for key in (*CONFIG_A, 'hors_secrets'):
+        if key not in state:
+            raise ValueError(f'{key} is missing')
+    for key, value in CONFIG_A.items():
+        if json.dumps(state[key]) != json.dumps(value):
+            raise ValueError(f"{key} is not Config A's {json.dumps(value)}")
+    secrets = state['hors_secrets']
     if not isinstance(secrets, list) or len(secrets) != 2 or any(not isinstance(r, list) or len(r) != 150 for r in secrets):
-        raise ValueError('Invalid secret count')
+        raise ValueError('hors_secrets is not 2 rounds of 150 secrets')
     flat = [s for r in secrets for s in r]
     if not all(isinstance(s, str) and re.fullmatch('[0-9a-f]{40}', s) for s in flat):
         raise ValueError('Each HORS secret is 20 bytes of lowercase hex')

@@ -9,7 +9,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 ## Holders
 
 - **Bitcoin wallet**: Xverse in the web app; SDK signers must support BIP-322 and PSBT signing with a compressed public key deriving the supplied P2WPKH or P2SH-P2WPKH payment address. Other address types are not supported by this flow. Holds the wallet private key.
-- **User's browser, or the SDK / CLI**: runs pinned, hash-checked QSB sources through Pyodide. The browser uses a separate worker; the SDK/CLI runs Pyodide in the calling Node process, without worker isolation. Decrypted HORS state is held in browser/worker memory or SDK/CLI process memory; passphrases and backup files stay on the user’s side.
+- **User's browser, or the SDK / CLI**: runs pinned, hash-checked QSB sources through Pyodide. The browser uses a separate worker; the SDK/CLI runs Pyodide in the calling Node process, without worker isolation. Decrypted HORS state is held in browser/worker memory or SDK/CLI process memory; passphrases and backup files stay on the user’s side. An SDK/CLI caller that supplies its own recovery state also holds the plaintext state it generated, until it destroys it.
 - **QSB service on AWS**: API Lambda, records table, Step Functions coordinator and CPU verifier. Holds vault and job records, session and API key hashes and webhook secrets, and reads the MARA credential. Holds no spending key.
 - **Outside parties**: The GPU solver receives public search inputs. MARA receives signed transactions and optional authorization/client-code credentials. MARA and Bitcoin see the selected HORS preimages disclosed in withdrawals.
 

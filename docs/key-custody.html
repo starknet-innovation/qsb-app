@@ -177,7 +177,7 @@
   <!-- BROWSER LANE -->
   <div class="lane-label browser">
     <h2>User's browser <span style="font-weight:500;color:var(--muted)">or SDK / CLI</span></h2>
-    <p>Pinned, hash-checked Pyodide sources. Browser: separate QSB worker. SDK/CLI: calling Node process, without worker isolation. Decrypted state stays in local memory while unlocked.</p>
+    <p>Pinned, hash-checked Pyodide sources. Browser: separate QSB worker. SDK/CLI: calling Node process, without worker isolation. Decrypted state stays in local memory while unlocked. An SDK/CLI caller's own supplied state also exists as its plaintext file until destroyed.</p>
     <div class="holds">
       <span class="chip secret">HORS one-time secrets</span>
       <span class="chip secret">passphrase</span>
@@ -185,7 +185,7 @@
     </div>
   </div>
   <div class="cell browser">
-    <div class="step">Generates <b>2 × 150 one-time HORS secrets</b> and their hash commitments, then builds the vault script. <b>SDK/CLI:</b> or takes state its caller generated; the SDK's own runtime rebuilds it from the secrets and refuses any difference.<br><span class="chip secret">HORS secrets</span></div>
+    <div class="step">Generates <b>2 × 150 one-time HORS secrets</b> and their hash commitments, then builds the vault script. <b>SDK/CLI</b> can instead take state its caller generated: the SDK's own runtime rebuilds it from the secrets and refuses any difference, and the caller destroys its plaintext copy once the backup is saved.<br><span class="chip secret">HORS secrets</span></div>
     <div class="step">Encrypts them with your passphrase (PBKDF2-SHA256, 600k rounds, then AES-256-GCM). Use a strong, unique passphrase: the 14-character minimum does not measure strength, and copied backups allow offline guessing.<br><span class="chip secret">passphrase, 14+ characters</span></div>
     <div class="step"><b>Web app:</b> download and reopen the saved file before registration, then shut down the worker. <b>SDK:</b> calls saveBackup and validates the encrypted string in memory, not the saved file; locks its runtime in finally. The CLI writes a private file. SDK/CLI callers must separately verify saved-file recovery.<br><span class="chip enc">qsb-recovery-&lt;id&gt;.json</span></div>
   </div>

@@ -37,7 +37,7 @@ Vaults
   vault create --name <name> --backup <new file> [--state <file>]
                   --state uses recovery state you generated (the JSON the pipeline's setup writes)
                   instead of generating it. It's refused unless it's exactly what the pipeline builds
-                  from its HORS secrets, checked locally before anything is saved or sent.
+                  from its HORS secrets, checked locally before the backup is saved or the vault registered.
   vault list
 Deposits (one per vault)
   deposit prepare <vault> --backup <file> --amount <BTC> --fee-rate <sat/vB> --utxo <txid:vout>... --out <file>

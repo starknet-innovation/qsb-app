@@ -65,7 +65,7 @@ The routes below are shown under `/api`; the SDK, like the mainnet webapp, calls
 | --- | --- | --- |
 | `login()` | `POST /api/auth/challenge`, `/verify` | checks the challenge text, then `signer.signMessage` |
 | `config()`, `rates()`, `utxos()` | `GET /api/config`, `/rates`, `/payment-utxos` | |
-| `vaults.create` | `GET /api/vaults` with `stateJson`, `POST /api/vaults` | generate or check `stateJson`, encrypt, `saveBackup`, re-open and validate |
+| `vaults.create` | `GET /api/vaults` (with `stateJson` only), `POST /api/vaults` | generate, or check `stateJson`; encrypt, `saveBackup`, re-open and validate |
 | `vaults.list` | `GET /api/vaults` | |
 | `deposits.prepare` | `/payment-input`, `/rates` | validate the backup against the vault, build the PSBT, check MARA's floor |
 | `deposits.submit` | `POST /api/vaults/:id/fund/submit` | rebuild the expected PSBT, verify the signed one, keep it pending |
@@ -88,22 +88,22 @@ Rules that carry over from the webapp:
 
 ## Your own recovery state
 
-`vaults.create({ name, passphrase, saveBackup, stateJson })` registers a vault from recovery state you generated yourself, on an offline machine for example, instead of state the SDK generates; `qsb vault create --state <file>` does the same from a file. It's an option of `vaults.create`, not a separate import, because everything after the state is the same (encrypt, `saveBackup`, re-open, register), and because the vault it makes is a new one: the app never takes in an existing vault, which has its one deposit.
+`vaults.create({ name, passphrase, saveBackup, stateJson })` registers a vault from recovery state you generated yourself, on an offline machine for example, instead of state the SDK generates; `qsb vault create --state <file>` does the same from a file. It's an option of `vaults.create`, not a separate import, because everything after the state is the same (encrypt, `saveBackup`, re-open, register). It makes a new vault, so the state must never have locked one: the app never takes in an existing vault, which has its one deposit.
 
-`stateJson` is the `qsb_state.json` that `python3 qsb_pipeline.py setup --config A` writes with the sources in [`public/qsb`](../public/qsb). Its only random input is the 2 × 150 HORS secrets: setup derives every other field from them or from fixed constants. Before anything is encrypted, saved or sent, the SDK checks the state in a fresh interpreter of its own bundled runtime, the manifest-checked Pyodide sources, and never with the `qsb` option: a replaced runtime could pass a script that the secrets can't spend, and the deposit would be locked for good.
+`stateJson` is the `qsb_state.json` that `python3 qsb_pipeline.py setup --config A` writes with the sources in [`public/qsb`](../public/qsb). Run it under `umask 077`: otherwise other users of that machine can read the file. The state's only random input is the 2 × 150 HORS secrets: setup derives every other field from them or from fixed constants. Before the state is encrypted or saved, and before the vault is registered, the SDK checks the state in a fresh interpreter of its own bundled runtime, the manifest-checked Pyodide sources, and never with the `qsb` option: a replaced runtime could pass a script that the secrets can't spend, and the deposit would be locked for good.
 
-- It's Config A (sha256, n = 150) with 2 × 150 HORS secrets, each 20 bytes of lowercase hex, none repeated.
+- It's Config A (sha256, n = 150) with 2 × 150 HORS secrets, each 20 bytes of lowercase hex, none repeated, and no key appears twice in one JSON object.
 - `adopt` in [`bridge.py`](../public/qsb/bridge.py) runs the pipeline's setup again with those secrets in place of its random draws, and every field must equal what that builds, in type and value: each commitment (its secret's HASH160), the dummy signatures, the pinning and round signatures with their nonces, and the full script, which setup builds only within the 10,000-byte and 201-opcode limits. A missing field is refused, and so is any field setup doesn't write, in a round signature too.
-- No vault of the signed-in address has its script.
+- No vault of the signed-in address on this deployment has its script. The SDK lists that address's vaults first, so an API key needs the `read` scope as well as `vaults`.
 
-A refusal names the first field that differs, for example `The supplied recovery state was refused: hors_commitments[0][17] is not what the pipeline builds from these HORS secrets. Nothing was saved or registered.` An accepted state gives the public state, script and backup that `vaults.create` gives when the SDK draws the same secrets itself, and the same bundled runtime re-opens the backup after `saveBackup`.
+A refusal says what didn't match, naming the field: for example `The supplied recovery state was refused: hors_commitments[0][17] is not what the pipeline builds from these HORS secrets. Nothing was saved or registered.` An accepted state gives the same public state and script as when the SDK draws the same secrets itself, and its backup holds the same state; the same bundled runtime re-opens the backup after `saveBackup`.
 
-Pass the text as written. The state holds 256-bit integers (`pin_r`, `pin_s`, `pin_k` and each round's `r`, `s` and `k`) that `JSON.parse` rounds, and a rounded state is refused.
+Pass the text as written. The state holds integers above 2^53 (`pin_r`, `pin_s`, `pin_k` and each round's `r`, `s` and `k`) that `JSON.parse` rounds, and a rounded state is refused.
 
 The SDK can't check these, so they're up to you:
 
 - The secrets are random and nobody else has them. Draw them from a cryptographically secure source; setup's `--seed` makes them predictable. Anyone who has them can spend the vault.
-- The state locks no other vault. The SDK sees only the signed-in address's vaults on this deployment. A state is for one vault, and a vault takes one deposit.
+- The state locks no other vault. The SDK only refuses a script that's already a vault of the signed-in address on this deployment. It can't see vaults of other addresses or deployments, or payments to the script made outside the app. A state is for one vault and one deposit: the first withdrawal discloses 15 of its secrets, which would help someone else spend any other output paying the same script.
 - The plaintext copy. The backup holds the state encrypted. Keep the plaintext as safe as the backup until the backup is saved, then destroy it.
 
 ## CLI
