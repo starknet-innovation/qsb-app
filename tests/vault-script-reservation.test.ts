@@ -244,11 +244,12 @@ describe("the operator's script-reservation backfill", () => {
     expect(await backfillScriptReservations(store, await store.vaultRows(), true)).toMatchObject({ reserved: 0, alreadyReserved: 1 });
   });
 
-  it("reserves the older of two rows sharing a script and reports the other, as a dry run does", async () => {
+  it("reserves the earlier of two rows sharing a script and reports the other, as a dry run does", async () => {
     const store = new MemoryStore();
     const scriptHex = script();
-    const first = older(vaultFor(owners[1], scriptHex), "2026-10-01T00:00:00.000Z");
-    const second = older(vaultFor(owners[0], scriptHex), "2026-10-02T00:00:00.000Z");
+    // By time, not text: as text, the one without milliseconds would sort later.
+    const first = older(vaultFor(owners[1], scriptHex), "2026-10-01T00:00:00Z");
+    const second = older(vaultFor(owners[0], scriptHex), "2026-10-01T00:00:00.500Z");
     await unreserved(store, second);
     await unreserved(store, first);
     for (const apply of [false, true])

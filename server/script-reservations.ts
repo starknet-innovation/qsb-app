@@ -24,8 +24,10 @@ export type ScriptBackfill = {
 /**
  * Reserve the script of each vault row that has no reservation, the row POST /api/vaults writes
  * with a new vault: `SCRIPT#<scriptHash>`, with attribute_not_exists. Without `apply` it only
- * reports. A script another vault holds is reported and never reassigned. Rows go oldest first,
- * so of two rows sharing a script the older one is reserved. Run again, it changes nothing.
+ * reports. A script another vault holds is reported and never reassigned. Rows go by the time
+ * their `createdAt` names, earliest first, so of two rows sharing a script the earlier one is
+ * reserved. `createdAt` is set by the client, so the order only decides which of the two keeps the
+ * reservation: the other is reported either way. Run again, it changes nothing.
  */
 export async function backfillScriptReservations(
   store: Pick<Store, "get" | "put">,
@@ -41,8 +43,10 @@ export async function backfillScriptReservations(
     unreadable: [],
     unsettled: [],
   };
-  const createdAt = (row: Row) => String((row.vault as Partial<PublicVault> | undefined)?.createdAt ?? "");
-  const rows = [...vaultRows].sort((a, b) => createdAt(a).localeCompare(createdAt(b)) || a.sk.localeCompare(b.sk));
+  // A time, not text: `createdAt` may carry milliseconds or not. One that doesn't parse goes last.
+  const createdAt = (row: Row) =>
+    Date.parse(String((row.vault as Partial<PublicVault> | undefined)?.createdAt)) || Number.POSITIVE_INFINITY;
+  const rows = [...vaultRows].sort((a, b) => createdAt(a) - createdAt(b) || a.sk.localeCompare(b.sk));
   // Scripts this run reserved, or would, by vault: a dry run sees no reservation it would have written.
   const claimed = new Map<string, string>();
   for (const row of rows) {
