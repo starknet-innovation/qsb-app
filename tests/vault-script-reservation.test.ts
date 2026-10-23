@@ -300,6 +300,20 @@ describe("the operator's script-reservation backfill", () => {
     expect((await store.get(`SCRIPT#${first.scriptHash}`, "RESERVATION"))?.vaultId).toBe(first.id);
   });
 
+  it("orders rows by createdAt's time, the epoch included, and puts one that doesn't parse last", async () => {
+    const store = new MemoryStore();
+    const scriptHex = script();
+    // Ids that put the unparsed row first by key, so only the time can put the epoch row first.
+    const unparsed = older({ ...vaultFor(owners[0], scriptHex), id: "00000000-0000-4000-8000-000000000000" }, "not a time");
+    const epoch = older({ ...vaultFor(owners[1], scriptHex), id: "ffffffff-ffff-4fff-bfff-ffffffffffff" }, "1970-01-01T00:00:00.000Z");
+    await unreserved(store, unparsed);
+    await unreserved(store, epoch);
+    expect(await backfillScriptReservations(store, await store.vaultRows(), false)).toMatchObject({
+      reserved: 1,
+      duplicates: [{ vault: unparsed.id, heldBy: epoch.id }],
+    });
+  });
+
   it("gives a shared script to the row whose deposit got furthest, before earlier ones", async () => {
     const store = new MemoryStore();
     const scriptHex = script();
