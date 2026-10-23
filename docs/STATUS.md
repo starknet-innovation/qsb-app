@@ -1,6 +1,6 @@
 # Status
 
-As of 22 October 2026. #8, the plan to a first mainnet withdrawal, is complete; what's open is listed below.
+As of 23 October 2026. #8, the plan to a first mainnet withdrawal, is complete; what's open is listed below.
 
 ## Deployed
 
@@ -39,7 +39,6 @@ As of 22 October 2026. #8, the plan to a first mainnet withdrawal, is complete; 
 - **#85 phase 3:** billing, terms of use, WAF and rate limits. This needs a separate decision.
 - **#119:** the QSB author's answers on the security figure, SHA-256 Config A, re-authorization and the single output.
 - **The old eu-west-1 stack's** services were retired on 30 September 2026 (REGION-MIGRATION.md step 11), and its data was kept. Deleting that data is the remaining cleanup.
-- **Script reservations for existing vaults.** Some vault rows have no `SCRIPT#` reservation, so a second registration of one of their scripts is refused only once their first deposit write claims one, or a payment to it shows on chain ([API](API.md#vault-registration)). Once that API is deployed, run `scripts/reserve-vault-scripts.ts` ([runbook](OPERATIONAL-RUNBOOK.md#reserve-the-scripts-of-existing-vaults)).
 - **Local operator profiles:** the local-profile part of REGION-MIGRATION.md step 12 (pointing `qsb-view` and `qsb-operator` at the new account) is still to do.
 
 ## Known gaps
