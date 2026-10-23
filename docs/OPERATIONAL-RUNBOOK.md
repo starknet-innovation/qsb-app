@@ -268,7 +268,7 @@ The withdrawal API Lambda has a 120-second timeout, but CloudFront returns a tim
 
 ## Reserve the scripts of existing vaults
 
-`POST /api/vaults` reserves each new vault's script (`SCRIPT#<scriptHash>`; [API](API.md#vault-registration)). A vault row without a reservation doesn't stop a second registration of its script until its first deposit write claims the reservation, or a payment to it shows on chain. `scripts/reserve-vault-scripts.ts` writes the missing reservations. A vault that claimed its reservation with a deposit before the backfill ran keeps it, whatever the ranking below: the backfill reports other rows on that script as its duplicates. Run it after deploying an API that reserves scripts; running it again is safe.
+`POST /api/vaults` reserves each new vault's script (`SCRIPT#<scriptHash>`; [API](API.md#vault-registration)). A vault row without a reservation doesn't stop a second registration of its script until its first deposit write claims the reservation, or a payment to it shows on chain. `scripts/reserve-vault-scripts.ts` writes the missing reservations. A vault that has claimed its reservation with a deposit keeps it, whatever the ranking below: the backfill reports other rows on that script as its duplicates. Every vault row on this deployment holds its reservation. Run the backfill when vault rows may lack one, such as rows restored or copied from elsewhere. Running it again is safe: a run that finds every row reserved writes nothing.
 
 1. In an [operator session](#operator-session), set `TABLE_NAME`, `AWS_REGION` and `QSB_NETWORK=mainnet`, then run it without options. It scans the table for vault rows and reports what it would write, writing nothing:
 
