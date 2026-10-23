@@ -240,7 +240,7 @@
 
   <!-- service <-> external -->
   <div class="conn-label">service ⇅ outside</div>
-  <div class="conn"><span class="empty">nothing leaves</span></div>
+  <div class="conn"><span class="pill"><span class="a">↓</span>script hash (public)</span></div>
   <div class="conn"><span class="pill"><span class="a">↓</span>raw deposit transaction</span><span class="pill">optional MARA credentials</span></div>
   <div class="conn"><span class="pill"><span class="a">↓</span>public search parameters</span><span class="pill"><span class="a">↑</span>candidate hits</span></div>
   <div class="conn"><span class="pill"><span class="a">↓</span>raw withdrawal + disclosed preimages</span><span class="pill">optional MARA credentials</span></div>
@@ -248,9 +248,11 @@
   <!-- EXTERNAL LANE -->
   <div class="lane-label external">
     <h2>Outside parties</h2>
-    <p>The GPU solver receives public search inputs. MARA receives signed transactions and optional authorization/client-code credentials. MARA and Bitcoin see the selected HORS preimages disclosed in withdrawals.</p>
+    <p>The chain API receives public lookups, such as a new vault's script hash. The GPU solver receives public search inputs. MARA receives signed transactions and optional authorization/client-code credentials. MARA and Bitcoin see the selected HORS preimages disclosed in withdrawals.</p>
   </div>
-  <div class="cell external"><div class="empty">—</div></div>
+  <div class="cell external">
+    <div class="step"><b>Chain API</b> (Esplora) looks up the script hash, so the service can refuse a script something has already paid.</div>
+  </div>
   <div class="cell external">
     <div class="step"><b>MARA: possible mining.</b> Submission can fail or remain uncertain; acceptance is not inclusion. The deposit completes only after inclusion is independently confirmed.</div>
   </div>
@@ -282,7 +284,7 @@
       <div><b>User</b><span>Supported service flow: backup, passphrase and original wallet. The script does not bind that wallet; decrypted recovery state can enable an outside-service spend with another controlled helper.</span></div>
       <div><b>QSB service</b><span>Can refuse or delay a withdrawal, but not redirect it: the destination is fixed by signatures made on the user's machine.</span></div>
       <div><b>GPU solver</b><span>Untrusted compute on public data. Only independently CPU-verified hits can be used as solutions; verification does not necessarily examine every returned hit.</span></div>
-      <div><b>Operator</b><span>MFA-backed role that reconciles records after an unknown outcome. It can't sign, and the tool never resubmits.</span></div>
+      <div><b>Operator</b><span>MFA-backed role that reconciles records after an unknown outcome and writes missing script reservations. It can't sign, and its tools never resubmit.</span></div>
       <div><b>MARA</b><span>Receives fully signed transactions and optional authorization/client-code credentials; withdrawals include the disclosed HORS preimages.</span></div>
     </div>
     <p class="trust"><b>Trust note.</b> The web app is served from the deployment, so whoever can deploy controls the code that runs in the browser and can read the MARA credential. The SDK and CLI run code the user installs.</p>

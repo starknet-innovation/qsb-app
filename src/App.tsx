@@ -31,6 +31,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { api, authenticate, clearSession } from "./lib/api";
+import { NO_DEPOSIT, NO_DEPOSIT_SENT, registrationError } from "./lib/vault-registration";
 import TransactionDialog from "./TransactionDialog";
 import WalletCheck from "./WalletCheck";
 import Costs from "./Costs";
@@ -159,6 +160,8 @@ export default function App() {
     [vaults, setVaults] = useState<PublicVault[]>([]),
     // Vaults whose unconfirmed deposit has stored Slipstream bytes the server can resend.
     [resendable, setResendable] = useState<Set<string>>(new Set()),
+    // Vaults that take no deposit: another vault on the server holds their script.
+    [noDeposit, setNoDeposit] = useState<Set<string>>(new Set()),
     // Payments to a vault's script beyond its one deposit, flagged by the server. Never spent.
     [stray, setStray] = useState<StrayPayments[]>([]),
     [manualDeposit, setManualDeposit] = useState<{ vaultId: string; txid: string; rawTxHex: string }>(),
@@ -398,7 +401,7 @@ export default function App() {
     const refresh = async () => {
       try {
         const [v, j] = await Promise.all([
-          api<{ vaults: PublicVault[]; resendable?: string[]; strayPayments?: StrayPayments[] }>("/vaults"),
+          api<{ vaults: PublicVault[]; resendable?: string[]; noDeposit?: string[]; strayPayments?: StrayPayments[] }>("/vaults"),
           api<{ jobs: Job[] }>("/jobs"),
         ]);
         if (disposed) return;
@@ -410,6 +413,7 @@ export default function App() {
           if (!pending.has(key)) delete pendingSince.current[key];
         for (const key of pending) pendingSince.current[key] ??= Date.now();
         setResendable(new Set(v.resendable ?? []));
+        setNoDeposit(new Set(v.noDeposit ?? []));
         setStray(v.strayPayments ?? []);
         setJobs(j.jobs);
         setCheckedAt((c) => ({ ...c, ...readChainSeen(wallet.address) }));
@@ -500,6 +504,7 @@ export default function App() {
     setWalletMenu(false);
     setManualDeposit(undefined);
     setResendable(new Set());
+    setNoDeposit(new Set());
     setStray([]);
     setInline({});
     setCheckedAt({});
@@ -634,7 +639,9 @@ export default function App() {
   async function save() {
     await action("Saving vault metadata", async () => {
       if (!recovery || !verified) throw new Error("Verify your backup first.");
-      await api("/vaults", recovery.vault);
+      await api("/vaults", recovery.vault).catch((e) => {
+        throw registrationError(e);
+      });
       setVaults((v) => [...v, recovery.vault]);
       setCreated(recovery.vault);
       setStep(3);
@@ -932,6 +939,12 @@ export default function App() {
                                 {v.configuration && ` · generator ${v.configuration.generatorCommit.slice(0, 7)}`}
                                 {v.funding && ` · deposit ${short(v.funding.txid)}:${v.funding.vout}`}
                               </p>
+                              {v.status === "unfunded" && noDeposit.has(v.id) && (
+                                <p className="vault-warning" role="status">{NO_DEPOSIT}</p>
+                              )}
+                              {v.status === "submitted" && noDeposit.has(v.id) && (
+                                <p className="vault-warning" role="status">{NO_DEPOSIT_SENT}</p>
+                              )}
                               {flagged && (
                                 <p className="vault-warning" role="status">
                                   {flagged.count === 1 ? "1 payment" : `${flagged.count} payments`} of{" "}
@@ -974,9 +987,14 @@ export default function App() {
                                   Check now
                                 </button>
                               )}
-                              {v.status === "unfunded" && (
+                              {v.status === "unfunded" && !noDeposit.has(v.id) && (
                                 <button className="secondary" onClick={() => startTransaction(v)}>
                                   <ArrowDownLeft size={16} /> Deposit
+                                </button>
+                              )}
+                              {v.status === "unfunded" && noDeposit.has(v.id) && (
+                                <button className="secondary" disabled>
+                                  Takes no deposit
                                 </button>
                               )}
                               {v.status === "submitted" && (

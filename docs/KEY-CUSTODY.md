@@ -11,7 +11,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 - **Bitcoin wallet**: Xverse in the web app; SDK signers must support BIP-322 and PSBT signing with a compressed public key deriving the supplied P2WPKH or P2SH-P2WPKH payment address. Other address types are not supported by this flow. Holds the wallet private key.
 - **User's browser, or the SDK / CLI**: runs pinned, hash-checked QSB sources through Pyodide. The browser uses a separate worker; the SDK/CLI runs Pyodide in the calling Node process, without worker isolation. Decrypted HORS state is held in browser/worker memory or SDK/CLI process memory; passphrases and backup files stay on the user’s side. An SDK/CLI caller that supplies its own recovery state also holds the plaintext state it generated, until it destroys it.
 - **QSB service on AWS**: API Lambda, records table, Step Functions coordinator and CPU verifier. Holds vault and job records, session and API key hashes and webhook secrets, and reads the MARA credential. Holds no spending key.
-- **Outside parties**: The GPU solver receives public search inputs. MARA receives signed transactions and optional authorization/client-code credentials. MARA and Bitcoin see the selected HORS preimages disclosed in withdrawals.
+- **Outside parties**: The chain API receives public lookups, such as a new vault's script hash. The GPU solver receives public search inputs. MARA receives signed transactions and optional authorization/client-code credentials. MARA and Bitcoin see the selected HORS preimages disclosed in withdrawals.
 
 ## 1. Create vault
 
@@ -22,7 +22,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 | Browser | Generates 2 × 150 one-time HORS secrets and their hash commitments, then builds the vault script. An SDK/CLI caller can supply recovery state it generated itself instead (`stateJson`, `qsb vault create --state`): the SDK's own bundled runtime rebuilds that state from its HORS secrets and refuses any difference before encrypting it, and the caller keeps its plaintext copy until the saved backup reads back intact, then destroys it. Encrypts them with the passphrase (14+ characters; PBKDF2-SHA256 with 600,000 rounds, then AES-256-GCM). Use a strong, unique passphrase: the 14-character minimum does not measure strength, and a copied backup allows offline guessing. In the web app, the user downloads `qsb-recovery-<id>.json` and reopens the saved file for verification before registration; then the worker is shut down. The SDK calls saveBackup, then decrypts and validates the in-memory encrypted string, not the persisted file. The CLI callback writes a private local file. SDK/CLI callers must separately check saved-file recovery; the SDK locks its runtime in finally. |
 | Crosses to the service | The BIP-322 sign-in proof, then the public vault (script, script hash, HORS commitments and payment address). The service returns a 1-hour session token. Authenticated requests send that bearer token, or a scoped API key. |
 | Service | Verifies the BIP-322 signature and issues a random session token, storing only its SHA-256. Stores the public vault record. At vault creation it receives commitments, not wallet private keys or HORS preimages. |
-| Outside parties | Nothing leaves the service. |
+| Outside parties | The chain API (Esplora) receives the vault's script hash, public data, so the service can refuse a script something has already paid. No secret or credential leaves the service. |
 
 ## 2. Deposit
 
@@ -74,11 +74,11 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 - **User**: the supported service flow requires their backup, passphrase and original wallet. The vault script does not bind that wallet; possession of decrypted recovery state can enable an outside-service spend using another controlled helper.
 - **QSB service**: can refuse or delay a withdrawal, but not redirect it: the destination is fixed by signatures made on the user's machine.
 - **GPU solver**: untrusted compute on public data. Only independently CPU-verified hits can be used as solutions; verification does not necessarily examine every returned hit.
-- **Operator**: an MFA-backed role that reconciles records after an unknown outcome. It can't sign, and the tool never resubmits.
+- **Operator**: an MFA-backed role that reconciles records after an unknown outcome and writes missing script reservations. It can't sign, and its tools never resubmit.
 - **MARA**: receives fully signed transactions and optional authorization/client-code credentials; withdrawals include the disclosed HORS preimages.
 
 **Trust note.** The web app is served from the deployment, so whoever can deploy controls the code that runs in the browser and can read the MARA credential. The SDK and CLI run code the user installs.
 
 ## Sources
 
-Sources: `src/lib/backup.ts`, `public/qsb/bridge.py`, `public/qsb/qsb_pipeline.py`, `src/lib/wallet.ts`, `src/mainnet/localSignature.ts`, `server/app.ts`, `server/scoped-keys.ts`, `server/webhooks.ts`, `terraform/variables.tf`, `terraform/compute.tf`, `ops/github-aws/render.py`, `src/TransactionDialog.tsx`, `server/providers.ts`, `server/submit-exact.ts`, `src/App.tsx`, `server/transaction-checks.ts`, `sdk/runtime.ts`, `sdk/signer.ts`, `sdk/client.ts`, `sdk/cli.ts`, `worker/cpu/handler.py` and [EXACT-SUBMIT.md](EXACT-SUBMIT.md). Keep this page, `key-custody.html` and `key-custody.png` in step; see "Docs" in `AGENTS.md`.
+Sources: `src/lib/backup.ts`, `public/qsb/bridge.py`, `public/qsb/qsb_pipeline.py`, `src/lib/wallet.ts`, `src/mainnet/localSignature.ts`, `server/app.ts`, `server/chain.ts`, `server/scoped-keys.ts`, `server/webhooks.ts`, `terraform/variables.tf`, `terraform/compute.tf`, `ops/github-aws/render.py`, `src/TransactionDialog.tsx`, `server/providers.ts`, `server/submit-exact.ts`, `src/App.tsx`, `server/transaction-checks.ts`, `sdk/runtime.ts`, `sdk/signer.ts`, `sdk/client.ts`, `sdk/cli.ts`, `worker/cpu/handler.py` and [EXACT-SUBMIT.md](EXACT-SUBMIT.md). Keep this page, `key-custody.html` and `key-custody.png` in step; see "Docs" in `AGENTS.md`.

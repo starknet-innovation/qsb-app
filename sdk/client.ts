@@ -223,6 +223,33 @@ function refused(error: ApiRequestError, what: string, next = ""): Error {
     cause: error,
   });
 }
+/**
+ * The server's refusals of a vault whose script isn't new: final, and nothing was registered. Each
+ * says what to do with the backup just saved. The vault that has the script may be the caller's
+ * own, and a paid script's backup may be the only copy of the secrets that spend what was paid.
+ */
+const scriptRefusals: Record<NonNullable<RefusedState["code"]>, string> = {
+  vault_script_registered:
+    "another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: don't pay into this script. Destroy that backup only if you hold another copy of this state.",
+  vault_script_paid:
+    "something has already paid this script on chain. A script locks one vault, which takes one deposit, so no new vault can have it. Nothing was registered. Keep the backup just saved, or another copy of this state: it holds the secrets that can spend what was paid. Don't pay into this script for a new vault.",
+};
+/** A deposit route's refusal of a vault whose script another vault holds: final, nothing was sent. */
+function scriptHeld(error: unknown): error is ApiRequestError {
+  return error instanceof ApiRequestError && error.status === 409 && error.code === "vault_script_registered";
+}
+/** The server's chain lookup failed before it wrote anything: not a verdict on the state. */
+function chainFailure(error: unknown): error is ApiRequestError & { code: string } {
+  return error instanceof ApiRequestError && (error.code === "chain_unavailable" || error.code === "chain_error");
+}
+function scriptRefusal(error: unknown): error is ApiRequestError & { code: keyof typeof scriptRefusals } {
+  return (
+    error instanceof ApiRequestError &&
+    error.status === 409 &&
+    error.code !== undefined &&
+    Object.hasOwn(scriptRefusals, error.code)
+  );
+}
 /** Refuse early when the deployment says this owner can't act, or its limits are misconfigured. */
 function assertOwnerAllowed(config: ApiConfig) {
   if (config.ownerLimits === null)
@@ -360,14 +387,19 @@ export class QsbClient {
      * With `stateJson`, the vault uses that recovery state instead, once this
      * package's own runtime finds it is exactly the state the pipeline builds
      * from its HORS secrets, and no vault of this address has a script that
-     * pushes one of its HORS commitments. Refusals are `RefusedState`s.
+     * pushes one of its HORS commitments. Refusals are `RefusedState`s, as is the server's
+     * refusal of a script that isn't new (`vault_script_registered`, `vault_script_paid`).
      */
     create: (input: { name: string; passphrase: string; saveBackup: SaveBackup; stateJson?: string }) =>
       this.createVault(input),
     list: () =>
-      this.session.api<{ vaults: PublicVault[]; resendable?: string[]; strayPayments?: StrayPayments[] }>(
-        "/vaults",
-      ),
+      this.session.api<{
+        vaults: PublicVault[];
+        resendable?: string[];
+        /** Vaults that take no deposit: another vault on the deployment holds their script. */
+        noDeposit?: string[];
+        strayPayments?: StrayPayments[];
+      }>("/vaults"),
   };
   readonly deposits = {
     /** An unsigned deposit PSBT paying the vault, after checking the backup matches its script. */
@@ -557,7 +589,8 @@ export class QsbClient {
       await input.saveBackup(backup);
       await this.unlock(backup, input.passphrase, vault, qsb);
       // Again, for a vault registered from the same secrets while this backup was saved. The server
-      // doesn't refuse a repeated script, so this narrows the window but can't close it.
+      // refuses a reserved or paid script, by any address; this also finds this address's vaults whose
+      // scripts push the secrets: another script, or one with no reservation.
       const sharing = supplied ? sharingSecrets((await this.vaults.list()).vaults, data.publicStateJson) : undefined;
       if (sharing)
         throw new RefusedState(
@@ -566,6 +599,20 @@ export class QsbClient {
       const registered = await this.session
         .api<{ vault: PublicVault }>("/vaults", publicVaultSchema.parse(vault))
         .catch((error) => {
+          if (scriptRefusal(error))
+            throw new RefusedState(
+              `The deployment refused to register the vault (${error.code}): ${scriptRefusals[error.code]}`,
+              { cause: error, code: error.code },
+            );
+          if (chainFailure(error))
+            throw new Error(
+              `The deployment couldn't check the vault's script on chain (${error.code}), so it registered nothing. ${
+                supplied
+                  ? "The backup just saved is for a vault id that won't be registered: keep the state, retry with it, and use the backup that retry saves. Don't pay into the script until a retry registers it."
+                  : "The backup just saved is for an unregistered vault: never pay into its script. A retry makes a new vault and a new backup."
+              }`,
+              { cause: error },
+            );
           throw ownerRefusal(error)
             ? refused(error, "to register the vault", " The saved backup is for an unregistered vault: never pay into its script.")
             : error;
@@ -592,7 +639,14 @@ export class QsbClient {
       throw new Error("Deposits are submitted to MARA Slipstream, which is switched off right now. Nothing was prepared.");
     if (await this.pending.get(vaultId))
       throw new Error("A signed deposit for this vault is waiting for MARA. Resubmit it; do not deposit again.");
-    const vault = await this.vault(vaultId);
+    id(vaultId, "vault");
+    const listed = await this.vaults.list();
+    const vault = listed.vaults.find((v) => v.id === vaultId);
+    if (!vault) throw new Error("Vault not found for this address.");
+    if (listed.noDeposit?.includes(vaultId))
+      throw new Error(
+        "Another vault on this deployment holds this vault's script, so this vault takes no deposit. Nothing was prepared; don't pay into its script.",
+      );
     if (vault.status !== "unfunded" || vault.funding)
       throw new Error("This vault already has a deposit. A vault takes one deposit; do not deposit again.");
     try {
@@ -722,6 +776,16 @@ export class QsbClient {
       // attempts may still have been sent, so the signed bytes stay pending either way.
       if (ownerRefusal(error))
         throw refused(error, "the deposit", " The signed deposit stays pending: resend it with deposits.resubmit once allowed; don't sign another.");
+      // Final for this vault, not just this request: every deposit route refuses it, so the pending
+      // bytes guard nothing and would only offer a resend that's refused.
+      if (scriptHeld(error)) {
+        await this.pending.delete(vaultId);
+        throw refused(
+          error,
+          "the deposit",
+          " Don't resend this deposit or sign another for this vault. If it was sent before, it may still confirm: deposits.status shows it once it's mined, so keep this vault's backup.",
+        );
+      }
       throw unconfirmed(error instanceof Error ? ` ${error.message}` : "");
     }
     // Only an answer about this vault and these bytes ends the pending deposit.
@@ -741,6 +805,12 @@ export class QsbClient {
     try {
       return await this.session.api<Omit<DepositSubmission, "txid">>(`/vaults/${vaultId}/fund/resubmit`, fundResubmitRequest.parse({}));
     } catch (error) {
+      if (scriptHeld(error))
+        throw refused(
+          error,
+          "to resend the deposit",
+          " Don't resend it or sign another deposit for this vault. If it was sent before, it may still confirm: deposits.status shows it once it's mined, so keep this vault's backup.",
+        );
       throw ownerRefusal(error) ? refused(error, "to resend the deposit", " Resend it once allowed; don't sign another.") : error;
     }
   }

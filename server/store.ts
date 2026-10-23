@@ -37,6 +37,9 @@ export type AtomicWrite = {
 export function isReservationRow(row: Row): boolean {
   return row.sk === "RESERVATION" && row.pk.startsWith("OUTPOINT#");
 }
+export function isVaultRow(row: Row): boolean {
+  return row.pk.startsWith("OWNER#") && row.sk.startsWith("VAULT#");
+}
 
 function transactItem(
   table: string,
@@ -87,6 +90,22 @@ export async function canonicalReservationWrites(
       jobId: point.jobId,
     },
   }));
+}
+
+/**
+ * A vault's script reservation: one row per script on this deployment, keyed by the script's
+ * SHA-256 (the vault's checked, lowercase `scriptHash`). It is written with attribute_not_exists(pk),
+ * with the vault row at registration, by an unreserved vault's first deposit write, or by the
+ * operator's backfill, so a second vault for the same script, by any owner, conflicts.
+ */
+export function scriptReservation(owner: string, vault: { id: string; scriptHash: string }): Row {
+  return {
+    pk: `SCRIPT#${vault.scriptHash}`,
+    sk: "RESERVATION",
+    version: 0,
+    owner,
+    vaultId: vault.id,
+  };
 }
 
 export class MemoryStore implements Store {
@@ -145,6 +164,10 @@ export class MemoryStore implements Store {
     return [...this.rows.values()]
       .filter(isReservationRow)
       .map((row) => structuredClone(row));
+  }
+  /** Every owner's vault rows, for the operator's script-reservation backfill. */
+  async vaultRows(): Promise<Row[]> {
+    return [...this.rows.values()].filter(isVaultRow).map((row) => structuredClone(row));
   }
 }
 export class DynamoStore implements Store {
@@ -269,6 +292,25 @@ export class DynamoStore implements Store {
       start = page.LastEvaluatedKey;
     } while (start);
     return rows.filter(isReservationRow);
+  }
+  /** Every owner's vault rows, for the operator's script-reservation backfill: a Scan the API role can't make. */
+  async vaultRows(): Promise<Row[]> {
+    const rows: Row[] = [];
+    let start: Record<string, unknown> | undefined;
+    do {
+      const page = await this.client.send(
+        new ScanCommand({
+          TableName: this.table,
+          FilterExpression: "begins_with(pk, :owner) AND begins_with(sk, :vault)",
+          ExpressionAttributeValues: { ":owner": "OWNER#", ":vault": "VAULT#" },
+          ExclusiveStartKey: start,
+          ConsistentRead: true,
+        }),
+      );
+      rows.push(...((page.Items ?? []) as Row[]));
+      start = page.LastEvaluatedKey;
+    } while (start);
+    return rows.filter(isVaultRow);
   }
 }
 export const store: Store = process.env.TABLE_NAME

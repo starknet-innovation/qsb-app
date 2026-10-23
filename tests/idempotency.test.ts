@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as btc from "@scure/btc-signer";
@@ -22,7 +22,6 @@ const owner = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint
 const other = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20).fill(9) });
 const tokens = { [owner]: "A".repeat(43), [other]: "C".repeat(43) };
 const scriptHex = "51".repeat(100);
-const scriptHash = createHash("sha256").update(Buffer.from(scriptHex, "hex")).digest("hex");
 const key = "k-0123456789abcdef";
 
 beforeEach(() => {
@@ -33,17 +32,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function vaultFor(paymentAddress: string, status: PublicVault["status"] = "unfunded"): PublicVault {
+/** A vault of its own script, since the server registers each script once; the fixture's pays `scriptHex`. */
+function vaultFor(
+  paymentAddress: string,
+  status: PublicVault["status"] = "unfunded",
+  script = randomBytes(100).toString("hex"),
+): PublicVault {
   return withVaultConfiguration({
     id: randomUUID(),
     name: "cold-1",
     createdAt: new Date().toISOString(),
     network: "mainnet",
     config: "A",
-    scriptHex,
-    scriptHash,
+    scriptHex: script,
+    scriptHash: createHash("sha256").update(Buffer.from(script, "hex")).digest("hex"),
     paymentAddress,
-    publicStateJson: JSON.stringify({ config: "A", hash_mode: "sha256", n: 150, round_sigs: [], full_script_hex: scriptHex }),
+    publicStateJson: JSON.stringify({ config: "A", hash_mode: "sha256", n: 150, round_sigs: [], full_script_hex: script }),
     status,
   });
 }
@@ -105,10 +109,11 @@ async function fixture() {
       network: "mainnet",
       expiresAt: Math.floor(Date.now() / 1000) + 7 * 86400,
     });
-  const vault = vaultFor(owner);
+  const vault = vaultFor(owner, "unfunded", scriptHex);
   await store.put({ pk: `OWNER#${owner}`, sk: `VAULT#${vault.id}`, version: 0, vault });
   const chain = new Esplora("https://chain.test", async () => new Response("", { status: 500 }));
   vi.spyOn(chain, "unspent").mockResolvedValue({ previousTxHex: "00", confirmations: 1 });
+  vi.spyOn(chain, "scriptFunded").mockResolvedValue(false);
   const miner = new Slipstream("https://slipstream.mara.com", async () => undefined);
   const submitFunding = vi.spyOn(miner, "submitFunding").mockImplementation(async (raw: string) => ({ status: "success" as const, message: transactionId(raw) }));
   const submit = vi.spyOn(miner, "submit").mockImplementation(async (raw: string) => ({ status: "success" as const, message: transactionId(raw) }));

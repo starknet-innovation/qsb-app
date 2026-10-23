@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { ripemd160 } from "@noble/hashes/legacy.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -340,6 +341,76 @@ describe("vaults.create with a supplied state", () => {
     );
     expect(saveBackup).toHaveBeenCalledOnce();
     expect(vaultPosts(w).map((r) => JSON.parse(r.body).id)).toEqual([registered]);
+  }, 120000);
+
+  const storedVaults = (w: ReturnType<typeof world>) =>
+    [...w.store.rows.values()].filter((row) => row.sk.startsWith("VAULT#")).map((row) => (row.vault as { id: string }).id);
+
+  it("reports the server's refusal of a script another address registered as a refused state", async () => {
+    const { w, client } = await signedIn();
+    const someone = wallet(w.chain);
+    const theirs = new QsbClient({ baseUrl: API, signer: loopbackTestSigner(someone.wif, API), fetch: w.fetch, qsb: replacedRuntime() });
+    await theirs.login();
+    const { vault } = await theirs.vaults.create({ name: "theirs", passphrase, saveBackup: async () => {}, stateJson: generated.stateJson });
+    // This address has no vault, so only the server can see that the script is taken.
+    const saveBackup = vi.fn(async () => {});
+    const error = await client.vaults.create({ name: "mine", passphrase, saveBackup, stateJson: generated.stateJson }).then(
+      () => new Error("registered"),
+      (e: Error) => e,
+    );
+    expect(error).toBeInstanceOf(RefusedState);
+    expect((error as RefusedState).code).toBe("vault_script_registered");
+    expect(error.message).toBe(
+      "The deployment refused to register the vault (vault_script_registered): another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: don't pay into this script. Destroy that backup only if you hold another copy of this state.",
+    );
+    expect(saveBackup).toHaveBeenCalledOnce();
+    expect(storedVaults(w)).toEqual([vault.id]);
+  }, 120000);
+
+  it("reports the server's refusal of a script already paid on chain as a refused state", async () => {
+    const { w, client } = await signedIn();
+    const payment = new btc.Transaction({ allowUnknownInputs: true, allowUnknownOutputs: true });
+    payment.addInput({ txid: randomBytes(32), index: 0 });
+    payment.addOutput({ script: hex.decode(generated.scriptHex), amount: 10_000n });
+    w.chain.add(hex.encode(payment.toBytes(true, false)));
+    const error = await client.vaults.create({ name: "paid", passphrase, saveBackup: async () => {}, stateJson: generated.stateJson }).then(
+      () => new Error("registered"),
+      (e: Error) => e,
+    );
+    expect(error).toBeInstanceOf(RefusedState);
+    expect((error as RefusedState).code).toBe("vault_script_paid");
+    // The secrets may already lock someone's payment: the message never says to discard the backup.
+    expect(error.message).toBe(
+      "The deployment refused to register the vault (vault_script_paid): something has already paid this script on chain. A script locks one vault, which takes one deposit, so no new vault can have it. Nothing was registered. Keep the backup just saved, or another copy of this state: it holds the secrets that can spend what was paid. Don't pay into this script for a new vault.",
+    );
+    expect(storedVaults(w)).toEqual([]);
+  }, 120000);
+
+  it("says a failed chain lookup registered nothing, and that the same state can be tried again", async () => {
+    const { w, signer, client } = await signedIn();
+    w.chain.failing.add("/scripthash/");
+    const saveBackup = vi.fn(async () => {});
+    const error = await client.vaults.create({ name: "chain down", passphrase, saveBackup, stateJson: generated.stateJson }).then(
+      () => new Error("registered"),
+      (e: Error) => e,
+    );
+    // Not a verdict on the state.
+    expect(error).not.toBeInstanceOf(RefusedState);
+    expect(error.message).toBe(
+      "The deployment couldn't check the vault's script on chain (chain_unavailable), so it registered nothing. The backup just saved is for a vault id that won't be registered: keep the state, retry with it, and use the backup that retry saves. Don't pay into the script until a retry registers it.",
+    );
+    expect(saveBackup).toHaveBeenCalledOnce();
+    expect(storedVaults(w)).toEqual([]);
+    w.chain.failing.clear();
+    const { vault } = await client.vaults.create({ name: "chain back", passphrase, saveBackup, stateJson: generated.stateJson });
+    expect(storedVaults(w)).toEqual([vault.id]);
+    // A state the SDK draws itself is new each time, so its saved backup is for no vault.
+    const drawing = new QsbClient({ baseUrl: API, signer, fetch: w.fetch, token: client.token, qsb: nodeQsb() });
+    w.chain.failing.add("/scripthash/");
+    await expect(drawing.vaults.create({ name: "drawn", passphrase, saveBackup: async () => {} })).rejects.toThrow(
+      "The deployment couldn't check the vault's script on chain (chain_unavailable), so it registered nothing. The backup just saved is for an unregistered vault: never pay into its script. A retry makes a new vault and a new backup.",
+    );
+    expect(storedVaults(w)).toEqual([vault.id]);
   }, 120000);
 });
 

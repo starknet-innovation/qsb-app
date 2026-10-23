@@ -1,7 +1,7 @@
 import { deployedSolver, deployedSolverId } from "./solver-deployment";
 import { observeWithdrawal } from "./withdrawal-status";
 import { submitExact, SubmitDisabled } from "./submit-exact";
-import { exportFunding, submitFunding, type FundingDependencies } from "./submit-funding";
+import { exportFunding, scriptFence, submitFunding, type FundingDependencies } from "./submit-funding";
 import { flagStrayPayments, strayPaymentsOf } from "./stray-outputs";
 import {
   CoreConsensus,
@@ -51,7 +51,9 @@ import {
 import {
   canonicalReservationWrites,
   Conflict,
+  scriptReservation,
   store as defaultStore,
+  type Row,
   type Store,
 } from "./store";
 import {
@@ -145,6 +147,11 @@ export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
  */
 const REQUEST_BUDGET_MS = 25_000;
 const REQUEST_LIMIT_MS = 28_000;
+/**
+ * Both chain reads of a new vault's script, together. A slower answer refuses the vault, so the
+ * chain reads can't push its write past CloudFront's 30 seconds.
+ */
+const SCRIPT_LOOKUP_MS = 15_000;
 /** How long a container keeps the deployment's app origin before reading its row again. */
 const ORIGIN_TTL_MS = 5 * 60_000;
 /** How long before a container reads the row again after finding it missing, or failing to read it. */
@@ -168,6 +175,8 @@ export function createApp(
     versionedAlias?: boolean;
     /** Trusted test configuration; the deployment reads QSB_OWNER_* from the environment. */
     ownerLimits?: OwnerLimits;
+    /** Tests only: a shorter SCRIPT_LOOKUP_MS. */
+    scriptLookupMs?: number;
   } = {},
 ) {
   // Routes write through `store`, so withdrawal and deposit status changes become owner
@@ -562,6 +571,24 @@ export function createApp(
     return c.json({ deleted: true });
   });
   /**
+   * Whether another vault's reservation holds this vault's script. A vault row without a
+   * reservation can share its script with another vault: a later registration of that script,
+   * the first deposit write of another row on it, or the operator's backfill gives the
+   * reservation to the other one. This vault then takes no
+   * deposit: the deposit routes refuse it before anything is recorded or sent, `GET /api/vaults`
+   * lists it in `noDeposit` and not as resendable, and `/funding` doesn't offer its stored bytes.
+   * A vault row with no reservation for its script isn't refused; its first deposit write claims
+   * one (scriptFence), and that write fails if another vault reserved the script in between.
+   */
+  async function scriptHeldElsewhere(owner: string, vault: PublicVault | undefined) {
+    if (typeof vault?.scriptHash !== "string") return false;
+    const { pk, sk } = scriptReservation(owner, vault);
+    const held = await store.get(pk, sk);
+    return held !== undefined && (held.owner !== owner || held.vaultId !== vault.id);
+  }
+  const vaultScriptHeldElsewhere = async (owner: string, vaultId: string) =>
+    scriptHeldElsewhere(owner, (await store.get(`OWNER#${owner}`, `VAULT#${vaultId}`))?.vault as PublicVault | undefined);
+  /**
    * submitFunding, watching the miner's answers without changing them. When the resend logic
    * finds the miner no longer has a submitted deposit, and the resend isn't accepted either,
    * the deposit is recorded as dropped after the decision is made.
@@ -592,18 +619,26 @@ export function createApp(
   }
   installApiKeyRoutes(app, store, apiKeys);
   app.get("/api/vaults", async (c) => {
-    const rows = await store.list(`OWNER#${c.get("owner")}`, "VAULT#");
+    const owner = c.get("owner");
+    const rows = await store.list(`OWNER#${owner}`, "VAULT#");
+    // Vaults that take no deposit, because another vault holds their script: the deposit routes
+    // refuse them, so clients refuse before anything is signed.
+    const held = await Promise.all(rows.map((r) => scriptHeldElsewhere(owner, r.vault as PublicVault)));
+    const noDeposit = rows.filter((_, i) => held[i]).map((r) => (r.vault as PublicVault).id);
     return c.json({
       vaults: rows.map((r) => r.vault),
-      // Vaults whose unconfirmed deposit the server can resend: stored Slipstream bytes only.
+      // Vaults whose unconfirmed deposit the server can resend: stored Slipstream bytes only, and
+      // not for a vault that takes no deposit, which the resend would refuse.
       resendable: rows
         .filter(
           (r) =>
             typeof r.fundingRawTxHex === "string" &&
             r.fundingRawTxHex !== "" &&
-            (r.vault as PublicVault).status === "submitted",
+            (r.vault as PublicVault).status === "submitted" &&
+            !noDeposit.includes((r.vault as PublicVault).id),
         )
         .map((r) => (r.vault as PublicVault).id),
+      noDeposit,
       // Payments to a vault's script beyond its recorded deposit, as last checked. Never spent.
       strayPayments: rows.flatMap((r) => strayPaymentsOf(r) ?? []),
     });
@@ -659,12 +694,36 @@ export function createApp(
         "vault_invalid",
         "Vault script does not match its commitment.",
       );
-    await store.put({
-      pk: `OWNER#${c.get("owner")}`,
-      sk: `VAULT#${vault.id}`,
-      version: 0,
-      vault,
-    });
+    // One vault per script on this deployment, by any address: a second record of a script would
+    // let it take a second deposit, which the first withdrawal's disclosed HORS preimages weaken.
+    const owner = c.get("owner");
+    const reservation = scriptReservation(owner, vault);
+    // Another vault's reservation. This vault's own means a repeat of this request: its vault
+    // row write conflicts below, with state_conflict.
+    const elsewhere = (held: Row | undefined) =>
+      held !== undefined && (held.owner !== owner || held.vaultId !== vault.id);
+    const held = await store.get(reservation.pk, reservation.sk);
+    const repeat = held !== undefined && !elsewhere(held);
+    // A paid script is never a new vault: a paid vault row here without a reservation, or a script
+    // used outside this deployment. Asked before the reservation, so a script anyone can see on
+    // chain gets this answer whether or not a vault here has it. A failed lookup refuses too:
+    // nothing is written without it.
+    const lookup = () => AbortSignal.timeout(dependencies.scriptLookupMs ?? SCRIPT_LOOKUP_MS);
+    if (!repeat && (await ledger.scriptFunded(vault.scriptHash, lookup())))
+      return apiError(c, 409, "vault_script_paid", "This script has already been paid on chain, so it can't be a new vault.");
+    if (elsewhere(held))
+      return apiError(c, 409, "vault_script_registered", "Another vault on this deployment already has this script.");
+    try {
+      await store.atomicPut([
+        { row: { pk: `OWNER#${owner}`, sk: `VAULT#${vault.id}`, version: 0, vault } },
+        { row: reservation },
+      ]);
+    } catch (error) {
+      // A registration of the same script won the race.
+      if (error instanceof Conflict && elsewhere(await store.get(reservation.pk, reservation.sk)))
+        return apiError(c, 409, "vault_script_registered", "Another vault on this deployment already has this script.");
+      throw error;
+    }
     return c.json({ vault }, 201);
   });
   app.post("/api/vaults/:id/fund", async (c) => {
@@ -677,6 +736,8 @@ export function createApp(
         { checks: release.checks },
       );
     if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
+    if (await vaultScriptHeldElsewhere(c.get("owner"), c.req.param("id")))
+      return apiError(c, 409, "vault_script_registered", "Another vault on this deployment holds this vault's script, so this vault takes no deposit.");
     const body = fundRequest.parse(await jsonBody(c));
     const pk = `OWNER#${c.get("owner")}`,
       sk = `VAULT#${c.req.param("id")}`;
@@ -716,7 +777,10 @@ export function createApp(
       value: payment.value,
     };
     vault.status = chainStatus.confirmed ? "confirmed" : "submitted";
-    await store.put({ ...row, vault, version: row.version + 1 }, row.version);
+    await store.atomicPut([
+      { row: { ...row, vault, version: row.version + 1 }, expected: row.version },
+      await scriptFence(store, c.get("owner"), vault),
+    ]);
     return c.json({ vault }, 201);
   });
   // Deposits pay a bare, non-standard QSB script that public relay refuses, so the signed
@@ -737,6 +801,8 @@ export function createApp(
         "Deposit submission to the miner is disabled.",
       );
     if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
+    if (await vaultScriptHeldElsewhere(c.get("owner"), c.req.param("id")))
+      return apiError(c, 409, "vault_script_registered", "Another vault on this deployment holds this vault's script, so this vault takes no deposit.");
     const body = fundSubmitRequest.parse(await jsonBody(c));
     const result = await submitDeposit(
       c.get("owner"),
@@ -759,6 +825,8 @@ export function createApp(
         "Deposit submission is switched off.",
       );
     if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
+    if (await vaultScriptHeldElsewhere(c.get("owner"), c.req.param("id")))
+      return apiError(c, 409, "vault_script_registered", "Another vault on this deployment holds this vault's script, so this vault takes no deposit.");
     const row = await exportFunding(store, c.get("owner"), c.req.param("id"));
     if (!row)
       return apiError(
@@ -793,6 +861,8 @@ export function createApp(
         "Deposit submission to the miner is disabled.",
       );
     if (!allowlisted(c.get("owner"))) return apiError(c, 403, "owner_not_allowlisted", "This wallet is not on this deployment's allowlist.");
+    if (await vaultScriptHeldElsewhere(c.get("owner"), c.req.param("id")))
+      return apiError(c, 409, "vault_script_registered", "Another vault on this deployment holds this vault's script, so this vault takes no deposit.");
     fundResubmitRequest.parse(await c.req.json().catch(() => ({})));
     const row = await store.get(`OWNER#${c.get("owner")}`, `VAULT#${c.req.param("id")}`);
     if (!row) return apiError(c, 404, "vault_not_found", "Vault not found");
@@ -915,9 +985,12 @@ export function createApp(
     if (!vault.funding)
       return apiError(c, 409, "vault_not_funded", "Vault is not funded");
     // A Slipstream deposit isn't visible to the public chain API until it is mined. The
-    // stored signed bytes stand in until then; they never count as confirmation.
+    // stored signed bytes stand in until then; they never count as confirmation. A vault whose
+    // script another vault holds takes no deposit, so its bytes aren't offered: only the chain answers.
     const stored =
-      typeof row.fundingRawTxHex === "string" && row.fundingRawTxHex ? row.fundingRawTxHex : undefined;
+      typeof row.fundingRawTxHex === "string" && row.fundingRawTxHex && !(await scriptHeldElsewhere(c.get("owner"), vault))
+        ? row.fundingRawTxHex
+        : undefined;
     // Only a definitive 404 falls back; provider failures (429, 5xx, network) propagate.
     const unseen = (error: unknown) => stored !== undefined && error instanceof ChainNotFound;
     let fromChain = true;

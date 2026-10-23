@@ -646,9 +646,12 @@ const consensusCheck = source(
 const fundingMatch = source(["transaction-checks.ts | invalid"], {
   409: ["funding_transaction_invalid"],
 });
+// A vault whose script another vault's reservation holds takes no deposit: the deposit routes
+// refuse it, and scriptFence refuses each deposit write it fences.
+const scriptHeld = source(["submit-funding.ts | scriptFence"], { 409: ["vault_script_registered"] });
 const fundingExport = source(
   ["submit-funding.ts | exportFunding"],
-  merge(writes),
+  merge(writes, scriptHeld),
 );
 // submitFunding; a retry asks the miner whether it already has the deposit.
 const deposit = source(
@@ -657,7 +660,7 @@ const deposit = source(
     "submit-funding.ts | touch",
     "submit-funding.ts | record",
   ],
-  merge(writes, fundingMatch, minerCredential, minerLookup, {
+  merge(writes, fundingMatch, minerCredential, minerLookup, scriptHeld, {
     409: [
       "funding_transaction_invalid",
       "vault_not_found",
@@ -843,6 +846,10 @@ export const apiRoutes: readonly ApiRoute[] = [
             z.array(z.string()),
             "Ids of vaults whose unconfirmed deposit the server stored and can resend.",
           ),
+          noDeposit: describe(
+            z.array(z.string()),
+            "Ids of vaults that take no deposit: another vault on this deployment holds their script, so the deposit routes refuse them with `vault_script_registered`.",
+          ),
           strayPayments: describe(
             z.array(strayPayments),
             "One record per vault with flagged stray payments, as last checked by `GET /api/vaults/{id}/funding`.",
@@ -858,13 +865,16 @@ export const apiRoutes: readonly ApiRoute[] = [
     operationId: "createVault",
     summary: "Register a new vault's public record",
     description:
-      "The vault is generated on the client; only its public record is sent. It must be unfunded, for this network and owned by the signed-in address.",
+      "The vault is generated on the client; only its public record is sent. It must be unfunded, for this network and owned by the signed-in address. Its script must be new: no other vault's reservation on this deployment, of any address, holds it, and nothing has paid it on chain. Nothing is written when the chain lookup fails.",
     auth: true,
     body: publicVaultSchema,
     responses: {
       201: { description: "The vault was registered.", schema: vaultResponse },
     },
-    errors: merge(writes, allowlisted, { 400: ["vault_invalid"] }),
+    errors: merge(writes, allowlisted, chainRead, {
+      400: ["vault_invalid"],
+      409: ["vault_script_registered", "vault_script_paid"],
+    }),
   },
   {
     method: "get",
@@ -905,7 +915,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     responses: {
       201: { description: "The deposit was recorded.", schema: vaultResponse },
     },
-    errors: merge(chainLookup, writes, fundingMatch, allowlisted, {
+    errors: merge(chainLookup, writes, fundingMatch, allowlisted, scriptHeld, {
       404: ["vault_not_found"],
       409: ["network_mismatch", "funding_intent_exists"],
       503: ["operations_disabled"],
@@ -927,7 +937,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: fundingSubmissionResponse,
       },
     },
-    errors: merge(deposit, allowlisted, { 503: ["operations_disabled", "submit_disabled"] }),
+    errors: merge(deposit, allowlisted, scriptHeld, { 503: ["operations_disabled", "submit_disabled"] }),
   },
   {
     method: "get",
@@ -949,7 +959,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         }),
       },
     },
-    errors: merge(fundingExport, allowlisted, {
+    errors: merge(fundingExport, allowlisted, scriptHeld, {
       404: ["signed_deposit_not_found"],
       503: ["submit_disabled"],
     }),
@@ -971,7 +981,7 @@ export const apiRoutes: readonly ApiRoute[] = [
         schema: fundingSubmissionResponse,
       },
     },
-    errors: merge(deposit, allowlisted, {
+    errors: merge(deposit, allowlisted, scriptHeld, {
       404: ["vault_not_found"],
       409: ["signed_deposit_not_found"],
       503: ["operations_disabled", "submit_disabled"],
@@ -983,7 +993,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     operationId: "getVaultFunding",
     summary: "The deposit's chain status and transaction",
     description:
-      "Until a Slipstream deposit is mined the chain provider doesn't know it. Then the stored signed bytes stand in for `previousTxHex` and `status` is unconfirmed; they never count as confirmation. The check also looks up the vault script's confirmed outputs and flags any beyond the recorded deposit, with a `deposit.stray_payment` event.",
+      "Until a Slipstream deposit is mined the chain provider doesn't know it. Then the stored signed bytes stand in for `previousTxHex` and `status` is unconfirmed; they never count as confirmation. A vault whose script another vault holds gets no such stand-in: only the chain answers, so an unmined deposit is a 409 `chain_transaction_not_found`. The check also looks up the vault script's confirmed outputs and flags any beyond the recorded deposit, with a `deposit.stray_payment` event.",
     auth: true,
     params: { id: vaultId },
     responses: {

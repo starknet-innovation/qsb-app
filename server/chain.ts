@@ -40,12 +40,14 @@ export class Esplora {
     private base = chainBase,
     private request: typeof fetch = fetch,
   ) {}
-  private async read(path: string) {
+  /** `signal` can end the request sooner than its own 15 seconds. */
+  private async read(path: string, signal?: AbortSignal) {
     // A request that fails before a response (DNS, refused, timeout) keeps its error and
     // reports chain_unavailable, like an error status.
+    const timeout = AbortSignal.timeout(15000);
     const r = await withApiErrorCode("chain_unavailable", () =>
       this.request(`${this.base}${path}`, {
-        signal: AbortSignal.timeout(15000),
+        signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
       }),
     );
     if (!r.ok) {
@@ -59,10 +61,10 @@ export class Esplora {
       throw new ChainError("Chain response exceeds limit.");
     return text;
   }
-  async assertNetwork() {
+  async assertNetwork(signal?: AbortSignal) {
     const expected = NETWORK_CONFIG.genesisHash;
     // Check each operation; do not cache a provider's identity across requests.
-    if ((await this.read("/block-height/0")).trim() !== expected)
+    if ((await this.read("/block-height/0", signal)).trim() !== expected)
       throw new ChainError(
         `Chain provider is not Bitcoin ${NETWORK_ID}. Signing and submission are blocked.`,
       );
@@ -238,6 +240,21 @@ export class Esplora {
       value: String(x.value),
       confirmed: x.status.confirmed,
     }));
+  }
+  /**
+   * Whether any output, confirmed or in the mempool, has ever paid the script whose SHA-256 is
+   * `scriptHash`, including outputs spent since. Esplora answers an unseen script with zeros.
+   * `signal` bounds both of its reads together.
+   */
+  async scriptFunded(scriptHash: string, signal?: AbortSignal) {
+    await this.assertNetwork(signal);
+    txid.parse(scriptHash);
+    const text = await this.read(`/scripthash/${scriptHash.toLowerCase()}`, signal);
+    const funded = z.object({ funded_txo_count: z.number().int().nonnegative() });
+    const stats = answer(() =>
+      z.object({ chain_stats: funded, mempool_stats: funded }).parse(JSON.parse(text)),
+    );
+    return stats.chain_stats.funded_txo_count + stats.mempool_stats.funded_txo_count > 0;
   }
   async paymentUtxos(address: string) {
     await this.assertNetwork();

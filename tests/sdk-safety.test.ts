@@ -614,6 +614,35 @@ describe("per-owner limits (#89)", () => {
     expect((await v.client.deposits.resubmit(v.vault.id)).submission).toBe("submitted");
   }, 120000);
 
+  it("reports a deposit refused because another vault holds the script as final, and sends nothing", async () => {
+    const v = await createdVault(passphrase);
+    const prepared = await v.client.deposits.prepare(v.vault.id, {
+      backup: v.backups[0], passphrase, amount: 200000n, feeRate: "2", utxos: [{ txid: v.owner.fundingTxid, vout: 0 }],
+    });
+    const signed = await v.signer.signPsbt(v.signer.address, prepared.psbt, prepared.signInputs);
+    // The operator's backfill gave this vault's script to another vault row.
+    const key = `SCRIPT#${v.vault.scriptHash}|RESERVATION`;
+    v.w.store.rows.set(key, { ...v.w.store.rows.get(key)!, vaultId: "00000000-0000-4000-8000-000000000000" });
+    const error = (await v.client.deposits.submit(prepared, signed, { costAccepted: true }).then(() => new Error("sent"), (e: Error) => e)) as Error;
+    expect(error.message).toContain("refused the deposit (vault_script_registered)");
+    expect(error.message).toContain("Nothing was written or sent by this request");
+    expect(error.message).toContain("Don't resend this deposit or sign another for this vault.");
+    // An earlier send may still confirm, so the backup still matters.
+    expect(error.message).toContain("If it was sent before, it may still confirm: deposits.status shows it once it's mined, so keep this vault's backup.");
+    expect(error.message).not.toContain("isn't confirmed");
+    // The pending deposit is dropped: nothing for this vault can be resent, and the server's own
+    // resend gets the same final answer.
+    await expect(v.client.deposits.resubmit(v.vault.id)).rejects.toThrow("refused to resend the deposit (vault_script_registered)");
+    // And a new deposit is refused before anything is signed.
+    expect((await v.client.vaults.list()).noDeposit).toEqual([v.vault.id]);
+    await expect(
+      v.client.deposits.prepare(v.vault.id, {
+        backup: v.backups[0], passphrase, amount: 200000n, feeRate: "2", utxos: [{ txid: v.owner.fundingTxid, vout: 0 }],
+      }),
+    ).rejects.toThrow("so this vault takes no deposit. Nothing was prepared; don't pay into its script.");
+    expect(v.w.minerSubmissions).toEqual([]);
+  }, 120000);
+
   it("reports a withdrawal refused by an owner limit as final, keeping the backup that holds its intent", async () => {
     const holder: { answer?: { status: number; body: unknown } } = {};
     const f = await fundedVault(passphrase, { wrap: intercept(/^\/v1\/jobs(\/[0-9a-f-]{36}\/resume)?$/, holder) });

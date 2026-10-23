@@ -1,7 +1,7 @@
 // Hermetic world for the SDK and CLI tests: createApp in-process with the
 // in-memory store, a fake Esplora behind the real Esplora client, a fake miner
 // and a recording transport. No socket is opened and nothing leaves the process.
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -22,6 +22,8 @@ export const API = "http://127.0.0.1:8787";
 export class FakeChain {
   private txs = new Map<string, { raw: string; tx: btc.Transaction; height?: number }>();
   private blocks = [GENESIS];
+  /** Path prefixes that answer 503, like a failing provider. */
+  readonly failing = new Set<string>();
   add(raw: string): string {
     const tx = btc.Transaction.fromRaw(hex.decode(raw), opts);
     if (!this.txs.has(tx.id)) this.txs.set(tx.id, { raw: raw.toLowerCase(), tx });
@@ -46,6 +48,7 @@ export class FakeChain {
   }
   readonly fetch = (async (input: RequestInfo | URL) => {
     const path = new URL(String(input)).pathname;
+    if ([...this.failing].some((prefix) => path.startsWith(prefix))) return new Response("", { status: 503 });
     const text = (body: string) => new Response(body);
     const json = (body: unknown) => new Response(JSON.stringify(body));
     const missing = () => new Response("not found", { status: 404 });
@@ -64,6 +67,16 @@ export class FakeChain {
     if ((m = /^\/tx\/([0-9a-f]{64})\/outspend\/(\d+)$/.exec(path))) {
       const spent = this.spender(m[1], Number(m[2]));
       return json(spent ? { spent: true, ...spent } : { spent: false });
+    }
+    if ((m = /^\/scripthash\/([0-9a-f]{64})$/.exec(path))) {
+      const funded = { chain: 0, mempool: 0 };
+      for (const { tx, height } of this.txs.values())
+        for (let vout = 0; vout < tx.outputsLength; vout++) {
+          const out = tx.getOutput(vout);
+          if (out.script && createHash("sha256").update(out.script).digest("hex") === m[1])
+            funded[height === undefined ? "mempool" : "chain"]++;
+        }
+      return json({ chain_stats: { funded_txo_count: funded.chain }, mempool_stats: { funded_txo_count: funded.mempool } });
     }
     if ((m = /^\/address\/([^/]+)\/utxo$/.exec(path))) {
       const script = hex.encode(outputScript(decodeURIComponent(m[1])));

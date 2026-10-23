@@ -266,11 +266,29 @@ Each transactional Put is authorized as `dynamodb:PutItem` with its own leading 
 
 The withdrawal API Lambda has a 120-second timeout, but CloudFront returns a timeout after its 30-second origin response timeout. A caller timeout doesn't stop an already running Lambda or prove the miner never received the POST: treat it as uncertain and follow the steps above. Never retry the POST or reset its intent.
 
+## Reserve the scripts of existing vaults
+
+`POST /api/vaults` reserves each new vault's script (`SCRIPT#<scriptHash>`; [API](API.md#vault-registration)). A vault row without a reservation doesn't stop a second registration of its script until its first deposit write claims the reservation, or a payment to it shows on chain. `scripts/reserve-vault-scripts.ts` writes the missing reservations. A vault that claimed its reservation with a deposit before the backfill ran keeps it, whatever the ranking below: the backfill reports other rows on that script as its duplicates. Run it after deploying an API that reserves scripts; running it again is safe.
+
+1. In an [operator session](#operator-session), set `TABLE_NAME`, `AWS_REGION` and `QSB_NETWORK=mainnet`, then run it without options. It scans the table for vault rows and reports what it would write, writing nothing:
+
+   ```sh
+   npx tsx scripts/reserve-vault-scripts.ts
+   ```
+
+2. Read the report: `vaults`, `reserved` (what `--apply` writes), `alreadyReserved`, and the vault ids in `duplicates`, `unreadable` and `unsettled`. Then run it again with `--apply`. It writes each missing reservation with `attribute_not_exists` and never changes an existing one; of two rows sharing a script, it reserves the one whose deposit got furthest (confirmed or spent, then submitted, then none), then the one whose `createdAt` is earlier.
+3. It exits non-zero when any of those three lists isn't empty, with or without `--apply`.
+   - A duplicate is `{ vault, heldBy }`: a vault whose script the vault `heldBy` already holds, or, for two rows sharing a script, the row it reserves (or, without `--apply`, would reserve). Those are two vault records on one script, which must never both take a deposit. Once `heldBy` holds the reservation, the deposit routes refuse `vault` (`vault_script_registered`; [API](API.md#vault-registration)), but a deposit either vault already has stays. Check both vaults' funding with their owners before anything else, and don't delete or reassign a reservation to clear the report.
+   - An unreadable row's `scriptHash` isn't the SHA-256 of its script, so it gets no reservation.
+   - An unsettled vault's write met another write to the same reservation that hadn't committed, such as a registration of that script still in flight, or an earlier row on its script did. Run the tool again.
+
+It reads the table with a Scan and writes only `SCRIPT#` rows, with PutItem. Its report names vault ids, never owner addresses.
+
 ## Operator session
 
-Reconciliation and plans run as `qsb-operator`. In the current account it is assumed from the Identity Center permission set; see the profiles in [ops/github-aws/README.md](../ops/github-aws/README.md#human-access-without-root). Sessions last at most an hour. The scoped runtime reconcile role Terraform declares (`operator_reconcile_role_arn`) stays dormant: `qsb-operator` is denied role chaining, so don't configure a profile for it.
+Reconciliation, plans and the script-reservation backfill run as `qsb-operator`. In the current account it is assumed from the Identity Center permission set; see the profiles in [ops/github-aws/README.md](../ops/github-aws/README.md#human-access-without-root). Sessions last at most an hour. The scoped runtime reconcile role Terraform declares (`operator_reconcile_role_arn`) stays dormant: `qsb-operator` is denied role chaining, so don't configure a profile for it.
 
-The `qsb-operator` session has deployment privileges, including `dynamodb:*` on QSB tables. It is not restricted to `OWNER#` partitions and can Query, Scan, Update and Delete, and read `SYSTEM#` and `OUTPOINT#` records. The reconcile CLIs' exact-record, conditional-version and audit checks restrict what they do; the session's IAM policy doesn't. Don't describe it as a least-privilege reconciliation identity.
+The `qsb-operator` session has deployment privileges, including `dynamodb:*` on QSB tables. It is not restricted to `OWNER#` partitions and can Query, Scan, Update and Delete, and read `SYSTEM#`, `OUTPOINT#` and `SCRIPT#` records. The reconcile CLIs' exact-record, conditional-version and audit checks restrict what they do; the session's IAM policy doesn't. Don't describe it as a least-privilege reconciliation identity.
 
 The human signs in first; agents use the cached session and never handle the MFA code. Run inside a subshell to keep exported credentials out of the parent shell, and never print them:
 

@@ -2,7 +2,7 @@ import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { type PublicVault } from "../src/lib/model";
 import { assertVaultConfiguration } from "../src/lib/provenance";
-import { Conflict, type Row, type Store } from "./store";
+import { Conflict, scriptReservation, type AtomicWrite, type Row, type Store } from "./store";
 import { ChainError } from "./chain";
 import { matchVaultFunding } from "./transaction-checks";
 import { transactionId } from "./miner-inclusion";
@@ -28,6 +28,24 @@ export type FundingDependencies = {
 };
 const opts = { allowUnknownOutputs: true, allowUnknownInputs: true };
 
+/**
+ * The reservation write that fences a write a deposit depends on (recording it, the write before
+ * a submission or resend, an export): the vault's own reservation, checked unchanged, or claimed
+ * when its script has none, so the deposit write and the script's owner change together. A
+ * registration or backfill that reserves the script for another vault in between makes the
+ * transaction fail, and nothing is recorded or sent. Throws when another vault holds the script.
+ */
+export async function scriptFence(store: Store, owner: string, vault: PublicVault): Promise<AtomicWrite> {
+  const reservation = scriptReservation(owner, vault);
+  const held = await store.get(reservation.pk, reservation.sk);
+  if (!held) return { row: reservation };
+  if (held.owner === owner && held.vaultId === vault.id) return { row: held, expected: held.version, conditionOnly: true };
+  throw new ChainError(
+    "Another vault on this deployment holds this vault's script, so this vault takes no deposit.",
+    "vault_script_registered",
+  );
+}
+
 /** Fence an in-flight rejection before exposing bytes that can be submitted manually.
  * If cleanup wins the version race, return no bytes; the caller must refresh.
  * Same-byte retries never clear an intent, so this fence also protects later retries.
@@ -44,7 +62,7 @@ export async function exportFunding(store: Store, owner: string, vaultId: string
     boundRaw = row.fundingRawTxHex;
     const next = { ...row, version: row.version + 1, fundingExportedAt: new Date().toISOString() };
     try {
-      await store.put(next, row.version);
+      await store.atomicPut([{ row: next, expected: row.version }, await scriptFence(store, owner, vault)]);
       return next;
     } catch (error) {
       if (!(error instanceof Conflict)) throw error;
@@ -134,7 +152,7 @@ export async function submitFunding(
       fundingSubmittedAt: new Date().toISOString(),
     };
     try {
-      await store.put(next, row.version);
+      await store.atomicPut([{ row: next, expected: row.version }, await scriptFence(store, owner, vault)]);
     } catch (error) {
       if (!(error instanceof Conflict)) throw error;
       const winner = await store.get(pk, sk);
@@ -175,7 +193,10 @@ async function touch(store: Store, row: Row): Promise<Row> {
       throw new ChainError("Funding intent changed during submission. Refresh the vault.", "state_conflict");
     const next = { ...latest, version: latest.version + 1, fundingResubmittedAt: new Date().toISOString() };
     try {
-      await store.put(next, latest.version);
+      await store.atomicPut([
+        { row: next, expected: latest.version },
+        await scriptFence(store, latest.pk.slice("OWNER#".length), latest.vault as PublicVault),
+      ]);
       return next;
     } catch (error) {
       if (!(error instanceof Conflict)) throw error;

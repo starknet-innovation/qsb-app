@@ -174,19 +174,22 @@ describe("owner event log", () => {
     const miner = new Slipstream("https://slipstream.test", async () => undefined);
     const f = await setup({ miner, exactSubmit: true });
     const a = await f.as(address);
-    const scriptHex = "51".repeat(100);
+    // Each vault its own script: a script takes one vault's deposit.
+    const scripts = ["51".repeat(100), "52".repeat(100)];
     const deposit = (seed: number) => {
       const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true, version: 2 });
       tx.addInput({ txid: new Uint8Array(32).fill(seed), index: 0, sequence: 0xfffffffe });
-      tx.addOutput({ amount: 50_000n, script: hex.decode(scriptHex) });
+      tx.addOutput({ amount: 50_000n, script: hex.decode(scripts[seed - 1]) });
       return hex.encode(tx.toBytes(true, false));
     };
     const vaults = [crypto.randomUUID(), crypto.randomUUID()];
-    for (const id of vaults)
+    for (const [i, id] of vaults.entries()) {
+      const scriptHex = scripts[i];
       await f.store.put({ pk: `OWNER#${address}`, sk: `VAULT#${id}`, version: 0, vault: {
         id, scriptHex, config: "A", publicStateJson: JSON.stringify({ config: "A", full_script_hex: scriptHex }),
         scriptHash: sha(Buffer.from(scriptHex, "hex").toString("latin1")), paymentAddress: address, network: "mainnet", status: "unfunded",
       } });
+    }
     vi.spyOn(miner, "credential").mockResolvedValue({} as never);
     vi.spyOn(miner, "seen").mockResolvedValue(false);
     const submit = vi.spyOn(miner, "submitFunding").mockImplementation(async (raw: string) => ({ status: "success" as const, message: transactionId(raw) }));
@@ -200,7 +203,7 @@ describe("owner event log", () => {
     ]);
   });
 
-  it("writes no event row between a deposit intent and its miner POST", async () => {
+  it("writes no event row between a deposit intent and its miner POST: it's in the intent's transaction", async () => {
     const address = btc.Address(BITCOIN_NETWORK).encode({ type: "wpkh", hash: new Uint8Array(20) });
     const miner = new Slipstream("https://slipstream.test", async () => undefined);
     const f = await setup({ miner, exactSubmit: true });
@@ -221,13 +224,19 @@ describe("owner event log", () => {
       await put(row, expected, options);
       order.push(row.sk.split("#")[0]);
     });
+    const atomicPut = MemoryStore.prototype.atomicPut.bind(f.store);
+    vi.spyOn(f.store, "atomicPut").mockImplementation(async (writes) => {
+      await atomicPut(writes);
+      order.push(writes.map((w) => w.row.pk.split("#")[0] === "SCRIPT" ? "SCRIPT" : w.row.sk.split("#")[0]).join("+"));
+    });
     vi.spyOn(miner, "credential").mockResolvedValue({} as never);
     vi.spyOn(miner, "submitFunding").mockImplementation(async (rawTx: string) => {
       order.push("POST");
       return { status: "success" as const, message: transactionId(rawTx) };
     });
     expect((await a.post(`/api/vaults/${id}/fund/submit`, { rawTxHex: raw, amount: "50000", costAccepted: true })).status).toBe(201);
-    expect(order).toEqual(["VAULT", "POST", "VAULT", "EVENT"]);
+    // The intent, the script's reservation and the event row commit together, then the POST.
+    expect(order).toEqual(["VAULT+SCRIPT+EVENT", "POST", "VAULT"]);
   });
 
   it("pages oldest first with a stable cursor, and lists only settled events", async () => {

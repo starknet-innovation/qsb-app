@@ -1,6 +1,6 @@
 # Status
 
-As of 2 October 2026. #8, the plan to a first mainnet withdrawal, is complete; what's open is listed below.
+As of 22 October 2026. #8, the plan to a first mainnet withdrawal, is complete; what's open is listed below.
 
 ## Deployed
 
@@ -17,7 +17,7 @@ As of 2 October 2026. #8, the plan to a first mainnet withdrawal, is complete; w
 - One pipeline: the Step Functions coordinator. QSB runs on mainnet only.
 - GPU work runs on AWS Batch. Runpod is neither the default nor a fallback.
 - No test chains: testing happens on mainnet with small deposits. Before submit, an offline consensus check runs Bitcoin Core's script interpreter on the exact signed transaction (#20).
-- One deposit per vault. The server flags a payment to a vault's script beyond its deposit, and no withdrawal spends it ([API](API.md#stray-payments)).
+- One deposit per vault. The server reserves each vault's script on the deployment, by any address, and refuses a script another vault has reserved or one already paid on chain ([API](API.md#vault-registration)). It flags a payment to a vault's script beyond its deposit, and no withdrawal spends it ([API](API.md#stray-payments)).
 
 `AGENTS.md` lists these with the funds-safety invariants.
 
@@ -39,6 +39,7 @@ As of 2 October 2026. #8, the plan to a first mainnet withdrawal, is complete; w
 - **#85 phase 3:** billing, terms of use, WAF and rate limits. This needs a separate decision.
 - **#119:** the QSB author's answers on the security figure, SHA-256 Config A, re-authorization and the single output.
 - **The old eu-west-1 stack's** services were retired on 30 September 2026 (REGION-MIGRATION.md step 11), and its data was kept. Deleting that data is the remaining cleanup.
+- **Script reservations for existing vaults.** Some vault rows have no `SCRIPT#` reservation, so a second registration of one of their scripts is refused only once their first deposit write claims one, or a payment to it shows on chain ([API](API.md#vault-registration)). Once that API is deployed, run `scripts/reserve-vault-scripts.ts` ([runbook](OPERATIONAL-RUNBOOK.md#reserve-the-scripts-of-existing-vaults)).
 - **Local operator profiles:** the local-profile part of REGION-MIGRATION.md step 12 (pointing `qsb-view` and `qsb-operator` at the new account) is still to do.
 
 ## Known gaps
