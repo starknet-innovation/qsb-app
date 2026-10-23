@@ -55,7 +55,10 @@ export async function backfillScriptReservations(
     return status === "confirmed" || status === "spent" ? 0 : funding ? 1 : 2;
   };
   // A time, not text: `createdAt` may carry milliseconds or not. One that doesn't parse goes last.
-  const createdAt = (row: Row) => Date.parse(String(vaultOf(row)?.createdAt)) || Number.POSITIVE_INFINITY;
+  const createdAt = (row: Row) => {
+    const time = Date.parse(String(vaultOf(row)?.createdAt));
+    return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time;
+  };
   const rows = [...vaultRows].sort(
     (a, b) => stage(a) - stage(b) || createdAt(a) - createdAt(b) || a.sk.localeCompare(b.sk),
   );
