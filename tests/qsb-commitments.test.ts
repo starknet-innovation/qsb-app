@@ -36,6 +36,8 @@ const manifest = {
   // Not palindromes, so a txid in the wrong byte order shows.
   funding: { txid: `a0${"11".repeat(31)}`, vout: 0, value: "100000" },
   helper: { txid: `b0${"22".repeat(31)}`, vout: 1, value: "20000" },
+  // A placeholder: the bridge never reads it. Assembly pays outputScript, which is why a key manager
+  // derives what it shows from the prepared transaction (sdk/README.md, "Secrets in a key manager").
   destination: "bc1qxyz",
   outputScript: `0014${"33".repeat(20)}`,
   outputValue: "110000",

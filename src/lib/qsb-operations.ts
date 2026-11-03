@@ -26,7 +26,10 @@ export function qsbOperations(run: Run) {
  * serialization with every scriptSig empty and no witness. `round0` and `round1` are the indices of
  * the 8 and 7 HORS secrets the solution discloses, in the order the pipeline signs with them (it sorts
  * each subset): keep that order, never reorder them. The other fields are what `finishAssembly`
- * needs to assemble the same transaction again.
+ * needs to assemble the same transaction again. `manifest` is the caller's input passed through, shape
+ * checked only: assembly pays its `outputScript` and never checks `destination` or `fee`. A key manager
+ * shows and approves what it derives from `transaction` and the verified previous outputs, never the
+ * manifest's values.
  */
 export type PreparedAssembly = {
   transaction: string;
