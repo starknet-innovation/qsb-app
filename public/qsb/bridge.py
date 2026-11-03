@@ -226,12 +226,16 @@ def assemble(state_json, manifest_json, solution_json):
 # for the key manager to record before it releases anything; finish takes exactly those preimages. Each call
 # refuses input it can't check with a ValueError that says what's wrong, and returns nothing then.
 
+# The longest JSON text a commitments-only call takes. prepare's result is read back by finish, so prepare
+# refuses a result longer than this too.
+MAX_JSON_TEXT = 1000000
+
 def read(text, label, depth, shape):
     """parse for the commitments-only calls, which take JSON text of at most a million characters."""
     if not isinstance(text, str):
         raise ValueError(f'{label} is not JSON text')
     # A public state is about 41,000 characters.
-    if len(text) > 1000000:
+    if len(text) > MAX_JSON_TEXT:
         raise ValueError(f'{label} is longer than a million characters')
     return parse(text, label, depth, shape, ValueError)
 
@@ -394,9 +398,14 @@ def prepare(public_state_json, manifest_json, solution_json):
     if [len(r) for r in taken] != [CONFIG_A['t1s'], CONFIG_A['t2s']] or any(s is None or s[0] != r for r, row in enumerate(taken) for s in row):
         raise ValueError('the pipeline signed with secrets other than 8 of round 1 and 7 of round 2')
     rounds = [[i for _, i in row] for row in taken]
-    return json.dumps({'transaction': unsigned(bytes.fromhex(raw)).hex(), 'round0': rounds[0], 'round1': rounds[1],
+    prepared = json.dumps({'transaction': unsigned(bytes.fromhex(raw)).hex(), 'round0': rounds[0], 'round1': rounds[1],
         'scriptHash': hashlib.sha256(bytes.fromhex(state['full_script_hex'])).hexdigest(),
         'publicStateJson': json.dumps(public), 'manifest': m, 'solution': hit})
+    # finish reads this back with the same limit, so a result it would refuse is refused here, before the key
+    # manager records T or releases a preimage, rather than after.
+    if len(prepared) > MAX_JSON_TEXT:
+        raise ValueError('the prepared withdrawal would be longer than finish accepts')
+    return prepared
 
 PREPARED_FIELDS = ('transaction', 'round0', 'round1', 'scriptHash', 'publicStateJson', 'manifest', 'solution')
 

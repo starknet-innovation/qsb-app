@@ -177,6 +177,16 @@ describe("prepare and finish", () => {
     for (const s of secretHex.flat()) expect(JSON.stringify(prepared)).not.toContain(s);
   });
 
+  it("prepare refuses a result finish could not read back, before anything is disclosed", () => {
+    // The manifest alone fits the million-character input limit; with the public state and the
+    // solution beside it, the prepared result would not.
+    const big = { ...manifest, note: "x".repeat(1_000_000 - JSON.stringify(manifest).length - 20) };
+    expect(JSON.stringify(big).length).toBeLessThanOrEqual(1_000_000);
+    expect(refusal(runtime, "prepare", [full.publicStateJson, JSON.stringify(big), JSON.stringify(solution)])).toBe(
+      "the prepared withdrawal would be longer than finish accepts",
+    );
+  }, 120000);
+
   it("finish with exactly the 15 selected preimages returns assemble's transaction, byte for byte", async () => {
     expect(await ops(runtime).finishAssembly(prepared, selected(prepared))).toBe(raw);
   }, 120000);
