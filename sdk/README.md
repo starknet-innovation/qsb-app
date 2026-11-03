@@ -108,6 +108,16 @@ The SDK can't check these, so they're up to you:
 
 `nodeQsb().adoptQsb(stateJson)` runs the same bridge check on its own, without the address check, and returns what `generateQsb` would. It throws `RefusedState` when it refuses the state.
 
+## Secrets in a key manager
+
+`nodeQsb()` also serves HORS secrets that a key manager outside the runtime holds, for example a wallet that derives them under the draft BIP [QSB Wallet Secret Management](https://github.com/adrienlacombe/bips/blob/bip/qsb-wallet-secret-management/bip-qsb-wallet-secrets.md) (profile `QSB-HORS-v1`). The runtime never gets the secret set: it gets the commitments, and at assembly only the 15 preimages the solution discloses. `QsbClient` doesn't use these calls. They run `setup_from_commitments`, `prepare` and `finish` in [`bridge.py`](../public/qsb/bridge.py), which run the pipeline's own setup and assembly.
+
+- `setupFromCommitments(commitments)` takes the 2 × 150 commitments, each the HASH160 of its secret, round 0 and then round 1, each in index order. It returns what `generateQsb` returns for those secrets, except `stateJson`: `publicStateJson`, `scriptHex` and `scriptHash`. It refuses anything but 2 rounds of 150 distinct commitments, each 20 bytes of lowercase hex.
+- `prepareAssembly(publicStateJson, manifest, solution)` takes what `assembleQsb` takes, with the vault's public state in place of its recovery state, and holds no secret. The public state must be exactly what `setupFromCommitments` returns for its commitments. It runs the pipeline's assembly with a public stand-in for each secret, so it refuses a solution that doesn't assemble before anything is disclosed. It returns `transaction`, T in hex as the BIP defines it (legacy serialization, every scriptSig empty, no witness), and `round0` and `round1`, the indices of the 8 secrets from the solution's `round1` and the 7 from its `round2` that the withdrawal discloses, in the order the pipeline signs with them. The pipeline sorts each subset, so they ascend; keep that order and don't reorder them. The rest, `scriptHash` and the public state, manifest and solution, is what `finishAssembly` needs. The key manager records T and the indices before it releases a preimage. These values are this runtime's work, not the key manager's: one that doesn't itself verify the solution and the link from T to the indices must present the release as an unverified transaction binding, as the BIP requires.
+- `finishAssembly(prepared, preimages)` takes what `prepareAssembly` returned and exactly 15 preimages: round0's and then round1's, in their order. It returns what `assembleQsb` returns for the full state: the same bytes. It refuses unless each preimage's HASH160 is its index's commitment, the pipeline signs with exactly those preimages in that order, and the transaction it assembles is the prepared T once its scriptSigs are emptied. Like the BIP's record, that binds T and the disclosed indices, not the solution's bonus indices, which disclose no secret.
+
+A refusal is an `Error` whose message says what was wrong; nothing is returned then.
+
 ## CLI
 
 ```sh
@@ -161,5 +171,5 @@ Publishing needs two decisions first: a licence for this code (the package stays
   - the `Idempotency-Key` header, which it doesn't send. `withdrawals.create` relies on the manifest's `idempotencyKey`, and `deposits.resubmit` resends only the same bytes.
 - The SDK is written by hand. It isn't generated from [`docs/api/openapi.json`](../docs/api/openapi.json), and no test checks it against that spec.
 - Phase 3 of #85 (billing, terms of use, WAF and rate limits) isn't done: `/config` reports `billing: "not_configured"`.
-- The tests can't run a GPU search. [`tests/sdk-e2e.test.ts`](../tests/sdk-e2e.test.ts) drives the CLI against `createApp` with the in-memory store, a fake chain and a fake miner; it stands in for the coordinator's solution and for the Python assembler, which refuses anything but a real hit ([`tests/sdk-runtime.test.ts`](../tests/sdk-runtime.test.ts)).
+- The tests can't run a GPU search. [`tests/sdk-e2e.test.ts`](../tests/sdk-e2e.test.ts) drives the CLI against `createApp` with the in-memory store, a fake chain and a fake miner; it stands in for the coordinator's solution and for the Python assembler, which refuses anything but a real hit ([`tests/sdk-runtime.test.ts`](../tests/sdk-runtime.test.ts)). [`tests/qsb-commitments.test.ts`](../tests/qsb-commitments.test.ts) compares `prepareAssembly` and `finishAssembly` with `assembleQsb` byte for byte with the pipeline's puzzle check replaced by one that accepts any candidate.
 - No licence has been chosen for the application code, including this SDK (see the top-level README).

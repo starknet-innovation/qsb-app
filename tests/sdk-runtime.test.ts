@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { QSB_SOURCES, startQsbRuntime } from "../src/lib/qsb-runtime";
+import { QSB_SOURCES, startQsbRuntime, type QsbMethod } from "../src/lib/qsb-runtime";
 import { nodeQsb } from "../sdk/runtime";
 
 const file = (name: string) => new Uint8Array(readFileSync(new URL(`../public/qsb/${name}`, import.meta.url)));
@@ -21,6 +21,13 @@ describe("shared QSB runtime bootstrap", () => {
     await startQsbRuntime(py, async (name) => file(name));
     expect(py.FS.writeFile.mock.calls.map(([name]) => name)).toEqual([...QSB_SOURCES]);
     expect(py.runPythonAsync).toHaveBeenCalledOnce();
+  });
+  it("calls no bridge function QSB_METHODS doesn't list", async () => {
+    const py = fakePython();
+    const runtime = await startQsbRuntime(py, async (name) => file(name));
+    for (const method of ["setup", "run_assemble", "__import__"])
+      expect(() => runtime.call(method as QsbMethod, [])).toThrow("Unknown QSB operation");
+    expect(py.pyimport).not.toHaveBeenCalled();
   });
   it("refuses a changed or unlisted source before Python runs", async () => {
     for (const read of [
