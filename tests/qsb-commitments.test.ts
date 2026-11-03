@@ -127,7 +127,7 @@ describe("setup_from_commitments", () => {
       JSON.stringify(commitments.map((round, ri) => round.map((c, ci) => (ri === r && ci === i ? value : c))));
     const cases: [string, string][] = [
       [JSON.stringify([[[commitments[0]]], commitments[1]]), "the commitment list nests deeper than 2 rounds of commitments"],
-      [JSON.stringify({ a: 1 }).replace("}", ',"a":2}'), "a appears twice in one object"],
+      ['{"a":1,"a":2}', "a appears twice in one object"],
       [JSON.stringify([commitments[0]]), "the commitments are not 2 rounds of 150"],
       [JSON.stringify([commitments[0], commitments[1]!.slice(1)]), "the commitments are not 2 rounds of 150"],
       [JSON.stringify(commitments.flat()), "the commitments are not 2 rounds of 150"],
