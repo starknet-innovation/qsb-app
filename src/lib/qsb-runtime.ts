@@ -12,7 +12,20 @@ export const QSB_SOURCES = [
   "qsb_pipeline.py",
   "bridge.py",
 ] as const;
-export type QsbMethod = "generate" | "adopt" | "validate" | "assemble";
+/**
+ * The bridge.py functions `call` runs; the bridge's other functions are internal. The last three
+ * take commitments and, at `finish`, only the preimages a withdrawal discloses (qsb-operations.ts).
+ */
+export const QSB_METHODS = [
+  "generate",
+  "adopt",
+  "validate",
+  "assemble",
+  "setup_from_commitments",
+  "prepare",
+  "finish",
+] as const;
+export type QsbMethod = (typeof QSB_METHODS)[number];
 /** The part of a loaded Pyodide instance the bridge needs. */
 export type PythonRuntime = {
   FS: { writeFile(path: string, data: Uint8Array): void };
@@ -56,6 +69,9 @@ export async function startQsbRuntime(
   );
   return {
     call(method: QsbMethod, args: string[]): string {
+      // The browser worker passes on whatever name its message holds.
+      if (!(QSB_METHODS as readonly string[]).includes(method))
+        throw new Error("Unknown QSB operation");
       const bridge = py.pyimport("bridge");
       try {
         return bridge[method](...args);

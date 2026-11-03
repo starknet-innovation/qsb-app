@@ -15,6 +15,6 @@ export {
   type SignedWithdrawal,
   type WithdrawalReview,
 } from "./client";
-export { RefusedState, nodeQsb, type BundledQsb, type LocalQsb } from "./runtime";
+export { RefusedState, nodeQsb, type BundledQsb, type LocalQsb, type PreparedAssembly } from "./runtime";
 export type { Signer } from "./signer";
 export { loopbackTestSigner } from "./test-signer";

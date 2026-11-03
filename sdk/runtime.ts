@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { loadPyodide } from "pyodide";
 import { startQsbRuntime, type QsbMethod } from "../src/lib/qsb-runtime";
-import { qsbOperations } from "../src/lib/qsb-operations";
+import { commitmentOperations, qsbOperations } from "../src/lib/qsb-operations";
+export type { PreparedAssembly } from "../src/lib/qsb-operations";
 
 /** The local QSB operations the SDK needs; the same operations src/lib/qsb.ts runs in the browser. */
 export type LocalQsb = ReturnType<typeof qsbOperations> & { lockQsb(): void };
@@ -9,9 +10,11 @@ type GeneratedQsb = Awaited<ReturnType<LocalQsb["generateQsb"]>>;
 /**
  * This package's own runtime. `adoptQsb` takes recovery state generated elsewhere and returns what
  * `generateQsb` returns for it, after the bridge rebuilds it with the pipeline's setup from its HORS
- * secrets and finds every field the same.
+ * secrets and finds every field the same. `setupFromCommitments`, `prepareAssembly` and
+ * `finishAssembly` serve HORS secrets a key manager holds: see "Secrets in a key manager" in the README.
  */
-export type BundledQsb = LocalQsb & { adoptQsb(stateJson: string): Promise<GeneratedQsb> };
+export type BundledQsb = LocalQsb &
+  ReturnType<typeof commitmentOperations> & { adoptQsb(stateJson: string): Promise<GeneratedQsb> };
 /**
  * A refused supplied recovery state, from `adoptQsb` or `vaults.create`, or the deployment's refusal of
  * a vault script that isn't new; the message says what didn't match. Any other error is not a verdict
@@ -72,6 +75,7 @@ export function nodeQsb(): BundledQsb {
   };
   return {
     ...qsbOperations(run),
+    ...commitmentOperations(run),
     async adoptQsb(stateJson) {
       if (typeof stateJson !== "string") throw new RefusedState("the recovery state is not JSON text");
       // The pipeline's state is about 60 KB; the bridge's checks run on this thread.
