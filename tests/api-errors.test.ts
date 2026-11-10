@@ -7,6 +7,8 @@ import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { z } from "zod";
 import { createApp } from "../server/app";
+import type { ServiceFeeDependencies } from "../server/service-fee";
+import { SERVICE_FEE_KEY } from "./service-fee-fixture";
 import {
   API_ERROR_CODES,
   attachedApiErrorCode,
@@ -167,6 +169,7 @@ async function setup() {
     webhooks,
     apiKeys: false,
     ownerLimits: undefined as OwnerLimits | undefined,
+    serviceFee: { publicKey: "" } as ServiceFeeDependencies,
   };
   const calls: { method: string; path: string }[] = [];
   const call = (
@@ -308,6 +311,11 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
     f.miner.rates.mockRejectedValue(new Error("down"));
     return f.call("GET", "/rates");
   }],
+  ["service_fee_not_offered", 404, (f) => f.call("GET", "/service-fee")],
+  ["service_fee_price_unavailable", 503, (f) =>
+    f.call("GET", "/service-fee", undefined, {
+      app: { serviceFee: { publicKey: SERVICE_FEE_KEY, price: async () => { throw new Error("down"); } } },
+    })],
   ["vault_invalid", 400, (f) => f.call("POST", "/vaults", vault({ paymentAddress: "bc1qunrelatedowner0000" }))],
   ["vault_script_registered", 409, async (f) => {
     genesis(f);

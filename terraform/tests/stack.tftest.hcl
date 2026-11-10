@@ -1,6 +1,14 @@
 mock_provider "aws" {
   mock_data "aws_partition" { defaults = { partition = "aws" } }
   mock_data "aws_caller_identity" { defaults = { account_id = "123456789012" } }
+  mock_data "aws_kms_public_key" {
+    defaults = {
+      arn                      = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+      customer_master_key_spec = "ECC_SECG_P256K1"
+      key_usage                = "SIGN_VERIFY"
+      public_key               = "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEmJwLdstWOXH9yb7zHsBsNWDzJJ1u6eXYPFdiVZbgX29jH00Fs65Rh3buCHVadwPmSy68MlR1BN4LVaFC1OzfgA=="
+    }
+  }
 }
 # The distribution's ARN, known at plan, so each CloudFront permission's source_arn can be checked against it.
 override_resource {
@@ -284,6 +292,25 @@ run "reject_provider_definition_wildcard" {
     batch_job_definition = "arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-*"
   }
   expect_failures = [var.batch_job_definition]
+}
+run "service_fee_default_off" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition     = length(data.aws_kms_public_key.service_fee) == 0 && !contains(keys(aws_lambda_function.api.environment[0].variables), "QSB_SERVICE_FEE_PUBLIC_KEY")
+    error_message = "Without service_fee_enabled, nothing reads the fee key and the API offers no fee."
+  }
+}
+run "service_fee_public_key_only" {
+  command = plan
+  variables {
+    network             = "mainnet"
+    service_fee_enabled = true
+  }
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.QSB_SERVICE_FEE_PUBLIC_KEY == data.aws_kms_public_key.service_fee[0].public_key && !contains(keys(aws_lambda_function.coordinator.environment[0].variables), "QSB_SERVICE_FEE_PUBLIC_KEY") && !strcontains(join(" ", [for policy in [aws_iam_role_policy.records["api"].policy, aws_iam_role_policy.start.policy, aws_iam_role_policy.reference.policy, aws_iam_role_policy.coordinator_records.policy] : policy]), "kms:") && !output.transactions_enabled && !output.exact_submit_enabled
+    error_message = "Only the API receives the fee key, as its public key; no role gets a KMS permission, and the fee activates nothing."
+  }
 }
 run "miner_credential_default_off" {
   command = plan

@@ -82,10 +82,14 @@ API_ENV_REFERENCES = {
     'aws_dynamodb_table.records', 'aws_dynamodb_table.records.name',
     'local.owner_limit_env', 'local.solver_release_id', 'local.workflow_arn',
     'var.api_keys_enabled', 'var.exact_submit_enabled', 'var.mainnet_enabled', 'var.network',
-    'var.slipstream_secret_arn',
+    'var.slipstream_secret_arn', 'var.service_fee_enabled',
+    # The service fee key's public key, read at plan time; never a KMS permission (compute.tf).
+    'data.aws_kms_public_key.service_fee', 'data.aws_kms_public_key.service_fee[0]',
+    'data.aws_kms_public_key.service_fee[0].public_key',
 }
 # The mocked `terraform test` plans whose expanded inventory must pass validate().
-MOCK_RUNS = {'baseline', 'configured_single_pipeline', 'miner_credential_api_only', 'webhook_dispatcher_enabled'}
+MOCK_RUNS = {'baseline', 'configured_single_pipeline', 'miner_credential_api_only', 'webhook_dispatcher_enabled',
+             'service_fee_public_key_only'}
 # The one secret any application role may read: the API's MARA Slipstream credential.
 MINER_SECRET = re.compile(r'^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:qsb/slipstream-[A-Za-z0-9]{6}$')
 MINER_POLICY = ('aws_iam_role_policy', 'miner_credential')
@@ -95,7 +99,8 @@ MINER_SOURCE = '"lambda:SourceFunctionArn" = "arn:aws:lambda:${var.region}:${var
 # What each runtime role may trust: only its AWS service. The schedule and reconcile roles have their own checks.
 RUNTIME_TRUST = {'lambda': 'lambda.amazonaws.com', 'workflow': 'states.amazonaws.com'}
 # Data sources the stack reads; anything else (an aws_iam_policy_document, say) is unreviewed policy input.
-DATA_SOURCES = {'aws_partition', 'aws_cloudfront_cache_policy', 'aws_cloudfront_origin_request_policy'}
+# aws_kms_public_key reads the optional service fee key's public key only (compute.tf).
+DATA_SOURCES = {'aws_partition', 'aws_cloudfront_cache_policy', 'aws_cloudfront_origin_request_policy', 'aws_kms_public_key'}
 # Where file-reading functions may read: the reviewed policies, build artifacts, the build manifest
 # override and the GPU spend constants.
 FILE_INPUTS = re.compile(r'(?:"\$\{path\.module\}/policies/[a-z0-9-]+\.json"|"\$\{local\.artifacts\}/'
@@ -288,6 +293,11 @@ def static_secret_rules(root):
         require(not re.search(r'^\s*module\s+"', text, re.M), f'{path.name}: modules are not reviewed by this check')
         for match in re.finditer(r'^\s*data\s+"([^"]+)"', text, re.M):
             require(match.group(1) in DATA_SOURCES, f'{path.name}: data source {match.group(1)} is not reviewed')
+        # The one KMS read: the service fee key's public key, by its alias.
+        kms = re.findall(r'^\s*data\s+"aws_kms_public_key"\s+"([^"]+)"', text, re.M)
+        require(kms in ([], ['service_fee']), f'{path.name}: only data.aws_kms_public_key.service_fee is reviewed')
+        require(not kms or 'key_id = "alias/qsb/service-fee"' in re.sub(r'\s+=\s+', ' = ', text),
+                f'{path.name}: data.aws_kms_public_key.service_fee must read alias/qsb/service-fee')
         require('templatefile(' not in text, f'{path.name}: templatefile() is not reviewed by this check')
         for match in re.finditer(r'\bfile[a-z0-9]*\(', text):
             require(FILE_INPUTS.match(text, match.end()), f'{path.name}: {match.group(0)} reads an unreviewed input')
@@ -525,6 +535,7 @@ def validate(rows, expanded, configuration=None, unknown_env=None):
                 'Only coordinator may receive the AWS Batch binding reference')
         for name in envs.keys() - {'api'}:
             require('SLIPSTREAM_SECRET_ARN' not in envs[name], 'Only the API may receive the miner credential reference')
+            require('QSB_SERVICE_FEE_PUBLIC_KEY' not in envs[name], 'Only the API may receive the service fee key')
         if dispatcher:
             require(DISPATCHER_FUNCTION not in whole and set(envs[DISPATCHER_FUNCTION]) == DISPATCHER_ENV
                     and table is not None and envs[DISPATCHER_FUNCTION]['TABLE_NAME'] == table,
@@ -729,7 +740,7 @@ def main():
                     result['runs'][name] = validate(rows, True, None,
                                                     unknown_lambda_env(event['test_plan']['resource_changes']))
             require(set(result['runs']) == MOCK_RUNS,
-                    'The baseline, configured-provider, miner-credential and webhook-dispatcher plans are all required')
+                    'The baseline, configured-provider, miner-credential, webhook-dispatcher and service-fee plans are all required')
         else:
             frontend_key_rules(plan.get('resource_changes', []))
             result = validate(module_resources(plan['planned_values']['root_module']), True, plan.get('configuration'),

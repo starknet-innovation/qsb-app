@@ -33,6 +33,7 @@ Account
   login                         BIP-322 sign-in; caches the 1-hour session token (owner-only file)
   logout                        Forget the cached session
   config | rates | utxos        Server configuration, MARA fee rates, confirmed payment outputs
+  service-fee                   The optional service fee's current quote (sats, BTC/USD, address)
 Vaults
   vault create --name <name> --backup <new file> [--state <file>]
                   --state uses recovery state you generated (the JSON the pipeline's setup writes)
@@ -41,6 +42,9 @@ Vaults
   vault list
 Deposits (one per vault)
   deposit prepare <vault> --backup <file> --amount <BTC> --fee-rate <sat/vB> --utxo <txid:vout>... --out <file>
+                  [--service-fee <max sats>]
+                  --service-fee also pays the optional USD 200 service fee in BTC, at the server's current
+                  quote, as its own output on top of the amount, if it's at most <max sats>. It isn't required.
   deposit submit --prepared <file> --signed <psbt> --accept-costs
   deposit status <vault> | deposit resubmit <vault>
 Withdrawals
@@ -97,6 +101,7 @@ const options = {
   prepared: { type: "string" },
   signed: { type: "string" },
   "accept-costs": { type: "boolean" },
+  "service-fee": { type: "string" },
   helper: { type: "string" },
   destination: { type: "string" },
   solver: { type: "string" },
@@ -155,10 +160,10 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
     const basePath = values["base-path"] ?? "/v1";
     if (basePath !== "/v1" && basePath !== "/api") throw new UsageError("--base-path is /v1 or /api.");
     // Public routes: no wallet needed to look at a deployment first.
-    if (group === "config" || group === "rates") {
+    if (group === "config" || group === "rates" || group === "service-fee") {
       arity(1);
       const open = publicApi({ baseUrl: api, basePath, fetch: io.fetch });
-      print(await (group === "config" ? open.config() : open.rates()));
+      print(await (group === "config" ? open.config() : group === "rates" ? open.rates() : open.serviceFee()));
       return 0;
     }
     const kind = values.signer ?? "external";
@@ -278,12 +283,16 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
           amount: parseBtc(need("amount")),
           feeRate: need("fee-rate"),
           utxos: (values.utxo ?? []).map(outpoint),
+          ...(values["service-fee"] !== undefined ? { serviceFee: { maxSats: values["service-fee"] } } : {}),
         });
         await writePublicFile(io, out, `${JSON.stringify(prepared, null, 2)}\n`);
         await writePublicFile(io, psbtFile, `${prepared.psbt}\n`);
         say(
           [
             `Deposit of ${sats(prepared.amount)} into ${vaultId}`,
+            ...(prepared.serviceFee
+              ? [`  Service fee: ${sats(prepared.serviceFee.amount)} (USD ${prepared.serviceFee.usd} at ${prepared.serviceFee.btcUsd} USD/BTC) to ${prepared.serviceFee.address}`]
+              : []),
             `  Miner fee: ${sats(prepared.fee)}, at most ${prepared.vsize} vB`,
             `  Change:    ${sats(prepared.change)} back to ${prepared.owner}`,
             `Unsigned PSBT: ${psbtFile}. Sign inputs ${prepared.signInputs.join(", ")} in your wallet without broadcasting,`,

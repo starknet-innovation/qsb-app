@@ -2,7 +2,7 @@
 
 Who holds each key, passphrase and credential through vault creation, deposit and withdrawal, and what the service receives. This page is the text version of the [diagram](key-custody.png); its source is [`key-custody.html`](key-custody.html).
 
-**The supported app/service withdrawal flow requires the backup file, its passphrase and the original wallet. The service holds no spending key.** The original wallet is a service-enforced requirement, not a condition in the vault script: someone with decrypted recovery state could use a helper they control to construct a spend outside the service. Wallet private keys, recovery passphrases and unrevealed HORS secrets stay on the user's side. The service also receives the BIP-322 sign-in proof and bearer session tokens or API keys. Signed withdrawals intentionally disclose selected HORS preimages.
+**The supported app/service withdrawal flow requires the backup file, its passphrase and the original wallet. The service holds no key that can spend a vault.** A deployment that offers the optional service fee has one AWS KMS key that spends only the fee address; the API holds just its public key. The original wallet is a service-enforced requirement, not a condition in the vault script: someone with decrypted recovery state could use a helper they control to construct a spend outside the service. Wallet private keys, recovery passphrases and unrevealed HORS secrets stay on the user's side. The service also receives the BIP-322 sign-in proof and bearer session tokens or API keys. Signed withdrawals intentionally disclose selected HORS preimages.
 
 ![Key custody diagram: the same stages, holders and tables as the text on this page.](key-custody.png)
 
@@ -10,8 +10,9 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 
 - **Bitcoin wallet**: Xverse in the web app; SDK signers must support BIP-322 and PSBT signing with a compressed public key deriving the supplied P2WPKH or P2SH-P2WPKH payment address. Other address types are not supported by this flow. Holds the wallet private key.
 - **User's browser, or the SDK / CLI**: runs pinned, hash-checked QSB sources through Pyodide. The browser uses a separate worker; the SDK/CLI runs Pyodide in the calling Node process, without worker isolation. Decrypted HORS state is held in browser/worker memory or SDK/CLI process memory; passphrases and backup files stay on the user’s side. An SDK/CLI caller that supplies its own recovery state also holds the plaintext state it generated, until it destroys it. The SDK runtime's commitments-only calls (`nodeQsb()`: `setupFromCommitments`, `prepareAssembly`, `finishAssembly`; the web app and CLI don't use them) serve HORS secrets that a key manager outside the runtime holds: the runtime gets their commitments, and at assembly only the 15 preimages the solution discloses.
-- **QSB service on AWS**: API Lambda, records table, Step Functions coordinator and CPU verifier. Holds vault and job records, session and API key hashes and webhook secrets, and reads the MARA credential. Holds no spending key.
-- **Outside parties**: The chain API receives public lookups, such as a new vault's script hash. The GPU solver receives public search inputs. MARA receives signed transactions and optional authorization/client-code credentials. MARA and Bitcoin see the selected HORS preimages disclosed in withdrawals.
+- **QSB service on AWS**: API Lambda, records table, Step Functions coordinator and CPU verifier. Holds vault and job records, session and API key hashes and webhook secrets, and reads the MARA credential. Holds no key that can spend a vault. With the optional service fee, the API's environment holds the fee key's public key, which Terraform reads from AWS KMS at plan time; the API has no KMS permission.
+- **Service fee key (optional)**: an AWS KMS secp256k1 key an administrator creates (`ops/service-fee-key`). Its private half never leaves KMS and can't be exported. Its key policy lets only the named signer roles sign, and only digests (an account administrator can change that policy, as with any key), which the operator's sweep tool uses to move what the fee address received.
+- **Outside parties**: The chain API receives public lookups, such as a new vault's script hash. With the optional service fee, Coinbase receives the API's BTC-USD price requests, which carry nothing about the user. The GPU solver receives public search inputs. MARA receives signed transactions and optional authorization/client-code credentials. MARA and Bitcoin see the selected HORS preimages disclosed in withdrawals.
 
 ## 1. Create vault
 
@@ -30,9 +31,9 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 | --- | --- |
 | Wallet | Signs the deposit PSBT. Broadcast is off: the app submits the signed bytes itself. |
 | Wallet ↔ browser | The deposit PSBT goes to the wallet; the signed PSBT comes back. |
-| Browser | Unlocks the backup locally to check it still opens; nothing secret is sent. Builds a deposit paying the vault script. Each vault takes exactly one deposit. |
+| Browser | Unlocks the backup locally to check it still opens; nothing secret is sent. Builds a deposit paying the vault script. If the user opts in to the service fee, the deposit also pays the fee address as output 1, at the amount the service quoted. Each vault takes exactly one deposit. |
 | Crosses to the service | The signed deposit transaction plus a bearer session token or API key. |
-| Service | Checks the transaction pays the vault script, records the exact bytes and submits them to MARA. Reads the optional MARA credential from Secrets Manager; only the API function can, with the credentials Lambda issues to it. |
+| Service | Checks the transaction's output 0 pays the vault script, records the exact bytes and submits them to MARA. It doesn't check whether the service fee was paid. Reads the optional MARA credential from Secrets Manager; only the API function can, with the credentials Lambda issues to it. |
 | Outside parties | MARA receives the signed transaction and optional authorization/client-code credentials for possible mining. Submission may fail or remain uncertain; acceptance is not block inclusion. The deposit completes only after inclusion is independently confirmed. |
 
 ## 3. Withdraw: search
@@ -68,6 +69,7 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 | Session token (1 hour) / API key (scoped, up to 90 days) | API, after a BIP-322 sign-in | Browser, or the SDK caller | SHA-256 hash at rest; receives the bearer credential on authenticated requests |
 | Webhook signing secret | API, shown once to the owner | Owner's webhook receiver | The secret, to sign deliveries (HMAC-SHA256) |
 | MARA Slipstream credential (optional) | Administrator | AWS Secrets Manager | Read at runtime by the API function only, with the credentials Lambda issues to it (copied out, those work until they expire); sent only to MARA |
+| Service fee key (optional) | Administrator, in AWS KMS (`ops/service-fee-key`) | AWS KMS; not exportable | The public key only, in the API's environment. Only the key policy's signers (who sign in with MFA through IAM Identity Center) can sign, to move the fee address's funds |
 
 ## Who can do what
 
@@ -75,10 +77,11 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 - **QSB service**: can refuse or delay a withdrawal, but not redirect it: the destination is fixed by signatures made on the user's machine.
 - **GPU solver**: untrusted compute on public data. Only independently CPU-verified hits can be used as solutions; verification does not necessarily examine every returned hit.
 - **Operator**: an MFA-backed role that reconciles records after an unknown outcome and writes missing script reservations. It can't sign, and its tools never resubmit.
+- **Service fee signers** (optional): the principals the fee key's policy names, each with its own IAM grant, signing in with MFA through IAM Identity Center. They can sign spends of the fee address only, never of a vault. The sweep tool prints the signed transaction and broadcasts nothing.
 - **MARA**: receives fully signed transactions and optional authorization/client-code credentials; withdrawals include the disclosed HORS preimages.
 
 **Trust note.** The web app is served from the deployment, so whoever can deploy controls the code that runs in the browser and can read the MARA credential. The SDK and CLI run code the user installs.
 
 ## Sources
 
-Sources: `src/lib/backup.ts`, `public/qsb/bridge.py`, `public/qsb/qsb_pipeline.py`, `src/lib/wallet.ts`, `src/mainnet/localSignature.ts`, `server/app.ts`, `server/chain.ts`, `server/scoped-keys.ts`, `server/webhooks.ts`, `terraform/variables.tf`, `terraform/compute.tf`, `ops/github-aws/render.py`, `src/TransactionDialog.tsx`, `server/providers.ts`, `server/submit-exact.ts`, `src/App.tsx`, `server/transaction-checks.ts`, `sdk/runtime.ts`, `sdk/signer.ts`, `sdk/client.ts`, `sdk/cli.ts`, `worker/cpu/handler.py` and [EXACT-SUBMIT.md](EXACT-SUBMIT.md). Keep this page, `key-custody.html` and `key-custody.png` in step; see "Docs" in `AGENTS.md`.
+Sources: `src/lib/backup.ts`, `public/qsb/bridge.py`, `public/qsb/qsb_pipeline.py`, `src/lib/wallet.ts`, `src/mainnet/localSignature.ts`, `server/app.ts`, `server/chain.ts`, `server/scoped-keys.ts`, `server/webhooks.ts`, `terraform/variables.tf`, `terraform/compute.tf`, `ops/github-aws/render.py`, `src/TransactionDialog.tsx`, `server/providers.ts`, `server/submit-exact.ts`, `src/App.tsx`, `server/transaction-checks.ts`, `sdk/runtime.ts`, `sdk/signer.ts`, `sdk/client.ts`, `sdk/cli.ts`, `src/lib/service-fee.ts`, `server/service-fee.ts`, `server/service-fee-sweep.ts`, `ops/service-fee-key/key.py`, `worker/cpu/handler.py` and [EXACT-SUBMIT.md](EXACT-SUBMIT.md). Keep this page, `key-custody.html` and `key-custody.png` in step; see "Docs" in `AGENTS.md`.

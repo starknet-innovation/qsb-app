@@ -39,8 +39,11 @@ reach this secret through an API role. Workflow log-delivery control APIs and re
 regional wildcard resources; these are the runtime control-plane exceptions. In S3, the boundary allows only the GPU
 job bucket's prefixes (`s3:PutObject` on `inputs/*`, `s3:GetObject` on `outputs/*`), which Terraform grants to the
 coordinator; runtime identities have no other S3 grant, and no SQS or ECR grant. The GPU roles have their own
-boundary ([below](#gpu-roles-and-spend)). KMS customer keys would need separately reviewed grants. This is a project deployment role, not a
-read-only role.
+boundary ([below](#gpu-roles-and-spend)). The boundary has no KMS grant. The deploy role's only KMS grant is
+`ServiceFeePublicKey`: `kms:GetPublicKey` on the administrator-created key aliased `alias/qsb/service-fee`
+([`ops/service-fee-key`](../service-fee-key/README.md)), which Terraform reads at plan time for the optional service
+fee. It can't sign with that key or change it. Other KMS customer keys would need separately reviewed grants. This is a
+project deployment role, not a read-only role.
 
 The state bucket uses S3-managed encryption, versioning, public access blocking and an HTTPS-only policy. The deploy
 role and `qsb-operator` can read and write objects only under `qsb/`, and delete only `.tflock` lock objects. They

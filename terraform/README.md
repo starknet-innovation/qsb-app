@@ -70,6 +70,7 @@ State is kept in the bootstrap state bucket under `qsb/main/terraform.tfstate`, 
 | `mainnet_enabled`, `exact_submit_enabled` | `false` by default | changed only with the user's explicit approval; see the [switch matrix](../docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches) |
 | `api_keys_enabled` | `false` | scoped API keys ([docs/API.md](../docs/API.md)); turned on only with the maintainer's explicit approval of third-party access |
 | `slipstream_secret_arn` | empty, or the `qsb/slipstream` secret's ARN | the API's optional MARA Slipstream credential; see [MARA Slipstream credential](#mara-slipstream-credential) |
+| `service_fee_enabled` | `false` by default | offers the optional USD 200 service fee; needs the administrator-created key first, see [Service fee key](#service-fee-key) |
 | `webhook_dispatcher_enabled` | `false` by default | the scoped roles need the installed Scheduler grants first; see [Scheduled webhook dispatcher](../docs/OPERATIONAL-RUNBOOK.md#scheduled-webhook-dispatcher) |
 
 Getting the role path wrong on the first apply means replacing the roles later, which needs an administrator again. `check-single-pipeline.py --deploy` refuses a plan that breaks the name, path, boundary or reconcile-principal rule.
@@ -207,6 +208,17 @@ By default the API calls MARA Slipstream without credentials. To use MARA's priv
 - If MARA answers 401 or 403, the request has already been sent, and it fails with "Miner API authorization is unavailable". Treat a deposit or withdrawal submission that fails this way as uncertain, not unsent: reconcile it, and never sign or submit a different transaction in its place.
 
 To back out, set `slipstream_secret_arn = ""` and apply; the secret itself is left alone.
+
+### Service fee key
+
+The optional service fee ([docs/API.md](../docs/API.md#service-fee)) is paid to the P2WPKH address of an AWS KMS key. To offer it:
+
+1. **Key.** An administrator creates it once, with `ops/service-fee-key/key.py` ([README](../ops/service-fee-key/README.md)): `ECC_SECG_P256K1`, `SIGN_VERIFY`, alias `alias/qsb/service-fee`, in this stack's account and region. Neither scoped role can create KMS keys.
+2. **Deploy role.** The installed deploy and `qsb-operator` policies must match `main`: its `ServiceFeePublicKey` statement allows `kms:GetPublicKey` on the key with that alias, and nothing else in KMS. Check with `ops/github-aws/update_installed.py` in plan mode; an administrator applies any difference.
+3. **Wire it.** Set `service_fee_enabled = true`, then plan and apply. The plan reads the key's public key (`data.aws_kms_public_key.service_fee`), checks it's a secp256k1 signing key in this account and region, and adds the API's `QSB_SERVICE_FEE_PUBLIC_KEY`, and nothing else. No runtime role gets a KMS permission; `check-single-pipeline.py` refuses the variable on any other function.
+4. **Check.** `GET /v1/config` reports a `serviceFeeAddress`, and it's the address that `npm run service-fee -- address` prints.
+
+To stop offering it, set `service_fee_enabled = false` and apply. The key and what its address holds are left alone; moving the funds is in the [runbook](../docs/OPERATIONAL-RUNBOOK.md#service-fee).
 
 ### Served solver release
 

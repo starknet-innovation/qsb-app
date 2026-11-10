@@ -129,6 +129,11 @@ variable "slipstream_secret_arn" {
     error_message = "Supply the full ARN of the qsb/slipstream secret in this stack's account and region, or leave it empty."
   }
 }
+variable "service_fee_enabled" {
+  description = "Offer the optional USD 200 service fee. Needs the administrator-created KMS key alias/qsb/service-fee (ops/service-fee-key) in this account and region: Terraform reads its public key at plan time and gives the API only that, from which it derives the fee's P2WPKH address. No role in this stack may sign with the key. False offers no fee."
+  type        = bool
+  default     = false
+}
 variable "solver_release_id" {
   description = "Enrolled schema-v3 solver release served by the configured endpoint. Empty refuses new jobs."
   type        = string
