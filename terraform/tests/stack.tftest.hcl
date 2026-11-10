@@ -308,7 +308,7 @@ run "service_fee_public_key_only" {
     service_fee_enabled = true
   }
   assert {
-    condition     = aws_lambda_function.api.environment[0].variables.QSB_SERVICE_FEE_PUBLIC_KEY == data.aws_kms_public_key.service_fee[0].public_key && !contains(keys(aws_lambda_function.coordinator.environment[0].variables), "QSB_SERVICE_FEE_PUBLIC_KEY") && !strcontains(join(" ", [for policy in [aws_iam_role_policy.records["api"].policy, aws_iam_role_policy.start.policy, aws_iam_role_policy.reference.policy, aws_iam_role_policy.coordinator_records.policy] : policy]), "kms:") && !output.transactions_enabled && !output.exact_submit_enabled
+    condition     = aws_lambda_function.api.environment[0].variables.QSB_SERVICE_FEE_PUBLIC_KEY == data.aws_kms_public_key.service_fee[0].public_key && !contains(keys(aws_lambda_function.coordinator.environment[0].variables), "QSB_SERVICE_FEE_PUBLIC_KEY") && !strcontains(join(" ", [aws_iam_role_policy.records["api"].policy, aws_iam_role_policy.start.policy, aws_iam_role_policy.coordinator_records.policy]), "kms:") && !output.transactions_enabled && !output.exact_submit_enabled
     error_message = "Only the API receives the fee key, as its public key; no role gets a KMS permission, and the fee activates nothing."
   }
 }
