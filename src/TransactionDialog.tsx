@@ -572,8 +572,10 @@ export default function TransactionDialog({
         if (payServiceFee) {
           if (typeof serviceFeeQuote !== "object") throw Error("The service fee quote isn't ready. Nothing was signed.");
           if (Date.now() - serviceFeeQuote.receivedAt > SERVICE_FEE_QUOTE_MS) {
+            // The amount may change, so the new one needs the user's consent again.
+            setAccepted(false);
             await loadServiceFeeQuote();
-            throw Error("The service fee quote was more than 15 minutes old, so it was refreshed. Check the new amount and sign again. Nothing was signed.");
+            throw Error("The service fee quote was more than 15 minutes old, so it was refreshed. Check the new amount, accept the costs again and sign. Nothing was signed.");
           }
           serviceFee = serviceFeeQuote;
         }
@@ -1357,11 +1359,13 @@ export default function TransactionDialog({
               <div className="cost-summary">
                 <p>
                   {!summary && <><strong>Miner fee: {feeBtc ? `${feeBtc} BTC` : "not set yet"}.</strong>{" "}</>}
-                  GPU compute, service and processing fees aren't billed yet.
+                  {deposit && typeof serviceFeeChoice === "object"
+                    ? `This deposit pays the optional USD ${serviceFeeChoice.usd} service fee you chose, ${BigInt(serviceFeeChoice.sats).toLocaleString()} sats, shown above. GPU compute and processing fees aren't billed yet.`
+                    : "GPU compute, service and processing fees aren't billed yet."}
                 </p>
                 <details>
                   <summary>See itemized costs</summary>
-                  <CostDisclosure feeBtc={feeBtc} job={job} />
+                  <CostDisclosure feeBtc={feeBtc} job={job} serviceFee={deposit && typeof serviceFeeChoice === "object" ? serviceFeeChoice : undefined} />
                 </details>
               </div>
             )}

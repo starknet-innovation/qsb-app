@@ -138,6 +138,14 @@ describe("GET /api/service-fee", () => {
     expect((await fee!.quote()).btcUsd).toBe("80003");
     expect(reads).toBe(3);
   });
+  it("shares one price read among concurrent quotes", async () => {
+    let reads = 0, release!: (value: string) => void;
+    const fee = serviceFee({ publicKey: SERVICE_FEE_KEY, price: () => { reads++; return new Promise<string>((resolve) => { release = resolve; }); } });
+    const quotes = Promise.all([fee!.quote(), fee!.quote(), fee!.quote()]);
+    release("90000");
+    expect((await quotes).map((q) => q.btcUsd)).toEqual(["90000", "90000", "90000"]);
+    expect(reads).toBe(1);
+  });
   it("offers no fee without a key", async () => {
     const app = createApp(new MemoryStore(), { serviceFee: { publicKey: "" } });
     expect((await request(app, "/service-fee")).status).toBe(404);

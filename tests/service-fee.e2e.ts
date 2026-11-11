@@ -75,6 +75,10 @@ test("deposit pays the opted-in service fee as output 1", async ({ page }) => {
   await expect(dialog).toContainText("Service fee (optional)");
   await expect(dialog).toContainText(`2,000 sats`);
   await expect(dialog).toContainText(feeAddress);
+  // The cost notice and itemized costs name the chosen fee instead of saying none is billed.
+  await expect(dialog).toContainText("This deposit pays the optional USD 200 service fee you chose, 2,000 sats");
+  await expect(dialog).not.toContainText("GPU compute, service and processing fees aren't billed yet.");
+  await expect(dialog.getByLabel("Itemized costs")).toContainText("USD 200, 2,000 sats at 10000000 USD/BTC");
   await dialog.getByLabel("I have read these statements and accept them").check();
   await dialog.getByRole("button", { name: "Review deposit in Xverse" }).click();
   await expect.poll(() => page.evaluate(() => (window as any).submitted?.rawTxHex)).toBeTruthy();
@@ -92,6 +96,7 @@ test("deposit pays no service fee unless the user ticks it", async ({ page }) =>
   const dialog = await open(page, true);
   await dialog.getByRole("button", { name: "Review deposit", exact: true }).click();
   await expect(dialog).not.toContainText("Service fee (optional)");
+  await expect(dialog).toContainText("GPU compute, service and processing fees aren't billed yet.");
   await dialog.getByLabel("I have read these statements and accept them").check();
   await dialog.getByRole("button", { name: "Review deposit in Xverse" }).click();
   await expect.poll(() => page.evaluate(() => (window as any).submitted?.rawTxHex)).toBeTruthy();
@@ -104,4 +109,20 @@ test("a deployment without the fee doesn't offer it", async ({ page }) => {
   const dialog = await open(page, false);
   await expect(dialog).toContainText(/Estimated size \d+ vB/);
   await expect(dialog.getByLabel(/Pay the optional USD 200 service fee/)).toHaveCount(0);
+});
+
+test("a quote that went stale after consent is refreshed and needs consent again", async ({ page }) => {
+  const dialog = await open(page, true);
+  await dialog.getByLabel(/Pay the optional USD 200 service fee/).check();
+  await dialog.getByRole("button", { name: "Review deposit", exact: true }).click();
+  await expect(dialog).toContainText("Service fee (optional)");
+  const consent = dialog.getByLabel("I have read these statements and accept them");
+  await consent.check();
+  // Sixteen minutes pass between consent and signing.
+  await page.evaluate(() => { const real = Date.now; Date.now = () => real() + 16 * 60 * 1000; });
+  await dialog.getByRole("button", { name: "Review deposit in Xverse" }).click();
+  await expect(dialog).toContainText("accept the costs again and sign. Nothing was signed.");
+  await expect(consent).not.toBeChecked();
+  expect(await page.evaluate(() => (window as any).walletCalls)).toBe(0);
+  expect(await page.evaluate(() => (window as any).quoteCalls)).toBe(2);
 });

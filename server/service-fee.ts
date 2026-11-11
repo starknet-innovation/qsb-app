@@ -41,13 +41,25 @@ export function serviceFee(dependencies: ServiceFeeDependencies = {}, now = () =
   if (!publicKey.trim()) return undefined;
   const address = serviceFeeAddress(publicKey);
   const price = dependencies.price ?? (() => coinbaseSpot());
-  // The last price read; a failed read keeps nothing.
-  let cached: { btcUsd: string; at: number } | undefined;
+  // The last price read, or the read in flight, which concurrent quotes share. A failed read is dropped.
+  let cached: { read: Promise<{ btcUsd: string; at: number }>; at?: number } | undefined;
+  const refresh = () => {
+    const entry: NonNullable<typeof cached> = {
+      read: price().then(
+        (btcUsd) => ({ btcUsd, at: (entry.at = now()) }),
+        (error) => {
+          if (cached === entry) cached = undefined;
+          throw error;
+        },
+      ),
+    };
+    return (cached = entry);
+  };
   return {
     address,
     async quote(): Promise<ServiceFeeQuote> {
-      if (!cached || now() - cached.at >= PRICE_CACHE_MS) cached = { btcUsd: await price(), at: now() };
-      const { btcUsd, at } = cached;
+      const current = cached && (cached.at === undefined || now() - cached.at < PRICE_CACHE_MS) ? cached : refresh();
+      const { btcUsd, at } = await current.read;
       return {
         usd: SERVICE_FEE_USD,
         btcUsd,

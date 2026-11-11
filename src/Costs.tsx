@@ -3,14 +3,18 @@ import { api } from "./lib/api";
 import { minerMinimumRate } from "./lib/transactions";
 import type { Job } from "./lib/model";
 
-export function CostDisclosure({ feeBtc, job }: { feeBtc?: string; job?: Job }) {
+/** The optional service fee the user chose to pay in this deposit. */
+export type ChosenServiceFee = { usd: number; sats: string; btcUsd: string };
+export function CostDisclosure({ feeBtc, job, serviceFee }: { feeBtc?: string; job?: Job; serviceFee?: ChosenServiceFee }) {
   return <section className="cost-disclosure" aria-label="Itemized costs">
     <h3>Know what you would pay</h3>
-    <p><strong>Customer billing is not enabled.</strong> This app cannot collect a compute payment, enforce a customer spending limit, or issue a refund yet.</p>
+    <p><strong>Customer billing is not enabled.</strong> This app cannot collect a compute payment, enforce a customer spending limit, or issue a refund yet.{serviceFee && " The only charge it takes is the optional service fee you chose, paid in this deposit."}</p>
     <dl className="cost-lines">
       <div><dt>Bitcoin miner fee</dt><dd>{feeBtc ? `${feeBtc} BTC · transaction amount, not a paid receipt` : "Not specified"}</dd></div>
       <div><dt>GPU search</dt><dd>Final cost unknown · no fixed-price quote</dd></div>
-      <div><dt>Service fee (AWS, support and margin)</dt><dd>Not configured · not included in an estimate</dd></div>
+      <div><dt>Service fee (AWS, support and margin)</dt><dd>{serviceFee
+        ? `USD ${serviceFee.usd}, ${BigInt(serviceFee.sats).toLocaleString()} sats at ${serviceFee.btcUsd} USD/BTC · optional, paid in this deposit, not refundable`
+        : "Not configured · not included in an estimate"}</dd></div>
       <div><dt>Separate MARA charge</dt><dd>Not confirmed · miner fees must not be counted twice</dd></div>
       <div><dt>Payment processing / applicable tax</dt><dd>Not configured</dd></div>
       <div><dt>Total payable</dt><dd>Unavailable until all charges are quoted</dd></div>
