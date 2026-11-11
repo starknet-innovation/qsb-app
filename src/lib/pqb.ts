@@ -4,7 +4,7 @@ import { buildLock, type Lock } from "../pqb-core/lock";
 import { assemble } from "../pqb-core/spend";
 import {
   stagesFromLock, problemFromPacket, problemTxt, evaluate, solves, parseHit,
-  roundSelection, witnessPlan, mineableEncoding, type Packet, type SolvedStage,
+  roundSelection, witnessPlan, type Packet, type SolvedStage,
 } from "../pqb-core/grind";
 import { fromHex, hex } from "../pqb-core/primitives";
 import { serializeTx, type Tx } from "../pqb-core/tx";
@@ -111,8 +111,7 @@ export function checkPqbHit(packet: Packet, line: string): SolvedStage | null {
   const { digest, z } = evaluate(packet, parsed.nonce, parsed.variant, parsed.menuIndex, parsed.encoding, parsed.ladder);
   if (!digest || digest[0] !== 0x30 || digest[1] !== 0x1d || digest[2] !== 0x02)
     throw new Error("PQB candidate failed CPU verification");
-  return mineableEncoding(parsed.encoding) && solves(packet, digest, z)
-    ? { ...parsed, stage: packet.stage, digest } : null;
+  return solves(packet, digest, z) ? { ...parsed, stage: packet.stage, digest } : null;
 }
 
 export function pqbSelection(packet: Packet, line: string): number[] {

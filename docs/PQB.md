@@ -1,10 +1,5 @@
 # PQB vaults
 
-The CPU verifier re-derives every candidate and excludes hybrid public-key encodings from
-solutions, matching the pinned reference's default STRICTENC policy. Compressed and
-uncompressed encodings remain eligible when the stage permits them. A DER-shaped hash alone
-does not establish a solution or miner acceptance.
-
 The browser's vault creation form and `vaults.create({ config: "PQB", ... })` in the SDK create PQB vaults. The CLI uses `qsb vault create --config PQB`. Config A remains the default. Both protocols use the same registration, one-deposit funding, encrypted backup, withdrawal approval and exact-submit routes. Neither a deposit nor its backup selects a solver release.
 
 ## Local custody and assembly

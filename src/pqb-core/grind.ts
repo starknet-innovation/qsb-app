@@ -176,9 +176,6 @@ export function derPrefixBytes(d: Bytes): number {
  *  the SIGHASH_SINGLE class, which is demonstrated theft (rules.is_spendable_der). */
 export const isSpendableDer = (d: Bytes): boolean => (d[d.length - 1] & 0x1f) !== 3;
 
-/** Hybrid public keys are refused wherever STRICTENC is enforced (upstream's default policy). */
-export const mineableEncoding = (encoding: number): boolean => encoding !== 2;
-
 export function solves(p: Packet, digest: Bytes, z: bigint): boolean {
   const rs = parseStrictDer(digest);
   if (rs === null || !isSpendableDer(digest)) return false;
@@ -602,7 +599,6 @@ export class HitChecker {
         throw new Error(`the fast hit check and evaluate disagree on ${JSON.stringify(line)}: this is a pqb bug, not the grinder`);
     }
     const c: Candidate = { ...h, digest: d, derBytes: der };
-    if (!mineableEncoding(h.encoding)) return c;
     if (parseStrictDer(d) !== null && solves(this.packet, d, z)) {
       this.full++;
       this.solutions.push(c);
