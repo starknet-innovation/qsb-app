@@ -1,3 +1,6 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 // Generated imports work in both Vite and the Lambda esbuild bundle.
 import { readdirSync, writeFileSync } from "node:fs";
 const dir = new URL("../src/lib/releases/", import.meta.url);
@@ -20,3 +23,17 @@ writeFileSync(
     files.map((_, i) => `d${i}`).join(", ") +
     "] as unknown[];\n",
 );
+
+// Match the producer's Python canonical JSON, including the deliberately invalid float 1.0
+// in pqb-ranked-v2's vectors. JS JSON.parse/JSON.stringify would silently change it to 1.
+const contracts = {};
+for (const [protocol, file] of [["qsb-config-a-v1", "ranked-v2"], ["pqb-v1", "pqb-ranked-v2"]]) {
+  const canonical = execFileSync("python3", ["-c",
+    "import json,sys; print(json.dumps(json.load(open(sys.argv[1])), sort_keys=True, separators=(',', ':')), end='')",
+    fileURLToPath(new URL(`../contracts/${file}.json`, import.meta.url)),
+  ]);
+  contracts[protocol] = createHash("sha256").update(canonical).digest("hex");
+}
+writeFileSync(new URL("../src/lib/search-contracts.generated.ts", import.meta.url),
+  "// Generated from contracts/*.json by scripts/generate-solver-registry.mjs; do not edit.\n"
+  + "export const solverSearchContracts = " + JSON.stringify(contracts, null, 2) + " as const;\n");

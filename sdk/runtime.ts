@@ -1,3 +1,4 @@
+import { adoptPqb } from "../src/lib/pqb";
 import { readFile } from "node:fs/promises";
 import { loadPyodide } from "pyodide";
 import { startQsbRuntime, type QsbMethod } from "../src/lib/qsb-runtime";
@@ -80,6 +81,13 @@ export function nodeQsb(): BundledQsb {
       if (typeof stateJson !== "string") throw new RefusedState("the recovery state is not JSON text");
       // The pipeline's state is about 60 KB; the bridge's checks run on this thread.
       if (stateJson.length > 1000000) throw new RefusedState("the recovery state is larger than the pipeline's state");
+      let config: unknown;
+      try { config = JSON.parse(stateJson)?.config; } catch { /* The QSB bridge reports malformed JSON. */ }
+      if (config === "PQB") {
+        try { return adoptPqb(stateJson); } catch (error) {
+          throw new RefusedState("Invalid PQB recovery state: " + (error instanceof Error ? error.message : "invalid state"));
+        }
+      }
       return JSON.parse(await run("adopt", [stateJson])) as GeneratedQsb;
     },
     lockQsb() {

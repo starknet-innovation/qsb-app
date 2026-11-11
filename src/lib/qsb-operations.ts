@@ -1,9 +1,12 @@
+import { generatePqb, adoptPqb, assemblePqb } from "./pqb";
+import { withdrawalSchema, type Job } from "./model";
 import type { QsbMethod } from "./qsb-runtime";
 type Run = (method: QsbMethod, args?: string[]) => Promise<string>;
 /** Typed bridge calls over a runtime: this browser worker, or the Node SDK's loader. */
 export function qsbOperations(run: Run) {
   return {
-    async generateQsb() {
+    async generateQsb(config: "A" | "PQB" = "A") {
+      if (config === "PQB") return generatePqb();
       return JSON.parse(await run("generate")) as {
         stateJson: string;
         publicStateJson: string;
@@ -11,9 +14,12 @@ export function qsbOperations(run: Run) {
         scriptHash: string;
       };
     },
-    validateRecovery: (stateJson: string) => run("validate", [stateJson]),
-    assembleQsb: (state: string, manifest: unknown, solution: unknown) =>
-      run("assemble", [
+    validateRecovery: async (stateJson: string) => JSON.parse(stateJson).config === "PQB"
+      ? Promise.resolve(adoptPqb(stateJson).scriptHash) : run("validate", [stateJson]),
+    assembleQsb: async (state: string, manifest: unknown, solution: unknown) =>
+      JSON.parse(state).config === "PQB"
+      ? Promise.resolve(assemblePqb(state, withdrawalSchema.parse(manifest), solution as NonNullable<Job["solution"]>))
+      : run("assemble", [
         state,
         JSON.stringify(manifest),
         JSON.stringify(solution),

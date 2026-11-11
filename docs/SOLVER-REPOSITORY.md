@@ -1,6 +1,6 @@
 # App / solver boundary
 
-GPU work is separate from custody and independent verification (#35). The solver source, image builds and provenance attestations live in [qsb-solver](https://github.com/starknet-innovation/qsb-solver). This app keeps the coordinator, the release registry, the QSB generator and the `worker/cpu` verifier. No CUDA source or compiler is needed by `npm run vendor`, the tests, the frontend or the Lambda packaging.
+GPU work is separate from custody and independent verification (#35). The solver source, image builds and provenance attestations live in [qsb-solver](https://github.com/starknet-innovation/qsb-solver). This app keeps the coordinator, release registry, local generators and independent CPU references: `worker/cpu` for Config A and `server/pqb-reference.ts` for PQB. [PQB support](PQB.md) describes the second protocol; no PQB image is enrolled. No CUDA source or compiler is needed by `npm run vendor`, the tests, the frontend or the Lambda packaging.
 
 The GPU receives only public parameters, returns untrusted hits, and can waste compute by omitting work. The app verifies each hit independently with `worker/cpu`. A digest or provenance attestation identifies an image; it doesn't prove its arithmetic or complete range coverage.
 
@@ -20,14 +20,14 @@ All three AWS releases use the same protocol, generator commit and `ranked-v2` s
 
 ## Search contract
 
-Both repositories carry `contracts/ranked-v2.json`. Their independent TypeScript and Python partitioners check every valid and rejected vector, and a solver release publishes the same file. A changed partition needs a new `searchVersion` and coordinated app support; it must never be presented as `ranked-v2`.
+Both repositories carry `contracts/ranked-v2.json`; the PQB integration uses `contracts/pqb-ranked-v2.json`. Their independent TypeScript and Python partitioners check every valid and rejected vector, and a solver release publishes the same file. A changed partition needs a new `searchVersion` and coordinated app support; it must never be presented as `ranked-v2`.
 
 ## Enrolling a release
 
 A tagged qsb-solver release publishes a GHCR image by digest with GitHub build provenance, and attaches `solver.json` plus the contract. To enroll it:
 
 1. Verify the provenance against `starknet-innovation/qsb-solver` and the exact tag commit, and that the release asset is the file you enroll (commands below).
-2. Require `schemaVersion` 3 and `searchContract`: the SHA-256 of canonical sorted-key compact JSON of `contracts/ranked-v2.json`. The producer derives it after checking its vectors; the app registry independently compares it with `fingerprint()` of its own contract. Run both suites.
+2. Require `schemaVersion` 3 and `searchContract`: the SHA-256 of the matching protocol contract in canonical sorted-key compact JSON. `scripts/generate-solver-registry.mjs` derives `src/lib/search-contracts.generated.ts` using Python canonical JSON so integer-valued float test vectors retain their type. The producer derives it after checking its vectors; the app registry compares it with the generated hash of its independently tested contract. Run both suites.
 3. Copy `solver.json` verbatim as a new descriptor in `src/lib/releases`. Never edit an existing descriptor.
 4. Run the registry generator (it runs before tests, typechecking and builds), the tests and a build, and commit the descriptor with the regenerated `registry.generated.ts`. No coordinator change is needed.
 

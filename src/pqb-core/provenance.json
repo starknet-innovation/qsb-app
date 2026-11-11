@@ -1,0 +1,20 @@
+{
+  "repository": "https://github.com/fireblocks-labs/pqb",
+  "commit": "eccdd09772edf14ab37fc63992b0626ad7ff2221",
+  "files": [
+    "js/src/address.ts",
+    "js/src/lock.ts",
+    "js/src/l1gen.ts",
+    "js/src/primitives.ts",
+    "js/src/spend.ts",
+    "js/src/sim.ts",
+    "js/src/tx.ts",
+    "js/src/grind.ts",
+    "js/src/configs.json",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "adaptations": {
+    "spend.ts": "Allow the caller to supply a two-input transaction and its vault input index. All witness and signature construction stays upstream."
+  }
+}

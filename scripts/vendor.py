@@ -63,3 +63,9 @@ for filename in ('bitcoin_tx.py', 'secp256k1.py', 'qsb_pipeline.py'):
 for filename in ('verify_hit.py', 'gpu_emulator.py'):
     shutil.copyfile(ROOT / 'vendor/qsb/config_a/verify' / filename, cpu / filename)
 shutil.copyfile(ROOT / 'vendor/qsb/LICENSE', cpu / 'LICENSE')
+
+# The bundled PQB generator/reference is MIT; its notices travel with web distributions.
+pqb_notices = ROOT / 'public/pqb'
+pqb_notices.mkdir(parents=True, exist_ok=True)
+for filename in ('LICENSE', 'THIRD_PARTY_NOTICES.md', 'provenance.json'):
+    shutil.copyfile(ROOT / 'src/pqb-core' / filename, pqb_notices / filename)

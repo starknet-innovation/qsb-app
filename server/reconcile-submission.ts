@@ -1,3 +1,5 @@
+import { assertSolverRuntime } from "./search-protocol";
+import { pqbWorkerStage } from "./pqb-search";
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { z } from "zod";
 import { reconciliationEnvironmentError } from "./reconciliation-environment";
@@ -175,11 +177,7 @@ export async function reconcileUnknownSubmission(input: {
   const selected = job.solver
     ? assertSolverPin(job.solver, vault)
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
-  if (
-    selected.searchVersion !== searchVersion ||
-    selected.generatorCommit !== release.qsbCommit
-  )
-    throw new ReconciliationError("SolverRuntimeMismatch");
+  try { assertSolverRuntime(selected); } catch { throw new ReconciliationError("SolverRuntimeMismatch"); }
   let replacementRequestKey: string | undefined;
   let replacedRequest: BatchSubmissionIdentity | undefined;
   const now = input.now ?? new Date().toISOString();
@@ -216,10 +214,10 @@ export async function reconcileUnknownSubmission(input: {
         .parse(result.output);
       const stage = slots ? target!.stage : job.stage,
         attempt = slots ? target!.attempt : job.attempt;
-      const range = workRange(stage, attempt);
+      const range = workRange(stage, attempt, selected.protocol);
       if (
         output.manifestHash !== job.manifestHash ||
-        output.stage !== stage ||
+        output.stage !== (selected.protocol === "pqb-v1" ? pqbWorkerStage(stage) : stage) ||
         output.attempt !== attempt ||
         output.kernelCommit !== selected.kernelCommit ||
         Object.entries(range).some(([k, v]) => output.workRange[k] !== v) ||

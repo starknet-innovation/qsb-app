@@ -19,6 +19,7 @@
   "files": [
     "dist",
     "public/qsb",
+    "public/pqb",
     "README.md"
   ],
   "scripts": {

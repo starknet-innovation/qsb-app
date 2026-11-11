@@ -175,6 +175,7 @@ export default function App() {
     [modal, setModal] = useState<"create" | "readiness" | null>(null),
     [step, setStep] = useState(1),
     [name, setName] = useState("My first vault"),
+    [vaultConfig, setVaultConfig] = useState<"A" | "PQB">("A"),
     [pass, setPass] = useState(""),
     [confirmPass, setConfirmPass] = useState(""),
     [recovery, setRecovery] = useState<Recovery>(),
@@ -597,7 +598,7 @@ export default function App() {
         );
       if (!name.trim()) throw new Error("Give your vault a name.");
       const gen = generation.current;
-      const data = await generateQsb();
+      const data = await generateQsb(vaultConfig);
       if (gen !== generation.current)
         throw new Error("Wallet changed during key generation.");
       const vault = withVaultConfiguration({
@@ -605,7 +606,7 @@ export default function App() {
         name: name.trim(),
         createdAt: new Date().toISOString(),
         network: NETWORK_ID,
-        config: "A",
+        config: vaultConfig,
         scriptHex: data.scriptHex,
         scriptHash: data.scriptHash,
         publicStateJson: data.publicStateJson,
@@ -1489,6 +1490,14 @@ export default function App() {
                     </div>
                   ) : (
                     <>
+                      <label>
+                        Vault protocol
+                        <select value={vaultConfig} onChange={e => setVaultConfig(e.target.value as "A" | "PQB")}>
+                          <option value="A">QSB Config A</option>
+                          <option value="PQB">PQB</option>
+                        </select>
+                      </label>
+                      {vaultConfig === "PQB" && <p className="field-hint">A PQB withdrawal requires a deployment serving an enrolled PQB solver release.</p>}
                       <label>
                         Vault name
                         <input

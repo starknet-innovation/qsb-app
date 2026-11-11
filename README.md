@@ -1,6 +1,6 @@
 # QSB application
 
-A web app, API and SDK for quantum-safe Bitcoin (QSB) vaults: vault secrets are generated and kept on the user's machine, a GPU search on AWS Batch solves the withdrawal puzzle, an independent CPU verifier re-checks every hit, and the user signs the withdrawal locally.
+A web app, API and SDK for quantum-safe Bitcoin (QSB Config A and PQB) vaults: vault secrets are generated and kept on the user's machine, a GPU search on AWS Batch solves the withdrawal puzzle, an independent CPU verifier re-checks every hit, and the user signs the withdrawal locally.
 
 **Not a production release.** It runs on Bitcoin mainnet without production hardening, and mainnet operations are off unless the deployment's switches turn them on. Do not use this repository to hold real funds. [Status](docs/STATUS.md) lists what's deployed and what's open.
 
@@ -9,7 +9,8 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB) vaults: vault secrets are 
 - `src/`: React application: encrypted local backups, wallet integration, and staged signing and recovery flows.
 - `server/`: the API (`server/app.ts`), the Step Functions coordinator, storage, chain and miner clients, and the exact-submit checks.
 - [`sdk/`](sdk/README.md): TypeScript SDK and `qsb` CLI for the same API. Recovery state, passphrases and keys stay on the caller's machine.
-- `worker/cpu/`: the independent CPU parameter export and hit verifier. GPU images come from [qsb-solver](https://github.com/starknet-innovation/qsb-solver).
+- `src/pqb-core/`: the pinned MIT PQB generator and CPU reference; [PQB support](docs/PQB.md) describes custody, stages and release requirements.
+- `worker/cpu/`: the Config A CPU parameter export and hit verifier. GPU images come from [qsb-solver](https://github.com/starknet-innovation/qsb-solver).
 - [`consensus/`](consensus/README.md): the offline Bitcoin Core script check run before a withdrawal is submitted.
 - `contracts/`: versioned search-range vectors shared with qsb-solver.
 - [`terraform/`](terraform/README.md): the AWS app stack; [`terraform/gpu/`](terraform/gpu/README.md): the AWS Batch GPU stack.
@@ -24,6 +25,8 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB) vaults: vault secrets are 
 3. The state machine's `CoordinateSearch` task invokes the coordinator Lambda (`terraform/workflow.tf`). The coordinator submits GPU work to AWS Batch, polls it, and has the reference Lambda (`worker/cpu`) re-check every hit.
 4. Once solved, the browser assembles and signs the withdrawal locally. `POST /api/jobs/:id/submit` checks the exact spend, runs the offline Core check and posts it once to MARA Slipstream ([exact submission](docs/EXACT-SUBMIT.md)).
 
+A PQB vault uses the same flow with PQB-specific problem construction and local witness assembly. Choose its protocol when creating it; a withdrawal requires the deployment to serve an enrolled solver for that protocol. No PQB image is currently enrolled.
+
 The deployed API Lambda (`server/lambda.ts`) serves mainnet only. The deploy-time switches `mainnet_enabled` and `exact_submit_enabled` gate funding, search and submission ([runbook](docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches)).
 
 ## Documentation
@@ -33,6 +36,7 @@ The deployed API Lambda (`server/lambda.ts`) serves mainnet only. The deploy-tim
 - [API](docs/API.md): prefixes, OpenAPI, errors, per-owner limits, events and webhooks, idempotency and API keys.
 - [Operational runbook](docs/OPERATIONAL-RUNBOOK.md): switches, GPU capacity and spend, incidents, reconciliation and rollback.
 - [Exact submission](docs/EXACT-SUBMIT.md): how a signed withdrawal reaches the miner once.
+- [PQB vaults](docs/PQB.md): protocol selection, local seed custody, independent reference checks and release enrollment.
 - [App / solver boundary](docs/SOLVER-REPOSITORY.md): enrolled solver releases and how to enroll and serve one.
 - [Moving to eu-west-2](docs/REGION-MIGRATION.md): how a new account is built, and retiring the old stack.
 - [Key custody](docs/KEY-CUSTODY.md): who holds each key, passphrase and credential through vault creation, deposit and withdrawal, and what the service receives, as text and a [diagram](docs/key-custody.png).

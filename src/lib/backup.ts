@@ -1,3 +1,4 @@
+import { solutionSchema } from "./solution";
 import { assertVaultConfiguration } from "./provenance";
 import {
   recoverySchema,
@@ -147,21 +148,6 @@ export function downloadBackup(contents: string, id: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const indices = z
-  .array(z.number().int().min(0).max(149))
-  .length(9)
-  .refine(
-    (values) => new Set(values).size === values.length,
-    "Duplicate HORS index",
-  );
-const solutionSchema = z
-  .object({
-    sequence: z.number().int().min(0).max(0xffffffff),
-    locktime: z.number().int().min(0).max(0xffffffff),
-    round1: indices,
-    round2: indices,
-  })
-  .strict();
 async function assemblyCommitment(
   solution: NonNullable<Job["solution"]>,
   rawTxHex: string,

@@ -175,3 +175,13 @@ Publishing needs two decisions first: a licence for this code (the package stays
 - Phase 3 of #85 (billing, terms of use, WAF and rate limits) isn't done: `/config` reports `billing: "not_configured"`.
 - The tests can't run a GPU search. [`tests/sdk-e2e.test.ts`](../tests/sdk-e2e.test.ts) drives the CLI against `createApp` with the in-memory store, a fake chain and a fake miner; it stands in for the coordinator's solution and for the Python assembler, which refuses anything but a real hit ([`tests/sdk-runtime.test.ts`](../tests/sdk-runtime.test.ts)). [`tests/qsb-commitments.test.ts`](../tests/qsb-commitments.test.ts) compares `prepareAssembly` and `finishAssembly` with `assembleQsb` byte for byte with the pipeline's puzzle check replaced by one that accepts any candidate.
 - No licence has been chosen for the application code, including this SDK (see the top-level README).
+
+## PQB vaults
+
+`client.vaults.create({ name, passphrase, saveBackup, config: "PQB" })` creates a PQB vault; the CLI uses `qsb vault create --config PQB --name ... --backup ...`. `config: "A"` is the default. A supplied PQB `stateJson` must contain exactly `config: "PQB"` and a 32-byte hex `seed`; the bundled runtime rebuilds its script locally. The seed is the complete spending authority, including the ECDSA co-signature key. Never send it to the API or reuse it for another vault.
+
+`nodeQsb().generateQsb("PQB")`, `adoptQsb`, `validateRecovery` and `assembleQsb` dispatch locally to the pinned TypeScript implementation for PQB. Config A continues to use Pyodide. The commitments-only methods are Config A methods; they do not accept PQB material. Both protocols use the same encrypted recovery envelope, deposit methods and withdrawal approval flow. A PQB signing backup also binds the three public hit records used to reconstruct its witness.
+
+The public vault has curve-point menus and a dummy-signature table. The service never receives the seed or menu scalars before signing. A signed PQB withdrawal intentionally discloses its selected HORS preimages and menu signatures, the ECDSA co-signature and its public key. Unrevealed material stays local. The packed SDK carries the upstream MIT license and notices under `public/pqb/`.
+
+A withdrawal requires `/config`'s `solverProtocol` to match the vault; mismatch is refused before saving a new withdrawal intent. No PQB release is enrolled yet. [PQB support](../docs/PQB.md) describes the search, source pin, enrollment requirements and evidence limits.

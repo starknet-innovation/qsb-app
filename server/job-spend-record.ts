@@ -1,3 +1,4 @@
+import { solutionSchema } from "../src/lib/solution";
 import { hex } from "@scure/base";
 import { withdrawalSchema, type Job } from "../src/lib/model";
 import { outputScript } from "../src/lib/transactions";
@@ -23,16 +24,6 @@ function mismatch(): never {
   throw new MinerInclusionError("ExactSpendMismatch");
 }
 
-function verifiedIndices(values: number[]): boolean {
-  return (
-    values.length === 9 &&
-    new Set(values).size === 9 &&
-    values.every(
-      (value) => Number.isInteger(value) && value >= 0 && value <= 149,
-    )
-  );
-}
-
 /**
  * Build the withdrawal spend from the stored job. Amounts and the destination
  * script come from the manifest. Sequence and locktime come from the solution
@@ -51,8 +42,7 @@ export function buildStoredSpendRecord(job: Job): StoredSpendRecord {
     !Number.isSafeInteger(solution.locktime) ||
     solution.locktime < MIN_LOCKTIME ||
     solution.locktime > MAX_LOCKTIME ||
-    !verifiedIndices(solution.round1) ||
-    !verifiedIndices(solution.round2)
+    !solutionSchema.safeParse(solution).success
   )
     mismatch();
   let destinationScript: string;
