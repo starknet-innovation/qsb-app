@@ -27,6 +27,9 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB Config A and PQB) vaults: v
 
 A PQB vault uses the same flow with PQB-specific problem construction and local witness assembly. Choose its protocol when creating it; a withdrawal requires the deployment to serve an enrolled solver for that protocol. No PQB image is currently enrolled.
 
+PQB candidate checking excludes hybrid public-key encodings under the pinned reference's
+default STRICTENC policy, after independently re-deriving each reported digest.
+
 The deployed API Lambda (`server/lambda.ts`) serves mainnet only. The deploy-time switches `mainnet_enabled` and `exact_submit_enabled` gate funding, search and submission ([runbook](docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches)).
 
 ## Documentation

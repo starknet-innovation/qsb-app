@@ -15,6 +15,7 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "adaptations": {
+    "grind.ts": "Apply the pinned Python reference's default STRICTENC policy when selecting solutions: hybrid encodings are still re-derived, but are not accepted as mineable solutions.",
     "spend.ts": "Allow the caller to supply a two-input transaction and its vault input index. All witness and signature construction stays upstream."
   }
 }
