@@ -1,12 +1,13 @@
 # Status
 
-PQB's TLS-fixed [`pqb-aws-sm86-v0.1.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/pqb-aws-sm86-v0.1.0) descriptor is enrolled for explicit adoption. Its registry digest and original build provenance verify; qualification retains native evidence only for the byte-identical compute stack, with fresh TLS/S3 checks. No new GPU timing, served Step Functions solve, solved-spend Core/miner acceptance or end-to-end PQB withdrawal is claimed. This change does not select the release, deploy or enable mainnet switches. See [PQB evidence and adoption limits](PQB.md#source-enrollment-and-evidence).
+PQB's TLS-fixed [`pqb-aws-sm86-v0.1.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/pqb-aws-sm86-v0.1.0) descriptor is enrolled for explicit adoption. Its registry digest and original build provenance verify; qualification retains native evidence only for the byte-identical compute stack, with fresh TLS/S3 checks. No new GPU timing, served Step Functions solve, solved-spend Core/miner acceptance or end-to-end PQB withdrawal is claimed. Enrollment does not select the served release or enable mainnet switches. The deployed app still serves Config A. See [PQB evidence and adoption limits](PQB.md#source-enrollment-and-evidence).
 
 As of 23 October 2026. #8, the plan to a first mainnet withdrawal, is complete; what's open is listed below.
 
 ## Deployed
 
 - **Account and region.** One app stack and one GPU stack in a dedicated AWS account in eu-west-2, reached through IAM Identity Center. They were built from scratch on 30 September 2026; no data was copied from the earlier eu-west-1 stack ([REGION-MIGRATION.md](REGION-MIGRATION.md)).
+- **App source.** The deployed API and coordinator match the clean build of `cadb84ca94ae8f415dff93f6f32748c58ee636ea` ([deployment run](https://github.com/starknet-innovation/qsb-app/actions/runs/43234282600)); their ZIP hashes were independently read back after apply.
 - **Pipeline.** API Lambda, Step Functions coordinator, AWS Batch GPUs and the CPU reference Lambda ([README](../README.md#how-a-withdrawal-runs)).
 - **API.** CloudFront calls the API's Lambda function URL (`AWS_IAM` auth) through origin access control; there is no API Gateway (`terraform/web.tf`). The URL answers only requests signed by CloudFront, or by principals in this account with Lambda invoke permission: `qsb-operator`, the deploy role and the administrator.
 - **Solver.** `combined-aws-sm86-v0.3.0` (`qsb-ranked-v2-40b5d9f9f741-6b4ac63b897c`), the optimized subset kernel with the repaired pinning on a runtime with Ubuntu updates applied at build, served since 2 October 2026. `combined-aws-sm86-v0.2.0` stays enrolled for rollback ([SOLVER-REPOSITORY.md](SOLVER-REPOSITORY.md)).
