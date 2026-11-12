@@ -1,6 +1,7 @@
+import { solverSearchContracts } from "./search-contracts.generated";
+import { PQB_GENERATOR_COMMIT } from "./pqb-identity";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import rankedContract from "../../contracts/ranked-v2.json";
 import publishedV2 from "./releases/qsb-solver-v0-1-0.json";
 import archived from "./releases/qsb-config-a-ranked-v2.json";
 import { z } from "zod";
@@ -12,9 +13,9 @@ export const externalSolverDescriptorSchema = z
     schemaVersion: z.literal(3),
     searchContract: z.string().regex(/^[a-f0-9]{64}$/),
     id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/),
-    protocol: z.literal("qsb-config-a-v1"),
-    generatorCommit: z.literal("2c9172051d5c150ef0a994ca6b988a08a3ef9e85"),
-    searchVersion: z.literal("ranked-v2"),
+    protocol: z.enum(["qsb-config-a-v1", "pqb-v1"]),
+    generatorCommit: z.string().regex(/^[a-f0-9]{40}$/),
+    searchVersion: z.enum(["ranked-v2", "pqb-ranked-v2"]),
     solverRepository: z.literal(
       "https://github.com/starknet-innovation/qsb-solver",
     ),
@@ -27,7 +28,11 @@ export const externalSolverDescriptorSchema = z
       .string()
       .regex(/^ghcr\.io\/starknet-innovation\/qsb-solver@sha256:[a-f0-9]{64}$/),
   })
-  .strict();
+  .strict().superRefine((d, ctx) => {
+    if (d.generatorCommit !== (d.protocol === "pqb-v1" ? PQB_GENERATOR_COMMIT : "2c9172051d5c150ef0a994ca6b988a08a3ef9e85")
+      || d.searchVersion !== (d.protocol === "pqb-v1" ? "pqb-ranked-v2" : "ranked-v2"))
+      ctx.addIssue({ code: "custom", message: "Incompatible solver protocol, generator or search version" });
+  });
 export type SolverDescriptor =
   | typeof archived
   | typeof publishedV2
@@ -44,7 +49,7 @@ export function solverRegistry(descriptors: unknown[]) {
         : externalSolverDescriptorSchema.parse(input);
     if (
       "searchContract" in descriptor &&
-      descriptor.searchContract !== fingerprint(rankedContract)
+      descriptor.searchContract !== solverSearchContracts[descriptor.protocol as keyof typeof solverSearchContracts]
     )
       throw new Error("SolverSearchContractMismatch");
     if (registry.has(descriptor.id)) throw new Error("DuplicateSolverRelease");
@@ -72,7 +77,7 @@ export function assertPaidSolverContract(descriptor: SolverDescriptor): void {
   if (
     "schemaVersion" in descriptor &&
     (!("searchContract" in descriptor) ||
-      descriptor.searchContract !== fingerprint(rankedContract))
+      descriptor.searchContract !== solverSearchContracts[descriptor.protocol as keyof typeof solverSearchContracts])
   )
     throw new Error("SolverSearchContractRequired");
 }
@@ -94,15 +99,15 @@ type VaultInput = {
   publicStateJson: string;
 };
 export function vaultConfiguration(v: VaultInput) {
-  if (v.config !== "A") throw new Error("UnsupportedVaultProtocol");
+  if (v.config !== "A" && v.config !== "PQB") throw new Error("UnsupportedVaultProtocol");
   if (typeof v.network !== "string" || v.network === "")
     throw new Error("Unsupported QSB network configuration");
   const network = v.network;
   return {
-    protocol: "qsb-config-a-v1" as const,
-    generatorCommit: "2c9172051d5c150ef0a994ca6b988a08a3ef9e85" as const,
+    protocol: v.config === "PQB" ? "pqb-v1" as const : "qsb-config-a-v1" as const,
+    generatorCommit: v.config === "PQB" ? PQB_GENERATOR_COMMIT : "2c9172051d5c150ef0a994ca6b988a08a3ef9e85",
     network,
-    config: "A" as const,
+    config: v.config as "A" | "PQB",
     scriptHash: v.scriptHash,
     scriptBytesHash: bytesToHex(
       sha256(
@@ -133,8 +138,10 @@ export function pinSolver(
   solverId = currentSolverId,
 ) {
   const configuration = assertVaultConfiguration(v);
-  if (v.config !== "A") throw new Error("UnsupportedVaultProtocol");
+  if (v.config !== "A" && v.config !== "PQB") throw new Error("UnsupportedVaultProtocol");
   const descriptor = solverRelease(solverId);
+  if (descriptor.protocol !== configuration.protocol || descriptor.generatorCommit !== configuration.generatorCommit)
+    throw new Error("SolverVaultProtocolMismatch");
   return {
     descriptor,
     releaseHash: fingerprint(descriptor),
@@ -152,7 +159,10 @@ export function assertSolverPin(
     pin.releaseHash !== fingerprint(descriptor)
   )
     throw new Error("SolverReleaseMismatch");
-  if (pin.vaultConfigurationHash !== fingerprint(assertVaultConfiguration(v)))
+  const config = assertVaultConfiguration(v);
+  if (descriptor.protocol !== config.protocol || descriptor.generatorCommit !== config.generatorCommit)
+    throw new Error("SolverVaultProtocolMismatch");
+  if (pin.vaultConfigurationHash !== fingerprint(config))
     throw new Error("SolverVaultMismatch");
   return descriptor;
 }

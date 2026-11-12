@@ -1,3 +1,4 @@
+import { isPqbMethod, runPqbOperation } from "./pqb-runtime";
 import { startQsbRuntime } from "./qsb-runtime";
 // Loaded from the same origin; no recovery material is transmitted.
 let runtime: ReturnType<typeof startQsbRuntime> | undefined;
@@ -23,7 +24,9 @@ async function getRuntime() {
 self.onmessage = async (event: MessageEvent) => {
   const { id, method, args } = event.data;
   try {
-    const result = (await getRuntime()).call(method, args || []);
+    const result = isPqbMethod(method)
+      ? runPqbOperation(method, args || [])
+      : (await getRuntime()).call(method, args || []);
     self.postMessage({ id, result });
   } catch (error) {
     self.postMessage({

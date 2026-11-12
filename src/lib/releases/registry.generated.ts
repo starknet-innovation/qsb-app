@@ -2,5 +2,6 @@
 import d0 from "./qsb-solver-aws-v0-1-0.json";
 import d1 from "./qsb-solver-combined-aws-sm86-v0-2-0.json";
 import d2 from "./qsb-solver-combined-aws-sm86-v0-3-0.json";
-import d3 from "./qsb-solver-v0-1-0.json";
-export default [d0, d1, d2, d3] as unknown[];
+import d3 from "./qsb-solver-pqb-aws-sm86-v0-1-0.json";
+import d4 from "./qsb-solver-v0-1-0.json";
+export default [d0, d1, d2, d3, d4] as unknown[];

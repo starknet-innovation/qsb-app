@@ -1,0 +1,268 @@
+{
+ "searchVersion": "pqb-ranked-v2",
+ "shapes": {
+  "pinning": {
+   "sequences": 14,
+   "sequenceMin": 2147483648,
+   "sequenceCount": 2147483646,
+   "locktimeMin": 500000000,
+   "locktimeEnd": 1700000000
+  },
+  "round0": {
+   "slots": 109,
+   "picks": 8,
+   "prefixChunk": 402653184
+  },
+  "round1": {
+   "slots": 101,
+   "picks": 9,
+   "prefixChunk": 1073741824
+  }
+ },
+ "cases": [
+  {
+   "stage": "pinning",
+   "attempt": 0,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "0",
+    "count": 16800000000,
+    "sequence": 2147483648,
+    "sequenceCount": 14,
+    "locktime": 500000000,
+    "locktimeCount": 1200000000
+   }
+  },
+  {
+   "stage": "pinning",
+   "attempt": 1,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "16800000000",
+    "count": 16800000000,
+    "sequence": 2147483662,
+    "sequenceCount": 14,
+    "locktime": 500000000,
+    "locktimeCount": 1200000000
+   }
+  },
+  {
+   "stage": "pinning",
+   "attempt": 2,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "33600000000",
+    "count": 16800000000,
+    "sequence": 2147483676,
+    "sequenceCount": 14,
+    "locktime": 500000000,
+    "locktimeCount": 1200000000
+   }
+  },
+  {
+   "stage": "pinning",
+   "attempt": 76695844,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "1288490179200000000",
+    "count": 16800000000,
+    "sequence": 3221225464,
+    "sequenceCount": 14,
+    "locktime": 500000000,
+    "locktimeCount": 1200000000
+   }
+  },
+  {
+   "stage": "pinning",
+   "attempt": 153391687,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "2576980341600000000",
+    "count": 16800000000,
+    "sequence": 4294967266,
+    "sequenceCount": 14,
+    "locktime": 500000000,
+    "locktimeCount": 1200000000
+   }
+  },
+  {
+   "stage": "pinning",
+   "attempt": 153391688,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "2576980358400000000",
+    "count": 16800000000,
+    "sequence": 4294967280,
+    "sequenceCount": 14,
+    "locktime": 500000000,
+    "locktimeCount": 1200000000
+   }
+  },
+  {
+   "stage": "round0",
+   "attempt": 0,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "0",
+    "count": 7141805239,
+    "prefixStart": "0",
+    "prefixCount": 402653184
+   }
+  },
+  {
+   "stage": "round0",
+   "attempt": 1,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "7141805239",
+    "count": 6740735874,
+    "prefixStart": "402653184",
+    "prefixCount": 402653184
+   }
+  },
+  {
+   "stage": "round0",
+   "attempt": 2,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "13882541113",
+    "count": 6297643738,
+    "prefixStart": "805306368",
+    "prefixCount": 402653184
+   }
+  },
+  {
+   "stage": "round0",
+   "attempt": 35,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "209481097899",
+    "count": 6180930075,
+    "prefixStart": "14092861440",
+    "prefixCount": 402653184
+   }
+  },
+  {
+   "stage": "round0",
+   "attempt": 68,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "375960786378",
+    "count": 3310275086,
+    "prefixStart": "27380416512",
+    "prefixCount": 402653184
+   }
+  },
+  {
+   "stage": "round0",
+   "attempt": 69,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "379271061464",
+    "count": 637786075,
+    "prefixStart": "27783069696",
+    "prefixCount": 100148472
+   }
+  },
+  {
+   "stage": "round1",
+   "attempt": 0,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "0",
+    "count": 15282749791,
+    "prefixStart": "0",
+    "prefixCount": 1073741824
+   }
+  },
+  {
+   "stage": "round1",
+   "attempt": 1,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "15282749791",
+    "count": 15171547203,
+    "prefixStart": "1073741824",
+    "prefixCount": 1073741824
+   }
+  },
+  {
+   "stage": "round1",
+   "attempt": 2,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "30454296994",
+    "count": 15060834241,
+    "prefixStart": "2147483648",
+    "prefixCount": 1073741824
+   }
+  },
+  {
+   "stage": "round1",
+   "attempt": 87,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "1132240484617",
+    "count": 13731905965,
+    "prefixStart": "93415538688",
+    "prefixCount": 1073741824
+   }
+  },
+  {
+   "stage": "round1",
+   "attempt": 172,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "2079461748622",
+    "count": 7100683898,
+    "prefixStart": "184683593728",
+    "prefixCount": 1073741824
+   }
+  },
+  {
+   "stage": "round1",
+   "attempt": 173,
+   "range": {
+    "version": "pqb-ranked-v2",
+    "start": "2086562432520",
+    "count": 1757270180,
+    "prefixStart": "185757335552",
+    "prefixCount": 330558748
+   }
+  }
+ ],
+ "invalid": [
+  {
+   "stage": "pinning",
+   "attempt": 153391689
+  },
+  {
+   "stage": "round0",
+   "attempt": 70
+  },
+  {
+   "stage": "round1",
+   "attempt": 174
+  },
+  {
+   "stage": "round2",
+   "attempt": 0
+  },
+  {
+   "stage": "pinning",
+   "attempt": -1
+  },
+  {
+   "stage": "round0",
+   "attempt": "0"
+  },
+  {
+   "stage": "round1",
+   "attempt": 1.0
+  },
+  {
+   "stage": "pinning",
+   "attempt": true
+  }
+ ]
+}

@@ -1,3 +1,4 @@
+import {solutionSchema} from "../lib/solution";
 import {z} from 'zod';
 import {hex} from '@scure/base';
 import {sha256} from '@noble/hashes/sha2.js';
@@ -6,8 +7,7 @@ import {assertVaultConfiguration,fingerprint} from '../lib/provenance';
 import {decryptRecovery,encryptRecovery,assertRecoveryAuthorization,bindRecoveryAssembly,assertRecoveryAssembly} from '../lib/backup';
 import {assembleQsb,validateRecovery,lockQsb} from '../lib/qsb';
 import {validateMainnetIntent} from './intent';
-const indices=z.array(z.number().int().min(0).max(149)).length(9).refine(x=>new Set(x).size===9);
-const schema=z.object({format:z.literal('qsb-mainnet-local-assembly-v1'),vault:publicVaultSchema,manifest:withdrawalSchema,solution:z.object({sequence:z.number().int().min(0).max(0xffffffff),locktime:z.number().int().min(0).max(0xffffffff),round1:indices,round2:indices}).strict(),fundingPreviousTxHex:z.string(),helperPreviousTxHex:z.string(),wallet:z.object({address:z.string(),publicKey:z.string()}).strict()}).strict();
+const schema=z.object({format:z.literal('qsb-mainnet-local-assembly-v1'),vault:publicVaultSchema,manifest:withdrawalSchema,solution:solutionSchema,fundingPreviousTxHex:z.string(),helperPreviousTxHex:z.string(),wallet:z.object({address:z.string(),publicKey:z.string()}).strict()}).strict();
 const digest=(s:string)=>hex.encode(sha256(new TextEncoder().encode(s)));
 type Guard={claim:(key:string,value:string)=>void};
 type Local={validate:typeof validateRecovery;assemble:typeof assembleQsb;lock:typeof lockQsb};

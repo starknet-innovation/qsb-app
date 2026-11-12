@@ -1,19 +1,24 @@
+import type { PqbMethod } from "./pqb-runtime";
 import type { QsbMethod } from "./qsb-runtime";
-type Run = (method: QsbMethod, args?: string[]) => Promise<string>;
+export type LocalQsbMethod = QsbMethod | PqbMethod;
+type Run = (method: LocalQsbMethod, args?: string[]) => Promise<string>;
 /** Typed bridge calls over a runtime: this browser worker, or the Node SDK's loader. */
 export function qsbOperations(run: Run) {
   return {
-    async generateQsb() {
-      return JSON.parse(await run("generate")) as {
+    async generateQsb(config: "A" | "PQB" = "A") {
+      return JSON.parse(await run(config === "PQB" ? "pqb_generate" : "generate")) as {
         stateJson: string;
         publicStateJson: string;
         scriptHex: string;
         scriptHash: string;
       };
     },
-    validateRecovery: (stateJson: string) => run("validate", [stateJson]),
-    assembleQsb: (state: string, manifest: unknown, solution: unknown) =>
-      run("assemble", [
+    validateRecovery: async (stateJson: string) => JSON.parse(stateJson).config === "PQB"
+      ? run("pqb_validate", [stateJson]) : run("validate", [stateJson]),
+    assembleQsb: async (state: string, manifest: unknown, solution: unknown) =>
+      JSON.parse(state).config === "PQB"
+      ? run("pqb_assemble", [state, JSON.stringify(manifest), JSON.stringify(solution)])
+      : run("assemble", [
         state,
         JSON.stringify(manifest),
         JSON.stringify(solution),
@@ -46,7 +51,7 @@ export type PreparedAssembly = {
  * Wallet Secret Management"). The runtime gets the 2 × 150 commitments, and at `finishAssembly`
  * only the 15 preimages that `prepareAssembly` named; it never gets the secret set.
  */
-export function commitmentOperations(run: Run) {
+export function commitmentOperations(run: (method: QsbMethod, args?: string[]) => Promise<string>) {
   return {
     /** The public part of `generateQsb` for secrets whose HASH160s are `commitments`, in setup's order. */
     async setupFromCommitments(commitments: string[][]) {

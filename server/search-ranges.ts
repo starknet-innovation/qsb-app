@@ -1,3 +1,4 @@
+import { pqbWorkRange } from "./pqb-search";
 // ranked-v2 contract: contracts/ranked-v2.json, also published by qsb-solver.
 // Exact decimal ranks survive JSON/DynamoDB; solver CI checks the same vectors.
 export const searchVersion = "ranked-v2";
@@ -5,7 +6,9 @@ export const chunkSize = 2 ** 34;
 const ltSpan = 1744600000 - 500000000;
 const sequences = 16;
 const subsetTotal = 82947113349100n;
-export function workRange(stage: string, attempt: number) {
+export type WorkRange = { version: string; start: string; count: number; sequence?: number; sequenceCount?: number; locktime?: number; locktimeCount?: number; prefixStart?: string; prefixCount?: number };
+export function workRange(stage: string, attempt: number, protocol = "qsb-config-a-v1"): WorkRange {
+  if (protocol === "pqb-v1") return pqbWorkRange(stage, attempt);
   if (!Number.isSafeInteger(attempt) || attempt < 0)
     throw new Error("Invalid work unit");
   if (stage === "pinning") {

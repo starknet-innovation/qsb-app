@@ -1,0 +1,57 @@
+{
+ "PQB": {
+  "K": [
+   12,
+   16,
+   16
+  ],
+  "R": 2,
+  "cosig": "p2pkh",
+  "depth_guard": true,
+  "der_only": [
+   true,
+   true,
+   true
+  ],
+  "der_pk33": true,
+  "gadget": "stride3",
+  "gates": 1,
+  "hors_secret_bytes": 20,
+  "hsel": [
+   [
+    "none",
+    0
+   ],
+   [
+    "none",
+    0
+   ],
+   [
+    "none",
+    0
+   ]
+  ],
+  "m": 6,
+  "m_list": [
+   6,
+   12,
+   4
+  ],
+  "n": 109,
+  "pin_gate_last": true,
+  "pin_keep_false": true,
+  "predicate": [
+   "sha256",
+   "sha256",
+   "sha256"
+  ],
+  "round_gates": 2,
+  "sha1_chain": false,
+  "sharing": "shared_chained",
+  "t": 8,
+  "t_list": [
+   8,
+   9
+  ]
+ }
+}

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { assertSolverRuntime, referenceInput as protocolReferenceInput, parseParameters, workerInput, checkedOutput } from "./search-protocol";
 import { deployedSolver } from "./solver-deployment";
 import {
   assertPaidSolverContract,
@@ -10,12 +10,11 @@ import { transactionsEnabled } from "./network";
 import { chain } from "./chain";
 import { configuredCompute, computeConfigured } from "./compute-provider";
 import {
-  release,
   type Job,
   type PublicVault,
   type SearchSlot,
 } from "../src/lib/model";
-import { searchVersion, workRange } from "./search-ranges";
+import { workRange } from "./search-ranges";
 import { gpuSpendLimits, nextGpuReservation } from "./gpu-spend";
 import {
   OWNER_GPU_BUDGET_REACHED,
@@ -27,7 +26,7 @@ import {
   HOST_HIT_CAPACITY,
   publishedHitRecords,
 } from "./hit-capacity";
-import { candidateOutput, applyVerifiedHit } from "./candidate-output";
+import { applyVerifiedHit } from "./candidate-output";
 import { meterChunk } from "./gpu-usage";
 import { UnreadableOutput, type ComputeStatus } from "./aws-batch";
 import type { Row, Store } from "./store";
@@ -228,11 +227,15 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   const selected = job.solver
     ? assertSolverPin(job.solver, vault)
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
-  if (
-    selected.searchVersion !== searchVersion ||
-    selected.generatorCommit !== release.qsbCommit
-  )
-    throw new Error("SolverRuntimeMismatch");
+  assertSolverRuntime(selected);
+  const pqb = selected.protocol === "pqb-v1";
+  // Reconstruct the high-water mark for retained pinning state, before polling can
+  // remove slots or change stages. New intents advance it durably below.
+  if (pqb && job.stage === "pinning") {
+    job.pqbNextPinAttempt = Math.max(job.pqbNextPinAttempt ?? 0, job.attempt,
+      ...slots.filter(s => s.stage === "pinning").map(s => s.attempt + 1),
+      ...(job.completedAttempts ?? []).map(attempt => attempt + 1));
+  }
   // A slot saved before a POST that never recorded its ID: never replay it.
   if (job.status === "searching" && unknown()) {
     job.status = "paused";
@@ -241,14 +244,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     await persist();
     return { ...event, done: true };
   }
-  const referenceInput = () => ({
-    publicStateJson: vault.publicStateJson,
-    manifest: job.manifest,
-    stage: job.stage,
-    ...(job.solution
-      ? { sequence: job.solution.sequence, locktime: job.solution.locktime }
-      : {}),
-  });
+  const referenceInput = () => protocolReferenceInput(vault, job);
 
   // An explicit resume allows each chunk it found in flight to be repeated once if it turns
   // out to have stopped, however many ticks that takes. Chunks sent later never inherit it.
@@ -263,7 +259,8 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   const completed = new Set(job.completedAttempts ?? []);
   for (const slot of [...slots]) {
     const r = await observe(slot);
-    const current = slot.stage === job.stage && job.status !== "failed";
+    const current = slot.stage === job.stage && job.status !== "failed"
+      && (!pqb || (slot.searchEpoch ?? 0) === (job.searchEpoch ?? 0));
     if (!current) {
       // Superseded by a verified hit or a failed job: stop it, never credit it.
       if (ACTIVE.includes(r.status)) await provider.cancel(slot.runpodId!);
@@ -280,25 +277,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       continue;
     }
     if (r.status !== "COMPLETED") continue;
-    const output = candidateOutput.parse(r.output);
-    const expectedRange = workRange(slot.stage, slot.attempt);
-    if (
-      output.kernelCommit !== selected.kernelCommit ||
-      output.manifestHash !== job.manifestHash ||
-      output.stage !== slot.stage ||
-      output.attempt !== slot.attempt
-    )
-      throw new Error("CandidateContextMismatch");
-    for (const field of [
-      "version",
-      "start",
-      "count",
-      "sequence",
-      "sequenceCount",
-      "locktime",
-    ] as const)
-      if (output.workRange[field] !== expectedRange[field])
-        throw new Error("CandidateRangeMismatch");
+    const { output, range: expectedRange } = checkedOutput(r.output, selected, job, slot.attempt);
     job.computeSeconds += (r.executionTime || 0) / 1000;
     remove(slots, slot);
     // The historical worker truncates at 64 and still reports range-complete.
@@ -313,7 +292,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       candidates: output.candidates,
     });
     if (checked.valid === true) {
-      applyVerifiedHit(job, checked, expectedRange);
+      applyVerifiedHit(job, checked, expectedRange, slot.attempt);
       job.attempt = 0;
       completed.clear();
       job.status =
@@ -351,18 +330,29 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   // still occupy a GPU until they stop, so they count against workersMax.
   if (["queued", "searching"].includes(job.status)) {
     const assigned = new Set(
-      slots.filter((s) => s.stage === job.stage).map((s) => s.attempt),
+      slots.filter((s) => s.stage === job.stage && (!pqb || (s.searchEpoch ?? 0) === (job.searchEpoch ?? 0))).map((s) => s.attempt),
     );
     let attempt = job.attempt;
-    let parameters: { parameterBase64: string; parameterSha256: string } | undefined;
+    let parameters: ReturnType<typeof parseParameters> | undefined;
     let sent = 0;
     const ownerBudget = await OwnerGpuBudget.open(store, event.owner);
     while (slots.length < gpuSpendLimits.workersMax) {
       if (Date.now() - tickStarted > FILL_DEADLINE_MS) break;
       while (assigned.has(attempt) || completed.has(attempt)) attempt++;
       try {
-        workRange(job.stage, attempt);
+        workRange(job.stage, attempt, selected.protocol);
       } catch {
+        if (pqb && job.stage !== "pinning" && assigned.size === 0 && slots.length === 0) {
+          job.searchEpoch = (job.searchEpoch ?? 0) + 1;
+          job.stage = "pinning";
+          job.attempt = job.pqbNextPinAttempt!;
+          delete job.solution;
+          delete job.parameterHashes;
+          job.completedAttempts = [];
+          completed.clear();
+          job.status = "queued";
+          break;
+        }
         if (assigned.size === 0) {
           job.status = "paused";
           job.error = "Search range exhausted; a reviewed new range is required.";
@@ -387,36 +377,19 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
         break;
       }
       if (!parameters) {
-        parameters = z
-          .object({
-            parameterBase64: z.string().max(140000),
-            parameterSha256: z.string().regex(/^[a-f0-9]{64}$/),
-          })
-          .parse(await cpu({ ...referenceInput(), action: "export" }));
-        const key = `${job.stage}:${job.solution?.sequence ?? ""}:${job.solution?.locktime ?? ""}`;
-        if (
-          job.parameterHashes?.[key] &&
-          job.parameterHashes[key] !== parameters.parameterSha256
-        )
+        parameters = parseParameters(await cpu({ ...referenceInput(), action: "export" }), pqb);
+        const key = pqb ? JSON.stringify([job.searchEpoch ?? 0, job.stage, job.solution])
+          : `${job.stage}:${job.solution?.sequence ?? ""}:${job.solution?.locktime ?? ""}`;
+        const digest = "problemSha256" in parameters ? parameters.problemSha256 : parameters.parameterSha256;
+        if (job.parameterHashes?.[key] && job.parameterHashes[key] !== digest)
           throw new Error("SolverParametersChanged");
-        job.parameterHashes = { ...job.parameterHashes, [key]: parameters.parameterSha256 };
+        job.parameterHashes = { ...job.parameterHashes, [key]: digest };
       }
       let submit: import("./aws-batch").PreparedRun;
       try {
         deployedSolver(selected.id);
         assertPaidSolverContract(selected);
-        submit = await provider.prepareRun(selected.image, {
-          protocol: selected.protocol,
-          kernelCommit: selected.kernelCommit,
-          manifestHash: job.manifestHash,
-          stage: job.stage,
-          attempt,
-          searchVersion,
-          ...parameters,
-          ...(job.solution
-            ? { sequence: job.solution.sequence, locktime: job.solution.locktime }
-            : {}),
-        });
+        submit = await provider.prepareRun(selected.image, workerInput(selected, job, attempt, parameters));
       } catch {
         job.status = "paused";
         job.error =
@@ -434,6 +407,7 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
       const slot: SearchSlot = {
         stage: job.stage as SearchSlot["stage"],
         attempt,
+        ...(pqb ? { searchEpoch: job.searchEpoch ?? 0 } : {}),
         batchSubmission: submit.identity,
         submissionStartedAt: new Date().toISOString(),
       };
@@ -450,6 +424,8 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
           next.status = "searching";
           next.computeProvider = "aws-batch";
           next.parallelSlots!.push(slot);
+          if (pqb && slot.stage === "pinning")
+            next.pqbNextPinAttempt = Math.max(next.pqbNextPinAttempt ?? 0, slot.attempt + 1);
           delete next.batchReplacementFor;
           delete next.oneSubmissionAllowed;
         },

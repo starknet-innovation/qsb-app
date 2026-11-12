@@ -15,3 +15,7 @@ export function deployedSolver(requestedId?: string): SolverDescriptor {
 export function deployedSolverId(): string | null {
   try { return deployedSolver().id; } catch { return null; }
 }
+
+export function deployedSolverProtocol(): string | null {
+  try { return deployedSolver().protocol; } catch { return null; }
+}

@@ -1,3 +1,4 @@
+import { canonical } from "../lib/provenance";
 import type * as btc from "@scure/btc-signer";
 import { finalizeVerifiedOfflineHelper } from "../lib/offline-signed-result";
 import {
@@ -54,7 +55,8 @@ function sameSolution(
     left.sequence === right.sequence &&
     left.locktime === right.locktime &&
     left.round1.join(",") === right.round1.join(",") &&
-    left.round2.join(",") === right.round2.join(",")
+    left.round2.join(",") === right.round2.join(",") &&
+    canonical(left.pqb) === canonical(right.pqb)
   );
 }
 

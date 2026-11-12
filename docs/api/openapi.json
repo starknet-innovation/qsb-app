@@ -6213,6 +6213,21 @@
               "null"
             ]
           },
+          "solverProtocol": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "qsb-config-a-v1",
+                  "pqb-v1"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Protocol of the served solver, or null. A withdrawal requires a solver for its vault protocol."
+          },
           "exactSubmitEnabled": {
             "type": "boolean",
             "description": "Whether submission to the miner is switched on."
@@ -6304,6 +6319,7 @@
           "mainnetEnabled",
           "operationsEnabled",
           "solverReleaseId",
+          "solverProtocol",
           "exactSubmitEnabled",
           "apiKeysEnabled",
           "billing",
@@ -6714,6 +6730,30 @@
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
                 }
+              },
+              "pqb": {
+                "type": "object",
+                "properties": {
+                  "pinning": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "round0": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "round1": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "pinning"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -7025,7 +7065,10 @@
           },
           "config": {
             "type": "string",
-            "const": "A"
+            "enum": [
+              "A",
+              "PQB"
+            ]
           },
           "scriptHex": {
             "type": "string",
@@ -7050,18 +7093,24 @@
             "properties": {
               "protocol": {
                 "type": "string",
-                "const": "qsb-config-a-v1"
+                "enum": [
+                  "qsb-config-a-v1",
+                  "pqb-v1"
+                ]
               },
               "generatorCommit": {
                 "type": "string",
-                "const": "2c9172051d5c150ef0a994ca6b988a08a3ef9e85"
+                "pattern": "^[a-f0-9]{40}$"
               },
               "network": {
                 "type": "string"
               },
               "config": {
                 "type": "string",
-                "const": "A"
+                "enum": [
+                  "A",
+                  "PQB"
+                ]
               },
               "scriptHash": {
                 "type": "string",
@@ -7228,7 +7277,7 @@
                 "maximum": 4294967295
               },
               "round1": {
-                "minItems": 9,
+                "minItems": 8,
                 "maxItems": 9,
                 "type": "array",
                 "items": {
@@ -7238,7 +7287,7 @@
                 }
               },
               "round2": {
-                "minItems": 9,
+                "minItems": 8,
                 "maxItems": 9,
                 "type": "array",
                 "items": {
@@ -7246,6 +7295,30 @@
                   "minimum": 0,
                   "maximum": 149
                 }
+              },
+              "pqb": {
+                "type": "object",
+                "properties": {
+                  "pinning": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "round0": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "round1": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "pinning"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
