@@ -33,7 +33,7 @@ A tagged qsb-solver release publishes a GHCR image by digest with GitHub build p
 
 Enrolling a descriptor doesn't serve it, publish an image or change a job definition.
 
-PQB remains HOLD despite its completed public synthetic transport solve; see [current evidence and adoption limits](PQB.md#source-enrollment-and-evidence). The producer's private-validation descriptor proposal is not a published release asset. Its prospective GHCR reference is not proof that an image exists there. The existing historical and combined QSB workflows do not publish the PQB Docker target. Before PQB enrollment, verify the final artifact's actual publication workflow/source provenance, matching contract, installed-file identities, correctness evidence and notices. Never relabel the measured older image as newer reviewed source.
+PQB remains HOLD despite its completed public synthetic transport solve; see [current evidence and adoption limits](PQB.md#source-enrollment-and-evidence). The producer's [qualified final-image proposal and publication handoff](https://github.com/starknet-innovation/qsb-solver/blob/e41580065d68579d7b7f0be0d2991942a5ea93db/docs/pqb/2026-11-12-final-image-qualification.md) remain HOLD review material, not a published release asset. Its prospective GHCR reference is not proof that an image exists there. The existing historical and combined QSB workflows do not publish the PQB Docker target. Before PQB enrollment, verify the final artifact's actual publication workflow/source provenance, matching contract, installed-file identities, correctness evidence and notices. The signed build, fresh native unit evidence and prior complete transport solve retain distinct source/runtime identities.
 
 ```sh
 # combined-aws-sm86-v0.3.0
