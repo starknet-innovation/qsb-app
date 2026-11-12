@@ -62,6 +62,11 @@ export function checkedOutput(raw: unknown, selected: SolverDescriptor, job: Job
       if (report.trials !== range.count * width || report.gateHits === undefined
         || report.gateHits > report.trials || report.gateHits < output.candidates.length)
         throw new Error("CandidateAccountingMismatch");
+      // Match the producer qualification gate. This detects grossly incomplete work;
+      // it is a statistical sanity check, not proof of complete enumeration.
+      const expectedGateHits = report.trials / 2 ** 24;
+      if (Math.abs(report.gateHits - expectedGateHits) > 6 * Math.sqrt(expectedGateHits) + 6)
+        throw new Error("CandidateGateCountMismatch");
     }
   }
   return { output, range };
