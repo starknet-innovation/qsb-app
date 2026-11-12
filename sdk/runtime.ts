@@ -1,8 +1,9 @@
 import { adoptPqb } from "../src/lib/pqb";
 import { readFile } from "node:fs/promises";
 import { loadPyodide } from "pyodide";
-import { startQsbRuntime, type QsbMethod } from "../src/lib/qsb-runtime";
-import { commitmentOperations, qsbOperations } from "../src/lib/qsb-operations";
+import { isPqbMethod, runPqbOperation } from "../src/lib/pqb-runtime";
+import { startQsbRuntime } from "../src/lib/qsb-runtime";
+import { commitmentOperations, qsbOperations, type LocalQsbMethod } from "../src/lib/qsb-operations";
 export type { PreparedAssembly } from "../src/lib/qsb-operations";
 
 /** The local QSB operations the SDK needs; the same operations src/lib/qsb.ts runs in the browser. */
@@ -66,7 +67,8 @@ export function nodeQsb(): BundledQsb {
       runtime = undefined;
       throw error;
     }));
-  const run = async (method: QsbMethod, args: string[] = []) => {
+  const run = async (method: LocalQsbMethod, args: string[] = []) => {
+    if (isPqbMethod(method)) return runPqbOperation(method, args);
     const loaded = await start();
     try {
       return loaded.call(method, args);

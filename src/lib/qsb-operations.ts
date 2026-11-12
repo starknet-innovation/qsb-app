@@ -1,13 +1,12 @@
-import { generatePqb, adoptPqb, assemblePqb } from "./pqb";
-import { withdrawalSchema, type Job } from "./model";
+import type { PqbMethod } from "./pqb-runtime";
 import type { QsbMethod } from "./qsb-runtime";
-type Run = (method: QsbMethod, args?: string[]) => Promise<string>;
+export type LocalQsbMethod = QsbMethod | PqbMethod;
+type Run = (method: LocalQsbMethod, args?: string[]) => Promise<string>;
 /** Typed bridge calls over a runtime: this browser worker, or the Node SDK's loader. */
 export function qsbOperations(run: Run) {
   return {
     async generateQsb(config: "A" | "PQB" = "A") {
-      if (config === "PQB") return generatePqb();
-      return JSON.parse(await run("generate")) as {
+      return JSON.parse(await run(config === "PQB" ? "pqb_generate" : "generate")) as {
         stateJson: string;
         publicStateJson: string;
         scriptHex: string;
@@ -15,10 +14,10 @@ export function qsbOperations(run: Run) {
       };
     },
     validateRecovery: async (stateJson: string) => JSON.parse(stateJson).config === "PQB"
-      ? Promise.resolve(adoptPqb(stateJson).scriptHash) : run("validate", [stateJson]),
+      ? run("pqb_validate", [stateJson]) : run("validate", [stateJson]),
     assembleQsb: async (state: string, manifest: unknown, solution: unknown) =>
       JSON.parse(state).config === "PQB"
-      ? Promise.resolve(assemblePqb(state, withdrawalSchema.parse(manifest), solution as NonNullable<Job["solution"]>))
+      ? run("pqb_assemble", [state, JSON.stringify(manifest), JSON.stringify(solution)])
       : run("assemble", [
         state,
         JSON.stringify(manifest),
@@ -52,7 +51,7 @@ export type PreparedAssembly = {
  * Wallet Secret Management"). The runtime gets the 2 × 150 commitments, and at `finishAssembly`
  * only the 15 preimages that `prepareAssembly` named; it never gets the secret set.
  */
-export function commitmentOperations(run: Run) {
+export function commitmentOperations(run: (method: QsbMethod, args?: string[]) => Promise<string>) {
   return {
     /** The public part of `generateQsb` for secrets whose HASH160s are `commitments`, in setup's order. */
     async setupFromCommitments(commitments: string[][]) {

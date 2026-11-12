@@ -177,7 +177,7 @@
   <!-- BROWSER LANE -->
   <div class="lane-label browser">
     <h2>User's browser <span style="font-weight:500;color:var(--muted)">or SDK / CLI</span></h2>
-    <p>Pinned Config A Pyodide sources and PQB TypeScript sources. Browser: Config A worker, PQB in its main process. SDK/CLI: calling Node process, without worker isolation. Decrypted state stays in local memory while unlocked. An SDK/CLI caller's own supplied state also exists as its plaintext copy until destroyed. With the SDK runtime's commitments-only calls, a key manager outside it can hold the HORS secrets instead: the runtime gets their commitments, and at assembly only the 15 preimages it discloses.</p>
+    <p>Pinned Config A Pyodide sources and PQB TypeScript sources. Browser: both protocols run in a local Web Worker. SDK/CLI: calling Node process, without worker isolation. Decrypted state stays in local memory while unlocked. An SDK/CLI caller's own supplied state also exists as its plaintext copy until destroyed. With the SDK runtime's commitments-only calls, a key manager outside it can hold the HORS secrets instead: the runtime gets their commitments, and at assembly only the 15 preimages it discloses.</p>
     <div class="holds">
       <span class="chip secret">HORS one-time secrets</span>
       <span class="chip secret">passphrase</span>

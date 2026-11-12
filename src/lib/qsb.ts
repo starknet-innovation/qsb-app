@@ -1,4 +1,4 @@
-import type { QsbMethod } from "./qsb-runtime";
+import type { LocalQsbMethod } from "./qsb-operations";
 import { qsbOperations } from "./qsb-operations";
 // Still exported from here, as before the Node SDK needed it without this module's browser worker.
 export { qsbOperations } from "./qsb-operations";
@@ -7,7 +7,7 @@ const pending = new Map<
   string,
   { resolve: (value: any) => void; reject: (reason: Error) => void }
 >();
-function call<T>(method: QsbMethod, args: string[] = []): Promise<T> {
+function call<T>(method: LocalQsbMethod, args: string[] = []): Promise<T> {
   if (!worker) {
     worker = new Worker(new URL("./qsb-worker.ts", import.meta.url), {
       type: "module",

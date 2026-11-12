@@ -88,7 +88,7 @@ function applyPqbHit(job: Job, checked: Record<string, unknown>, range: ReturnTy
       throw new Error("CandidateOutsideAssignedRange");
     job.solution = { sequence, locktime, round1: [], round2: [], pqb: { pinning: candidate } };
     job.stage = "round1";
-    job.pqbNextPinAttempt = attempt + 1;
+    job.pqbNextPinAttempt = Math.max(job.pqbNextPinAttempt ?? 0, attempt + 1);
     return;
   }
   const indices = z.array(z.number().int().min(0).max(108)).parse(checked.indices);

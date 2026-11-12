@@ -10,7 +10,9 @@ test("PQB generation and encrypted recovery stay local and work in a fresh brows
   });
   let fixture: { backup: string; hash: string };
   try {
-    const page = await context.newPage(); await page.goto("/");
+    const page = await context.newPage();
+    const workers: string[] = []; page.on("worker", worker => workers.push(worker.url()));
+    await page.goto("/");
     fixture = await page.evaluate(async () => {
       const runtime = await import("/src/lib/qsb.ts" as string), backup = await import("/src/lib/backup.ts" as string);
       const { withVaultConfiguration } = await import("/src/lib/provenance.ts" as string);
@@ -24,6 +26,7 @@ test("PQB generation and encrypted recovery stay local and work in a fresh brows
       const encrypted = await backup.encryptRecovery(r, "disposable browser PQB passphrase");
       runtime.lockQsb(); return { backup: encrypted, hash: g.scriptHash };
     });
+    expect(workers.some(url => url.includes("qsb-worker"))).toBe(true);
   } finally { await context.close(); }
   const cold = await browser.newContext({ baseURL, serviceWorkers: "block" });
   await cold.route("**/*", async route => {
@@ -32,12 +35,15 @@ test("PQB generation and encrypted recovery stay local and work in a fresh brows
     else await route.continue();
   });
   try {
-    const page = await cold.newPage(); await page.goto("/");
+    const page = await cold.newPage();
+    const workers: string[] = []; page.on("worker", worker => workers.push(worker.url()));
+    await page.goto("/");
     const hash = await page.evaluate(async text => {
       const runtime = await import("/src/lib/qsb.ts" as string), backup = await import("/src/lib/backup.ts" as string);
       const restored = await backup.decryptRecovery(text, "disposable browser PQB passphrase");
       const hash = await runtime.validateRecovery(restored.stateJson); runtime.lockQsb(); return hash;
     }, fixture!.backup);
     expect(hash).toBe(fixture!.hash); expect(writes).toEqual([]);
+    expect(workers.some(url => url.includes("qsb-worker"))).toBe(true);
   } finally { await cold.close(); }
 });

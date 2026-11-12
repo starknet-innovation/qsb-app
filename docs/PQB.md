@@ -4,7 +4,7 @@ The browser's vault creation form and `vaults.create({ config: "PQB", ... })` in
 
 ## Local custody and assembly
 
-[`src/lib/pqb.ts`](../src/lib/pqb.ts) generates a fresh 32-byte seed locally. The pinned PQB generator derives its shared HORS table, menu signatures and ECDSA co-signature key from that seed. Recovery state is exactly `{ "config": "PQB", "seed": "..." }`; adoption rebuilds the real-puzzle script from it. The encrypted backup and passphrase stay with the user. The browser runs this TypeScript in its own process; the SDK and CLI run it in their Node process. Dropping references does not guarantee zeroization.
+[`src/lib/pqb.ts`](../src/lib/pqb.ts) generates a fresh 32-byte seed locally. The pinned PQB generator derives its shared HORS table, menu signatures and ECDSA co-signature key from that seed. Recovery state is exactly `{ "config": "PQB", "seed": "..." }`; adoption rebuilds the real-puzzle script from it. The encrypted backup and passphrase stay with the user. The browser performs generation, recovery validation and assembly in its local Web Worker; the SDK and CLI run the same TypeScript in their Node process. Dropping references does not guarantee zeroization.
 
 The public vault contains the script, its dummy-signature table and the three menus as curve points. Strict allowlists reject private or unknown public-state fields. Menu signature scalars and the seed never enter search requests. A signed withdrawal intentionally discloses 17 selected HORS preimages, three selected menu signatures, the ECDSA co-signature and its public key. The seed, private co-signature key and unrevealed witness material remain local. See [key custody](KEY-CUSTODY.md).
 
@@ -14,7 +14,7 @@ Before assembling a witness, the local client re-derives all three solved digest
 
 A deployment still serves exactly one `SOLVER_RELEASE_ID`. `/config` returns its `solverProtocol` as well as `solverReleaseId`; a withdrawal requires the served release's protocol and generator to match its vault. The job pins that descriptor. Config A cannot use a PQB release, and PQB cannot use a Config A release. Drain existing jobs before changing the served release or Batch job-definition revision.
 
-The coordinator uses the same Step Functions and AWS Batch pipeline, reservations, unknown-submission reconciliation and GPU spend caps. Its CPU reference in `server/pqb-reference.ts` builds the public problem from the vault and approved manifest. It runs inside the coordinator bundle; Config A's Python reference remains in the separate reference Lambda. All deployment bundles are hashed in the build manifest.
+The coordinator uses the same Step Functions and AWS Batch pipeline, reservations, unknown-submission reconciliation and GPU spend caps. Each pinning intent atomically advances a durable high-water mark before its paid submission. After an empty round, re-pinning starts beyond every submitted pinning unit, including parallel units that completed before the winning hit. Its CPU reference in `server/pqb-reference.ts` builds the public problem from the vault and approved manifest. It runs inside the coordinator bundle; Config A's Python reference remains in the separate reference Lambda. All deployment bundles are hashed in the build manifest.
 
 | App job stage | Worker stage | Search |
 | --- | --- | --- |

@@ -229,6 +229,13 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     : solverRelease("qsb-config-a-ranked-v2-2791ed0");
   assertSolverRuntime(selected);
   const pqb = selected.protocol === "pqb-v1";
+  // Reconstruct the high-water mark for retained pinning state, before polling can
+  // remove slots or change stages. New intents advance it durably below.
+  if (pqb && job.stage === "pinning") {
+    job.pqbNextPinAttempt = Math.max(job.pqbNextPinAttempt ?? 0, job.attempt,
+      ...slots.filter(s => s.stage === "pinning").map(s => s.attempt + 1),
+      ...(job.completedAttempts ?? []).map(attempt => attempt + 1));
+  }
   // A slot saved before a POST that never recorded its ID: never replay it.
   if (job.status === "searching" && unknown()) {
     job.status = "paused";
@@ -417,6 +424,8 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
           next.status = "searching";
           next.computeProvider = "aws-batch";
           next.parallelSlots!.push(slot);
+          if (pqb && slot.stage === "pinning")
+            next.pqbNextPinAttempt = Math.max(next.pqbNextPinAttempt ?? 0, slot.attempt + 1);
           delete next.batchReplacementFor;
           delete next.oneSubmissionAllowed;
         },

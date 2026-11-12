@@ -173,6 +173,7 @@ export type Job = {
   parameterHashes?: Record<string, string>;
   /** Separates PQB searches after an empty round forces another pinning solution. */
   searchEpoch?: number;
+  /** Beyond every PQB pinning intent; advanced in the same durable reservation as the paid POST. */
   pqbNextPinAttempt?: number;
   attempt: number;
   /** Historical paid submission count; not the time budget. */

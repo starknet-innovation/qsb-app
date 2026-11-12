@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ prepare: vi.fn(), status: vi.fn(), cancel: vi.fn(), cpu: vi.fn() }));
+const mocks = vi.hoisted(() => ({ prepare: vi.fn(), status: vi.fn(), cancel: vi.fn(), cpu: vi.fn(),
+  limits: { workersMax: 1, executionTimeoutMs: 900000, maxJobGpuSeconds: 36000 } }));
 vi.mock("../src/lib/releases/registry.generated", async () => {
   const { servedFixture, pqbFixture } = await import("./solver-fixture");
   return { default: [servedFixture, pqbFixture] };
@@ -8,9 +9,7 @@ vi.mock("../server/network", () => ({ transactionsEnabled: true }));
 vi.mock("../server/chain", () => ({ chain: { assertNetwork: async () => {} } }));
 vi.mock("../server/compute-provider", () => ({ computeConfigured: () => true,
   configuredCompute: async () => ({ prepareRun: mocks.prepare, status: mocks.status, cancel: mocks.cancel }) }));
-vi.mock("../server/gpu-spend", async original => ({ ...await original<any>(), gpuSpendLimits: {
-  workersMax: 1, executionTimeoutMs: 900000, maxJobGpuSeconds: 36000,
-} }));
+vi.mock("../server/gpu-spend", async original => ({ ...await original<any>(), gpuSpendLimits: mocks.limits }));
 import { servedFixture, pqbFixture } from "./solver-fixture";
 import fixture from "./fixtures/pqb-reference.json";
 import { adoptPqb } from "../src/lib/pqb";
@@ -40,7 +39,7 @@ beforeAll(() => {
 });
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubEnv("SOLVER_RELEASE_ID", pqbFixture.id); vi.stubEnv("REFERENCE_FUNCTION", "synthetic");
-  store = new MemoryStore(); serial = 0;
+  store = new MemoryStore(); serial = 0; mocks.limits.workersMax = 1;
   mocks.prepare.mockImplementation(async () => {
     const n = serial++, f = Object.assign(async () => ({ id: `test-${n}` }), { identity: {
       jobName: `test-${n}`, inputSha256: "a".repeat(64), inputKey: `inputs/${n}`, queue: "test", definition: "test",
@@ -101,6 +100,7 @@ it("never resubmits a paid request whose outcome is unknown", async () => {
   await seed(); mocks.prepare.mockImplementationOnce(async () => Object.assign(async () => { throw Error("lost response"); },
     { identity: { jobName: "lost", inputSha256: "a".repeat(64), inputKey: "inputs/lost", queue: "q", definition: "d" } }));
   await expect(tick()).rejects.toThrow("lost response");
+  expect((await job()).pqbNextPinAttempt).toBe(1);
   await tick();
   expect((await job()).status).toBe("paused"); expect((await job()).error).toContain("Submission outcome unknown");
   expect(mocks.prepare).toHaveBeenCalledOnce();
@@ -148,4 +148,52 @@ it("refuses wrong worker context, ranges, accounting and out-of-unit hits before
     { ...o, trials: o.trials - 1 }, { ...o, workRange: { ...o.workRange, prefixStart: "0" } },
     { ...o, candidates: ["2147483662 500000000 0 0 0 1"] }])
     expect(() => checkedOutput(altered, deployedSolver(), j, 0)).toThrow();
+});
+
+
+it("re-pins beyond every submitted parallel pinning range, including earlier completed ranges", async () => {
+  mocks.limits.workersMax = 3;
+  await seed(); await tick();
+  expect((await job()).pqbNextPinAttempt).toBe(3);
+  let j = await job();
+  mocks.status.mockImplementation(async id => id === "test-1"
+    ? { id, status: "COMPLETED", output: output(j, [], 1) } : { id, status: "IN_PROGRESS" });
+  await tick();
+  j = await job();
+  expect(j.completedAttempts).toEqual([1]);
+  expect(j.pqbNextPinAttempt).toBe(4);
+  const line = "2147483648 500000000 0 0 0 1";
+  mocks.status.mockImplementation(async id => id === "test-0"
+    ? { id, status: "COMPLETED", output: output(j, [line], 0) } : { id, status: "COMPLETED" });
+  mocks.cpu.mockImplementation(async e => e.action === "export" ? pqbReference(e)
+    : { valid: true, candidate: line, sequence: 2147483648, locktime: 500000000 });
+  await tick();
+  j = await job();
+  expect(j.stage).toBe("round1"); expect(j.pqbNextPinAttempt).toBe(4);
+  // Simulate the complete round space already exhausted; no real provider is called.
+  const row = (await store.get(pk, sk))!;
+  await store.put({ ...row, version: row.version + 1, job: { ...j, attempt: 70,
+    parallelSlots: [], completedAttempts: [] } }, row.version);
+  await tick();
+  expect((await job()).attempt).toBe(4);
+  mocks.status.mockImplementation(async id => ({ id, status: "IN_PROGRESS" }));
+  await tick();
+  const pinAttempts = mocks.prepare.mock.calls.map(call => call[1])
+    .filter(input => input.stage === "pinning").map(input => input.attempt);
+  expect(pinAttempts).toEqual([0, 1, 2, 3, 4, 5, 6]);
+});
+
+it("recovers the pinning high-water mark from retained slots and completed attempts", async () => {
+  const line = "2147483648 500000000 0 0 0 1";
+  const j = await seed({ parallelSlots: [
+    { stage: "pinning", attempt: 0, runpodId: "retained-0", submissionStartedAt: vault.createdAt },
+    { stage: "pinning", attempt: 9, runpodId: "retained-9", submissionStartedAt: vault.createdAt },
+  ], completedAttempts: [7], gpuBudgetReservedSeconds: 1800 });
+  mocks.status.mockImplementation(async id => id === "retained-0"
+    ? { id, status: "COMPLETED", output: output(j, [line], 0) } : { id, status: "COMPLETED" });
+  mocks.cpu.mockImplementation(async e => e.action === "export" ? pqbReference(e)
+    : { valid: true, candidate: line, sequence: 2147483648, locktime: 500000000 });
+  await tick();
+  expect((await job()).pqbNextPinAttempt).toBe(10);
+  expect((await job()).stage).toBe("round1");
 });
