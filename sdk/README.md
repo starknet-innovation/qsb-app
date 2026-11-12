@@ -184,4 +184,4 @@ Publishing needs two decisions first: a licence for this code (the package stays
 
 The public vault has curve-point menus and a dummy-signature table. The service never receives the seed or menu scalars before signing. A signed PQB withdrawal intentionally discloses its selected HORS preimages and menu signatures, the ECDSA co-signature and its public key. Unrevealed material stays local. The packed SDK carries the upstream MIT license and notices under `public/pqb/`.
 
-A withdrawal requires `/config`'s `solverProtocol` to match the vault; mismatch is refused before saving a new withdrawal intent. No PQB release is enrolled yet. [PQB support](../docs/PQB.md) describes the search, source pin, enrollment requirements and evidence limits.
+A withdrawal requires `/config`'s `solverProtocol` to match the vault; mismatch is refused before saving a new withdrawal intent. The TLS-fixed `pqb-aws-sm86-v0.1.0` descriptor is enrolled for explicit adoption; a deployment must select and serve that release before it can accept PQB withdrawals. [PQB support](../docs/PQB.md) describes the search, source pin, enrollment requirements and evidence limits.
