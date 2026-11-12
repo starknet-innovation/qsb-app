@@ -1,6 +1,5 @@
 """Isolated capacity safeguards: no credentials, cloud calls or paid work."""
 import copy
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
