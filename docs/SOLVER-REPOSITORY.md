@@ -2,7 +2,7 @@
 
 GPU work is separate from custody and independent verification (#35). The solver source, image builds and provenance attestations live in [qsb-solver](https://github.com/starknet-innovation/qsb-solver). This app keeps the coordinator, release registry, local generators and independent CPU references: `worker/cpu` for Config A and `server/pqb-reference.ts` for PQB. [PQB support](PQB.md) describes the second protocol; no PQB image is enrolled. No CUDA source or compiler is needed by `npm run vendor`, the tests, the frontend or the Lambda packaging.
 
-The GPU receives only public parameters, returns untrusted hits, and can waste compute by omitting work. The app verifies each hit independently with `worker/cpu`. A digest or provenance attestation identifies an image; it doesn't prove its arithmetic or complete range coverage.
+The GPU receives only public parameters, returns untrusted hits, and can waste compute by omitting work. The app verifies each hit independently with the protocol's CPU reference. A digest or provenance attestation identifies an image; it doesn't prove its arithmetic or complete range coverage.
 
 ## Enrolled releases
 
@@ -32,6 +32,8 @@ A tagged qsb-solver release publishes a GHCR image by digest with GitHub build p
 4. Run the registry generator (it runs before tests, typechecking and builds), the tests and a build, and commit the descriptor with the regenerated `registry.generated.ts`. No coordinator change is needed.
 
 Enrolling a descriptor doesn't serve it, publish an image or change a job definition.
+
+PQB remains HOLD despite its completed public synthetic transport solve; see [current evidence and adoption limits](PQB.md#source-enrollment-and-evidence). The producer's private-validation descriptor proposal is not a published release asset. Its prospective GHCR reference is not proof that an image exists there. The existing historical and combined QSB workflows do not publish the PQB Docker target. Before PQB enrollment, verify the final artifact's actual publication workflow/source provenance, matching contract, installed-file identities, correctness evidence and notices. Never relabel the measured older image as newer reviewed source.
 
 ```sh
 # combined-aws-sm86-v0.3.0
