@@ -336,7 +336,10 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
     let parameters: ReturnType<typeof parseParameters> | undefined;
     let sent = 0;
     const ownerBudget = await OwnerGpuBudget.open(store, event.owner);
-    while (slots.length < gpuSpendLimits.workersMax) {
+    const parallelism = provider.parallelismLimit ?? gpuSpendLimits.workersMax;
+    if (!Number.isInteger(parallelism) || parallelism < 1 || parallelism > gpuSpendLimits.workersMax)
+      throw new Error("ProviderLimitsUnconfirmed");
+    while (slots.length < parallelism) {
       if (Date.now() - tickStarted > FILL_DEADLINE_MS) break;
       while (assigned.has(attempt) || completed.has(attempt)) attempt++;
       try {
