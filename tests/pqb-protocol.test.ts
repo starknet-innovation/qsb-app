@@ -71,7 +71,9 @@ function output(j: Job, candidates: string[] = [], attempt = j.attempt) {
   return { status: "completed", stage: pqbWorkerStage(j.stage), manifestHash: j.manifestHash,
     attempt, candidates, kernelCommit: pqbFixture.kernelCommit, checkpoint: "range-complete",
     searchVersion: "pqb-ranked-v2", verified: false, workRange: range,
-    trials: range.count * (j.stage === "pinning" ? 72 : j.stage === "round1" ? 192 : 64), gateHits: candidates.length };
+    trials: range.count * (j.stage === "pinning" ? 72 : j.stage === "round1" ? 192 : 64),
+    gateHits: Math.max(candidates.length,
+      Math.round(range.count * (j.stage === "pinning" ? 72 : j.stage === "round1" ? 192 : 64) / 2 ** 24)) };
 }
 
 it("enrolls only the matching PQB contract/generator and never pins a QSB release to a PQB vault", () => {
@@ -148,6 +150,21 @@ it("refuses wrong worker context, ranges, accounting and out-of-unit hits before
     { ...o, trials: o.trials - 1 }, { ...o, workRange: { ...o.workRange, prefixStart: "0" } },
     { ...o, candidates: ["2147483662 500000000 0 0 0 1"] }])
     expect(() => checkedOutput(altered, deployedSolver(), j, 0)).toThrow();
+});
+
+it("checks both sides of the producer's statistical gate-count bound for every PQB stage", async () => {
+  const base = await seed();
+  for (const stage of ["pinning", "round1", "round2"] as const) {
+    const j = { ...base, stage }, o = output(j);
+    const mean = o.trials / 2 ** 24, tolerance = 6 * Math.sqrt(mean) + 6;
+    for (const gateHits of [Math.ceil(mean - tolerance), Math.floor(mean + tolerance)])
+      expect(() => checkedOutput({ ...o, gateHits }, deployedSolver(), j, 0)).not.toThrow();
+    for (const gateHits of [0, Math.ceil(mean - tolerance) - 1, Math.floor(mean + tolerance) + 1])
+      expect(() => checkedOutput({ ...o, gateHits }, deployedSolver(), j, 0))
+        .toThrow("CandidateGateCountMismatch");
+    expect(() => checkedOutput({ ...o, status: "interrupted", trials: undefined, gateHits: undefined },
+      deployedSolver(), j, 0)).not.toThrow();
+  }
 });
 
 
