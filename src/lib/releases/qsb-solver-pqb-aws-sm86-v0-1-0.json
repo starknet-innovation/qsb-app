@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 3,
+  "id": "pqb-ranked-v2-cfd99e384469-edce7a14b554",
+  "protocol": "pqb-v1",
+  "generatorCommit": "eccdd09772edf14ab37fc63992b0626ad7ff2221",
+  "searchVersion": "pqb-ranked-v2",
+  "searchContract": "5217daa6415b83dcce2d85159130df4994ab0e9bb67910c7bdf00e5804f4ee71",
+  "solverRepository": "https://github.com/starknet-innovation/qsb-solver",
+  "solverCommit": "cfd99e3844698f59679e4c15cf567db2976b9ffc",
+  "kernelCommit": "cfd99e3844698f59679e4c15cf567db2976b9ffc",
+  "image": "ghcr.io/starknet-innovation/qsb-solver@sha256:edce7a14b5548a079f8ebf1e866c533cb14573328cf739a6647b150cca08756e"
+}

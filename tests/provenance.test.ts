@@ -144,8 +144,8 @@ it("refuses duplicate releases and archived ID replacement", () => {
   ).toThrow("DuplicateSolverRelease");
 });
 
-it("pins the published external release while retaining the archived default", () => {
-  const releases = solverReleases().filter((release) => "schemaVersion" in release);
+it("pins published Config A releases while retaining the archived default", () => {
+  const releases = solverReleases().filter((release) => "schemaVersion" in release && release.protocol === "qsb-config-a-v1");
   expect(releases.length).toBeGreaterThan(0);
   for (const release of releases) {
     const v = vault();
@@ -160,4 +160,23 @@ it("retains published v2 verbatim but refuses new paid work without a tested con
   const old = solverRelease(publishedV2.id);
   expect(() => assertPaidSolverContract(old)).toThrow("SolverSearchContractRequired");
   expect(() => assertPaidSolverContract(externalSolverDescriptorSchema.parse(external()))).not.toThrow();
+});
+
+import publishedPqb from "../src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json";
+import publicPqbFixture from "./fixtures/pqb-reference.json";
+import { adoptPqb } from "../src/lib/pqb";
+
+it("pins the enrolled PQB release only to PQB vaults and requires explicit selection", () => {
+  const generated = adoptPqb(JSON.stringify({ config: "PQB", seed: publicPqbFixture.seed }));
+  const v = {
+    network: "mainnet", config: "PQB", scriptHex: generated.scriptHex,
+    scriptHash: createHash("sha256").update(Buffer.from(generated.scriptHex, "hex")).digest("hex"),
+    publicStateJson: generated.publicStateJson,
+  };
+  const release = solverRelease(publishedPqb.id);
+  expect(release).toEqual(publishedPqb);
+  expect(() => assertPaidSolverContract(release)).not.toThrow();
+  expect(assertSolverPin(pinSolver(v, release.id), v)).toEqual(release);
+  expect(() => pinSolver(v)).toThrow("SolverVaultProtocolMismatch");
+  expect(() => pinSolver(vault(), release.id)).toThrow("SolverVaultProtocolMismatch");
 });

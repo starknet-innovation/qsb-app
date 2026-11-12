@@ -1,5 +1,7 @@
 # Status
 
+PQB's TLS-fixed [`pqb-aws-sm86-v0.1.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/pqb-aws-sm86-v0.1.0) descriptor is enrolled for explicit adoption. Its registry digest and original build provenance verify; qualification retains native evidence only for the byte-identical compute stack, with fresh TLS/S3 checks. No new GPU timing, served Step Functions solve, solved-spend Core/miner acceptance or end-to-end PQB withdrawal is claimed. This change does not select the release, deploy or enable mainnet switches. See [PQB evidence and adoption limits](PQB.md#source-enrollment-and-evidence).
+
 As of 23 October 2026. #8, the plan to a first mainnet withdrawal, is complete; what's open is listed below.
 
 ## Deployed

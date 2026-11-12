@@ -25,7 +25,7 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB Config A and PQB) vaults: v
 3. The state machine's `CoordinateSearch` task invokes the coordinator Lambda (`terraform/workflow.tf`). The coordinator submits GPU work to AWS Batch, polls it, and has the reference Lambda (`worker/cpu`) re-check every hit.
 4. Once solved, the browser assembles and signs the withdrawal locally. `POST /api/jobs/:id/submit` checks the exact spend, runs the offline Core check and posts it once to MARA Slipstream ([exact submission](docs/EXACT-SUBMIT.md)).
 
-A PQB vault uses the same flow with PQB-specific problem construction and local witness assembly. Choose its protocol when creating it; a withdrawal requires the deployment to serve an enrolled solver for that protocol. No PQB image is currently enrolled.
+A PQB vault uses the same flow with PQB-specific problem construction and local witness assembly. Choose its protocol when creating it; a withdrawal requires the deployment to serve an enrolled solver for that protocol. The [TLS-fixed PQB release](docs/PQB.md#source-enrollment-and-evidence) is enrolled; serving it still requires an explicit deployment selection.
 
 The deployed API Lambda (`server/lambda.ts`) serves mainnet only. The deploy-time switches `mainnet_enabled` and `exact_submit_enabled` gate funding, search and submission ([runbook](docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches)).
 
