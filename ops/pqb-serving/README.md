@@ -34,18 +34,42 @@ image and partition contract, and a separately recorded allowance. The first
 reservation is retained in campaign accounting. Neither execution is resumed or
 replayed after an unknown submission.
 
+When the ordinary `g5.xlarge` pool has no capacity, `capacity.py` prepares an
+isolated `qsb-gpu-validation` queue and compute environment using `g5.2xlarge`
+A10G hosts. It copies the reviewed host AMI, immutable launch-template version,
+network and instance profile. The pool uses `BEST_FIT_PROGRESSIVE`, minimum zero
+and maximum 64 vCPUs. Its provider limits the coordinator to eight single-GPU
+hosts, within the existing global 16-slot ceiling. The production queue and pool
+are never modified. Production work appearing during collection stops the public
+assessment so it can release capacity. This is a validation configuration, not a
+production solver selection.
+
+An administrator installs two temporary additions, preserving all original policy
+statements: an inline operator grant for create/update/delete/tag on exactly the
+new queue and pool, and a runtime-boundary supplement for submit/tag on only the
+new queue. The boundary supplement also restricts the principal to the dedicated
+validation coordinator role pattern. Both additions require London and the same
+absolute expiry. The controller reads them through the existing metadata-only
+role; it never writes IAM or requests administrator credentials. The grant must
+expire within 24 hours of planning, with at least five hours left before preparing
+the four-hour campaign. Fresh readbacks precede capacity creation and workflow
+starts. The administrator removes both additions after cleanup; their expiry is
+fixed and is never extended during a campaign.
+
 Set one absolute campaign deadline before resource creation; never extend it.
 An independently scheduled `deadline.py` invocation pauses only the two public
-fixture jobs and terminates only jobs belonging to the campaign's exact Batch
-job-definition revision. It leaves the shared production queue and compute
-configuration intact. The ordinary Batch 900-second running timeout and deployed
-30-minute queue/startup watchdog remain in force. The schedule is armed at the recorded deadline and read back before any workflow
-start. The complete function configuration, runtime roles, trust and inline policies
-are checked before each start, including after changing to the solve table.
+fixture jobs and drains only the campaign's exact Batch job-definition revision.
+The fixed deadline drain is unconditional. With isolated capacity, a separate
+five-minute schedule invokes the same function and stops work whose total queue,
+startup and running age exceeds 30 minutes. The ordinary Batch 900-second running
+timeout also remains in force. Both schedules are read back before a workflow
+start, along with the complete function configuration, runtime roles, trust and
+inline policies, including after changing to the solve table.
 [Scheduler has 60-second precision](https://docs.aws.amazon.com/scheduler/latest/UserGuide/schedule-types.html);
-retain actual invocation and drain times separately from the deadline. A timeout, unexpectedly failed/incomplete unit, unknown intent or
-CPU mismatch stops the assessment for collection and reconciliation. Superseded
-units may be cancelled and never receive completion credit; it is not retried automatically.
+retain actual invocation and drain times separately from the deadline. A timeout,
+unexpectedly failed/incomplete unit, unknown intent or CPU mismatch stops the
+assessment for collection and reconciliation. Superseded units may be cancelled
+and never receive completion credit; work is not retried automatically.
 
 Retain both workflow histories, every revision-specific Batch job description,
 public input/output S3 objects and hashes, native startup/result logs, assigned
@@ -81,8 +105,23 @@ QSB_NETWORK=mainnet node --import tsx ops/pqb-serving/fixture.ts prepare "$EVIDE
 python3 ops/pqb-serving/control.py inspect "$EVIDENCE"
 release_id=$(node -p 'require("./src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json").id')
 node terraform/scripts/build.mjs --network=mainnet --solver-release="$release_id"
+# Optional temporary pool: generate the baseline and scope it against the
+# administrator-requested policy kept outside Git. AWS_ACCOUNT_ID comes from
+# the explicitly selected operator profile, never from a different account.
+DISABLE_IAM_POLICY_AUTOPILOT_TELEMETRY=true uvx iam-policy-autopilot@0.4.0 generate-policies \
+  "$PWD/ops/pqb-serving/capacity.py" --region eu-west-2 --account "$AWS_ACCOUNT_ID" \
+  --service-hints batch --tf-dir "$PWD/terraform/gpu" --pretty > "$EVIDENCE/autopilot-capacity.json"
+python3 ops/pqb-serving/capacity.py plan "$EVIDENCE" \
+  --generated-policy "$EVIDENCE/autopilot-capacity.json" \
+  --requested-policy "$EVIDENCE/admin-operator-policy.json" \
+  --boundary-baseline "$EVIDENCE/runtime-boundary-baseline.json"
+# Planning and building allocate no hardware and start no campaign deadline.
+# The plan retains the full boundary request for administrator review.
+# Continue only when both installed administrator additions verify:
+python3 ops/pqb-serving/capacity.py verify_grant "$EVIDENCE"
 python3 ops/pqb-serving/control.py prepare "$EVIDENCE"
 python3 ops/pqb-serving/control.py mirror "$EVIDENCE"
+python3 ops/pqb-serving/capacity.py create "$EVIDENCE"
 python3 ops/pqb-serving/control.py deploy "$EVIDENCE"
 python3 ops/pqb-serving/control.py start "$EVIDENCE" --phase preflight
 python3 ops/pqb-serving/control.py collect "$EVIDENCE"
@@ -93,17 +132,30 @@ python3 ops/pqb-serving/control.py collect "$EVIDENCE"
 QSB_NETWORK=mainnet node --import tsx ops/pqb-serving/fixture.ts verify "$EVIDENCE"
 ```
 
+Omit the `capacity.py` and Autopilot commands when using the original pool.
 Call `collect` regularly during each execution; it retains snapshots rather than
 rewriting originals. The whole campaign reserves $200 operationally, has a fixed
 four-hour deadline, permits at most 900 + 540,000 reserved GPU-seconds across the
-two public jobs, and uses the existing fleet's 16-GPU cap. This is an assessment
+two public jobs. The ordinary provider keeps its 16-slot cap; the isolated provider
+reduces it to eight. The account quota applies across both pools.
+This is an assessment
 reservation, not a guaranteed billing limit. Current regional pricing must be
 recorded independently before preparing a new campaign.
 
 `stop` pauses the two public fixture rows and drains only the test revision.
 Run `final_collect` after work is terminal. It retains both fixture tables,
 complete workflow event histories, native artifacts and resource configuration,
-then seals their byte hashes. `remove` requires that receipt, checks that live work
+then seals their byte hashes. For temporary capacity, run
+`capacity.py remove "$EVIDENCE"` next: it collects and seals a fresh snapshot,
+disables/deletes only the owned isolated queue and pool,
+and requires recorded hosts terminated, recorded volumes absent and its scaling
+group absent. An invalid pool can still be cleaned up. Every job in the isolated queue must be terminal and already recorded. Production
+resources are never deleted. If asynchronous deletion is pending, `capacity.py verify_removed`
+performs fresh reads. Rerunning `remove` can continue after a known asynchronous
+delete using the original successful response; uncertain mutations require
+separate reconciliation and are never replayed.
+The normal `control.py remove` refuses to remove the deadline guard until this
+capacity cleanup verifies. It requires the final collection receipt, checks that live work
 and fixture rows have not changed, and removes only positively collected dedicated
 resources and fixture objects. Failed/partial deployments use the same final
 collection path; missing mutation responses must first be reconciled separately,

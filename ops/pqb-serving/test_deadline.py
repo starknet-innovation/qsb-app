@@ -63,6 +63,28 @@ class DeadlineTests(unittest.TestCase):
         with patch.dict('os.environ', {'SETTINGS': json.dumps({'deadline': 1000})}), patch('time.time', return_value=999):
             self.assertEqual(deadline.handler({}, None), {'beforeDeadline': True})
 
+    def test_age_watchdog_counts_only_owned_jobs_and_rejects_missing_timestamps(self):
+        batch = Mock()
+        batch.get_paginator.return_value.paginate.side_effect = lambda **kw: [{'jobSummaryList': [{'jobId': 'one'}]}] if kw['jobStatus'] == 'RUNNING' else []
+        batch.describe_jobs.return_value = {'jobs': [
+            {'jobId': 'old', 'jobDefinition': 'ours', 'createdAt': 100000},
+            {'jobId': 'recent', 'jobDefinition': 'ours', 'createdAt': 1500000},
+            {'jobId': 'unrelated', 'jobDefinition': 'other', 'createdAt': 100000},
+            {'jobId': 'unknown-age', 'jobDefinition': 'ours'}]}
+        result = deadline.expired_jobs(batch, {'queue': 'isolated', 'definition': 'ours', 'watchdogMaxAgeSeconds': 1800}, 2000)
+        self.assertEqual(result, ['old', 'unknown-age'])
+        batch.terminate_job.assert_not_called()
+
+    def test_periodic_watchdog_keeps_the_fixed_deadline_unconditional(self):
+        import json
+        settings = {'deadline': 1000, 'watchdogMaxAgeSeconds': 1800}
+        modules = {'boto3': SimpleNamespace(client=lambda *a, **kw: Mock()),
+                   'botocore.config': SimpleNamespace(Config=lambda **kw: kw)}
+        for now, expired, drains in [(999, [], False), (999, ['old'], True), (1000, [], True)]:
+            with self.subTest(now=now, expired=expired), patch.dict('sys.modules', modules), patch.dict('os.environ', {'SETTINGS': json.dumps(settings)}), patch('time.time', return_value=now), patch.object(deadline, 'expired_jobs', return_value=expired), patch.object(deadline, 'drain', return_value={'drained': True}) as drain:
+                deadline.handler({}, Mock())
+                self.assertEqual(drain.called, drains)
+
 
 if __name__ == '__main__':
     unittest.main()

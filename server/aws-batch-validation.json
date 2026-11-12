@@ -1,0 +1,8 @@
+{
+  "name": "qsb-gpu-validation",
+  "region": "eu-west-2",
+  "instanceType": "g5.2xlarge",
+  "vcpusPerHost": 8,
+  "maxVcpus": 64,
+  "allocationStrategy": "BEST_FIT_PROGRESSIVE"
+}

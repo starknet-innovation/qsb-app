@@ -4,6 +4,21 @@ import os
 import time
 
 
+def expired_jobs(batch, settings, now):
+    expired = []
+    for status in ('SUBMITTED', 'PENDING', 'RUNNABLE', 'STARTING', 'RUNNING'):
+        for page in batch.get_paginator('list_jobs').paginate(jobQueue=settings['queue'], jobStatus=status):
+            ids = [j['jobId'] for j in page['jobSummaryList']]
+            for offset in range(0, len(ids), 100):
+                for job in batch.describe_jobs(jobs=ids[offset:offset + 100])['jobs']:
+                    if job['jobDefinition'] != settings['definition']:
+                        continue
+                    created = job.get('createdAt')
+                    if not isinstance(created, (int, float)) or created <= 0 or now - created / 1000 >= settings['watchdogMaxAgeSeconds']:
+                        expired.append(job['jobId'])
+    return expired
+
+
 def stop(clients, settings):
     from botocore.exceptions import ClientError
     reason = settings.get('stopReason', 'Fixed public validation deadline reached')
@@ -53,12 +68,18 @@ def drain(clients, settings, remaining=None):
 
 def handler(event, context):
     settings = json.loads(os.environ['SETTINGS'])
-    if time.time() < settings['deadline']:
+    before_deadline = time.time() < settings['deadline']
+    if before_deadline and not settings.get('watchdogMaxAgeSeconds'):
         return {'beforeDeadline': True}
     import boto3
     from botocore.config import Config
     config = Config(connect_timeout=5, read_timeout=15, retries={'total_max_attempts': 1})
     clients = {n: boto3.client(n, config=config) for n in ('batch', 'dynamodb')}
+    if before_deadline:
+        expired = expired_jobs(clients['batch'], settings, time.time())
+        if not expired:
+            return {'beforeDeadline': True, 'expiredJobs': []}
+        settings['stopReason'] = 'Public validation job exceeded the queue/startup age ceiling'
     # A coordinator invocation may already have reserved work before the pause.
     # Reconcile past its 90-second timeout so a late accepted POST is also stopped.
     return drain(clients, settings, remaining=lambda: context.get_remaining_time_in_millis() / 1000)

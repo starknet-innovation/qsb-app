@@ -93,8 +93,11 @@ class Campaign:
             raise RuntimeError('Dedicated resource scope changed; refuse cleanup or execution')
         if self.state.get('logs') not in (None, ['/aws/lambda/' + expected['function'], '/aws/lambda/' + expected['cleanupFunction'], '/aws/vendedlogs/states/' + name]):
             raise RuntimeError('Dedicated log scope changed')
-        if self.state['queue'] != self.arn('batch', 'job-queue/qsb-gpu') or self.state['bucket'] != f'qsb-gpu-{self.account}-{self.region}-jobs':
+        queue_name = json.loads((ROOT / 'server/aws-batch-validation.json').read_text())['name'] if self.state.get('capacity') else 'qsb-gpu'
+        if self.state['queue'] != self.arn('batch', 'job-queue/' + queue_name) or self.state['bucket'] != f'qsb-gpu-{self.account}-{self.region}-jobs':
             raise RuntimeError('Shared Batch binding changed')
+        if self.state.get('capacity') and self.state.get('watchdogSchedule') != name + '-watchdog':
+            raise RuntimeError('Isolated watchdog scope changed')
         definition = self.state.get('definition')
         if definition and not re.fullmatch(re.escape(self.arn('batch', 'job-definition/qsb-gpu-solver:')) + r'[0-9]+', definition):
             raise RuntimeError('Unexpected Batch definition namespace')
@@ -117,7 +120,7 @@ class Campaign:
     def save(self):
         persist(self.state_path, self.state)
 
-    def mutate(self, key, service, operation, **params):
+    def mutate(self, key, service, operation, invoke=None, **params):
         journal = self.directory / 'requests'
         journal.mkdir(exist_ok=True)
         intent, response = journal / (key + '.intent.json'), journal / (key + '.response.json')
@@ -139,7 +142,7 @@ class Campaign:
             return prior['result']
         persist(intent, request, exclusive=True)
         try:
-            result = getattr(self.client(service), operation)(**params)
+            result = invoke() if invoke is not None else getattr(self.client(service), operation)(**params)
         except Exception as error:
             persist(response, {'error': type(error).__name__, 'message': str(error)}, exclusive=True)
             raise
@@ -181,6 +184,15 @@ class Campaign:
                 raise RuntimeError('Build artifact hash mismatch: ' + name)
         if any(snapshot['activeJobs'].values()) or snapshot['runningExecutions']:
             raise RuntimeError('Baseline must be drained')
+        capacity_plan = self.directory / 'capacity-plan.json'
+        capacity = None
+        if capacity_plan.exists():
+            from capacity import Capacity
+            capacity = Capacity(self)
+            if (capacity.plan['sourceCommit'] != source or capacity.plan['productionQueue'] != snapshot['queue'][0]
+                or capacity.plan['expiresAt'] < time.time() + 5 * 3600):
+                raise RuntimeError('Capacity plan is stale or differs from the source/baseline')
+            capacity.check_grant()
         groups = snapshot['computeEnvironments'][0]['computeResources']['securityGroupIds']
         baseline = self.client('ec2').describe_instances(Filters=[{'Name': 'instance.group-id', 'Values': groups}])
         persist(self.directory / 'instance-baseline.json', baseline, exclusive=True)
@@ -196,6 +208,10 @@ class Campaign:
             'tables': [name + '-preflight', name + '-solve'], 'roles': [name + '-' + n for n in ['coordinator', 'workflow', 'deadline', 'scheduler']],
             'function': name + '-coordinator', 'cleanupFunction': name + '-deadline', 'workflow': name,
             'schedule': name + '-deadline', 'phase': 'prepared'}
+        if capacity:
+            self.state['capacity'] = {'planSha256': hashlib.sha256(capacity_plan.read_bytes()).hexdigest(), 'status': 'planned'}
+            self.state['queue'] = capacity.plan['queueArn']
+            self.state['watchdogSchedule'] = name + '-watchdog'
         retained = self.directory / 'build-artifacts'; retained.mkdir()
         for name in ['manifest.json', 'api.zip', 'coordinator.zip', 'reference.zip', 'webhooks.zip']:
             shutil.copyfile(ROOT / 'terraform/.build' / name, retained / name)
@@ -203,7 +219,7 @@ class Campaign:
                 os.fsync(artifact.fileno())
         persist(self.state_path, self.state, exclusive=True)
         self.validate_scope()
-        print(dump({'prepared': name, 'deadline': self.state['deadline'], 'reservedUsd': 200}).strip())
+        print(dump({'prepared': self.state['name'], 'deadline': self.state['deadline'], 'reservedUsd': 200}).strip())
 
     def before_deadline(self):
         if time.time() > self.state['deadline'] - 1200:
@@ -253,10 +269,13 @@ class Campaign:
         state = self.state
         snapshot = json.loads((self.directory / 'live-runtime-private.json').read_text())
         # Check the current shared configuration; never change it.
-        queue = self.client('batch').describe_job_queues(jobQueues=[state['queue']])['jobQueues'][0]
+        queue = self.client('batch').describe_job_queues(jobQueues=[snapshot['queue'][0]['jobQueueArn']])['jobQueues'][0]
         if queue != snapshot['queue'][0]:
             # desired capacity is in the CE, not the queue: this comparison is intentionally exact.
             raise RuntimeError('Shared queue changed since the reviewed baseline')
+        if state.get('capacity'):
+            from capacity import Capacity
+            Capacity(self).check_ready()
         original = snapshot['definition'][0]
         params = {k: copy.deepcopy(original[k]) for k in ['jobDefinitionName', 'type', 'parameters', 'retryStrategy', 'containerProperties', 'timeout', 'propagateTags', 'platformCapabilities'] if k in original}
         params['containerProperties']['image'] = state['image']
@@ -313,6 +332,8 @@ class Campaign:
             raise RuntimeError('Deployed coordinator bytes differ')
         fixture = json.loads((self.directory / 'public-fixture.json').read_text())
         settings = {'deadline': state['deadline'], 'tables': state['tables'], 'pk': fixture['rows'][1]['pk'], 'sk': fixture['rows'][1]['sk'], 'queue': state['queue'], 'definition': state['definition']}
+        if state.get('capacity'):
+            settings['watchdogMaxAgeSeconds'] = 1800
         zip_bytes = io.BytesIO()
         with zipfile.ZipFile(zip_bytes, 'w', zipfile.ZIP_DEFLATED) as z:
             z.writestr('deadline.py', (ROOT / 'ops/pqb-serving/deadline.py').read_bytes())
@@ -331,6 +352,16 @@ class Campaign:
         if check['State'] != 'ENABLED' or check['Target']['Arn'] != self.arn('lambda', 'function:' + state['cleanupFunction']):
             raise RuntimeError('Independent deadline not armed')
         persist(self.directory / 'armed-deadline.json', check, exclusive=True)
+        if state.get('capacity'):
+            self.mutate('watchdog-schedule', 'scheduler', 'create_schedule', Name=state['watchdogSchedule'],
+                ScheduleExpression='rate(5 minutes)', ScheduleExpressionTimezone='UTC', FlexibleTimeWindow={'Mode': 'OFF'},
+                StartDate=datetime.fromtimestamp(state['createdAt'] + 300, timezone.utc), EndDate=datetime.fromtimestamp(state['deadline'], timezone.utc),
+                Target={'Arn': self.arn('lambda', 'function:' + state['cleanupFunction']), 'RoleArn': self.iam(state['roles'][3]),
+                    'Input': '{}', 'RetryPolicy': {'MaximumEventAgeInSeconds': 3600, 'MaximumRetryAttempts': 10}})
+            watchdog = self.client('scheduler').get_schedule(Name=state['watchdogSchedule'])
+            if watchdog['State'] != 'ENABLED' or watchdog['Target']['Arn'] != self.arn('lambda', 'function:' + state['cleanupFunction']):
+                raise RuntimeError('Isolated age watchdog not armed')
+            persist(self.directory / 'armed-watchdog.json', watchdog, exclusive=True)
         state['phase'] = 'armed'; self.save()
 
     @staticmethod
@@ -392,10 +423,19 @@ class Campaign:
             raise RuntimeError('Require the collected native preflight before the full solve')
         if phase == 'preflight' and self.state['phase'] != 'armed':
             raise RuntimeError('Never restart the preflight')
+        if self.state.get('capacity'):
+            from capacity import Capacity
+            Capacity(self).check_ready()
         schedule = self.client('scheduler').get_schedule(Name=self.state['schedule'])
         armed = json.loads((self.directory / 'armed-deadline.json').read_text())
         if schedule['State'] != 'ENABLED' or schedule['ScheduleExpression'] != armed['ScheduleExpression'] or schedule['Target'] != armed['Target']:
             raise RuntimeError('Independent deadline configuration changed')
+        if self.state.get('capacity'):
+            watchdog = self.client('scheduler').get_schedule(Name=self.state['watchdogSchedule'])
+            armed_watchdog = json.loads((self.directory / 'armed-watchdog.json').read_text())
+            fields = ['State', 'ScheduleExpression', 'ScheduleExpressionTimezone', 'Target', 'StartDate', 'EndDate', 'FlexibleTimeWindow']
+            if watchdog['State'] != 'ENABLED' or dump({k: watchdog.get(k) for k in fields}) != dump({k: armed_watchdog.get(k) for k in fields}):
+                raise RuntimeError('Isolated age watchdog configuration changed')
         deadline_function = self.client('lambda').get_function_configuration(FunctionName=self.state['cleanupFunction'])
         recorded = json.loads((self.directory / 'requests/deadline-function.response.json').read_text())['result']
         self.check_function(deadline_function, recorded)
@@ -431,6 +471,14 @@ class Campaign:
     def native_jobs(self):
         if not self.state.get('definition'):
             return []
+        if self.state.get('capacity', {}).get('queueRemoved'):
+            ids = self.state.get('knownJobIds', [])
+            jobs = []
+            for offset in range(0, len(ids), 100):
+                jobs += self.client('batch').describe_jobs(jobs=ids[offset:offset + 100])['jobs']
+            if sorted(j['jobId'] for j in jobs) != sorted(ids) or any(j['jobDefinition'] != self.state['definition'] or j['jobQueue'] != self.state['queue'] for j in jobs):
+                raise RuntimeError('Recorded work after queue deletion is incomplete or changed')
+            return jobs
         ids = set()
         for status in (*ACTIVE, 'SUCCEEDED', 'FAILED'):
             for page in self.client('batch').get_paginator('list_jobs').paginate(jobQueue=self.state['queue'], jobStatus=status):
@@ -443,6 +491,13 @@ class Campaign:
 
     def collect(self):
         from boto3.dynamodb.types import TypeDeserializer
+        if self.state.get('capacity'):
+            from capacity import Capacity
+            try:
+                Capacity(self).check_ready()
+            except Exception:
+                self.stop(reason='Validation capacity changed; stop and reconcile')
+                raise
         phase = 'solve' if self.state['phase'].startswith('solve') else 'preflight'
         n = int(phase == 'solve')
         fixture = json.loads((self.directory / 'public-fixture.json').read_text())
@@ -563,6 +618,9 @@ class Campaign:
         groups = snapshot['computeEnvironments'][0]['computeResources']['securityGroupIds']
         instances = self.client('ec2').describe_instances(Filters=[{'Name': 'instance.group-id', 'Values': groups}])
         persist(self.directory / ('instances-' + stamp + '.json'), instances, exclusive=True)
+        if self.state.get('capacity'):
+            from capacity import Capacity
+            Capacity(self).collect(stamp)
 
     @staticmethod
     def rows_hash(rows):
@@ -590,7 +648,7 @@ class Campaign:
                 tags = {t.get('Key', t.get('key')): t.get('Value', t.get('value')) for t in tags}
             if tags.get('PqbValidation') != self.state['name']:
                 raise RuntimeError('Refuse to collect/delete a resource without the campaign ownership tag')
-        snapshot = {'tables': {}, 'functions': {}, 'roles': {}, 'logs': [], 'workflow': None, 'schedule': None}
+        snapshot = {'tables': {}, 'functions': {}, 'roles': {}, 'logs': [], 'workflow': None, 'schedule': None, 'watchdogSchedule': None}
         row_hashes, ledger = {}, 0
         for name in self.state['tables']:
             table = optional('dynamodb', 'describe_table', TableName=name)
@@ -642,6 +700,12 @@ class Campaign:
             if schedule['Target']['Arn'] != self.arn('lambda', 'function:' + self.state['cleanupFunction']) or schedule['Target']['RoleArn'] != self.iam(self.state['roles'][3]):
                 raise RuntimeError('Unexpected schedule target; refuse deletion')
             snapshot['schedule'] = schedule
+        if self.state.get('watchdogSchedule'):
+            watchdog = optional('scheduler', 'get_schedule', Name=self.state['watchdogSchedule'])
+            if watchdog:
+                if watchdog['Target']['Arn'] != self.arn('lambda', 'function:' + self.state['cleanupFunction']) or watchdog['Target']['RoleArn'] != self.iam(self.state['roles'][3]):
+                    raise RuntimeError('Unexpected watchdog target; refuse deletion')
+                snapshot['watchdogSchedule'] = watchdog
         expected_logs = ['/aws/lambda/' + self.state['function'], '/aws/lambda/' + self.state['cleanupFunction'], '/aws/vendedlogs/states/' + self.state['name']]
         for group in expected_logs:
             found = [g for page in self.client('logs').get_paginator('describe_log_groups').paginate(logGroupNamePrefix=group) for g in page['logGroups'] if g['logGroupName'] == group]
@@ -667,7 +731,9 @@ class Campaign:
         snapshot_path = self.directory / ('final-resources-' + stamp + '.json')
         persist(snapshot_path, snapshot, exclusive=True)
         paths = [snapshot_path, self.directory / ('native-index-' + stamp + '.json'), self.directory / ('instances-' + stamp + '.json'), self.directory / 'public-fixture.json']
-        for folder in ['requests', 'objects', 'logs', 'build-artifacts']:
+        if self.state.get('capacity'):
+            paths.append(self.directory / 'capacity-plan.json')
+        for folder in ['requests', 'objects', 'logs', 'build-artifacts', 'capacity']:
             paths += [p for p in (self.directory / folder).rglob('*') if p.is_file()]
         files = {str(p.relative_to(self.directory)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
         receipt = {'format': 'pqb-serving-final-collection-v1', 'name': self.state['name'], 'sourceCommit': self.state['sourceCommit'],
@@ -696,6 +762,8 @@ class Campaign:
 
     def remove(self):
         receipt, resources = self.checked_final_collection()
+        if self.state.get('capacity') and self.state['capacity'].get('status') != 'removed-verified':
+            raise RuntimeError('Verify isolated queue and pool cleanup first')
         jobs = self.native_jobs()
         if any(j['status'] in ACTIVE for j in jobs) or sorted(j['jobId'] for j in jobs) != receipt['nativeJobIds']:
             raise RuntimeError('Native work changed since final collection')
@@ -726,6 +794,8 @@ class Campaign:
             self.mutate('remove-object-' + str(index), 's3', 'delete_object', **params)
         if resources['schedule']:
             self.mutate('remove-schedule', 'scheduler', 'delete_schedule', Name=self.state['schedule'])
+        if resources.get('watchdogSchedule'):
+            self.mutate('remove-watchdog', 'scheduler', 'delete_schedule', Name=self.state['watchdogSchedule'])
         if resources['workflow']:
             self.mutate('remove-workflow', 'stepfunctions', 'delete_state_machine', stateMachineArn=self.arn('states', 'stateMachine:' + self.state['workflow']))
         for name in resources['functions']:

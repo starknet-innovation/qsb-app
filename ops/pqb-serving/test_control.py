@@ -136,6 +136,27 @@ class JournalTests(unittest.TestCase):
                 c.mutate('one', 'service', 'create', Code=b'changed')
             client.create.assert_called_once()
 
+    def test_explicit_sdk_callback_retains_no_replay_guarantee(self):
+        with TemporaryDirectory() as directory:
+            client = Mock(); c = self.campaign(directory, client)
+            sdk = Mock(return_value={'created': 'owned'})
+            self.assertEqual(c.mutate('pool', 'batch', 'create_compute_environment', invoke=sdk, Name='owned'), {'created': 'owned'})
+            c.mutate('pool', 'batch', 'create_compute_environment', invoke=sdk, Name='owned')
+            sdk.assert_called_once()
+            with self.assertRaisesRegex(RuntimeError, 'changed request'):
+                c.mutate('pool', 'batch', 'create_compute_environment', invoke=sdk, Name='another')
+            client.create_compute_environment.assert_not_called()
+
+    def test_deleted_queue_inventory_uses_retained_job_ids(self):
+        c = object.__new__(control.Campaign)
+        c.state = {'definition': 'owned:3', 'queue': 'isolated', 'knownJobIds': ['job'], 'capacity': {'queueRemoved': True}}
+        batch = Mock(); c.client = Mock(return_value=batch)
+        batch.describe_jobs.return_value = {'jobs': [{'jobId': 'job', 'jobDefinition': 'owned:3', 'jobQueue': 'isolated', 'status': 'SUCCEEDED'}]}
+        self.assertEqual(c.native_jobs()[0]['jobId'], 'job')
+        batch.get_paginator.assert_not_called()
+        batch.describe_jobs.return_value = {'jobs': []}
+        with self.assertRaisesRegex(RuntimeError, 'incomplete or changed'): c.native_jobs()
+
 
 if __name__ == '__main__':
     unittest.main()

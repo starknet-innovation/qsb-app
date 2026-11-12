@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Parallel search with four GPUs. Unsigned fixtures and synthetic provider IDs only.
 const mocks = vi.hoisted(() => ({
+  parallelismLimit: undefined as number | undefined,
   enabled: true,
   health: vi.fn(),
   run: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock("../server/providers", () => ({ slipstream: {} }));
 vi.mock("../server/compute-provider", () => ({
   computeConfigured: () => true,
   configuredCompute: async () => ({
+    parallelismLimit: mocks.parallelismLimit,
     health: mocks.health,
     prepareRun: mocks.prepareRun,
     status: mocks.status,
@@ -130,6 +132,7 @@ const saved = async () => (await store.get(pk, sk))!.job as Job;
 let states: Record<string, unknown>;
 let submitted: number;
 beforeEach(() => {
+  mocks.parallelismLimit = undefined;
   mocks.enabled = true;
   (store as MemoryStore).rows.clear();
   vi.clearAllMocks();
@@ -152,6 +155,23 @@ beforeEach(() => {
     const n = ++submitted;
     return Object.assign(() => mocks.run(input), { identity: identity(n) });
   });
+});
+
+it("uses a smaller provider capacity without exceeding the global GPU cap", async () => {
+  mocks.parallelismLimit = 2;
+  await seed();
+  await handler(event);
+  expect(mocks.run.mock.calls.map(c => c[0].attempt)).toEqual([0, 1]);
+  expect(await saved()).toMatchObject({ gpuSubmissions: 2, gpuBudgetReservedSeconds: 1800 });
+  await handler(event);
+  expect(mocks.run).toHaveBeenCalledTimes(2);
+});
+
+it.each([0, -1, 2.5, 5])("rejects an invalid provider slot ceiling %s before preparing paid work", async limit => {
+  mocks.parallelismLimit = limit;
+  await seed();
+  await expect(handler(event)).rejects.toThrow("ProviderLimitsUnconfirmed");
+  expect(mocks.prepareRun).not.toHaveBeenCalled(); expect(mocks.run).not.toHaveBeenCalled();
 });
 
 it("fills every GPU with consecutive chunks, saving each intent and reservation before its POST", async () => {
