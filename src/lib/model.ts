@@ -1,3 +1,4 @@
+import { pqbPublicStateSchema } from "./pqb";
 export type BatchSubmissionIdentity = {
   jobName: string;
   inputSha256: string;
@@ -11,6 +12,7 @@ export type SearchSlot = {
   attempt: number;
   batchSubmission?: BatchSubmissionIdentity;
   submissionStartedAt: string;
+  searchEpoch?: number;
   /** Set once SubmitJob returns. A slot without one has an unknown paid outcome. */
   runpodId?: string;
   /** Stamped from an explicit resume: if this chunk is found stopped, repeat it once. */
@@ -56,17 +58,17 @@ export const publicVaultSchema = z
     name: z.string().min(1).max(60),
     createdAt: z.string().datetime(),
     network: z.literal(NETWORK_ID),
-    config: z.literal("A"),
+    config: z.enum(["A", "PQB"]),
     scriptHex: hex.max(20000),
     scriptHash: txid,
     paymentAddress: z.string().min(14).max(100),
     publicStateJson: z.string().max(60000),
     configuration: z
       .object({
-        protocol: z.literal("qsb-config-a-v1"),
-        generatorCommit: z.literal("2c9172051d5c150ef0a994ca6b988a08a3ef9e85"),
+        protocol: z.enum(["qsb-config-a-v1", "pqb-v1"]),
+        generatorCommit: z.string().regex(/^[a-f0-9]{40}$/),
         network: z.string(),
-        config: z.literal("A"),
+        config: z.enum(["A", "PQB"]),
         scriptHash: txid,
         scriptBytesHash: txid,
         publicStateHash: txid,
@@ -169,6 +171,10 @@ export type Job = {
   manifestHash: string;
   solver?: SolverPin;
   parameterHashes?: Record<string, string>;
+  /** Separates PQB searches after an empty round forces another pinning solution. */
+  searchEpoch?: number;
+  /** Beyond every PQB pinning intent; advanced in the same durable reservation as the paid POST. */
+  pqbNextPinAttempt?: number;
   attempt: number;
   /** Historical paid submission count; not the time budget. */
   gpuSubmissions?: number;
@@ -211,6 +217,7 @@ export type Job = {
     locktime: number;
     round1: number[];
     round2: number[];
+    pqb?: import("./pqb").PqbHits;
   };
   revision: number;
 };
@@ -247,6 +254,10 @@ export function formatBtc(value: string | bigint): string {
 }
 export function validatePublicState(value: string): void {
   const s = JSON.parse(value) as Record<string, unknown>;
+  if (s.config === "PQB") {
+    pqbPublicStateSchema.parse(s);
+    return;
+  }
   const allowed = [
     "config",
     "hash_mode",

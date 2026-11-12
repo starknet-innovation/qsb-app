@@ -279,3 +279,11 @@ revoked keys are 401, and so is a key whose stored record names another
 network (`network_mismatch`),
 session-only or unmapped routes and missing scopes are 403, the active-key cap
 is 409, revoking an unknown key is 404, and keys switched off are 503.
+
+## Vault protocols
+
+`POST /vaults` accepts `config: "A"` (QSB Config A) or `config: "PQB"`, with a matching `configuration.protocol` and pinned generator commit. PQB's public state contains only its script, dummy-signature table and curve-point menus; the seed and menu scalars are never request fields. Both protocols use the same registration and one-deposit rules.
+
+`GET /config` returns `solverProtocol` (`qsb-config-a-v1`, `pqb-v1` or null) alongside `solverReleaseId`. A new withdrawal requires the served release to match its vault's protocol and generator, otherwise `solver_not_served` is returned before outpoint reservation. A deployment serves one release at a time.
+
+PQB jobs retain the app's `pinning`, `round1`, `round2`, `verification` stage names: the two round stages map to worker `round0` and `round1`. A solved PQB result has eight `round1` indices and nine `round2` indices from a shared 109-entry table, without overlap, plus `solution.pqb` containing `pinning`, `round0`, and `round1` public hit lines. They are sealed into the local signing backup with the exact solution. Signed PQB withdrawals disclose selected HORS and menu witness material by design; see [PQB support](PQB.md) and [key custody](KEY-CUSTODY.md).

@@ -40,6 +40,10 @@ for (const file of ["manifest.json", "LICENSE", ...Object.keys(manifest)]) {
   cpSync(path.join(root, "public", "qsb", file), path.join(sources, file));
 }
 
+for (const file of ["LICENSE", "THIRD_PARTY_NOTICES.md", "provenance.json"]) {
+  cpSync(path.join(root, "src", "pqb-core", file), path.join(sdk, "public", "pqb", file));
+}
+
 const tsc = path.join(root, "node_modules", ".bin", "tsc");
 execFileSync(tsc, ["-p", path.join(sdk, "tsconfig.build.json")], { stdio: "inherit" });
 finishDeclarations(path.join(dist, "types"));
@@ -54,7 +58,7 @@ console.log("Built the SDK into sdk/dist and sdk/public/qsb. Nothing is publishe
 function finishDeclarations(types) {
   const entry = path.join(types, "sdk", "index.d.ts");
   const specifier = /(\bfrom\s*|\bimport\s*\(\s*)(["'])(\.{1,2}\/[^"']+)\2/g;
-  const jsonImport = /^import\s+([A-Za-z_$][\w$]*)\s+from\s+["'](\.{1,2}\/[^"']+\.json)["'];\s*$/gm;
+  const jsonImport = /^import\s+([A-Za-z_$][\w$]*)\s+from\s+["'](\.{1,2}\/[^"']+\.json)["'](?:\s+with\s*\{[^}]*\})?;\s*$/gm;
   const reached = new Set();
   const inlined = [];
   const visit = (file) => {
@@ -68,7 +72,9 @@ function finishDeclarations(types) {
     });
     text = text.replace(specifier, (_, lead, quote, spec) => {
       const target = path.resolve(dir, spec);
-      const found = [[`${target}.d.ts`, `${spec}.js`], [path.join(target, "index.d.ts"), `${spec}/index.js`]]
+      const found = (spec.endsWith(".js")
+        ? [[`${target.slice(0, -3)}.d.ts`, spec]]
+        : [[`${target}.d.ts`, `${spec}.js`], [path.join(target, "index.d.ts"), `${spec}/index.js`]])
         .find(([candidate]) => existsSync(candidate));
       if (!found) throw new Error(`${path.relative(types, file)} imports ${spec}, which has no declaration`);
       visit(found[0]);

@@ -1,3 +1,4 @@
+import { PQB_MAX_SCRIPTSIG } from "./pqb";
 import { BITCOIN_NETWORK } from "./network";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
@@ -207,6 +208,8 @@ export function fundingFeeForRate(
  * Round 1: 2*34 + 9*34 + 8*21 + 9*3 = 569. Round 2: 2*34 + 9*34 + 7*21 + 9*3 = 548. Pin: 68.
  */
 export const QSB_CONFIG_A_MAX_SCRIPTSIG = 1185;
+/** Each protocol derives or documents its maximum witness size before quoting a fee. */
+export const vaultScriptSigBound = (config: "A" | "PQB") => config === "PQB" ? PQB_MAX_SCRIPTSIG : QSB_CONFIG_A_MAX_SCRIPTSIG;
 /**
  * Virtual size of a signed two-input QSB withdrawal: input 0 is the wallet's helper payment
  * output (P2WPKH or nested SegWit, witness counted at the 72-byte DER maximum), input 1 is
@@ -231,8 +234,9 @@ export function withdrawalFeeForRate(
   nestedHelper: boolean,
   outputScriptLength: number,
   milliSatPerVb: bigint,
+  config: "A" | "PQB" = "A",
 ): { fee: bigint; vsize: number } {
-  const vsize = withdrawalVsize(nestedHelper, outputScriptLength);
+  const vsize = withdrawalVsize(nestedHelper, outputScriptLength, vaultScriptSigBound(config));
   return { fee: (BigInt(vsize) * milliSatPerVb + 999n) / 1000n, vsize };
 }
 /** Virtual size of a raw transaction: weight = 3 × size without witnesses + full size. */

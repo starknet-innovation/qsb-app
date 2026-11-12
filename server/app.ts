@@ -1,4 +1,4 @@
-import { deployedSolver, deployedSolverId } from "./solver-deployment";
+import { deployedSolver, deployedSolverId, deployedSolverProtocol } from "./solver-deployment";
 import { observeWithdrawal } from "./withdrawal-status";
 import { submitExact, SubmitDisabled } from "./submit-exact";
 import { exportFunding, scriptFence, submitFunding, type FundingDependencies } from "./submit-funding";
@@ -400,6 +400,7 @@ export function createApp(
       mainnetEnabled: enabled,
       operationsEnabled: enabled,
       solverReleaseId: deployedSolverId(),
+      solverProtocol: deployedSolverProtocol(),
       exactSubmitEnabled: dependencies.exactSubmit ?? exactSubmitEnabled(),
       apiKeysEnabled: apiKeys,
       billing: "not_configured",
@@ -700,6 +701,7 @@ export function createApp(
       );
     }
     if (
+      publicState.config !== vault.config ||
       publicState.full_script_hex !== vault.scriptHex ||
       createHash("sha256")
         .update(Buffer.from(vault.scriptHex, "hex"))
@@ -1178,7 +1180,12 @@ export function createApp(
         "Transaction amounts do not balance.",
       );
     let selectedSolver: ReturnType<typeof deployedSolver>;
-    try { selectedSolver = deployedSolver(manifest.solverReleaseId); }
+    try {
+      selectedSolver = deployedSolver(manifest.solverReleaseId);
+      const configuration = assertVaultConfiguration(v);
+      if (selectedSolver.protocol !== configuration.protocol || selectedSolver.generatorCommit !== configuration.generatorCommit)
+        throw new Error("SolverVaultProtocolMismatch");
+    }
     catch {
       return apiError(
         c,

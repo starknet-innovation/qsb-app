@@ -35,7 +35,7 @@ Account
   config | rates | utxos        Server configuration, MARA fee rates, confirmed payment outputs
   service-fee                   The optional service fee's current quote (sats, BTC/USD, address)
 Vaults
-  vault create --name <name> --backup <new file> [--state <file>]
+  vault create --name <name> --backup <new file> [--config A|PQB] [--state <file>]
                   --state uses recovery state you generated (the JSON the pipeline's setup writes)
                   instead of generating it. It's refused unless it's exactly what the pipeline builds
                   from its HORS secrets, checked locally before the backup is saved or the vault registered.
@@ -91,6 +91,7 @@ const options = {
   "message-out": { type: "string" },
   "signed-psbt": { type: "string" },
   name: { type: "string" },
+  config: { type: "string" },
   backup: { type: "string" },
   state: { type: "string" },
   "out-backup": { type: "string" },
@@ -248,11 +249,13 @@ export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise
         const file = need("backup"), name = need("name");
         assertOutputs(io, [file], [values.state], [values["message-out"]]);
         const stateJson = values.state === undefined ? undefined : await readTextFile(io, values.state);
+        if (values.config !== undefined && values.config !== "A" && values.config !== "PQB") throw new Error("--config must be A or PQB");
         const secret = await passphrase(true);
         await signIn();
         say(stateJson === undefined ? "Generating QSB keys locally…" : `Checking the recovery state in ${values.state} locally…`);
         const { vault } = await client.vaults.create({
           name,
+          config: values.config as "A" | "PQB" | undefined,
           passphrase: secret,
           saveBackup: (text) => writeNewPrivateFile(io, file, text),
           ...(stateJson === undefined ? {} : { stateJson }),

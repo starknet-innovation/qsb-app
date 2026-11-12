@@ -17,8 +17,8 @@ describe("SDK workspace package", () => {
     for (const [name, version] of Object.entries(sdk.dependencies)) expect(root.dependencies[name]).toBe(version);
   });
 
-  it("ships only the bundles, declarations, pinned Python sources and README", () => {
-    expect(sdk.files).toEqual(["dist", "public/qsb", "README.md"]);
+  it("ships only the bundles, declarations, pinned Python sources, PQB notices and README", () => {
+    expect(sdk.files).toEqual(["dist", "public/qsb", "public/pqb", "README.md"]);
     expect(sdk.bin).toEqual({ qsb: "./dist/cli.js" });
     expect(sdk.exports).toEqual({ ".": { types: "./dist/types/sdk/index.d.ts", default: "./dist/index.js" } });
   });

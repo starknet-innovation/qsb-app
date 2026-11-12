@@ -1,3 +1,4 @@
+import { vaultScriptSigBound } from "./lib/transactions";
 import {fingerprint} from './lib/provenance';
 import {readSessionEpoch} from './lib/api';
 import { operationsAllowed } from "./lib/readiness";
@@ -258,9 +259,9 @@ export default function TransactionDialog({
     setPendingFunding(readFundingGuard());
     if (!job && !deposit) {
       const active = generation.current;
-      api<{solverReleaseId?: string | null}>("/config").then(config => {
+      api<{solverReleaseId?: string | null; solverProtocol?: string | null}>("/config").then(config => {
         if (active === generation.current)
-          setSolverId(typeof config.solverReleaseId === "string" ? config.solverReleaseId : null);
+          setSolverId(typeof config.solverReleaseId === "string" && (config.solverProtocol ?? "qsb-config-a-v1") === (vault.config === "PQB" ? "pqb-v1" : "qsb-config-a-v1") ? config.solverReleaseId : null);
       }).catch(() => { if (active === generation.current) setSolverId(null); });
     }
     if (deposit && !job) {
@@ -394,7 +395,7 @@ export default function TransactionDialog({
       return "Enter a valid destination address to see the miner fee.";
     }
     try {
-      return withdrawalFeeForRate(nestedPaymentAddress(wallet.address), script.length, parseFeeRate(feeRate));
+      return withdrawalFeeForRate(nestedPaymentAddress(wallet.address), script.length, parseFeeRate(feeRate), vault.config);
     } catch (e) {
       return e instanceof Error ? e.message : "Unable to estimate the miner fee.";
     }
@@ -655,7 +656,7 @@ export default function TransactionDialog({
             : undefined;
           if (saved) {
             // The saved fee can't change. Refuse to start a paid search MARA wouldn't accept.
-            const vsize = withdrawalVsize(nestedPaymentAddress(wallet.address), saved.outputScript.length / 2);
+            const vsize = withdrawalVsize(nestedPaymentAddress(wallet.address), saved.outputScript.length / 2, vaultScriptSigBound(vault.config));
             await assertMinerFloor((BigInt(saved.fee) * 1000n) / BigInt(vsize));
             check();
             return BigInt(saved.fee);
@@ -667,6 +668,7 @@ export default function TransactionDialog({
             nestedPaymentAddress(wallet.address),
             outputScript(destination).length,
             rate,
+            vault.config,
           ).fee;
         })(),
         outputValue = BigInt(funding.value) + BigInt(helper.value) - feeSats;
@@ -677,8 +679,10 @@ export default function TransactionDialog({
             JSON.parse(unlocked.authorization.manifestJson),
           )
         : undefined;
-      const config = await api<{solverReleaseId?: string | null}>("/config");
+      const config = await api<{solverReleaseId?: string | null; solverProtocol?: string | null}>("/config");
       check();
+      if ((config.solverProtocol ?? "qsb-config-a-v1") !== (vault.config === "PQB" ? "pqb-v1" : "qsb-config-a-v1"))
+        throw Error("The deployment serves a different vault protocol. Nothing was created.");
       if (!config.solverReleaseId || config.solverReleaseId !== solverId)
         throw Error("The deployment solver is unavailable or changed. Reopen the withdrawal before saving an intent.");
       if (previousIntent && previousIntent.solverReleaseId !== config.solverReleaseId)

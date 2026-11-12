@@ -1,12 +1,8 @@
+import { solutionSchema } from "../lib/solution";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { hex } from "@scure/base";
 import { z } from "zod";
 import { canonicalManifest, withdrawalSchema, type Job } from "../lib/model";
-
-const subset = z
-  .array(z.number().int().min(0).max(149))
-  .length(9)
-  .refine((values) => new Set(values).size === 9, "Duplicate subset index");
 
 /** Public coordinator output only. Recovery state, passphrases and keys are not fields. */
 export const coordinatorSolvedResultSchema = z
@@ -17,14 +13,7 @@ export const coordinatorSolvedResultSchema = z
     vaultId: z.string().uuid(),
     manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
     manifest: withdrawalSchema,
-    solution: z
-      .object({
-        sequence: z.number().int().min(0).max(0xffffffff),
-        locktime: z.number().int().min(0).max(0xffffffff),
-        round1: subset,
-        round2: subset,
-      })
-      .strict(),
+    solution: solutionSchema,
   })
   .strict();
 
@@ -83,6 +72,7 @@ export function coordinatorPublicSolvedResult(
       locktime: job.solution.locktime,
       round1: job.solution.round1,
       round2: job.solution.round2,
+      ...(job.solution.pqb ? { pqb: job.solution.pqb } : {}),
     },
   });
 }

@@ -1,3 +1,4 @@
+import { pqbHitsSchema } from "../src/lib/pqb";
 import { z } from "zod";
 import packageJson from "../package.json";
 import {
@@ -273,6 +274,7 @@ const jobFields = {
       locktime: z.number().int(),
       round1: z.array(z.number().int()),
       round2: z.array(z.number().int()),
+      pqb: pqbHitsSchema.optional(),
     })
     .optional(),
 };
@@ -376,6 +378,7 @@ const configResponse = z.object({
     z.string().nullable(),
     "The solver release this deployment serves, or null.",
   ),
+  solverProtocol: describe(z.enum(["qsb-config-a-v1", "pqb-v1"]).nullable(), "Protocol of the served solver, or null. A withdrawal requires a solver for its vault protocol."),
   exactSubmitEnabled: describe(
     z.boolean(),
     "Whether submission to the miner is switched on.",

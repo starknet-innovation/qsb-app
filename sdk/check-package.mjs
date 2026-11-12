@@ -23,6 +23,7 @@ try {
   const files = packed.files.map((f) => f.path).sort();
   const manifest = JSON.parse(readFileSync(path.join(root, "public", "qsb", "manifest.json"), "utf8"));
   const required = ["package.json", "README.md", "dist/index.js", "dist/cli.js", "dist/types/sdk/index.d.ts",
+    "public/pqb/LICENSE", "public/pqb/THIRD_PARTY_NOTICES.md", "public/pqb/provenance.json",
     "public/qsb/manifest.json", "public/qsb/LICENSE", ...Object.keys(manifest).map((f) => `public/qsb/${f}`)];
   for (const file of required) if (!files.includes(file)) fail(`the tarball lacks ${file}`);
   // Exactly those files, plus the generated declarations; anything else fails.

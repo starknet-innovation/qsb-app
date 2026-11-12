@@ -1,3 +1,4 @@
+import { pqbReference } from "./pqb-reference";
 import { deployedSolver } from "./solver-deployment";
 import {
   assertPaidSolverContract,
@@ -31,6 +32,8 @@ import {
 const cpuClient = new LambdaClient({ region: process.env.AWS_REGION });
 type Event = { owner: string; jobId: string; revision: number; polls?: number };
 async function cpu(payload: unknown) {
+  const e = payload as { publicStateJson?: string };
+  if (e.publicStateJson && JSON.parse(e.publicStateJson).config === "PQB") return pqbReference(payload);
   const response = await cpuClient.send(
     new InvokeCommand({
       FunctionName: process.env.REFERENCE_FUNCTION,
@@ -94,7 +97,7 @@ async function coordinate(event: Event, store: Store) {
   const job = row.job as Job;
   if (event.revision !== job.revision) return { ...event, done: true };
   // More than one GPU per withdrawal, or a job already carrying parallel slots.
-  if (gpuSpendLimits.workersMax > 1 || job.parallelSlots)
+  if (gpuSpendLimits.workersMax > 1 || job.parallelSlots || job.solver?.descriptor.protocol === "pqb-v1")
     return parallelTick(event, row, store, cpu);
   const save = () =>
     store.put({ ...row, version: row.version + 1, job }, row.version);

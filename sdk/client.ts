@@ -1,3 +1,4 @@
+import { vaultScriptSigBound } from "../src/lib/transactions";
 import { randomUUID } from "node:crypto";
 import * as btc from "@scure/btc-signer";
 import { base64, hex } from "@scure/base";
@@ -75,6 +76,7 @@ export type ApiConfig = {
   operationsEnabled?: boolean;
   exactSubmitEnabled?: boolean;
   solverReleaseId?: string | null;
+  solverProtocol?: "qsb-config-a-v1" | "pqb-v1" | null;
   /** The deployment's per-owner limits; `null` when they're misconfigured. `allowlisted` is the signed-in caller's. */
   ownerLimits?: {
     allowlist: boolean;
@@ -286,7 +288,12 @@ function assertOwnerAllowed(config: ApiConfig) {
  * binds a vault to (its hash); the commitments its public state declares are never checked against it.
  */
 function sharingSecrets(vaults: PublicVault[], publicStateJson: string): PublicVault | undefined {
-  const { hors_commitments: rounds } = JSON.parse(publicStateJson) as { hors_commitments: string[][] };
+  const state = JSON.parse(publicStateJson);
+  if (state.config === "PQB") {
+    // The seed fixes every commitment and co-signature key; a reused seed rebuilds this script.
+    return vaults.find(v => v.scriptHex === state.full_script_hex);
+  }
+  const { hors_commitments: rounds } = state as { hors_commitments: string[][] };
   // Each commitment is a 20-byte push. A chance match elsewhere in a script would only refuse.
   const pushes = rounds.flat().map((commitment) => `14${commitment}`);
   return vaults.find((vault) => pushes.some((push) => vault.scriptHex.toLowerCase().includes(push)));
@@ -440,7 +447,7 @@ export class QsbClient {
      * pushes one of its HORS commitments. Refusals are `RefusedState`s, as is the server's
      * refusal of a script that isn't new (`vault_script_registered`, `vault_script_paid`).
      */
-    create: (input: { name: string; passphrase: string; saveBackup: SaveBackup; stateJson?: string }) =>
+    create: (input: { name: string; passphrase: string; saveBackup: SaveBackup; config?: "A" | "PQB"; stateJson?: string }) =>
       this.createVault(input),
     list: () =>
       this.session.api<{
@@ -613,7 +620,7 @@ export class QsbClient {
     return data;
   }
 
-  private async createVault(input: { name: string; passphrase: string; saveBackup: SaveBackup; stateJson?: string }) {
+  private async createVault(input: { name: string; passphrase: string; saveBackup: SaveBackup; config?: "A" | "PQB"; stateJson?: string }) {
     const name = input.name.trim();
     if (!name || name.length > 60) throw new Error("Give the vault a name of 1 to 60 characters.");
     if (input.passphrase.length < 14)
@@ -624,14 +631,17 @@ export class QsbClient {
     const supplied = input.stateJson === undefined ? undefined : { qsb: nodeQsb(), stateJson: input.stateJson };
     const qsb = supplied?.qsb ?? this.qsb;
     try {
-      const data = supplied ? await this.adoptState(supplied.qsb, supplied.stateJson) : await qsb.generateQsb();
+      const data = supplied ? await this.adoptState(supplied.qsb, supplied.stateJson)
+        : input.config === undefined ? await qsb.generateQsb() : await qsb.generateQsb(input.config);
       validatePublicState(data.publicStateJson);
+      const config = JSON.parse(data.publicStateJson).config as "A" | "PQB";
+      if (input.config && input.config !== config) throw new Error("Supplied state protocol does not match config");
       const vault = withVaultConfiguration({
         id: randomUUID(),
         name,
         createdAt: new Date().toISOString(),
         network: NETWORK_ID,
-        config: "A",
+        config,
         scriptHex: data.scriptHex,
         scriptHash: data.scriptHash,
         publicStateJson: data.publicStateJson,
@@ -940,6 +950,8 @@ export class QsbClient {
     const funded = await this.depositStatus(vault.id);
     if (!funded.status.confirmed || !funded.vault.funding) throw new Error("Wait for the deposit to confirm.");
     const funding = funded.vault.funding;
+    if ((config.solverProtocol ?? "qsb-config-a-v1") !== vault.configuration.protocol)
+      throw new Error("The deployment serves a different vault protocol. Nothing was created.");
     if (!config.solverReleaseId)
       throw new Error("The deployment serves no solver right now. Nothing was created.");
     if (input.solverReleaseId !== undefined && input.solverReleaseId !== config.solverReleaseId)
@@ -960,7 +972,7 @@ export class QsbClient {
         throw new Error("The saved intent uses a different solver. Keep its backup and contact the operator; do not create a new intent.");
       if ((["txid", "vout", "value"] as const).some((field) => saved.funding[field] !== funding[field]))
         throw new Error("The saved intent spends a different deposit.");
-      const vsize = withdrawalVsize(nested, saved.outputScript.length / 2);
+      const vsize = withdrawalVsize(nested, saved.outputScript.length / 2, vaultScriptSigBound(vault.config));
       await this.assertMinerFloor((BigInt(saved.fee) * 1000n) / BigInt(vsize));
       manifest = saved;
       this.guard.claim(`qsb-intent:${vault.scriptHash}`, digest(JSON.stringify(saved)));
@@ -971,7 +983,7 @@ export class QsbClient {
       const script = outputScript(input.destination);
       const rate = parseFeeRate(input.feeRate);
       await this.assertMinerFloor(rate);
-      const fee = withdrawalFeeForRate(nested, script.length, rate).fee;
+      const fee = withdrawalFeeForRate(nested, script.length, rate, vault.config).fee;
       const outputValue = BigInt(funding.value) + BigInt(helper.value) - fee;
       if (outputValue <= 0n) throw new Error("The miner fee exceeds the available amount.");
       manifest = withdrawalSchema.parse({
