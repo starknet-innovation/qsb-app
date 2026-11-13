@@ -2,8 +2,9 @@ import validation from "../../server/aws-batch-validation.json";
 
 /** Check collected native logs against the hardware selected by the committed profile. */
 export function nativeStartup(messages: string[], queue: string) {
-  const queueName = /^arn:aws:batch:eu-west-2:\d{12}:job-queue\/(qsb-gpu(?:-validation)?)$/.exec(queue)?.[1];
-  const expected = queueName === validation.name ? validation.gpuName : queueName === "qsb-gpu" ? "A10G" : undefined;
+  const identity = /^arn:aws:batch:([^:]+):\d{12}:job-queue\/([^/]+)$/.exec(queue);
+  const expected = identity?.[2] === validation.name && validation.regions.includes(identity[1])
+    ? validation.gpuName : identity?.[2] === "qsb-gpu" && identity[1] === "eu-west-2" ? "A10G" : undefined;
   const lines = messages.flatMap(message => message.split("\n"));
   const devices = lines.map(line => /^(?:NVIDIA )?([^,]+),\s*(GPU-[a-f0-9-]+),\s*([0-9]+(?:\.[0-9]+)+)\s*$/.exec(line))
     .filter((match): match is RegExpExecArray => match !== null);

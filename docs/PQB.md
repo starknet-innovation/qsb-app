@@ -44,7 +44,7 @@ Completed units must satisfy the producer qualification harness's statistical ga
 
 Before serving PQB, complete deployment-specific runtime verification, including a public synthetic solve through Step Functions and the immutable Batch job-definition revision. A deployment serves one protocol: selecting PQB prevents new Config A withdrawals there. Keep the previous QSB descriptor and deployment manifest for rollback, but they cannot resume a PQB job or spend a PQB vault; drain/reconcile paid jobs before switching. There is no qualified previous PQB release to fall back to.
 
-The [public serving harness](../ops/pqb-serving/README.md) prepares this assessment without allocating hardware. An optional isolated L4 (`g6.xlarge`) queue and pool require externally installed, expiring operator permissions and a validation-role-only runtime-boundary supplement. The controller verifies both before execution. The validation provider keeps the coordinator within sixteen GPUs, adds a queue/startup age watchdog, records instance/volume identities, and verifies isolated capacity cleanup before removing its independent deadline guards. The production queue and pool remain unchanged. This preparation supplies no new native solve or timing evidence.
+The [public serving harness](../ops/pqb-serving/README.md) prepares this assessment without allocating hardware. An optional isolated A10G (`g5.xlarge`) queue and pool require externally installed, expiring operator permissions and a validation-role-only runtime-boundary supplement. The controller verifies both before execution. The validation provider keeps the coordinator within sixteen GPUs, adds a queue/startup age watchdog, records instance/volume identities, and verifies isolated capacity cleanup before removing its independent deadline guards. The production queue and pool remain unchanged. This preparation supplies no new native solve or timing evidence.
 
 The scoped queue-creation grant must authorize both the queue and its referenced compute environment. Partial-deployment collection checks unresolved IAM role absence through the existing metadata-only role; it never treats access denial as deletion evidence.
 
@@ -57,7 +57,7 @@ npm test -- tests/pqb.test.ts tests/pqb-protocol.test.ts
 
 These checks cover exact script bytes, public problem bytes, sighashes and trial digests on all stages, strict predicates, co-signature construction and coordinator state transitions. Coordinator positive-hit tests stub the CPU verdicts. They do not constitute a full solve, native GPU execution, Bitcoin Core acceptance of a solved PQB withdrawal, miner acceptance or an end-to-end spend. No mainnet switch is enabled by this support.
 
-The serving harness also supports an explicitly authorized isolated SNF account.
+The serving harness also supports an explicitly authorized isolated SNF account in Ireland or London.
 It runs the same public workflow and native transport with campaign-owned infrastructure
 and scoped workload roles. Such receipts qualify that isolated account/hardware;
 they do not establish readiness of the production app account or select its release.
@@ -66,3 +66,7 @@ The Batch job definition must bind exactly one `QSB_JOB_BUCKET` to the consumerâ
 configured artifact bucket. The consumer checks this before uploading public input
 or preparing a paid submission. SNF bootstrap sets that binding; request-specific
 input keys and hashes remain ordinary submission overrides.
+
+The operational collector paces log reads and retries explicit read throttling
+with a fixed per-page bound. Mutations and paid submissions remain one attempt;
+collection failure still pauses and drains work for reconciliation.

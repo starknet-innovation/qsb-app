@@ -44,6 +44,13 @@ def persist(path, value, exclusive=False):
         os.close(parent)
 
 
+def check_operator_config(config):
+    allowed = json.loads((ROOT / 'server/aws-batch-validation.json').read_text())['regions'] if config.get('snfIsolation') is True else ['eu-west-2']
+    if (set(config) not in ({'profile', 'account', 'region'}, {'profile', 'account', 'region', 'snfIsolation'})
+        or ('snfIsolation' in config and config['snfIsolation'] is not True) or config.get('region') not in allowed):
+        raise RuntimeError('Use the scoped operator profile, account and explicitly supported region')
+
+
 def clean_source():
     def git(*args):
         return subprocess.check_output(['git', *args], cwd=ROOT, text=True).strip()
@@ -64,9 +71,7 @@ class Campaign:
             raise RuntimeError('Keep operator configuration and receipts outside Git')
         self.state_path = self.directory / 'campaign.json'
         self.config = json.loads((self.directory / 'operator.json').read_text())
-        if (set(self.config) not in ({'profile', 'account', 'region'}, {'profile', 'account', 'region', 'snfIsolation'})
-            or ('snfIsolation' in self.config and self.config['snfIsolation'] is not True) or self.config['region'] != 'eu-west-2'):
-            raise RuntimeError('Use the scoped London operator profile, account and region')
+        check_operator_config(self.config)
         self.session = boto3.Session(profile_name=self.config['profile'], region_name=self.config['region'])
         self.clients = {}
         self.sdk_config = Config(connect_timeout=5, read_timeout=30, retries={'total_max_attempts': 1})
@@ -571,6 +576,29 @@ class Campaign:
             persist(self.directory / 'final-job.json', row, exclusive=True)
             self.state['phase'] = 'solve-complete'; self.save()
 
+    def log_pages(self, **params):
+        """Pace log reads and retry only explicit throttling, never a cloud mutation."""
+        logs = self.client('logs'); pages = []; seen = set(); request = dict(params)
+        while True:
+            for attempt in range(5):
+                delay = max(0, getattr(self, '_last_log_read', 0) + 0.4 - time.monotonic())
+                if delay: time.sleep(delay)
+                self._last_log_read = time.monotonic()
+                try:
+                    page = logs.filter_log_events(**request)
+                    break
+                except logs.exceptions.ThrottlingException as error:
+                    target = self.directory / 'logs'; target.mkdir(exist_ok=True)
+                    persist(target / ('read-throttle-' + str(time.time_ns()) + '.json'),
+                        {'operation': 'FilterLogEvents', 'params': request, 'attempt': attempt + 1, 'error': str(error)}, exclusive=True)
+                    if attempt == 4: raise
+                    time.sleep(2 ** attempt)
+            pages.append(page)
+            token = page.get('nextToken')
+            if not token: return pages
+            if token in seen: raise RuntimeError('Repeated CloudWatch log pagination token')
+            seen.add(token); request['nextToken'] = token
+
     def collect_artifacts(self, jobs, stamp, allow_missing=False):
         # Original public objects are copied without exposing them in console output.
         objects = self.directory / 'objects'; objects.mkdir(exist_ok=True)
@@ -612,8 +640,7 @@ class Campaign:
                 try:
                     snapshot = json.loads((self.directory / 'live-runtime-private.json').read_text())
                     group = snapshot['definition'][0]['containerProperties']['logConfiguration']['options']['awslogs-group']
-                    pages = list(self.client('logs').get_paginator('filter_log_events').paginate(
-                        logGroupName=group, logStreamNames=[stream]))
+                    pages = self.log_pages(logGroupName=group, logStreamNames=[stream])
                 except self.client('logs').exceptions.ResourceNotFoundException:
                     pages = []
                 persist(logs / (job['jobId'] + '-' + stamp + '.json'), pages, exclusive=True)
@@ -639,7 +666,7 @@ class Campaign:
         # Managed workflow ALL logs retain transitions even where the operator cannot read execution data APIs.
         for index, group in enumerate(self.state.get('logs', [])):
             try:
-                pages = list(self.client('logs').get_paginator('filter_log_events').paginate(logGroupName=group))
+                pages = self.log_pages(logGroupName=group)
             except self.client('logs').exceptions.ResourceNotFoundException:
                 if not allow_missing:
                     raise

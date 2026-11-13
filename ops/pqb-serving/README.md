@@ -35,8 +35,8 @@ reservation is retained in campaign accounting. Neither execution is resumed or
 replayed after an unknown submission.
 
 When the ordinary `g5.xlarge` pool has no capacity, `capacity.py` prepares an
-isolated `qsb-gpu-validation` queue and compute environment using `g6.xlarge`
-NVIDIA L4 hosts. It copies the reviewed host AMI, immutable launch-template version,
+isolated `qsb-gpu-validation` queue and compute environment using `g5.xlarge`
+NVIDIA A10G hosts. It copies the reviewed host AMI, immutable launch-template version,
 network and instance profile. The pool uses `BEST_FIT_PROGRESSIVE`, minimum zero
 and maximum 64 vCPUs. Its provider limits the coordinator to sixteen single-GPU
 hosts, within the existing global 16-slot ceiling. The production queue and pool
@@ -44,14 +44,11 @@ are never modified. Production work appearing during collection stops the public
 assessment so it can release capacity. This is a validation configuration, not a
 production solver selection.
 
-The image remains the enrolled `sm_86` artifact. NVIDIA documents that
-[8.6 cubins run on 8.9 GPUs](https://docs.nvidia.com/cuda/ada-compatibility-guide/index.html);
-[L4 has compute capability 8.9](https://developer.nvidia.com/cuda/gpus). This
-compatibility permits a fresh qualification attempt; it supplies no L4 correctness
-or timing receipt. Require the native preflight on the selected hardware and do
-not transfer A10G measurements. The startup audit requires exactly one GPU matching
-`server/aws-batch-validation.json` for the validation queue (A10G for the ordinary
-queue), its UUID/driver and the process-isolation flags.
+The image remains the enrolled `sm_86` artifact on A10G. Require a fresh native
+preflight on the selected hardware. The startup audit requires exactly one GPU
+matching `server/aws-batch-validation.json`, its UUID/driver and the
+process-isolation flags. Receipts remain bound to their exact source, bundle,
+image and hardware identities.
 
 An administrator installs two temporary additions, preserving all original policy
 statements: an inline operator grant for create/update/delete/tag on exactly the
@@ -105,7 +102,7 @@ estimated compute and reserved budget are not provider billing.
 ## Operator sequence
 
 Use a fresh directory outside every checkout. Its `operator.json` contains only
-`profile`, `account` and `region` (`eu-west-2`), never credentials. The connected AWS
+`profile`, `account` and `region` (`eu-west-2` for the app-account operator), never credentials. The connected AWS
 MCP session should be used when it targets the deployment account; the explicit
 local profile is the SDK fallback when that connector is bound to another account.
 Provisioning mutations use the SDK with one attempt and retain an exclusive intent
@@ -220,7 +217,7 @@ The current-status collector pauses and drains the campaign immediately when it 
 ## Explicit SNF account isolation
 
 `operator.json` may explicitly add `"snfIsolation": true` for a separately authorized
-root session in an otherwise empty London GPU/Batch account. This creates an isolated
+root session in an otherwise empty Ireland or London GPU/Batch account. This creates an isolated
 consumer stack, not a production app deployment. Root credentials remain local; the
 coordinator and workers receive only generated runtime roles. No API, wallet or miner
 path is created. The same enrolled image, clean consumer bundle, workflow, public
@@ -236,7 +233,8 @@ fresh quota. The quota may bound actual concurrency below the configured ceiling
 record both and never infer allocated GPUs from submitted jobs.
 
 Use `uv run --no-project --with boto3 --with awscrt python` for this profile's AWS
-login credential provider. After building and local public-fixture preparation:
+login credential provider. Isolated mode permits `eu-west-1` or `eu-west-2`; ordinary
+app-account mode remains London only. Select and freeze the region before preparation. After building and local public-fixture preparation:
 
 ```sh
 python ops/pqb-serving/control.py inspect "$EVIDENCE"
@@ -270,3 +268,10 @@ The Batch job definition must bind exactly one `QSB_JOB_BUCKET` to the consumerâ
 configured artifact bucket. The consumer checks this before uploading public input
 or preparing a paid submission. SNF bootstrap sets that binding; request-specific
 input keys and hashes remain ordinary submission overrides.
+
+Log collection spaces `FilterLogEvents` reads by at least 400 ms across pages and
+groups. Only explicit read throttling is retried, at most five attempts per page,
+with bounded backoff and retained failure receipts. Empty pages with continuation
+tokens are followed; repeated tokens fail closed. Cloud mutations and paid
+submissions retain their one-attempt journal and are never replayed. Complete
+workflow histories remain mandatory before removal. See the [AWS log API quotas](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/cloudwatch_limits_cwl.html).

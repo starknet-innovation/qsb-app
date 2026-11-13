@@ -10,12 +10,14 @@ const definition = "arn:aws:batch:eu-west-2:123456789012:job-definition/qsb-gpu-
 const image = "ghcr.io/starknet-innovation/qsb-solver@sha256:" + "a".repeat(64);
 
 function setup(selectedQueue = queue) {
+  const selectedCe = selectedQueue.replace(":job-queue/", ":compute-environment/");
+  const selectedDefinition = definition.replace("eu-west-2", selectedQueue.split(":")[3]);
   const q: any = { jobQueueArn: selectedQueue, state: "ENABLED", status: "VALID",
-    tags: { Project: "qsb-gpu", PqbValidation: campaign }, computeEnvironmentOrder: [{ order: 1, computeEnvironment: ce }] };
-  const e: any = { computeEnvironmentArn: ce, state: "ENABLED", status: "VALID",
+    tags: { Project: "qsb-gpu", PqbValidation: campaign }, computeEnvironmentOrder: [{ order: 1, computeEnvironment: selectedCe }] };
+  const e: any = { computeEnvironmentArn: selectedCe, state: "ENABLED", status: "VALID",
     tags: { Project: "qsb-gpu", PqbValidation: campaign }, computeResources: {
       type: "EC2", allocationStrategy: "BEST_FIT_PROGRESSIVE", minvCpus: 0, maxvCpus: 64, instanceTypes: [validation.instanceType] } };
-  const d: any = { jobDefinitionArn: definition, status: "ACTIVE", retryStrategy: { attempts: 1 }, timeout: { attemptDurationSeconds: 900 },
+  const d: any = { jobDefinitionArn: selectedDefinition, status: "ACTIVE", retryStrategy: { attempts: 1 }, timeout: { attemptDurationSeconds: 900 },
     containerProperties: {
       environment: [{ name: "QSB_JOB_BUCKET", value: "qsb-gpu-jobs" }], image, command, readonlyRootFilesystem: true, privileged: false,
       resourceRequirements: [{ type: "GPU", value: "1" }, { type: "VCPU", value: "4" }] } };
@@ -29,11 +31,11 @@ function setup(selectedQueue = queue) {
   }) };
   const s3: any = { send: vi.fn(async () => ({})) };
   vi.stubEnv("AWS_LAMBDA_FUNCTION_NAME", campaign + "-coordinator");
-  return { provider: new AwsBatch(selectedQueue, definition, "qsb-gpu-jobs", batch, s3, batch), q, e, s3, submit };
+  return { provider: new AwsBatch(selectedQueue, selectedDefinition, "qsb-gpu-jobs", batch, s3, batch), q, e, s3, submit };
 }
 afterEach(() => vi.unstubAllEnvs());
 
-it("prepares the owned isolated L4 pool through the real provider with a sixteen-slot limit", async () => {
+it("prepares the owned isolated A10G pool through the real provider with a sixteen-slot limit", async () => {
   const t = setup();
   expect(t.provider.parallelismLimit).toBe(16);
   const run = await t.provider.prepareRun(image, { public: "synthetic" });
@@ -64,5 +66,17 @@ it.each(["production-function", "missing-function", "wrong-owner", "wrong-pool",
 it("keeps the production queue's original hardware checks", async () => {
   const t = setup(queue.replace("qsb-gpu-validation", "qsb-gpu"));
   await expect(t.provider.prepareRun(image, { public: "synthetic" })).rejects.toThrow("ProviderLimitsUnconfirmed");
+  expect(t.s3.send).not.toHaveBeenCalled(); expect(t.submit).not.toHaveBeenCalled();
+});
+
+it("permits the explicitly supported Ireland validation region", async () => {
+  const t = setup(queue.replace("eu-west-2", "eu-west-1"));
+  await expect(t.provider.prepareRun(image, { public: "synthetic" })).resolves.toBeTypeOf("function");
+  expect(t.submit).not.toHaveBeenCalled();
+});
+
+it("rejects an unsupported validation region before storing or submitting", async () => {
+  const t = setup(queue.replace("eu-west-2", "eu-central-1"));
+  await expect(t.provider.prepareRun(image, {})).rejects.toThrow("ProviderLimitsUnconfirmed");
   expect(t.s3.send).not.toHaveBeenCalled(); expect(t.submit).not.toHaveBeenCalled();
 });

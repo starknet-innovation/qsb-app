@@ -4,6 +4,7 @@ import validation from "../server/aws-batch-validation.json";
 
 const device = `${validation.gpuName}, GPU-01234567-89ab-cdef-0123-456789abcdef, 580.178.04`;
 const queue = `arn:aws:batch:eu-west-2:123456789012:job-queue/${validation.name}`;
+const otherModel = validation.gpuName === "A10G" ? "L4" : "A10G";
 const isolation = "NoNewPrivs:\t1\nCapBnd:\t0000000000000000";
 
 it("binds the native startup to the selected GPU and process isolation", () => {
@@ -13,7 +14,7 @@ it("binds the native startup to the selected GPU and process isolation", () => {
 });
 
 it.each([
-  [device.replace(validation.gpuName, "A10G"), isolation],
+  [device.replace(validation.gpuName, otherModel), isolation],
   [device, device, isolation],
   [device],
   [device, isolation.replace("NoNewPrivs:\t1", "NoNewPrivs:\t0")],
@@ -28,6 +29,15 @@ it("preserves the ordinary A10G queue audit and rejects unknown queues", () => {
   const productionQueue = queue.replace(validation.name, "qsb-gpu");
   const a10g = device.replace(validation.gpuName, "A10G");
   expect(nativeStartup([a10g, isolation], productionQueue).gpuModel).toBe("A10G");
-  expect(() => nativeStartup([device, isolation], productionQueue)).toThrow("receipt missing");
+  expect(() => nativeStartup([device.replace(validation.gpuName, otherModel), isolation], productionQueue)).toThrow("receipt missing");
   expect(() => nativeStartup([device, isolation], queue + "-other")).toThrow("receipt missing");
+});
+
+it.each(validation.regions)("audits validation startup in %s", (region) => {
+  expect(nativeStartup([device, isolation], queue.replace("eu-west-2", region)).gpuModel).toBe(validation.gpuName);
+});
+
+it("rejects unsupported validation regions and keeps ordinary-queue audit in London", () => {
+  expect(() => nativeStartup([device, isolation], queue.replace("eu-west-2", "us-east-1"))).toThrow("receipt missing");
+  expect(() => nativeStartup([device, isolation], queue.replace(validation.name, "qsb-gpu").replace("eu-west-2", "eu-west-1"))).toThrow("receipt missing");
 });
