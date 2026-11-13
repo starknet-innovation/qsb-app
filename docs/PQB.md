@@ -84,3 +84,8 @@ hardware checks and release selection stay unchanged. See the
 The current larger-host profile is one A10G per `g5.4xlarge`, at most four
 validation slots within 64 vCPUs. A fresh shared-pool campaign freezes six hours
 and a $200 reservation before any submission; its deadline cannot be extended.
+
+The committed watcher deduplicates job IDs across Batch status snapshots, retains
+terminal instance receipts and reports stopped campaigns explicitly. Its readiness
+check is required before submission; see the
+[watcher procedure](../ops/pqb-serving/README.md#committed-campaign-watcher).

@@ -74,3 +74,5 @@ For explicitly authorized idle-pool maintenance using existing London permission
 the [PQB validation controller](ops/pqb-serving/README.md#authorized-replacement-of-an-idle-original-pool)
 can temporarily test the larger A10G profile in the existing subnets and restore
 the original pool afterward. Production release selection is independent.
+The committed watcher checks metadata readiness, handles Batch status transitions
+without duplicate descriptions, and records verified stops and terminal hosts.

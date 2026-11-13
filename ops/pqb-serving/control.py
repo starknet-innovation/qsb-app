@@ -918,6 +918,11 @@ class Campaign:
         persist(self.directory / ('stop-' + stamp + '.intent.json'), settings, exclusive=True)
         result = module.drain({n: self.client(n) for n in ['batch', 'dynamodb']}, settings)
         persist(self.directory / ('stop-' + stamp + '.response.json'), result, exclusive=True)
+        if result.get('terminalWorkVerified') is not True:
+            raise RuntimeError('Drain is not verified; retain campaign reservation')
+        self.state['lastStop'] = {'file': 'stop-' + stamp + '.response.json', 'terminalWorkVerified': result['terminalWorkVerified']}
+        self.state['phase'] = 'solve-stopped' if self.state['phase'].startswith('solve') else 'preflight-stopped'
+        self.save()
         print(dump(result).strip())
 
 

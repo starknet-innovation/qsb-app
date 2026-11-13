@@ -3,7 +3,7 @@ import importlib.util
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('control', Path(__file__).with_name('control.py'))
 control = importlib.util.module_from_spec(spec)
@@ -11,6 +11,25 @@ spec.loader.exec_module(control)
 
 
 class JournalTests(unittest.TestCase):
+    def test_verified_stop_publishes_a_terminal_phase_only_after_drain(self):
+        from types import SimpleNamespace
+        for failure in [False, True]:
+            with self.subTest(failure=failure), TemporaryDirectory() as directory:
+                import json
+                c = object.__new__(control.Campaign); c.directory = Path(directory); c.client = Mock(); c.save = Mock()
+                c.state = {'phase': 'solve-running', 'tables': ['a', 'b'], 'queue': 'owned', 'definition': 'own:1'}
+                (c.directory / 'public-fixture.json').write_text(json.dumps({'rows': [{}, {'pk': 'public', 'sk': 'test'}]}))
+                module = SimpleNamespace(drain=Mock(return_value={'terminalWorkVerified': True, 'activeJobs': []}))
+                if failure: module.drain.side_effect = TimeoutError('drain unknown')
+                spec = SimpleNamespace(loader=Mock())
+                with patch('importlib.util.spec_from_file_location', return_value=spec), patch('importlib.util.module_from_spec', return_value=module):
+                    if failure:
+                        with self.assertRaises(TimeoutError): c.stop()
+                        self.assertEqual(c.state['phase'], 'solve-running'); c.save.assert_not_called()
+                    else:
+                        c.stop(); self.assertEqual(c.state['phase'], 'solve-stopped')
+                        self.assertTrue(c.state['lastStop']['terminalWorkVerified']); c.save.assert_called_once()
+
     def test_shared_window_is_fixed_at_preparation_and_cannot_be_extended(self):
         self.assertEqual(control.campaign_seconds(), 4 * 3600)
         self.assertEqual(control.campaign_seconds(True), 6 * 3600)

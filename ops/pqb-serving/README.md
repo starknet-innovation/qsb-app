@@ -355,3 +355,28 @@ four-hour deadlines. The workflow timeout and independent stop schedule use the
 same frozen deadline. Five hosts (including a possible Batch overshoot) for six
 hours at the recorded $2.06148/hour on-demand rate would be $61.8444 in VM time;
 this excludes other services and is an estimate rather than provider billing.
+
+## Committed campaign watcher
+
+After deployment and before the first submission, run
+`python3 ops/pqb-serving/monitor.py CAMPAIGN --check` with the pinned controller
+requirements. This checks the active inventory and metadata collection path without
+starting or stopping work. During each running phase, run
+`python3 ops/pqb-serving/monitor.py CAMPAIGN` from the same clean pushed checkout.
+
+Batch status queries are separate snapshots, so a transitioning job may appear in
+several status pages. The watcher deduplicates identities before `DescribeJobs`,
+requires the complete described inventory, and yields to unrelated work without
+terminating it. Collector or inventory failures stop only this campaign through
+the journaled controller and return a failing process status. `monitor-status.json`
+records liveness and failures; a verified stop also marks `preflight-stopped` or
+`solve-stopped` in the campaign ledger. Those states cannot restart paid work.
+
+The watcher retains explicit instance-state receipts as well as SG-filtered
+snapshots, preserving termination evidence before EC2 expires old instance
+metadata. It never starts or retries a compute submission or extends a deadline.
+A watcher holds an exclusive per-campaign lock. A second watcher exits without
+stopping work. Each process is bound to its starting phase and exits promptly when
+that phase completes; wait for its successful exit before starting the next phase
+and its watcher. A lock file remaining after exit is harmless: the operating
+system releases the lock when the process closes or exits.
