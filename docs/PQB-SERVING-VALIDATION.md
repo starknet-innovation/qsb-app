@@ -50,6 +50,12 @@ recorded hosts are terminated or reconciled absent and all twenty volumes are
 deleted. The immutable registry mirror and untouched pre-existing network are
 intentionally retained.
 
+The production-account validation harness can select an administrator-provisioned
+subnet in a new zone for its isolated pool. It freezes and verifies that subnet's
+shared VPC, public routing and ACL identity before use. The production queue and
+pool keep their existing subnets. Subnet creation/removal and expiring IAM grants
+remain administrator-managed; the controller cannot broaden its own permissions.
+
 Production continues to select Config A with its existing coordinator bundle.
 These receipts qualify the isolated SNF Ireland account; production London PQB IAM,
 capacity and native runtime verification remain separate. Selecting PQB requires

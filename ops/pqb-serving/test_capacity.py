@@ -78,6 +78,17 @@ class CapacityTests(unittest.TestCase):
             changed = copy.deepcopy(plan); mutate(changed)
             with self.assertRaises(RuntimeError): capacity.validate_plan(changed, c)
 
+    def test_validation_subnet_only_changes_the_isolated_subnet_list(self):
+        from test_validation_network import fixture, read
+        c, plan = self.fixture(); ec2, *_ = fixture()
+        plan['computeBaseline']['computeResources']['subnets'] = ['subnet-base']
+        plan['validationNetwork'] = read(ec2)
+        plan['computeResources']['subnets'] = ['subnet-test']
+        capacity.validate_plan(plan, c)
+        for subnets in [['subnet-base'], ['subnet-test', 'subnet-base'], ['subnet-foreign']]:
+            changed = copy.deepcopy(plan); changed['computeResources']['subnets'] = subnets
+            with self.assertRaises(RuntimeError): capacity.validate_plan(changed, c)
+
     def test_boundary_supplement_keeps_existing_statements_and_limits_runtime_identity(self):
         c, plan = self.fixture(); boundary = plan['runtimeBoundary']
         self.assertEqual(boundary['Statement'][:-2], plan['boundaryBaseline']['Statement'])
