@@ -95,8 +95,11 @@ export function batchImageMatches(
   );
 }
 export class AwsBatch implements ComputeProvider {
+  private get sharedValidationProfile() {
+    return process.env.QSB_BATCH_SHARED_POOL_VALIDATION === "1" && this.queue.endsWith(":job-queue/qsb-gpu");
+  }
   private get validationProfile() {
-    return this.queue.endsWith(`:job-queue/${validation.name}`);
+    return this.sharedValidationProfile || this.queue.endsWith(`:job-queue/${validation.name}`);
   }
   get parallelismLimit() {
     return this.validationProfile
@@ -194,6 +197,7 @@ export class AwsBatch implements ComputeProvider {
       definitions.jobDefinitions?.length !== 1 ||
       d?.jobDefinitionArn !== this.definition ||
       d.status !== "ACTIVE" ||
+      (this.sharedValidationProfile && d.tags?.PqbValidation !== validationCampaign) ||
       !batchImageMatches(image, d.containerProperties?.image ?? "", this.queue)
     )
       throw new Error("ProviderImageUnconfirmed");
@@ -218,7 +222,7 @@ export class AwsBatch implements ComputeProvider {
       q.state !== "ENABLED" ||
       q.status !== "VALID" ||
       q.computeEnvironmentOrder?.length !== 1 ||
-      (this.validationProfile && (q.tags?.PqbValidation !== validationCampaign || q.tags?.Project !== "qsb-gpu"))
+      (this.validationProfile && (q.tags?.Project !== "qsb-gpu" || (!this.sharedValidationProfile && q.tags?.PqbValidation !== validationCampaign)))
     )
       throw new Error("ProviderLimitsUnconfirmed");
     const env = await this.batch.send(
@@ -240,7 +244,7 @@ export class AwsBatch implements ComputeProvider {
       c.maxvCpus !== (this.validationProfile ? validation.maxVcpus : 4 * gpuSpendLimits.workersMax) ||
       c.instanceTypes?.length !== 1 ||
       c.instanceTypes[0] !== (this.validationProfile ? validation.instanceType : "g5.xlarge") ||
-      (this.validationProfile && (e.tags?.PqbValidation !== validationCampaign || e.tags?.Project !== "qsb-gpu"
+      (this.validationProfile && ((!this.sharedValidationProfile && e.tags?.PqbValidation !== validationCampaign) || e.tags?.Project !== "qsb-gpu"
         || e.computeEnvironmentArn !== this.queue.replace(":job-queue/", ":compute-environment/")
         || q.computeEnvironmentOrder[0].computeEnvironment !== e.computeEnvironmentArn))
     )

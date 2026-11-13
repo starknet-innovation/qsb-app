@@ -22,6 +22,13 @@ ROOT = Path(__file__).resolve().parents[2]
 ACTIVE = ('SUBMITTED', 'PENDING', 'RUNNABLE', 'STARTING', 'RUNNING')
 
 
+def campaign_seconds(shared_pool=False):
+    hours = json.loads((ROOT / 'server/aws-batch-validation.json').read_text())['sharedPoolCampaignHours'] if shared_pool else 4
+    if hours not in (4, 6):
+        raise RuntimeError('Unsupported fixed campaign duration')
+    return hours * 3600
+
+
 def dump(value):
     return json.dumps(value, sort_keys=True, indent=2, default=lambda x: int(x) if isinstance(x, Decimal) and x == int(x) else str(x)) + '\n'
 
@@ -89,7 +96,7 @@ class Campaign:
 
     def validate_scope(self):
         name = self.state['name']
-        if self.state['deadline'] != self.state['createdAt'] + 4 * 3600 or self.state['reservedUsd'] != 200 or self.state['preflightGpuSeconds'] != 900 or self.state['solveGpuSeconds'] != 540000:
+        if self.state['deadline'] != self.state['createdAt'] + campaign_seconds(bool(self.state.get('sharedPoolReplacement'))) or self.state['reservedUsd'] != 200 or self.state['preflightGpuSeconds'] != 900 or self.state['solveGpuSeconds'] != 540000:
             raise RuntimeError('Campaign deadline or reserved budget changed')
         if not re.fullmatch(r'qsb-pqb-v-[a-f0-9]{12}', name):
             raise RuntimeError('Invalid dedicated campaign name')
@@ -159,7 +166,12 @@ class Campaign:
         try:
             result = invoke() if invoke is not None else getattr(self.client(service), operation)(**params)
         except Exception as error:
-            persist(response, {'error': type(error).__name__, 'message': str(error)}, exclusive=True)
+            failure = {'error': type(error).__name__, 'message': str(error)}
+            aws = getattr(error, 'response', {})
+            if isinstance(aws, dict) and 'Error' in aws:
+                failure['awsErrorCode'] = aws['Error'].get('Code')
+                failure['httpStatusCode'] = aws.get('ResponseMetadata', {}).get('HTTPStatusCode')
+            persist(response, failure, exclusive=True)
             raise
         persist(response, {'result': result}, exclusive=True)
         return result
@@ -208,6 +220,11 @@ class Campaign:
             prepare(self, source, fixture, manifest)
             return
         snapshot = json.loads((self.directory / 'live-runtime-private.json').read_text())
+        shared_pool = self.directory / 'shared-pool-binding.json'
+        shared_binding = None
+        if shared_pool.exists():
+            from shared_pool import verify_binding
+            shared_binding = verify_binding(self, json.loads(shared_pool.read_text()), source, snapshot)
         if any(snapshot['activeJobs'].values()) or snapshot['runningExecutions']:
             raise RuntimeError('Baseline must be drained')
         capacity_plan = self.directory / 'capacity-plan.json'
@@ -227,7 +244,7 @@ class Campaign:
         prepared_at = int(time.time())
         self.state = {'format': 'pqb-serving-campaign-v1', 'name': name, 'sourceCommit': source,
             'operatorHash': hashlib.sha256(dump(self.config).encode()).hexdigest(), 'createdAt': prepared_at,
-            'deadline': prepared_at + 4 * 3600, 'reservedUsd': 200, 'reservationStatus': 'reserved',
+            'deadline': prepared_at + campaign_seconds(bool(shared_binding)), 'reservedUsd': 200, 'reservationStatus': 'reserved',
             'preflightGpuSeconds': 900, 'solveGpuSeconds': 540000, 'fixtureSha256': hashlib.sha256((self.directory / 'public-fixture.json').read_bytes()).hexdigest(),
             'coordinatorSha256': manifest['files']['coordinator.zip'], 'apiArtifactSha256': manifest['files']['api.zip'], 'descriptor': fixture['descriptor'],
             'queue': snapshot['coordinatorEnv']['AWS_BATCH_JOB_QUEUE'], 'bucket': snapshot['coordinatorEnv']['AWS_BATCH_JOB_BUCKET'],
@@ -238,6 +255,8 @@ class Campaign:
             self.state['capacity'] = {'planSha256': hashlib.sha256(capacity_plan.read_bytes()).hexdigest(), 'status': 'planned'}
             self.state['queue'] = capacity.plan['queueArn']
             self.state['watchdogSchedule'] = name + '-watchdog'
+        if shared_binding:
+            self.state['sharedPoolReplacement'] = shared_binding
         retained = self.directory / 'build-artifacts'; retained.mkdir()
         for name in ['manifest.json', 'api.zip', 'coordinator.zip', 'reference.zip', 'webhooks.zip']:
             shutil.copyfile(ROOT / 'terraform/.build' / name, retained / name)
@@ -353,6 +372,8 @@ class Campaign:
         env.update(TABLE_NAME=state['tables'][0], QSB_NETWORK='mainnet', SOLVER_RELEASE_ID=state['descriptor']['id'], QSB_MAINNET_ENABLED=snapshot['coordinatorEnv']['QSB_MAINNET_ENABLED'], REFERENCE_FUNCTION='public-pqb-in-process',
             AWS_BATCH_JOB_QUEUE=state['queue'], AWS_BATCH_JOB_DEFINITION=state['definition'], AWS_BATCH_JOB_BUCKET=state['bucket'],
             QSB_OWNER_ALLOWLIST=json.loads((self.directory / 'public-fixture.json').read_text())['event']['owner'], QSB_OWNER_MAX_GPU_SECONDS=str(state['preflightGpuSeconds']))
+        if state.get('sharedPoolReplacement'):
+            env['QSB_BATCH_SHARED_POOL_VALIDATION'] = '1'
         state['coordinatorEnv'] = env; self.save()
         common = {'Runtime': 'nodejs22.x', 'Architectures': ['arm64'], 'Handler': 'index.handler', 'Timeout': 90, 'MemorySize': 512}
         response = self.mutate('function', 'lambda', 'create_function', FunctionName=state['function'], Role=self.iam(state['roles'][0]), Code={'ZipFile': code}, Environment={'Variables': env}, Tags={t['Key']: t['Value'] for t in tags}, **common)
@@ -369,7 +390,7 @@ class Campaign:
         asl = json.loads(snapshot['workflow']['definition'])
         asl['States']['CoordinateSearch']['Resource'] = self.arn('lambda', 'function:' + state['function'])
         asl['States']['ContinueSearch']['Parameters']['StateMachineArn'] = self.arn('states', 'stateMachine:' + state['workflow'])
-        asl['TimeoutSeconds'] = 4 * 3600
+        asl['TimeoutSeconds'] = state['deadline'] - state['createdAt']
         state['asl'] = asl; self.save()
         self.mutate('workflow', 'stepfunctions', 'create_state_machine', name=state['workflow'], definition=json.dumps(asl), roleArn=self.iam(state['roles'][1]), type='STANDARD',
             loggingConfiguration={'level': 'ALL', 'includeExecutionData': True, 'destinations': [{'cloudWatchLogsLogGroup': {'logGroupArn': self.arn('logs', 'log-group:' + logs[2]) + ':*'}}]}, tags=[{'key': t['Key'], 'value': t['Value']} for t in tags])
@@ -897,6 +918,11 @@ class Campaign:
         persist(self.directory / ('stop-' + stamp + '.intent.json'), settings, exclusive=True)
         result = module.drain({n: self.client(n) for n in ['batch', 'dynamodb']}, settings)
         persist(self.directory / ('stop-' + stamp + '.response.json'), result, exclusive=True)
+        if result.get('terminalWorkVerified') is not True:
+            raise RuntimeError('Drain is not verified; retain campaign reservation')
+        self.state['lastStop'] = {'file': 'stop-' + stamp + '.response.json', 'terminalWorkVerified': result['terminalWorkVerified']}
+        self.state['phase'] = 'solve-stopped' if self.state['phase'].startswith('solve') else 'preflight-stopped'
+        self.save()
         print(dump(result).strip())
 
 

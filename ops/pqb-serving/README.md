@@ -39,14 +39,17 @@ reservation is retained in campaign accounting. Neither execution is resumed or
 replayed after an unknown submission.
 
 When the ordinary `g5.xlarge` pool has no capacity, `capacity.py` prepares an
-isolated `qsb-gpu-validation` queue and compute environment using `g5.xlarge`
+isolated `qsb-gpu-validation` queue and compute environment using `g5.4xlarge`
 NVIDIA A10G hosts. It copies the reviewed host AMI, immutable launch-template version,
 network and instance profile. The pool uses `BEST_FIT_PROGRESSIVE`, minimum zero
-and maximum 64 vCPUs. Its provider limits the coordinator to sixteen single-GPU
+and maximum 64 vCPUs. Its provider limits the coordinator to four single-GPU
 hosts, within the existing global 16-slot ceiling. The production queue and pool
 are never modified. Production work appearing during collection stops the public
-assessment so it can release capacity. This is a validation configuration, not a
-production solver selection.
+assessment so it can release capacity. The larger host keeps the same A10G GPU and
+enrolled image while requesting a different EC2 size in the existing subnets. It is a capacity option,
+without a comparative performance claim or a change to production selection.
+The worker still requests four vCPUs and 12,000 MiB; host vCPUs bound the number of
+simultaneous single-GPU hosts.
 
 The image remains the enrolled `sm_86` artifact on A10G. Require a fresh native
 preflight on the selected hardware. The startup audit requires exactly one GPU
@@ -153,10 +156,10 @@ QSB_NETWORK=mainnet node --import tsx ops/pqb-serving/fixture.ts verify "$EVIDEN
 
 Omit the `capacity.py` and Autopilot commands when using the original pool.
 Call `collect` regularly during each execution; it retains snapshots rather than
-rewriting originals. The whole campaign reserves $200 operationally, has a fixed
-four-hour deadline, permits at most 900 + 540,000 reserved GPU-seconds across the
-two public jobs. The ordinary provider keeps its 16-slot cap; the isolated provider
-also keeps sixteen. The account quota applies across both pools.
+rewriting originals. Each campaign reserves $200 operationally and permits at most 900 + 540,000
+reserved GPU-seconds across the two public jobs. The original and isolated pool
+modes freeze four hours; the explicitly bound shared-pool replacement freezes six. The ordinary provider keeps its 16-slot cap; the isolated provider
+keeps four. The account quota applies across both pools.
 This is an assessment
 reservation, not a guaranteed billing limit. Current regional pricing must be
 recorded independently before preparing a new campaign.
@@ -303,3 +306,77 @@ injection verifies actual SDK recovery, exhaustion, immediate authorization-deni
 failure and a lost mutation reply making only one request, without AWS access. Cloud mutations and paid
 submissions retain their one-attempt journal and are never replayed. Complete
 workflow histories remain mandatory before removal. See the [AWS log API quotas](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/cloudwatch_limits_cwl.html).
+
+## Authorized replacement of an idle original pool
+
+When the user explicitly authorizes temporary replacement of the idle `qsb-gpu`
+pool using existing access, `shared_pool.py` retains its exact creation payload for
+restoration. It supports only the London operator and the two existing subnets.
+The candidate changes only allocation strategy and instance type to the committed
+single-A10G validation profile. No IAM or networking change is made.
+
+Use a fresh external maintenance directory with `operator.json`, then run
+`shared_pool.py capture DIRECTORY` from a clean pushed controller. Review the
+retained plan before `shared_pool.py replace DIRECTORY`. The controller disables
+new queue submissions, verifies no active jobs, production workflow executions,
+hosts or pending scaling demand, deletes the idle queue, disables/deletes the original compute
+environment, and recreates the same named environment enabled but unassociated,
+with zero minimum and desired capacity. It verifies the candidate before recreating
+the original queue disabled and enabling submissions. Batch uses the existing
+service-linked role by default; the controller verifies that role exists and its
+ARN matches, without explicitly passing it or changing IAM.
+The queue name, ARN, priority and tags are restored; roles, AMI, launch template, subnets, tags and 64-vCPU limit stay
+bound to the original snapshot. Each write has an exclusive intent and one attempt;
+uncertain outcomes require reconciliation rather than replay.
+
+After replacement, prepare a fresh campaign directory and run
+`shared_pool.py bind DIRECTORY --campaign CAMPAIGN` before `control.py inspect` and
+`prepare`. Omit the isolated `capacity.py` path. The dedicated coordinator receives
+`QSB_BATCH_SHARED_POOL_VALIDATION=1` and accepts only this reviewed hardware and its
+own tagged job definition. The production coordinator keeps its original checks
+and fails closed against the temporary alternative hardware. Its bundle, settings
+and release are not changed. This maintenance window is unsuitable for concurrent
+production GPU work; any observed unrelated activity blocks replacement/restoration.
+
+Run the normal fixed-deadline native preflight and full public synthetic solve.
+Stop, collect, remove and independently verify campaign cleanup; then wait for the
+shared fleet and scaling demand to reach zero and run
+`shared_pool.py restore DIRECTORY`. Independently read back the original pool and
+queue settings, zero hosts and recorded-volume absence. This restores the original
+Terraform-managed configuration, while retaining the actual Batch-generated pool, group and cluster identities
+observed before and after maintenance. AWS may reuse an existing cluster ARN. Keep the maintenance plan, every request/response and fresh restoration
+receipt; never apply Terraform concurrently with this maintenance operation.
+
+The shared-pool `g5.4xlarge` assessment freezes a fresh six-hour deadline at
+preparation, with four validation GPU slots and the same $200 reservation. The
+additional preparation-time window accommodates the smaller GPU count; it never
+extends an existing campaign. The original-pool and isolated-pool modes retain
+four-hour deadlines. The workflow timeout and independent stop schedule use the
+same frozen deadline. Five hosts (including a possible Batch overshoot) for six
+hours at the recorded $2.06148/hour on-demand rate would be $61.8444 in VM time;
+this excludes other services and is an estimate rather than provider billing.
+
+## Committed campaign watcher
+
+After deployment and before the first submission, run
+`python3 ops/pqb-serving/monitor.py CAMPAIGN --check` with the pinned controller
+requirements. This checks the active inventory and metadata collection path without
+starting or stopping work. During each running phase, run
+`python3 ops/pqb-serving/monitor.py CAMPAIGN` from the same clean pushed checkout.
+
+Batch status queries are separate snapshots, so a transitioning job may appear in
+several status pages. The watcher deduplicates identities before `DescribeJobs`,
+requires the complete described inventory, and yields to unrelated work without
+terminating it. Collector or inventory failures stop only this campaign through
+the journaled controller and return a failing process status. `monitor-status.json`
+records liveness and failures; a verified stop also marks `preflight-stopped` or
+`solve-stopped` in the campaign ledger. Those states cannot restart paid work.
+
+The watcher retains explicit instance-state receipts as well as SG-filtered
+snapshots, preserving termination evidence before EC2 expires old instance
+metadata. It never starts or retries a compute submission or extends a deadline.
+A watcher holds an exclusive per-campaign lock. A second watcher exits without
+stopping work. Each process is bound to its starting phase and exits promptly when
+that phase completes; wait for its successful exit before starting the next phase
+and its watcher. A lock file remaining after exit is harmless: the operating
+system releases the lock when the process closes or exits.

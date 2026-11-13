@@ -44,7 +44,7 @@ Completed units must satisfy the producer qualification harness's statistical ga
 
 Before serving PQB, complete deployment-specific runtime verification, including a public synthetic solve through Step Functions and the immutable Batch job-definition revision. A deployment serves one protocol: selecting PQB prevents new Config A withdrawals there. Keep the previous QSB descriptor and deployment manifest for rollback, but they cannot resume a PQB job or spend a PQB vault; drain/reconcile paid jobs before switching. There is no qualified previous PQB release to fall back to.
 
-The [public serving harness](../ops/pqb-serving/README.md) prepares this assessment without allocating hardware. An optional isolated A10G (`g5.xlarge`) queue and pool require externally installed, expiring operator permissions and a validation-role-only runtime-boundary supplement. The controller verifies both before execution. The validation provider keeps the coordinator within sixteen GPUs, adds a queue/startup age watchdog, records instance/volume identities, and verifies isolated capacity cleanup before removing its independent deadline guards. The production queue and pool remain unchanged. The preparation and each execution receipt have distinct source identities; use the sealed assessment for native evidence.
+The [public serving harness](../ops/pqb-serving/README.md) prepares this assessment without allocating hardware. An optional isolated A10G (`g5.4xlarge`) queue and pool require externally installed, expiring operator permissions and a validation-role-only runtime-boundary supplement. The controller verifies both before execution. The validation provider keeps the coordinator within four GPUs, adds a queue/startup age watchdog, records instance/volume identities, and verifies isolated capacity cleanup before removing its independent deadline guards. The production queue and pool remain unchanged. The preparation and each execution receipt have distinct source identities; use the sealed assessment for native evidence.
 
 The scoped queue-creation grant must authorize both the queue and its referenced compute environment. Partial-deployment collection checks unresolved IAM role absence through the existing metadata-only role; it never treats access denial as deletion evidence.
 
@@ -72,3 +72,20 @@ to a separate SDK client with at most five total attempts for transient failures
 Mutations, including journal callbacks, retain a one-attempt client. Real SDK
 loopback tests cover dropped connections, throttling, exhaustion and a lost
 mutation reply. Collection failure still pauses and drains work for reconciliation.
+
+An explicitly authorized maintenance assessment can temporarily replace the idle
+London `qsb-gpu` compute environment at its existing ARN to test the larger A10G
+profile in the two existing subnets. The journaled controller retains and restores
+the original configuration and refuses active work or hosts. Only the dedicated
+public-validation coordinator opts into the alternative profile; production
+hardware checks and release selection stay unchanged. See the
+[maintenance procedure](../ops/pqb-serving/README.md#authorized-replacement-of-an-idle-original-pool).
+
+The current larger-host profile is one A10G per `g5.4xlarge`, at most four
+validation slots within 64 vCPUs. A fresh shared-pool campaign freezes six hours
+and a $200 reservation before any submission; its deadline cannot be extended.
+
+The committed watcher deduplicates job IDs across Batch status snapshots, retains
+terminal instance receipts and reports stopped campaigns explicitly. Its readiness
+check is required before submission; see the
+[watcher procedure](../ops/pqb-serving/README.md#committed-campaign-watcher).
