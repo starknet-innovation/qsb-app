@@ -320,8 +320,11 @@ Use a fresh external maintenance directory with `operator.json`, then run
 retained plan before `shared_pool.py replace DIRECTORY`. The controller disables
 new queue submissions, verifies no active jobs, production workflow executions,
 hosts or pending scaling demand, deletes the idle queue, disables/deletes the original compute
-environment, and recreates the same named environment disabled with zero minimum
-and desired capacity. It verifies the candidate before recreating the original queue disabled and enabling both.
+environment, and recreates the same named environment enabled but unassociated,
+with zero minimum and desired capacity. It verifies the candidate before recreating
+the original queue disabled and enabling submissions. Batch uses the existing
+service-linked role by default; the controller verifies that role exists and its
+ARN matches, without explicitly passing it or changing IAM.
 The queue name, ARN, priority and tags are restored; roles, AMI, launch template, subnets, tags and 64-vCPU limit stay
 bound to the original snapshot. Each write has an exclusive intent and one attempt;
 uncertain outcomes require reconciliation rather than replay.

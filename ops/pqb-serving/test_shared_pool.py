@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
 
-from shared_pool import SharedPool, creation, queue_creation, validate_plan, ready, PROFILE
+from shared_pool import SharedPool, creation, creation_request, queue_creation, validate_plan, ready, PROFILE
 from control import Campaign
 
 
@@ -32,6 +32,11 @@ def plan():
 class MaintenanceTests(unittest.TestCase):
     def test_only_reviewed_type_strategy_change_and_exact_rollback(self):
         p = plan(); validate_plan(p, CONFIG)
+        request = creation_request(p['candidate'])
+        self.assertNotIn('serviceRole', request)
+        self.assertEqual(request['state'], 'ENABLED')
+        self.assertEqual(request['computeResources']['minvCpus'], 0)
+        self.assertEqual(request['computeResources']['desiredvCpus'], 0)
         for section, field, changed in [('candidate', 'subnets', ['new-subnet']), ('candidate', 'maxvCpus', 128),
                                         ('restore', 'instanceTypes', ['g5.2xlarge']), ('candidate', 'instanceRole', 'new-role'),
                                         ('candidate', 'desiredvCpus', 1)]:
@@ -68,7 +73,7 @@ class MaintenanceTests(unittest.TestCase):
             restoring = initial != 'original'
             with self.subTest(initial=initial), TemporaryDirectory() as directory:
                 s = object.__new__(SharedPool); s.plan = plan(); s.path = Path(directory) / 'plan.json'
-                s.path.write_text(json.dumps(s.plan)); s.c = Mock(directory=Path(directory)); s.status = Mock(); s.idle = Mock()
+                s.path.write_text(json.dumps(s.plan)); s.c = Mock(directory=Path(directory)); s.status = Mock(); s.idle = Mock(); s.confirm_default_role = Mock()
                 q = copy.deepcopy(s.plan['baselineQueue'])
                 state = {'pool': copy.deepcopy(s.plan['baselinePool']), 'queue': q}
                 if restoring:
@@ -91,7 +96,11 @@ class MaintenanceTests(unittest.TestCase):
                     elif operation == 'update_compute_environment': state['pool']['state'] = args['state']
                     elif operation == 'delete_compute_environment': state['pool'] = None
                     elif operation == 'create_compute_environment':
+                        self.assertNotIn('serviceRole', args)
+                        self.assertEqual(args['state'], 'ENABLED')
+                        self.assertIsNone(state['queue'])
                         state['pool'] = copy.deepcopy(args); state['pool']['status'] = 'VALID'
+                        state['pool']['serviceRole'] = s.plan['baselinePool']['serviceRole']
                     else: raise AssertionError(operation)
                     return {}
                 s.c.mutate.side_effect = mutate

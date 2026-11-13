@@ -20,9 +20,16 @@ RESOURCE_KEYS = ['type', 'allocationStrategy', 'minvCpus', 'maxvCpus', 'desiredv
 
 def creation(pool):
     return {'computeEnvironmentName': pool['computeEnvironmentName'], 'type': pool['type'],
-            'state': 'DISABLED', 'serviceRole': pool['serviceRole'], 'tags': pool['tags'],
+            'state': 'ENABLED', 'serviceRole': pool['serviceRole'], 'tags': pool['tags'],
             'computeResources': {k: copy.deepcopy(pool['computeResources'][k])
                                  for k in RESOURCE_KEYS if k in pool['computeResources']}}
+
+
+def creation_request(target):
+    # Batch requires ENABLED at creation. With no queue and min/desired zero,
+    # this cannot dispatch work. An existing service-linked role is selected by
+    # default; explicitly passing it unnecessarily requires iam:PassRole.
+    return {k: copy.deepcopy(v) for k, v in target.items() if k != 'serviceRole'}
 
 
 def queue_identity(queue):
@@ -113,6 +120,14 @@ class SharedPool:
         if metadata.client('sts', config=self.c.read_sdk_config).get_caller_identity()['Account'] != self.c.account:
             raise RuntimeError('Metadata profile account mismatch')
         self.asg = metadata.client('autoscaling', config=self.c.read_sdk_config)
+        self.iam = metadata.client('iam', config=self.c.read_sdk_config)
+
+    def confirm_default_role(self):
+        role = self.iam.get_role(RoleName='AWSServiceRoleForBatch')['Role']
+        expected = 'arn:aws:iam::237145860001:role/aws-service-role/batch.amazonaws.com/AWSServiceRoleForBatch'
+        if role['Arn'] != expected:
+            raise RuntimeError('Existing Batch default service-linked role required')
+        persist(self.c.directory / ('default-role-' + str(time.time_ns()) + '.json'), role, exclusive=True)
 
     def queue(self):
         queues = self.batch.describe_job_queues(jobQueues=['qsb-gpu'])['jobQueues']
@@ -158,6 +173,7 @@ class SharedPool:
                      'baselineQueue': queue, 'queueRestore': queue_creation(queue), 'restore': creation(pool), 'candidate': candidate}
         validate_plan(self.plan, self.c.config)
         self.idle()
+        self.confirm_default_role()
         persist(self.path, self.plan, exclusive=True)
         self.status('planned')
 
@@ -241,7 +257,9 @@ class SharedPool:
                 self.idle()
             stage('delete', 'delete_compute_environment', self.pool, lambda p: p is None, computeEnvironment='qsb-gpu')
         if restore_mode != 'reuse':
-            stage('create', 'create_compute_environment', self.pool, lambda p: p and p['status'] == 'VALID' and creation(p) == target, **target)
+            self.confirm_default_role()
+            stage('create', 'create_compute_environment', self.pool, lambda p: p and p['status'] == 'VALID' and creation(p) == target,
+                  **creation_request(target))
         if creation(self.pool()) != target:
             raise RuntimeError('Replacement differs from exact target')
         stage('queue-create', 'create_job_queue', self.queue, lambda q: q and q['status'] == 'VALID' and queue_identity(q) == queue_identity(self.plan['baselineQueue'])
