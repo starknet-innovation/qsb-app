@@ -212,6 +212,20 @@ script, not a wallet signature, chain/UTXO acceptance, miner policy or broadcast
 Legacy signatures do not commit previous-output amounts; the production chain and
 exact-spend checks retain that responsibility. No wallet material is accepted.
 
+The co-signature mutation locates the final signature/key pair by the PQB stack
+layout and checks the key against the lock's HASH160; other DER signatures may
+legitimately occur earlier in the witness.
+
+A checker-only follow-up may use
+`consensus.ts "$EVIDENCE" --retained-transaction "$EVIDENCE/FRESH_FOLLOWUP"`.
+It requires independently verified cleanup and a released reservation, verifies
+every sealed file, binds the final solution to its sealed coordinator row and
+requires unchanged application/build/fixture source and all original artifact
+hashes. It checks the exact original positive transaction with the same Core
+binary/library and immutable container identity. The output records native and
+validation commits separately; it never grants new native execution credit.
+Normal campaign verification still requires the original clean campaign commit.
+
 The current-status collector pauses and drains the campaign immediately when it observes an unexpected failed unit or incomplete native output. Successful qualification separately requires provider-declared coordinator cancellation and an earlier CPU-verified winner for the same packet for every superseded failed job.
 
 ## Explicit SNF account isolation
