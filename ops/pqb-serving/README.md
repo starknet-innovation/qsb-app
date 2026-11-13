@@ -56,6 +56,11 @@ the four-hour campaign. Fresh readbacks precede capacity creation and workflow
 starts. The administrator removes both additions after cleanup; their expiry is
 fixed and is never extended during a campaign.
 
+Queue creation also requires `batch:CreateJobQueue` on its referenced compute
+environment, in addition to the queue itself. The operator grant and its readback
+check require both permissions on the two exact validation resources. Simulate
+each resource check; a queue-only allow does not authorize the complete request.
+
 Set one absolute campaign deadline before resource creation; never extend it.
 An independently scheduled `deadline.py` invocation pauses only the two public
 fixture jobs and drains only the campaign's exact Batch job-definition revision.
@@ -164,6 +169,10 @@ get past an uncertain operation. Retain the verified ECR artifact for the review
 handoff. Save an independent cleanup reconciliation after removal: all dedicated
 resources absent, all campaign work terminal, recorded volumes deleted and the
 shared fleet idle. Only that reconciliation closes the budget reservation.
+
+When an operator IAM read cannot resolve a never-created runtime role, final
+collection uses the existing metadata-only role to check it. Only an explicit
+not-found response establishes absence; access denial still blocks collection.
 
 Local checks (no AWS calls):
 

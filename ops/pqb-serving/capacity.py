@@ -14,7 +14,8 @@ from control import ACTIVE, Campaign, ROOT, clean_source, persist
 PROFILE = json.loads((ROOT / 'server/aws-batch-validation.json').read_text())
 COMPUTE_NAME = QUEUE_NAME = PROFILE['name']
 POLICY_NAME = 'qsb-pqb-validation-capacity'
-COMPUTE_ACTIONS = {'batch:CreateComputeEnvironment', 'batch:UpdateComputeEnvironment', 'batch:DeleteComputeEnvironment', 'batch:TagResource'}
+# CreateJobQueue authorizes both its queue and each referenced compute environment.
+COMPUTE_ACTIONS = {'batch:CreateComputeEnvironment', 'batch:UpdateComputeEnvironment', 'batch:DeleteComputeEnvironment', 'batch:TagResource', 'batch:CreateJobQueue'}
 QUEUE_ACTIONS = {'batch:CreateJobQueue', 'batch:UpdateJobQueue', 'batch:DeleteJobQueue', 'batch:TagResource'}
 CAPACITY_ACTIONS = COMPUTE_ACTIONS | QUEUE_ACTIONS
 

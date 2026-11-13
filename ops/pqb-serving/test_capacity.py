@@ -53,6 +53,16 @@ class CapacityTests(unittest.TestCase):
             changed = copy.deepcopy(policy); mutate(changed)
             with self.assertRaises(RuntimeError): capacity.validate_operator_policy(changed, c)
 
+    def test_queue_creation_requires_permission_on_both_related_resources(self):
+        c, plan = self.fixture(); policy = plan['operatorPolicy']
+        for statement in policy['Statement']:
+            self.assertIn('batch:CreateJobQueue', statement['Action'])
+        for index in [0, 1]:
+            changed = copy.deepcopy(policy)
+            changed['Statement'][index]['Action'].remove('batch:CreateJobQueue')
+            with self.assertRaisesRegex(RuntimeError, 'broader or differently scoped'):
+                capacity.validate_operator_policy(changed, c)
+
     def test_plan_preserves_baseline_and_rejects_changed_hardware_or_expiry(self):
         c, plan = self.fixture(); capacity.validate_plan(plan, c)
         mutations = [lambda p: p['computeResources'].update(maxvCpus=128),

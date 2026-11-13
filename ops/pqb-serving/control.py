@@ -627,8 +627,28 @@ class Campaign:
         rows = sorted(rows, key=lambda r: (r['pk']['S'], r['sk']['S']))
         return hashlib.sha256(dump(rows).encode()).hexdigest()
 
-    def final_collect(self):
+    def optional_cleanup_resource(self, service, operation, **params):
         from botocore.exceptions import ClientError
+        def read(client):
+            try:
+                return getattr(client, operation)(**params)
+            except ClientError as error:
+                if error.response['Error']['Code'] not in ('ResourceNotFoundException', 'StateMachineDoesNotExist', 'NoSuchEntity'):
+                    raise
+                return None
+        try:
+            return read(self.client(service))
+        except ClientError as error:
+            if service != 'iam' or operation != 'get_role' or error.response['Error']['Code'] not in ('AccessDenied', 'AccessDeniedException'):
+                raise
+            # A never-created role cannot resolve to the operator's runtime IAM path.
+            # An explicit metadata-only read must verify absence; denial is not absence.
+            if not hasattr(self, '_cleanup_metadata_iam'):
+                from capacity import Capacity
+                self._cleanup_metadata_iam = Capacity(self).metadata_session().client('iam', config=self.sdk_config)
+            return read(self._cleanup_metadata_iam)
+
+    def final_collect(self):
         started = bool(list((self.directory / 'requests').glob('*-execution.intent.json')))
         for intent in (self.directory / 'requests').glob('*.intent.json'):
             response = intent.with_name(intent.name.replace('.intent.json', '.response.json'))
@@ -636,13 +656,7 @@ class Campaign:
                 raise RuntimeError('Uncertain mutation requires a separate reconciliation receipt before final cleanup: ' + intent.name)
         if not self.state.get('definition') and (self.directory / 'requests/definition.intent.json').exists():
             raise RuntimeError('Reconcile the uncertain definition identity before cleanup')
-        def optional(service, operation, **params):
-            try:
-                return getattr(self.client(service), operation)(**params)
-            except ClientError as error:
-                if error.response['Error']['Code'] not in ('ResourceNotFoundException', 'StateMachineDoesNotExist', 'NoSuchEntity'):
-                    raise
-                return None
+        optional = self.optional_cleanup_resource
         def owned(tags):
             if isinstance(tags, list):
                 tags = {t.get('Key', t.get('key')): t.get('Value', t.get('value')) for t in tags}

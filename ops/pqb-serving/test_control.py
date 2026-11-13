@@ -157,6 +157,30 @@ class JournalTests(unittest.TestCase):
         batch.describe_jobs.return_value = {'jobs': []}
         with self.assertRaisesRegex(RuntimeError, 'incomplete or changed'): c.native_jobs()
 
+    def test_partial_cleanup_verifies_role_absence_with_metadata_role(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        class ClientError(Exception):
+            def __init__(self, code):
+                self.response = {'Error': {'Code': code}}
+        operator, metadata = Mock(), Mock()
+        operator.get_role.side_effect = ClientError('AccessDenied')
+        metadata.get_role.side_effect = ClientError('NoSuchEntity')
+        c = self.campaign('.', operator); c.sdk_config = object()
+        capacity_factory = Mock(return_value=Mock(metadata_session=Mock(return_value=Mock(client=Mock(return_value=metadata)))))
+        with patch.dict('sys.modules', {'botocore.exceptions': SimpleNamespace(ClientError=ClientError),
+                                      'capacity': SimpleNamespace(Capacity=capacity_factory)}):
+            for name in ['never-created-one', 'never-created-two']:
+                self.assertIsNone(c.optional_cleanup_resource('iam', 'get_role', RoleName=name))
+            capacity_factory.assert_called_once_with(c)
+            self.assertEqual(metadata.get_role.call_count, 2)
+            metadata.get_role.side_effect = ClientError('AccessDenied')
+            with self.assertRaises(ClientError):
+                c.optional_cleanup_resource('iam', 'get_role', RoleName='not-proven-absent')
+            operator.describe_table.side_effect = ClientError('AccessDenied')
+            with self.assertRaises(ClientError):
+                c.optional_cleanup_resource('dynamodb', 'describe_table', TableName='not-proven-absent')
+
 
 if __name__ == '__main__':
     unittest.main()
