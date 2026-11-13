@@ -32,9 +32,9 @@ function setup(selectedQueue = queue) {
 }
 afterEach(() => vi.unstubAllEnvs());
 
-it("prepares the owned isolated L4 pool through the real provider with an eight-slot limit", async () => {
+it("prepares the owned isolated L4 pool through the real provider with a sixteen-slot limit", async () => {
   const t = setup();
-  expect(t.provider.parallelismLimit).toBe(8);
+  expect(t.provider.parallelismLimit).toBe(16);
   const run = await t.provider.prepareRun(image, { public: "synthetic" });
   expect(run.identity.queue).toBe(queue);
   expect(t.submit).not.toHaveBeenCalled();

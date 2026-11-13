@@ -9,7 +9,7 @@ from pathlib import Path
 import time
 from datetime import datetime, timezone
 
-from control import ACTIVE, Campaign, ROOT, clean_source, persist
+from control import ACTIVE, Campaign, ROOT, clean_source, dump, persist
 
 PROFILE = json.loads((ROOT / 'server/aws-batch-validation.json').read_text())
 COMPUTE_NAME = QUEUE_NAME = PROFILE['name']
@@ -272,6 +272,81 @@ class Capacity:
         if sorted(j['jobId'] for j in rows) != ids: raise RuntimeError('Incomplete isolated job inventory')
         return rows
 
+    def reconcile_history(self, directories):
+        """Retained queue history is not a submission by the new campaign."""
+        self.c.before_deadline(); self.check_ready()
+        if self.c.state['phase'] != 'prepared' or self.c.state.get('definition') or self.c.state.get('knownJobIds'):
+            raise RuntimeError('Reconcile prior history before deploying or submitting new work')
+        expected, sources = {}, []
+        for directory in directories:
+            previous = Campaign(directory)
+            state = previous.state
+            if (not state or previous.config != self.c.config or state['name'] == self.c.state['name']
+                or state['queue'] != self.c.state['queue'] or state.get('reservationStatus') != 'released'
+                or not state.get('phase', '').endswith('-cleanup-verified')):
+                raise RuntimeError('Require a separately completed and cleaned prior campaign')
+            receipt, _ = previous.checked_final_collection()
+            binding = state['independentCleanup']
+            cleanup_path = previous.directory / binding['file']
+            if cleanup_path.parent != previous.directory or hashlib.sha256(cleanup_path.read_bytes()).hexdigest() != binding['sha256']:
+                raise RuntimeError('Prior independent cleanup binding changed')
+            cleanup = json.loads(cleanup_path.read_text())
+            if (cleanup.get('verified') is not True or cleanup.get('campaign') != state['name']
+                or cleanup.get('sourceCommit') != state['sourceCommit'] or not cleanup.get('checks')
+                or not all(row.get('passed') is True for row in cleanup['checks'])):
+                raise RuntimeError('Prior independent cleanup did not verify')
+            indices = [name for name in receipt['files'] if name.startswith('native-index-') and name.endswith('.json')]
+            if len(indices) != 1:
+                raise RuntimeError('Require one sealed prior native inventory')
+            rows = json.loads((previous.directory / indices[0]).read_text())['jobs']
+            if sorted(j['jobId'] for j in rows) != state['knownJobIds'] or receipt['nativeJobIds'] != state['knownJobIds']:
+                raise RuntimeError('Prior native inventory changed')
+            for job in rows:
+                if (job['jobId'] in expected or job['status'] not in ('SUCCEEDED', 'FAILED')
+                    or job['jobQueue'] != self.c.state['queue'] or job['jobDefinition'] != state['definition']
+                    or job['createdAt'] >= self.c.state['createdAt'] * 1000):
+                    raise RuntimeError('Prior native work is duplicated, active or incorrectly bound')
+                expected[job['jobId']] = hashlib.sha256(dump(job).encode()).hexdigest()
+            sources.append({'campaign': state['name'], 'sourceCommit': state['sourceCommit'],
+                'finalCollection': state['finalCollection'], 'independentCleanup': binding})
+        jobs = self.queue_jobs()
+        if sorted(j['jobId'] for j in jobs) != sorted(expected) or any(
+            hashlib.sha256(dump(j).encode()).hexdigest() != expected[j['jobId']] for j in jobs):
+            raise RuntimeError('Live queue history differs from the sealed prior inventories')
+        persist(self.c.directory / 'capacity/prior-terminal-history.json', {
+            'format': 'pqb-prior-terminal-history-v2', 'campaign': self.c.state['name'],
+            'sourceCommit': self.plan['sourceCommit'], 'sources': sources, 'jobSha256': expected,
+            'scope': 'Historical terminal jobs; excluded from current native accounting'}, exclusive=True)
+
+    def verify_queue_inventory(self, jobs, terminal=False):
+        path = self.c.directory / 'capacity/prior-terminal-history.json'
+        historical = {}
+        if path.exists():
+            history = json.loads(path.read_text())
+            if (history['format'] != 'pqb-prior-terminal-history-v2' or history['campaign'] != self.c.state['name']
+                or history['sourceCommit'] != self.plan['sourceCommit']):
+                raise RuntimeError('Prior terminal history binding changed')
+            historical = history['jobSha256']
+            if terminal:
+                receipt, _ = self.c.checked_final_collection()
+                if 'capacity/prior-terminal-history.json' not in receipt['files']:
+                    raise RuntimeError('Prior terminal history was not sealed before cleanup')
+        current = []
+        for job in jobs:
+            if job.get('jobQueue') != self.c.state['queue']:
+                raise RuntimeError('Isolated work changed or remains active; queue identity differs')
+            if job['jobId'] in historical:
+                if job['status'] not in ('SUCCEEDED', 'FAILED') or hashlib.sha256(dump(job).encode()).hexdigest() != historical[job['jobId']]:
+                    raise RuntimeError('Prior terminal history changed')
+            elif self.c.state.get('definition') and job['jobDefinition'] == self.c.state['definition']:
+                current.append(job['jobId'])
+            else:
+                raise RuntimeError('Isolated work changed or remains active; reconcile prior queue history')
+        if (len({j['jobId'] for j in jobs}) != len(jobs) or set(historical) - {j['jobId'] for j in jobs}
+            or set(historical).intersection(self.c.state.get('knownJobIds', []))
+            or (terminal and (any(j['status'] in ACTIVE for j in jobs) or sorted(current) != self.c.state.get('knownJobIds', [])))):
+            raise RuntimeError('Isolated work changed or remains active; collect/reconcile before deletion')
+
     def collect(self, stamp):
         target = self.c.directory / 'capacity'; target.mkdir(exist_ok=True)
         pool, queue = self.pool(), self.queue(); hosts = []
@@ -316,8 +391,7 @@ class Capacity:
                 self.wait(self.queue, lambda q: q is None, 'Queue deletion pending')
             elif queue:
                 jobs = self.queue_jobs()
-                if any(j['status'] in ACTIVE for j in jobs) or sorted(j['jobId'] for j in jobs) != self.c.state.get('knownJobIds', []):
-                    raise RuntimeError('Isolated work changed or remains active; collect/reconcile before deletion')
+                self.verify_queue_inventory(jobs, terminal=True)
                 snapshot = self.collect(str(time.time_ns()))
                 persist(self.c.directory / ('capacity/removal-seal-' + str(time.time_ns()) + '.json'),
                     {'baseFinalCollection': self.c.state['finalCollection'], 'snapshot': str(snapshot.relative_to(self.c.directory)),
@@ -371,16 +445,20 @@ class Capacity:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['plan', 'verify_grant', 'create', 'remove', 'verify_removed'])
+    parser.add_argument('mode', choices=['plan', 'verify_grant', 'create', 'reconcile_history', 'remove', 'verify_removed'])
     parser.add_argument('directory', type=Path)
     parser.add_argument('--generated-policy', type=Path)
     parser.add_argument('--requested-policy', type=Path)
     parser.add_argument('--boundary-baseline', type=Path)
+    parser.add_argument('--previous-campaign', type=Path, action='append')
     args = parser.parse_args(); capacity = Capacity(Campaign(args.directory))
     if args.mode == 'plan':
         if not args.generated_policy or not args.requested_policy or not args.boundary_baseline:
             parser.error('plan requires --generated-policy, --requested-policy and --boundary-baseline')
         capacity.make_plan(args.generated_policy, args.requested_policy, args.boundary_baseline)
+    elif args.mode == 'reconcile_history':
+        if not args.previous_campaign: parser.error('reconcile_history requires --previous-campaign')
+        capacity.reconcile_history(args.previous_campaign)
     else: getattr(capacity, args.mode)()
 
 

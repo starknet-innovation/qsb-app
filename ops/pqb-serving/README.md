@@ -35,10 +35,10 @@ reservation is retained in campaign accounting. Neither execution is resumed or
 replayed after an unknown submission.
 
 When the ordinary `g5.xlarge` pool has no capacity, `capacity.py` prepares an
-isolated `qsb-gpu-validation` queue and compute environment using `g6.2xlarge`
+isolated `qsb-gpu-validation` queue and compute environment using `g6.xlarge`
 NVIDIA L4 hosts. It copies the reviewed host AMI, immutable launch-template version,
 network and instance profile. The pool uses `BEST_FIT_PROGRESSIVE`, minimum zero
-and maximum 64 vCPUs. Its provider limits the coordinator to eight single-GPU
+and maximum 64 vCPUs. Its provider limits the coordinator to sixteen single-GPU
 hosts, within the existing global 16-slot ceiling. The production queue and pool
 are never modified. Production work appearing during collection stops the public
 assessment so it can release capacity. This is a validation configuration, not a
@@ -136,6 +136,10 @@ python3 ops/pqb-serving/capacity.py verify_grant "$EVIDENCE"
 python3 ops/pqb-serving/control.py prepare "$EVIDENCE"
 python3 ops/pqb-serving/control.py mirror "$EVIDENCE"
 python3 ops/pqb-serving/capacity.py create "$EVIDENCE"
+# If the recreated queue retains prior terminal jobs, reconcile every such
+# campaign before deployment (repeat --previous-campaign as needed):
+python3 ops/pqb-serving/capacity.py reconcile_history "$EVIDENCE" \
+  --previous-campaign "$PREVIOUS_COMPLETED_EVIDENCE"
 python3 ops/pqb-serving/control.py deploy "$EVIDENCE"
 python3 ops/pqb-serving/control.py start "$EVIDENCE" --phase preflight
 python3 ops/pqb-serving/control.py collect "$EVIDENCE"
@@ -151,7 +155,7 @@ Call `collect` regularly during each execution; it retains snapshots rather than
 rewriting originals. The whole campaign reserves $200 operationally, has a fixed
 four-hour deadline, permits at most 900 + 540,000 reserved GPU-seconds across the
 two public jobs. The ordinary provider keeps its 16-slot cap; the isolated provider
-reduces it to eight. The account quota applies across both pools.
+also keeps sixteen. The account quota applies across both pools.
 This is an assessment
 reservation, not a guaranteed billing limit. Current regional pricing must be
 recorded independently before preparing a new campaign.
@@ -163,7 +167,14 @@ then seals their byte hashes. For temporary capacity, run
 `capacity.py remove "$EVIDENCE"` next: it collects and seals a fresh snapshot,
 disables/deletes only the owned isolated queue and pool,
 and requires recorded hosts terminated, recorded volumes absent and its scaling
-group absent. An invalid pool can still be cleaned up. Every job in the isolated queue must be terminal and already recorded. Production
+group absent. An invalid pool can still be cleaned up. AWS can retain terminal job history across queue deletion and recreation.
+`reconcile_history` accepts only prior campaigns with released reservations, sealed
+native inventories and hash-bound verified independent cleanup. It compares all
+retained rows byte-for-byte with fresh provider descriptions, before deployment.
+The binding is sealed in the current collection and checked again before deletion.
+Prior jobs never enter the current submission ledger or receive completion credit.
+Unrecognized, changed or active historical work blocks deployment and cleanup.
+Every job in the isolated queue must be terminal and already recorded. Production
 resources are never deleted. If asynchronous deletion is pending, `capacity.py verify_removed`
 performs fresh reads. Rerunning `remove` can continue after a known asynchronous
 delete using the original successful response; uncertain mutations require

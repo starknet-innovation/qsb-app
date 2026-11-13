@@ -275,7 +275,8 @@ class Campaign:
             raise RuntimeError('Shared queue changed since the reviewed baseline')
         if state.get('capacity'):
             from capacity import Capacity
-            Capacity(self).check_ready()
+            capacity = Capacity(self); capacity.check_ready()
+            capacity.verify_queue_inventory(capacity.queue_jobs())
         original = snapshot['definition'][0]
         params = {k: copy.deepcopy(original[k]) for k in ['jobDefinitionName', 'type', 'parameters', 'retryStrategy', 'containerProperties', 'timeout', 'propagateTags', 'platformCapabilities'] if k in original}
         params['containerProperties']['image'] = state['image']
@@ -425,7 +426,8 @@ class Campaign:
             raise RuntimeError('Never restart the preflight')
         if self.state.get('capacity'):
             from capacity import Capacity
-            Capacity(self).check_ready()
+            capacity = Capacity(self); capacity.check_ready()
+            capacity.verify_queue_inventory(capacity.queue_jobs())
         schedule = self.client('scheduler').get_schedule(Name=self.state['schedule'])
         armed = json.loads((self.directory / 'armed-deadline.json').read_text())
         if schedule['State'] != 'ENABLED' or schedule['ScheduleExpression'] != armed['ScheduleExpression'] or schedule['Target'] != armed['Target']:

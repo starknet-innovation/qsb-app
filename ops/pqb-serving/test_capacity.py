@@ -1,5 +1,7 @@
 """Isolated capacity safeguards: no credentials, cloud calls or paid work."""
 import copy
+import hashlib
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -167,6 +169,78 @@ class CapacityTests(unittest.TestCase):
             pool.c.client.return_value.describe_instances.return_value = {'Reservations': [{'Instances': [{'InstanceId': 'i-owned', 'State': {'Name': 'terminated'}}]}]}
             pool.c.state['capacity']['volumeIds'] = ['vol-retained']
             with self.assertRaisesRegex(RuntimeError, 'volume remains'): pool.verify_removed()
+
+    def test_retained_history_is_separate_from_current_native_inventory(self):
+        pool = self.object(); pool.c.state.update(sourceCommit='source', definition='current:1', knownJobIds=['new'])
+        old = {'jobId': 'old', 'status': 'FAILED', 'jobDefinition': 'previous:1', 'jobQueue': pool.c.state['queue']}
+        new = {'jobId': 'new', 'status': 'SUCCEEDED', 'jobDefinition': 'current:1', 'jobQueue': pool.c.state['queue']}
+        pool.c.checked_final_collection.return_value = ({'files': {'capacity/prior-terminal-history.json': 'sealed'}}, {})
+        with TemporaryDirectory() as directory:
+            pool.c.directory = Path(directory); (pool.c.directory / 'capacity').mkdir()
+            history = {'format': 'pqb-prior-terminal-history-v2', 'campaign': pool.c.state['name'],
+                'sourceCommit': 'source', 'jobSha256': {'old': hashlib.sha256(capacity.dump(old).encode()).hexdigest()}}
+            path = pool.c.directory / 'capacity/prior-terminal-history.json'; path.write_text(json.dumps(history))
+            pool.verify_queue_inventory([old, new], terminal=True)
+            self.assertEqual(pool.c.state['knownJobIds'], ['new'])
+            for jobs in [[new], [old, old, new], [dict(old, status='RUNNING'), new],
+                [dict(old, jobDefinition='changed:1'), new], [old, dict(new, jobId='unknown')],
+                [old, dict(new, status='RUNNING')], [old, dict(new, jobDefinition='foreign:1')],
+                [old, dict(new, jobQueue='foreign-queue')]]:
+                with self.assertRaises(RuntimeError): pool.verify_queue_inventory(jobs, terminal=True)
+            pool.verify_queue_inventory([old, dict(new, status='RUNNING')])
+            pool.c.checked_final_collection.return_value = ({'files': {}}, {})
+            with self.assertRaisesRegex(RuntimeError, 'not sealed'): pool.verify_queue_inventory([old, new], terminal=True)
+            history['campaign'] = 'other'; path.write_text(json.dumps(history))
+            with self.assertRaisesRegex(RuntimeError, 'binding changed'): pool.verify_queue_inventory([old, new])
+        pool.c.mutate.assert_not_called()
+
+    def test_unrecognized_history_blocks_deployment_and_cleanup(self):
+        pool = self.object()
+        with TemporaryDirectory() as directory:
+            pool.c.directory = Path(directory)
+            for terminal in [False, True]:
+                with self.assertRaisesRegex(RuntimeError, 'work changed or remains active'):
+                    pool.verify_queue_inventory([{'jobId': 'unknown', 'status': 'FAILED', 'jobDefinition': 'old:1'}], terminal)
+            pool.verify_queue_inventory([])
+        pool.c.mutate.assert_not_called()
+
+    def test_history_reconciliation_requires_verified_prior_cleanup(self):
+        pool = self.object(); pool.c.before_deadline = Mock(); pool.check_ready = Mock()
+        pool.c.state.update(phase='prepared', createdAt=1000)
+        previous = Mock(); previous.config = pool.c.config
+        previous.state = {'name': 'qsb-pqb-v-fedcba543210', 'queue': pool.c.state['queue'],
+            'reservationStatus': 'reserved', 'phase': 'removal-requested'}
+        with patch('capacity.Campaign', return_value=previous):
+            with self.assertRaisesRegex(RuntimeError, 'completed and cleaned'):
+                pool.reconcile_history([Path('/previous')])
+        previous.checked_final_collection.assert_not_called(); pool.c.mutate.assert_not_called()
+
+    def test_history_reconciliation_binds_sealed_prior_jobs_to_fresh_provider_rows(self):
+        pool = self.object(); pool.c.before_deadline = Mock(); pool.check_ready = Mock()
+        pool.c.state.update(phase='prepared', createdAt=1000)
+        with TemporaryDirectory() as directory:
+            pool.c.directory = Path(directory) / 'current'; (pool.c.directory / 'capacity').mkdir(parents=True)
+            previous = Mock(); previous.config = pool.c.config; previous.directory = Path(directory) / 'previous'; previous.directory.mkdir()
+            job = {'jobId': 'prior', 'status': 'FAILED', 'jobDefinition': 'prior:1',
+                'jobQueue': pool.c.state['queue'], 'createdAt': 900000}
+            (previous.directory / 'native-index-1.json').write_text(json.dumps({'jobs': [job]}))
+            cleanup = {'verified': True, 'campaign': 'qsb-pqb-v-fedcba543210', 'sourceCommit': 'previous-source',
+                'checks': [{'passed': True}]}
+            cleanup_path = previous.directory / 'independent-cleanup-1.json'; cleanup_path.write_text(json.dumps(cleanup))
+            previous.state = {'name': cleanup['campaign'], 'sourceCommit': cleanup['sourceCommit'],
+                'queue': pool.c.state['queue'], 'definition': 'prior:1', 'knownJobIds': ['prior'],
+                'reservationStatus': 'released', 'phase': 'capacity-blocked-cleanup-verified',
+                'finalCollection': {'file': 'sealed'}, 'independentCleanup': {'file': cleanup_path.name,
+                    'sha256': hashlib.sha256(cleanup_path.read_bytes()).hexdigest()}}
+            previous.checked_final_collection.return_value = ({'files': {'native-index-1.json': 'sealed'}, 'nativeJobIds': ['prior']}, {})
+            pool.queue_jobs = Mock(return_value=[dict(job, status='RUNNING')])
+            with patch('capacity.Campaign', return_value=previous):
+                with self.assertRaisesRegex(RuntimeError, 'Live queue history differs'): pool.reconcile_history([previous.directory])
+                pool.queue_jobs.return_value = [job]; pool.reconcile_history([previous.directory])
+            history = json.loads((pool.c.directory / 'capacity/prior-terminal-history.json').read_text())
+            self.assertEqual(history['jobSha256'], {'prior': hashlib.sha256(capacity.dump(job).encode()).hexdigest()})
+            self.assertEqual(pool.c.state['knownJobIds'], [])
+        pool.c.mutate.assert_not_called()
 
 
 if __name__ == '__main__': unittest.main()
