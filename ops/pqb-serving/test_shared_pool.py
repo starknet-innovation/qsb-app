@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
 
-from shared_pool import SharedPool, creation, validate_plan, ready, PROFILE
+from shared_pool import SharedPool, creation, queue_creation, validate_plan, ready, PROFILE
 from control import Campaign
 
 
@@ -22,11 +22,11 @@ def plan():
             'instanceTypes': ['g5.xlarge'], 'minvCpus': 0, 'desiredvCpus': 0, 'maxvCpus': 64,
             'subnets': ['subnet-0b9dbd06af28524de', 'subnet-0a4b5fdacb09d88ab'], 'securityGroupIds': ['existing'],
             'launchTemplate': {'launchTemplateId': 'original', 'version': '1'}, 'instanceRole': 'original-role'}}
-    queue = {'jobQueueArn': ARN + 'job-queue/qsb-gpu', 'state': 'ENABLED', 'status': 'VALID',
+    queue = {'jobQueueArn': ARN + 'job-queue/qsb-gpu', 'jobQueueName': 'qsb-gpu', 'priority': 1, 'state': 'ENABLED', 'status': 'VALID',
              'tags': {'Project': 'qsb-gpu'}, 'computeEnvironmentOrder': [{'order': 1, 'computeEnvironment': pool['computeEnvironmentArn']}]}
     candidate = creation(pool)
     candidate['computeResources'].update(allocationStrategy=PROFILE['allocationStrategy'], instanceTypes=[PROFILE['instanceType']])
-    return {'baselinePool': pool, 'baselineQueue': queue, 'restore': creation(pool), 'candidate': candidate, 'sourceCommit': 'source', 'createdAt': 1}
+    return {'baselinePool': pool, 'baselineQueue': queue, 'queueRestore': queue_creation(queue), 'restore': creation(pool), 'candidate': candidate, 'sourceCommit': 'source', 'createdAt': 1}
 
 
 class MaintenanceTests(unittest.TestCase):
@@ -42,6 +42,7 @@ class MaintenanceTests(unittest.TestCase):
     def test_running_work_or_hosts_prevent_maintenance(self):
         with TemporaryDirectory() as directory:
             s = object.__new__(SharedPool); s.plan = plan()
+            s.queue = Mock(return_value=s.plan['baselineQueue'])
             s.c = Mock(directory=Path(directory)); s.batch = Mock(); s.asg = Mock()
             s.batch.get_paginator.return_value.paginate.return_value = [{'jobSummaryList': []}]
             s.asg.get_paginator.return_value.paginate.return_value = [{'AutoScalingGroups': []}]
@@ -75,7 +76,7 @@ class MaintenanceTests(unittest.TestCase):
                     journal = Path(directory) / 'requests'; journal.mkdir()
                     (journal / 'candidate-queue-disable.intent.json').write_text('{}')
                     (journal / 'candidate-queue-disable.response.json').write_text('{"result":{}}')
-                if initial == 'missing': state['pool'] = None; q['computeEnvironmentOrder'] = []; q['state'] = 'DISABLED'
+                if initial == 'missing': state['pool'] = None; state['queue'] = None
                 if initial == 'disabled-original': state['pool'] = copy.deepcopy(s.plan['baselinePool']); state['pool']['state'] = 'DISABLED'; q['state'] = 'DISABLED'
                 if initial == 'invalid-candidate': state['pool']['status'] = 'INVALID'; state['pool']['state'] = 'DISABLED'; q['state'] = 'DISABLED'
                 s.pool = lambda: state['pool']; s.queue = lambda: state['queue']
@@ -84,6 +85,9 @@ class MaintenanceTests(unittest.TestCase):
                     operations.append(operation)
                     if operation == 'update_job_queue':
                         state['queue'].update({k: v for k, v in args.items() if k != 'jobQueue'})
+                    elif operation == 'delete_job_queue': state['queue'] = None
+                    elif operation == 'create_job_queue':
+                        state['queue'] = dict(copy.deepcopy(s.plan['baselineQueue']), **args)
                     elif operation == 'update_compute_environment': state['pool']['state'] = args['state']
                     elif operation == 'delete_compute_environment': state['pool'] = None
                     elif operation == 'create_compute_environment':
@@ -101,8 +105,9 @@ class MaintenanceTests(unittest.TestCase):
                     s.replace(restore=restoring)
                 middle = [] if initial == 'disabled-original' else ['create_compute_environment'] if initial == 'missing' else [
                     'update_compute_environment', 'delete_compute_environment', 'create_compute_environment']
-                self.assertEqual(operations, ['update_job_queue', 'update_job_queue', *middle,
-                    'update_job_queue', 'update_compute_environment', 'update_job_queue'])
+                prefix = [] if initial == 'missing' else ['update_job_queue', 'delete_job_queue']
+                self.assertEqual(operations, [*prefix, *middle,
+                    'create_job_queue', 'update_compute_environment', 'update_job_queue'])
                 self.assertEqual(creation(state['pool']), s.plan['restore' if restoring else 'candidate'])
                 self.assertEqual(state['queue'], s.plan['baselineQueue'])
 

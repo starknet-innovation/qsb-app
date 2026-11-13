@@ -26,11 +26,19 @@ def creation(pool):
 
 
 def queue_identity(queue):
+    if queue is None:
+        return None
     return {k: v for k, v in queue.items() if k not in ['state', 'status', 'statusReason', 'computeEnvironmentOrder']}
 
 
+def queue_creation(queue):
+    result = {k: copy.deepcopy(queue[k]) for k in ['jobQueueName', 'priority', 'computeEnvironmentOrder', 'tags',
+              'jobStateTimeLimitActions', 'schedulingPolicyArn'] if k in queue}
+    return dict(result, state='DISABLED')
+
+
 def ready(pool, queue, target, baseline_queue):
-    return (pool is not None and creation(pool) == target and pool['state'] == 'ENABLED' and pool['status'] == 'VALID'
+    return (pool is not None and queue is not None and creation(pool) == target and pool['state'] == 'ENABLED' and pool['status'] == 'VALID'
             and queue['state'] == 'ENABLED' and queue['status'] == 'VALID'
             and queue_identity(queue) == queue_identity(baseline_queue)
             and queue['computeEnvironmentOrder'] == baseline_queue['computeEnvironmentOrder'])
@@ -60,6 +68,8 @@ def validate_plan(plan, config):
     expected = creation(pool)
     if plan['restore'] != expected:
         raise RuntimeError('Original pool rollback payload changed')
+    if plan['queueRestore'] != queue_creation(queue):
+        raise RuntimeError('Original queue rollback payload changed')
     expected['computeResources'].update(allocationStrategy=PROFILE['allocationStrategy'], instanceTypes=[PROFILE['instanceType']])
     if plan['candidate'] != expected or PROFILE['gpuName'] != 'A10G' or PROFILE['vcpusPerHost'] != 8:
         raise RuntimeError('Candidate differs from the reviewed single-A10G profile')
@@ -106,9 +116,9 @@ class SharedPool:
 
     def queue(self):
         queues = self.batch.describe_job_queues(jobQueues=['qsb-gpu'])['jobQueues']
-        if len(queues) != 1:
-            raise RuntimeError('Expected the original queue')
-        return queues[0]
+        if len(queues) > 1:
+            raise RuntimeError('Unexpected queue inventory')
+        return queues[0] if queues else None
 
     def pool(self):
         pools = self.batch.describe_compute_environments(computeEnvironments=['qsb-gpu'])['computeEnvironments']
@@ -118,7 +128,7 @@ class SharedPool:
 
     def idle(self):
         active = {status: [j for page in self.batch.get_paginator('list_jobs').paginate(jobQueue='qsb-gpu', jobStatus=status)
-                           for j in page['jobSummaryList']] for status in ACTIVE}
+                           for j in page['jobSummaryList']] for status in ACTIVE} if self.queue() else {}
         api = self.c.client('lambda').get_function_configuration(FunctionName='qsb-app-api')
         workflow = api['Environment']['Variables']['WORKFLOW_ARN']
         executions = [e for page in self.c.client('stepfunctions').get_paginator('list_executions').paginate(
@@ -145,7 +155,7 @@ class SharedPool:
         candidate = creation(pool)
         candidate['computeResources'].update(allocationStrategy=PROFILE['allocationStrategy'], instanceTypes=[PROFILE['instanceType']])
         self.plan = {'sourceCommit': clean_source(), 'createdAt': int(time.time()), 'baselinePool': pool,
-                     'baselineQueue': queue, 'restore': creation(pool), 'candidate': candidate}
+                     'baselineQueue': queue, 'queueRestore': queue_creation(queue), 'restore': creation(pool), 'candidate': candidate}
         validate_plan(self.plan, self.c.config)
         self.idle()
         persist(self.path, self.plan, exclusive=True)
@@ -170,7 +180,8 @@ class SharedPool:
         target = self.plan[direction]
         before = self.plan['candidate' if restore else 'restore']
         journal = self.c.directory / 'requests'
-        started = (journal / (direction + '-queue-disable.intent.json')).exists()
+        checkpoint = self.c.directory / (direction + '-from.json')
+        started = checkpoint.exists()
         if not started:
             if not restore and time.time() > self.plan['createdAt'] + 3600:
                 raise RuntimeError('Maintenance plan is stale')
@@ -189,22 +200,17 @@ class SharedPool:
                     if 'error' in result and not (result.get('httpStatusCode') in (400, 403)
                         and result.get('awsErrorCode') in ('AccessDenied', 'AccessDeniedException', 'ClientException')):
                         raise RuntimeError('Uncertain maintenance error; reconcile before rollback')
-                if (queue_identity(queue) != queue_identity(self.plan['baselineQueue'])
-                    or queue['computeEnvironmentOrder'] not in ([], self.plan['baselineQueue']['computeEnvironmentOrder'])
+                if ((queue and (queue_identity(queue) != queue_identity(self.plan['baselineQueue'])
+                    or queue['computeEnvironmentOrder'] != self.plan['baselineQueue']['computeEnvironmentOrder']))
                     or (pool and creation(pool) not in (before, target))):
                     raise RuntimeError('Unknown pool/queue state; refuse rollback')
                 mode = 'missing' if not pool else 'reuse' if creation(pool) == target else 'replace'
             elif not ready(pool, queue, before, self.plan['baselineQueue']):
                 raise RuntimeError('Pool changed before maintenance')
             self.idle()
-            if restore:
-                checkpoint = self.c.directory / 'restore-from.json'
-                if checkpoint.exists():
-                    if json.loads(checkpoint.read_text())['mode'] != mode:
-                        raise RuntimeError('Rollback checkpoint no longer matches; reconcile')
-                else:
-                    persist(checkpoint, {'mode': mode, 'pool': pool, 'queue': queue}, exclusive=True)
-        restore_mode = json.loads((self.c.directory / 'restore-from.json').read_text())['mode'] if restore else 'replace'
+            persist(checkpoint, {'mode': mode if restore else 'replace', 'pool': pool, 'queue': queue}, exclusive=True)
+        origin = json.loads(checkpoint.read_text())
+        restore_mode = origin['mode']
         self.status(direction + '-in-progress')
         def mutate(key, operation, **params):
             return self.c.mutate(direction + '-' + key, 'batch', operation, **params)
@@ -217,19 +223,20 @@ class SharedPool:
             mutate(key, operation, **params)
             actual = self.wait(read, ready)
             persist(done, {'actual': actual}, exclusive=True)
-        stage('queue-disable', 'update_job_queue', self.queue, lambda q: q['state'] == 'DISABLED' and q['status'] == 'VALID', jobQueue='qsb-gpu', state='DISABLED')
-        self.idle()
-        if (queue_identity(self.queue()) != queue_identity(self.plan['baselineQueue'])
-            or self.queue()['state'] != 'DISABLED'):
-            raise RuntimeError('Unrelated queue configuration changed')
-        stage('detach', 'update_job_queue', self.queue, lambda q: q['status'] == 'VALID' and not q['computeEnvironmentOrder'], jobQueue='qsb-gpu', computeEnvironmentOrder=[])
-        if self.queue()['computeEnvironmentOrder']:
-            raise RuntimeError('Queue was reattached during maintenance')
+        if origin['queue']:
+            if not (self.c.directory / (direction + '-queue-delete.done.json')).exists():
+                stage('queue-disable', 'update_job_queue', self.queue, lambda q: q and q['state'] == 'DISABLED' and q['status'] == 'VALID', jobQueue='qsb-gpu', state='DISABLED')
+                self.idle()
+                q = self.queue()
+                if q and (queue_identity(q) != queue_identity(self.plan['baselineQueue']) or q['state'] != 'DISABLED'
+                    or q['computeEnvironmentOrder'] != self.plan['baselineQueue']['computeEnvironmentOrder']):
+                    raise RuntimeError('Unrelated queue configuration changed')
+                stage('queue-delete', 'delete_job_queue', self.queue, lambda q: q is None, jobQueue='qsb-gpu')
         if restore_mode == 'replace':
             stage('pool-disable', 'update_compute_environment', self.pool, lambda p: p and p['state'] == 'DISABLED' and p['status'] in ('VALID', 'INVALID'), computeEnvironment='qsb-gpu', state='DISABLED')
             if not (journal / (direction + '-delete.intent.json')).exists():
                 pool = self.pool()
-                if not pool or creation(pool) != before or pool['state'] != 'DISABLED':
+                if not pool or creation(pool) != before or pool['state'] != 'DISABLED' or self.queue() is not None:
                     raise RuntimeError('Unexpected pool before deletion')
                 self.idle()
             stage('delete', 'delete_compute_environment', self.pool, lambda p: p is None, computeEnvironment='qsb-gpu')
@@ -237,7 +244,8 @@ class SharedPool:
             stage('create', 'create_compute_environment', self.pool, lambda p: p and p['status'] == 'VALID' and creation(p) == target, **target)
         if creation(self.pool()) != target:
             raise RuntimeError('Replacement differs from exact target')
-        stage('attach', 'update_job_queue', self.queue, lambda q: q['status'] == 'VALID' and q['computeEnvironmentOrder'] == self.plan['baselineQueue']['computeEnvironmentOrder'], jobQueue='qsb-gpu', computeEnvironmentOrder=self.plan['baselineQueue']['computeEnvironmentOrder'])
+        stage('queue-create', 'create_job_queue', self.queue, lambda q: q and q['status'] == 'VALID' and queue_identity(q) == queue_identity(self.plan['baselineQueue'])
+              and q['computeEnvironmentOrder'] == self.plan['baselineQueue']['computeEnvironmentOrder'], **self.plan['queueRestore'])
         stage('pool-enable', 'update_compute_environment', self.pool, lambda p: p and p['status'] == 'VALID' and p['state'] == 'ENABLED', computeEnvironment='qsb-gpu', state='ENABLED')
         stage('queue-enable', 'update_job_queue', self.queue, lambda q: q['status'] == 'VALID' and q['state'] == 'ENABLED', jobQueue='qsb-gpu', state='ENABLED')
         self.idle()

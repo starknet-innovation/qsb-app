@@ -319,10 +319,10 @@ Use a fresh external maintenance directory with `operator.json`, then run
 `shared_pool.py capture DIRECTORY` from a clean pushed controller. Review the
 retained plan before `shared_pool.py replace DIRECTORY`. The controller disables
 new queue submissions, verifies no active jobs, production workflow executions,
-hosts or pending scaling demand, detaches/disables/deletes the original compute
+hosts or pending scaling demand, deletes the idle queue, disables/deletes the original compute
 environment, and recreates the same named environment disabled with zero minimum
-and desired capacity. It verifies the candidate before attaching and enabling it.
-The queue name, roles, AMI, launch template, subnets, tags and 64-vCPU limit stay
+and desired capacity. It verifies the candidate before recreating the original queue disabled and enabling both.
+The queue name, ARN, priority and tags are restored; roles, AMI, launch template, subnets, tags and 64-vCPU limit stay
 bound to the original snapshot. Each write has an exclusive intent and one attempt;
 uncertain outcomes require reconciliation rather than replay.
 
