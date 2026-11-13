@@ -1,5 +1,9 @@
 # Public PQB serving validation
 
+The [qualified public assessment](../../docs/PQB-SERVING-VALIDATION.md) records the
+exact native/checker identities, complete solve, Core checks and verified cleanup.
+Each future campaign requires its own authorization, fresh directory and evidence.
+
 This bounded operational assessment invokes the actual coordinator bundle through
 its Step Functions state machine and AWS Batch transport. It uses only the
 committed, never-funded public synthetic fixture. It creates no API, wallet,
