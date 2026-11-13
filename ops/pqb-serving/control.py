@@ -159,7 +159,12 @@ class Campaign:
         try:
             result = invoke() if invoke is not None else getattr(self.client(service), operation)(**params)
         except Exception as error:
-            persist(response, {'error': type(error).__name__, 'message': str(error)}, exclusive=True)
+            failure = {'error': type(error).__name__, 'message': str(error)}
+            aws = getattr(error, 'response', {})
+            if isinstance(aws, dict) and 'Error' in aws:
+                failure['awsErrorCode'] = aws['Error'].get('Code')
+                failure['httpStatusCode'] = aws.get('ResponseMetadata', {}).get('HTTPStatusCode')
+            persist(response, failure, exclusive=True)
             raise
         persist(response, {'result': result}, exclusive=True)
         return result
@@ -208,6 +213,11 @@ class Campaign:
             prepare(self, source, fixture, manifest)
             return
         snapshot = json.loads((self.directory / 'live-runtime-private.json').read_text())
+        shared_pool = self.directory / 'shared-pool-binding.json'
+        shared_binding = None
+        if shared_pool.exists():
+            from shared_pool import verify_binding
+            shared_binding = verify_binding(self, json.loads(shared_pool.read_text()), source, snapshot)
         if any(snapshot['activeJobs'].values()) or snapshot['runningExecutions']:
             raise RuntimeError('Baseline must be drained')
         capacity_plan = self.directory / 'capacity-plan.json'
@@ -238,6 +248,8 @@ class Campaign:
             self.state['capacity'] = {'planSha256': hashlib.sha256(capacity_plan.read_bytes()).hexdigest(), 'status': 'planned'}
             self.state['queue'] = capacity.plan['queueArn']
             self.state['watchdogSchedule'] = name + '-watchdog'
+        if shared_binding:
+            self.state['sharedPoolReplacement'] = shared_binding
         retained = self.directory / 'build-artifacts'; retained.mkdir()
         for name in ['manifest.json', 'api.zip', 'coordinator.zip', 'reference.zip', 'webhooks.zip']:
             shutil.copyfile(ROOT / 'terraform/.build' / name, retained / name)
@@ -353,6 +365,8 @@ class Campaign:
         env.update(TABLE_NAME=state['tables'][0], QSB_NETWORK='mainnet', SOLVER_RELEASE_ID=state['descriptor']['id'], QSB_MAINNET_ENABLED=snapshot['coordinatorEnv']['QSB_MAINNET_ENABLED'], REFERENCE_FUNCTION='public-pqb-in-process',
             AWS_BATCH_JOB_QUEUE=state['queue'], AWS_BATCH_JOB_DEFINITION=state['definition'], AWS_BATCH_JOB_BUCKET=state['bucket'],
             QSB_OWNER_ALLOWLIST=json.loads((self.directory / 'public-fixture.json').read_text())['event']['owner'], QSB_OWNER_MAX_GPU_SECONDS=str(state['preflightGpuSeconds']))
+        if state.get('sharedPoolReplacement'):
+            env['QSB_BATCH_SHARED_POOL_VALIDATION'] = '1'
         state['coordinatorEnv'] = env; self.save()
         common = {'Runtime': 'nodejs22.x', 'Architectures': ['arm64'], 'Handler': 'index.handler', 'Timeout': 90, 'MemorySize': 512}
         response = self.mutate('function', 'lambda', 'create_function', FunctionName=state['function'], Role=self.iam(state['roles'][0]), Code={'ZipFile': code}, Environment={'Variables': env}, Tags={t['Key']: t['Value'] for t in tags}, **common)

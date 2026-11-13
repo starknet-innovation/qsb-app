@@ -18,6 +18,7 @@ function setup(selectedQueue = queue) {
     tags: { Project: "qsb-gpu", PqbValidation: campaign }, computeResources: {
       type: "EC2", allocationStrategy: "BEST_FIT_PROGRESSIVE", minvCpus: 0, maxvCpus: 64, instanceTypes: [validation.instanceType] } };
   const d: any = { jobDefinitionArn: selectedDefinition, status: "ACTIVE", retryStrategy: { attempts: 1 }, timeout: { attemptDurationSeconds: 900 },
+    tags: { PqbValidation: campaign },
     containerProperties: {
       environment: [{ name: "QSB_JOB_BUCKET", value: "qsb-gpu-jobs" }], image, command, readonlyRootFilesystem: true, privileged: false,
       resourceRequirements: [{ type: "GPU", value: "1" }, { type: "VCPU", value: "4" }] } };
@@ -31,7 +32,7 @@ function setup(selectedQueue = queue) {
   }) };
   const s3: any = { send: vi.fn(async () => ({})) };
   vi.stubEnv("AWS_LAMBDA_FUNCTION_NAME", campaign + "-coordinator");
-  return { provider: new AwsBatch(selectedQueue, selectedDefinition, "qsb-gpu-jobs", batch, s3, batch), q, e, s3, submit };
+  return { provider: new AwsBatch(selectedQueue, selectedDefinition, "qsb-gpu-jobs", batch, s3, batch), q, e, d, s3, submit };
 }
 afterEach(() => vi.unstubAllEnvs());
 
@@ -66,6 +67,25 @@ it.each(["production-function", "missing-function", "wrong-owner", "wrong-pool",
 it("keeps the production queue's original hardware checks", async () => {
   const t = setup(queue.replace("qsb-gpu-validation", "qsb-gpu"));
   await expect(t.provider.prepareRun(image, { public: "synthetic" })).rejects.toThrow("ProviderLimitsUnconfirmed");
+  expect(t.s3.send).not.toHaveBeenCalled(); expect(t.submit).not.toHaveBeenCalled();
+});
+
+it("permits an explicitly selected shared-pool assessment only in its dedicated coordinator", async () => {
+  const t = setup(queue.replace("qsb-gpu-validation", "qsb-gpu"));
+  delete t.q.tags.PqbValidation; delete t.e.tags.PqbValidation;
+  vi.stubEnv("QSB_BATCH_SHARED_POOL_VALIDATION", "1");
+  expect(t.provider.parallelismLimit).toBe(8);
+  await expect(t.provider.prepareRun(image, {})).resolves.toBeTypeOf("function");
+  vi.stubEnv("AWS_LAMBDA_FUNCTION_NAME", "qsb-app-coordinator");
+  await expect(t.provider.prepareRun(image, {})).rejects.toThrow("ProviderLimitsUnconfirmed");
+  expect(t.submit).not.toHaveBeenCalled();
+});
+
+it("rejects a shared assessment using an unrelated job definition before storing input", async () => {
+  const t = setup(queue.replace("qsb-gpu-validation", "qsb-gpu"));
+  vi.stubEnv("QSB_BATCH_SHARED_POOL_VALIDATION", "1");
+  t.d.tags.PqbValidation = "other";
+  await expect(t.provider.prepareRun(image, {})).rejects.toThrow("ProviderImageUnconfirmed");
   expect(t.s3.send).not.toHaveBeenCalled(); expect(t.submit).not.toHaveBeenCalled();
 });
 

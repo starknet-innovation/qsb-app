@@ -69,3 +69,8 @@ Unit and browser tests stub the wallet, chain, miner and GPU; they don't run a G
 See [third-party notices](THIRD_PARTY_NOTICES.md). No project-wide license has been selected for original application code yet. Existing third-party licenses remain in their respective directories. Public visibility alone does not provide a broad reuse license for the original application code.
 
 Deployment settings, credentials, inventories, plans, customer data, signed transactions and wallet material are kept out of Git. The archived solver descriptor (`src/lib/releases/qsb-config-a-ranked-v2.json`) names a placeholder registry account, `000000000000`, and is not a deployable image. CUDA sources, image builds and image provenance belong to qsb-solver; this app consumes solver image digests through its release registry ([App / solver boundary](docs/SOLVER-REPOSITORY.md)).
+
+For explicitly authorized idle-pool maintenance using existing London permissions,
+the [PQB validation controller](ops/pqb-serving/README.md#authorized-replacement-of-an-idle-original-pool)
+can temporarily test the larger A10G profile in the existing subnets and restore
+the original pool afterward. Production release selection is independent.

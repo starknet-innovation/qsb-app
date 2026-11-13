@@ -72,3 +72,11 @@ to a separate SDK client with at most five total attempts for transient failures
 Mutations, including journal callbacks, retain a one-attempt client. Real SDK
 loopback tests cover dropped connections, throttling, exhaustion and a lost
 mutation reply. Collection failure still pauses and drains work for reconciliation.
+
+An explicitly authorized maintenance assessment can temporarily replace the idle
+London `qsb-gpu` compute environment at its existing ARN to test the larger A10G
+profile in the two existing subnets. The journaled controller retains and restores
+the original configuration and refuses active work or hosts. Only the dedicated
+public-validation coordinator opts into the alternative profile; production
+hardware checks and release selection stay unchanged. See the
+[maintenance procedure](../ops/pqb-serving/README.md#authorized-replacement-of-an-idle-original-pool).

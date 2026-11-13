@@ -306,3 +306,40 @@ injection verifies actual SDK recovery, exhaustion, immediate authorization-deni
 failure and a lost mutation reply making only one request, without AWS access. Cloud mutations and paid
 submissions retain their one-attempt journal and are never replayed. Complete
 workflow histories remain mandatory before removal. See the [AWS log API quotas](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/cloudwatch_limits_cwl.html).
+
+## Authorized replacement of an idle original pool
+
+When the user explicitly authorizes temporary replacement of the idle `qsb-gpu`
+pool using existing access, `shared_pool.py` retains its exact creation payload for
+restoration. It supports only the London operator and the two existing subnets.
+The candidate changes only allocation strategy and instance type to the committed
+single-A10G validation profile. No IAM or networking change is made.
+
+Use a fresh external maintenance directory with `operator.json`, then run
+`shared_pool.py capture DIRECTORY` from a clean pushed controller. Review the
+retained plan before `shared_pool.py replace DIRECTORY`. The controller disables
+new queue submissions, verifies no active jobs, production workflow executions,
+hosts or pending scaling demand, detaches/disables/deletes the original compute
+environment, and recreates the same named environment disabled with zero minimum
+and desired capacity. It verifies the candidate before attaching and enabling it.
+The queue name, roles, AMI, launch template, subnets, tags and 64-vCPU limit stay
+bound to the original snapshot. Each write has an exclusive intent and one attempt;
+uncertain outcomes require reconciliation rather than replay.
+
+After replacement, prepare a fresh campaign directory and run
+`shared_pool.py bind DIRECTORY --campaign CAMPAIGN` before `control.py inspect` and
+`prepare`. Omit the isolated `capacity.py` path. The dedicated coordinator receives
+`QSB_BATCH_SHARED_POOL_VALIDATION=1` and accepts only this reviewed hardware and its
+own tagged job definition. The production coordinator keeps its original checks
+and fails closed against the temporary alternative hardware. Its bundle, settings
+and release are not changed. This maintenance window is unsuitable for concurrent
+production GPU work; any observed unrelated activity blocks replacement/restoration.
+
+Run the normal fixed-deadline native preflight and full public synthetic solve.
+Stop, collect, remove and independently verify campaign cleanup; then wait for the
+shared fleet and scaling demand to reach zero and run
+`shared_pool.py restore DIRECTORY`. Independently read back the original pool and
+queue settings, zero hosts and recorded-volume absence. This restores the original
+Terraform-managed configuration, although Batch-generated cluster/group identities
+change. Keep the maintenance plan, every request/response and fresh restoration
+receipt; never apply Terraform concurrently with this maintenance operation.
