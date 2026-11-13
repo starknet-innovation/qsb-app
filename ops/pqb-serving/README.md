@@ -343,8 +343,8 @@ Stop, collect, remove and independently verify campaign cleanup; then wait for t
 shared fleet and scaling demand to reach zero and run
 `shared_pool.py restore DIRECTORY`. Independently read back the original pool and
 queue settings, zero hosts and recorded-volume absence. This restores the original
-Terraform-managed configuration, although Batch-generated cluster/group identities
-change. Keep the maintenance plan, every request/response and fresh restoration
+Terraform-managed configuration, while retaining the actual Batch-generated pool, group and cluster identities
+observed before and after maintenance. AWS may reuse an existing cluster ARN. Keep the maintenance plan, every request/response and fresh restoration
 receipt; never apply Terraform concurrently with this maintenance operation.
 
 The shared-pool `g5.4xlarge` assessment freezes a fresh six-hour deadline at
