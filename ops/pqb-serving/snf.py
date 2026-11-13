@@ -1,7 +1,6 @@
 """Explicit isolated-account serving assessment. No production app or wallet deployment."""
 import argparse
 import base64
-import copy
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -118,7 +117,7 @@ def prepare(c, source, fixture, manifest):
 
 
 def boundary(c):
-    n = c.state['name']; q = c.state['queue']; definition = c.arn('batch', 'job-definition/qsb-gpu-solver:*')
+    q = c.state['queue']; definition = c.arn('batch', 'job-definition/qsb-gpu-solver:*')
     statements = [allow(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query', 'dynamodb:UpdateItem'], [c.arn('dynamodb', 'table/' + t) for t in c.state['tables']]),
         allow(['lambda:InvokeFunction'], [c.arn('lambda', 'function:' + c.state[k]) for k in ['function', 'cleanupFunction']]),
         allow(['states:StartExecution'], c.arn('states', 'stateMachine:' + c.state['workflow'])),

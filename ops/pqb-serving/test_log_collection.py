@@ -1,5 +1,4 @@
 """Rate-limited read collection never replays paid work or hides incomplete pages."""
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace

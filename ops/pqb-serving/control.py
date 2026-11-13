@@ -205,7 +205,8 @@ class Campaign:
         source, fixture, manifest = self.checked_build()
         if self.config.get('snfIsolation') is True:
             from snf import prepare
-            return prepare(self, source, fixture, manifest)
+            prepare(self, source, fixture, manifest)
+            return
         snapshot = json.loads((self.directory / 'live-runtime-private.json').read_text())
         if any(snapshot['activeJobs'].values()) or snapshot['runningExecutions']:
             raise RuntimeError('Baseline must be drained')

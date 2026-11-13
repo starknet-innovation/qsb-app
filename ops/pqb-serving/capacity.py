@@ -193,7 +193,8 @@ class Capacity:
     def check_grant(self):
         if self.c.config.get('snfIsolation') is True:
             from snf import check_authority
-            return check_authority(self.c, self.plan)
+            check_authority(self.c, self.plan)
+            return {'snfIsolation': True}
         if time.time() >= self.plan['expiresAt']:
             raise RuntimeError('Capacity grant expired')
         iam = self.metadata_session().client('iam', config=self.c.read_sdk_config)
