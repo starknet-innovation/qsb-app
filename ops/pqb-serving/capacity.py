@@ -86,6 +86,9 @@ def requested_boundary(baseline, campaign, expiry):
 
 
 def validate_plan(plan, c):
+    if c.config.get('snfIsolation') is True:
+        from snf import validate_plan as validate_snf_plan
+        return validate_snf_plan(plan, c)
     if (plan['format'] != 'pqb-validation-capacity-v2'
         or plan['computeArn'] != c.arn('batch', 'compute-environment/' + COMPUTE_NAME)
         or plan['queueArn'] != c.arn('batch', 'job-queue/' + QUEUE_NAME)):
@@ -117,7 +120,8 @@ class Capacity:
         self.batch = self.c.client('batch')
         if self.plan:
             validate_plan(self.plan, self.c)
-            for name, key in [('autopilot.json', 'autopilotSha256'), ('requested-policy.json', 'requestedPolicySha256'), ('boundary-baseline.json', 'boundaryBaselineSha256')]:
+            witnesses = [] if self.c.config.get('snfIsolation') is True else [('autopilot.json', 'autopilotSha256'), ('requested-policy.json', 'requestedPolicySha256'), ('boundary-baseline.json', 'boundaryBaselineSha256')]
+            for name, key in witnesses:
                 if hashlib.sha256((self.c.directory / 'capacity' / name).read_bytes()).hexdigest() != self.plan[key]:
                     raise RuntimeError('Capacity policy evidence changed')
             if self.c.state:
@@ -126,6 +130,7 @@ class Capacity:
                     raise RuntimeError('Capacity plan differs from the campaign binding')
 
     def metadata_session(self):
+        if self.c.config.get('snfIsolation') is True: return self.c.session
         import boto3
         source = self.c.session._session.get_scoped_config().get('source_profile')
         if not source:
@@ -141,6 +146,9 @@ class Capacity:
                 for g in page['AutoScalingGroups'] if g['AutoScalingGroupName'].startswith('AWSBatch-' + COMPUTE_NAME + '-asg-')]
 
     def production_unchanged(self, require_idle=False):
+        if self.c.config.get('snfIsolation') is True:
+            from snf import check_baseline
+            return check_baseline(self.c, require_idle)
         q = self.batch.describe_job_queues(jobQueues=[self.plan['productionQueue']['jobQueueArn']])['jobQueues']
         if q != [self.plan['productionQueue']]:
             raise RuntimeError('Production queue changed; stop and reconcile')
@@ -183,6 +191,9 @@ class Capacity:
         print('Retained isolated capacity plan and exact, expiring IAM requests; no campaign deadline started')
 
     def check_grant(self):
+        if self.c.config.get('snfIsolation') is True:
+            from snf import check_authority
+            return check_authority(self.c, self.plan)
         if time.time() >= self.plan['expiresAt']:
             raise RuntimeError('Capacity grant expired')
         iam = self.metadata_session().client('iam', config=self.c.sdk_config)

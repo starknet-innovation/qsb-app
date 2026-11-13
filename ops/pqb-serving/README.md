@@ -216,3 +216,52 @@ Legacy signatures do not commit previous-output amounts; the production chain an
 exact-spend checks retain that responsibility. No wallet material is accepted.
 
 The current-status collector pauses and drains the campaign immediately when it observes an unexpected failed unit or incomplete native output. Successful qualification separately requires provider-declared coordinator cancellation and an earlier CPU-verified winner for the same packet for every superseded failed job.
+
+## Explicit SNF account isolation
+
+`operator.json` may explicitly add `"snfIsolation": true` for a separately authorized
+root session in an otherwise empty London GPU/Batch account. This creates an isolated
+consumer stack, not a production app deployment. Root credentials remain local; the
+coordinator and workers receive only generated runtime roles. No API, wallet or miner
+path is created. The same enrolled image, clean consumer bundle, workflow, public
+fixture, native/CPU audit and offline Core check are used. Evidence applies to the
+SNF transport and hardware, not to deployment or IAM in the app account.
+
+Keep `host-image.json` (`{"imageId":"..."}`) and a fresh read-only reference app
+`reference-runtime.json` snapshot outside Git. The snapshot supplies the workflow
+and compute-limit template; it is never presented as an existing SNF deployment.
+`inspect` verifies the selected root identity, empty GPU/Batch baseline, pinned
+Amazon ECS GPU AMI, public default subnets supporting the selected hardware, and
+fresh quota. The quota may bound actual concurrency below the configured ceiling;
+record both and never infer allocated GPUs from submitted jobs.
+
+Use `uv run --no-project --with boto3 --with awscrt python` for this profile's AWS
+login credential provider. After building and local public-fixture preparation:
+
+```sh
+python ops/pqb-serving/control.py inspect "$EVIDENCE"
+python ops/pqb-serving/control.py prepare "$EVIDENCE"
+python ops/pqb-serving/snf.py bootstrap "$EVIDENCE"
+python ops/pqb-serving/control.py mirror "$EVIDENCE"
+python ops/pqb-serving/capacity.py create "$EVIDENCE"
+python ops/pqb-serving/snf.py capture "$EVIDENCE"
+python ops/pqb-serving/control.py deploy "$EVIDENCE"
+```
+
+Preparation freezes one $200 reservation and four-hour deadline before infrastructure
+creation. Bootstrap creates only named, tagged public-data resources: a private
+TLS-only artifact bucket, no-ingress HTTPS-only host group, immutable host template,
+worker roles/profile, initial definition/log group and a campaign runtime boundary.
+The boundary expires one hour after the fixed deadline to allow scheduled draining.
+The selected root session is not represented as an IAM-limited operator grant.
+A newly created `qsb-solver` ECR repository is intentionally retained with the
+verified immutable mirror. Existing default networking is reused without edits.
+
+Use the ordinary preflight, solve, collection and runtime/fleet cleanup sequence.
+Then `snf.py remove "$EVIDENCE"` removes the bootstrap definition, worker roles/profile,
+boundary, template, group, empty artifact bucket and native log group. It verifies
+resource identities against original successful responses and ownership tags.
+Retain and independently reconcile every additional resource before releasing the
+single operational reservation. Uncertain bootstrap calls are never replayed;
+partial bootstrap failures require retained readback and scoped reconciliation
+before another campaign.

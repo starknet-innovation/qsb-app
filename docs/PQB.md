@@ -56,3 +56,8 @@ npm test -- tests/pqb.test.ts tests/pqb-protocol.test.ts
 ```
 
 These checks cover exact script bytes, public problem bytes, sighashes and trial digests on all stages, strict predicates, co-signature construction and coordinator state transitions. Coordinator positive-hit tests stub the CPU verdicts. They do not constitute a full solve, native GPU execution, Bitcoin Core acceptance of a solved PQB withdrawal, miner acceptance or an end-to-end spend. No mainnet switch is enabled by this support.
+
+The serving harness also supports an explicitly authorized isolated SNF account.
+It runs the same public workflow and native transport with campaign-owned infrastructure
+and scoped workload roles. Such receipts qualify that isolated account/hardware;
+they do not establish readiness of the production app account or select its release.
