@@ -61,3 +61,8 @@ The serving harness also supports an explicitly authorized isolated SNF account.
 It runs the same public workflow and native transport with campaign-owned infrastructure
 and scoped workload roles. Such receipts qualify that isolated account/hardware;
 they do not establish readiness of the production app account or select its release.
+
+The Batch job definition must bind exactly one `QSB_JOB_BUCKET` to the consumer’s
+configured artifact bucket. The consumer checks this before uploading public input
+or preparing a paid submission. SNF bootstrap sets that binding; request-specific
+input keys and hashes remain ordinary submission overrides.

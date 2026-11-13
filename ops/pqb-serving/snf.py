@@ -153,6 +153,16 @@ def compute_resources(c, snapshot):
         'ec2Configuration': [{'imageType': 'ECS_AL2023_NVIDIA', 'imageIdOverride': snapshot['image']['ImageId']}]}
 
 
+def initial_container(c, group):
+    """Bind the worker transport bucket before any native submission."""
+    return {'image': f"{c.account}.dkr.ecr.{c.region}.amazonaws.com/qsb-solver@{c.state['descriptor']['image'].split('@')[1]}",
+            'environment': [{'name': 'QSB_JOB_BUCKET', 'value': c.state['bucket']}],
+            'command': json.loads((ROOT / 'server/aws-batch-command.json').read_text()), 'jobRoleArn': role(c, 'task'), 'executionRoleArn': role(c, 'execute'),
+            'readonlyRootFilesystem': True, 'privileged': False, 'resourceRequirements': [{'type': 'VCPU', 'value': '4'}, {'type': 'MEMORY', 'value': '12000'}, {'type': 'GPU', 'value': '1'}],
+            'linuxParameters': {'tmpfs': [{'containerPath': '/tmp', 'size': 2048, 'mountOptions': ['rw', 'nosuid', 'nodev']}]},
+            'logConfiguration': {'logDriver': 'awslogs', 'options': {'awslogs-group': group, 'awslogs-region': c.region, 'awslogs-stream-prefix': 'solver'}}}
+
+
 def bootstrap(c):
     from capacity import PROFILE
     c.before_deadline(); require_mode(c); check_baseline(c, True)
@@ -199,11 +209,7 @@ def bootstrap(c):
     c.mutate('snf-job-logs', 'logs', 'create_log_group', logGroupName=group, tags=tags(c))
     c.mutate('snf-job-retention', 'logs', 'put_retention_policy', logGroupName=group, retentionInDays=7)
     definition = c.mutate('snf-initial-definition', 'batch', 'register_job_definition', jobDefinitionName='qsb-gpu-solver', type='container', platformCapabilities=['EC2'],
-        containerProperties={'image': f"{c.account}.dkr.ecr.{c.region}.amazonaws.com/qsb-solver@{c.state['descriptor']['image'].split('@')[1]}",
-            'command': json.loads((ROOT / 'server/aws-batch-command.json').read_text()), 'jobRoleArn': role(c, 'task'), 'executionRoleArn': role(c, 'execute'),
-            'readonlyRootFilesystem': True, 'privileged': False, 'resourceRequirements': [{'type': 'VCPU', 'value': '4'}, {'type': 'MEMORY', 'value': '12000'}, {'type': 'GPU', 'value': '1'}],
-            'linuxParameters': {'tmpfs': [{'containerPath': '/tmp', 'size': 2048, 'mountOptions': ['rw', 'nosuid', 'nodev']}]},
-            'logConfiguration': {'logDriver': 'awslogs', 'options': {'awslogs-group': group, 'awslogs-region': c.region, 'awslogs-stream-prefix': 'solver'}}},
+        containerProperties=initial_container(c, group),
         retryStrategy={'attempts': 1}, timeout={'attemptDurationSeconds': 900}, propagateTags=True, tags=tags(c))
     b['initialDefinition'] = definition['jobDefinitionArn']; c.save()
     plan = {'format': 'pqb-snf-isolated-capacity-v1', 'sourceCommit': c.state['sourceCommit'],

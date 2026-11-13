@@ -37,6 +37,7 @@ function setup(realSubmit = false) {
     jobDefinitionArn: definition,
     status: "ACTIVE",
     containerProperties: {
+      environment: [{ name: "QSB_JOB_BUCKET", value: "qsb-gpu-jobs" }],
       image,
       command,
       readonlyRootFilesystem: true,
@@ -131,6 +132,22 @@ it.each(["image", "retry", "size", "spot", "overrun", "caps"])(
     ).rejects.toThrow();
     expect(t.submit).not.toHaveBeenCalled();
     expect(t.s3.send).not.toHaveBeenCalled();
+  },
+);
+it.each(["missing", "wrong", "duplicate"])(
+  "rejects a %s transport bucket before uploading input or submitting work",
+  async (kind) => {
+    const t = setup();
+    t.config.containerProperties.environment = kind === "missing" ? undefined
+      : kind === "wrong" ? [{ name: "QSB_JOB_BUCKET", value: "another-bucket" }]
+      : [
+          { name: "QSB_JOB_BUCKET", value: "qsb-gpu-jobs" },
+          { name: "QSB_JOB_BUCKET", value: "qsb-gpu-jobs" },
+        ];
+    await expect(t.provider.prepareRun(image, { public: "fixture" }))
+      .rejects.toThrow("ProviderLimitsUnconfirmed");
+    expect(t.s3.send).not.toHaveBeenCalled();
+    expect(t.submit).not.toHaveBeenCalled();
   },
 );
 it("stores exact hashed input and submits once even when the acceptance response is lost", async () => {

@@ -265,3 +265,8 @@ Retain and independently reconcile every additional resource before releasing th
 single operational reservation. Uncertain bootstrap calls are never replayed;
 partial bootstrap failures require retained readback and scoped reconciliation
 before another campaign.
+
+The Batch job definition must bind exactly one `QSB_JOB_BUCKET` to the consumer’s
+configured artifact bucket. The consumer checks this before uploading public input
+or preparing a paid submission. SNF bootstrap sets that binding; request-specific
+input keys and hashes remain ordinary submission overrides.

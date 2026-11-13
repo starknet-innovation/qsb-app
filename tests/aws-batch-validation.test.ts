@@ -16,7 +16,8 @@ function setup(selectedQueue = queue) {
     tags: { Project: "qsb-gpu", PqbValidation: campaign }, computeResources: {
       type: "EC2", allocationStrategy: "BEST_FIT_PROGRESSIVE", minvCpus: 0, maxvCpus: 64, instanceTypes: [validation.instanceType] } };
   const d: any = { jobDefinitionArn: definition, status: "ACTIVE", retryStrategy: { attempts: 1 }, timeout: { attemptDurationSeconds: 900 },
-    containerProperties: { image, command, readonlyRootFilesystem: true, privileged: false,
+    containerProperties: {
+      environment: [{ name: "QSB_JOB_BUCKET", value: "qsb-gpu-jobs" }], image, command, readonlyRootFilesystem: true, privileged: false,
       resourceRequirements: [{ type: "GPU", value: "1" }, { type: "VCPU", value: "4" }] } };
   const submit = vi.fn(async () => ({ jobId: "public-native-job" }));
   const batch: any = { send: vi.fn(async (c: any) => {

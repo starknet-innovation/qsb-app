@@ -198,7 +198,12 @@ export class AwsBatch implements ComputeProvider {
     )
       throw new Error("ProviderImageUnconfirmed");
     const resources = d.containerProperties?.resourceRequirements;
+    const buckets = d.containerProperties?.environment?.filter(
+      (entry) => entry.name === "QSB_JOB_BUCKET",
+    );
     if (
+      buckets?.length !== 1 ||
+      buckets[0].value !== this.bucket ||
       d.containerProperties?.readonlyRootFilesystem !== true ||
       d.containerProperties?.privileged !== false ||
       JSON.stringify(d.containerProperties?.command) !==

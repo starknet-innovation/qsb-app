@@ -73,6 +73,14 @@ class SnfTests(unittest.TestCase):
             changed = copy.deepcopy(expected); changed[key] = 'other'
             with self.assertRaises(RuntimeError): snf.check_owned(changed, c)
 
+    def test_initial_definition_binds_the_campaign_bucket_and_real_worker_command(self):
+        c = campaign(); c.state['descriptor'] = {'image': 'ghcr.io/worker@sha256:' + 'b' * 64}
+        properties = snf.initial_container(c, '/aws/batch/' + c.state['name'])
+        self.assertEqual(properties['environment'], [{'name': 'QSB_JOB_BUCKET', 'value': c.state['bucket']}])
+        self.assertEqual(properties['command'], json.loads((snf.ROOT / 'server/aws-batch-command.json').read_text()))
+        self.assertTrue(properties['readonlyRootFilesystem']); self.assertFalse(properties['privileged'])
+        self.assertTrue(properties['image'].endswith('@sha256:' + 'b' * 64))
+
     def test_bootstrap_removal_requires_completed_runtime_and_capacity_cleanup(self):
         c = campaign(); c.state.update(phase='preflight-running', capacity={'status': 'ready'})
         with self.assertRaisesRegex(RuntimeError, 'runtime and fleet'): snf.remove(c)
