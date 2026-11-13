@@ -95,8 +95,11 @@ export function batchImageMatches(
   );
 }
 export class AwsBatch implements ComputeProvider {
+  private get sharedValidationProfile() {
+    return process.env.QSB_BATCH_SHARED_POOL_VALIDATION === "1" && this.queue.endsWith(":job-queue/qsb-gpu");
+  }
   private get validationProfile() {
-    return this.queue.endsWith(`:job-queue/${validation.name}`);
+    return this.sharedValidationProfile || this.queue.endsWith(`:job-queue/${validation.name}`);
   }
   get parallelismLimit() {
     return this.validationProfile
@@ -174,7 +177,7 @@ export class AwsBatch implements ComputeProvider {
     const validationCampaign = this.validationProfile
       ? /^(qsb-pqb-v-[a-f0-9]{12})-coordinator$/.exec(process.env.AWS_LAMBDA_FUNCTION_NAME ?? "")?.[1]
       : undefined;
-    if (this.validationProfile && (!validationCampaign || this.queue.split(":")[3] !== validation.region))
+    if (this.validationProfile && (!validationCampaign || !validation.regions.includes(this.queue.split(":")[3])))
       throw new Error("ProviderLimitsUnconfirmed");
     const [definitions, queues] = await Promise.all([
       this.batch.send(
@@ -194,11 +197,17 @@ export class AwsBatch implements ComputeProvider {
       definitions.jobDefinitions?.length !== 1 ||
       d?.jobDefinitionArn !== this.definition ||
       d.status !== "ACTIVE" ||
+      (this.sharedValidationProfile && d.tags?.PqbValidation !== validationCampaign) ||
       !batchImageMatches(image, d.containerProperties?.image ?? "", this.queue)
     )
       throw new Error("ProviderImageUnconfirmed");
     const resources = d.containerProperties?.resourceRequirements;
+    const buckets = d.containerProperties?.environment?.filter(
+      (entry) => entry.name === "QSB_JOB_BUCKET",
+    );
     if (
+      buckets?.length !== 1 ||
+      buckets[0].value !== this.bucket ||
       d.containerProperties?.readonlyRootFilesystem !== true ||
       d.containerProperties?.privileged !== false ||
       JSON.stringify(d.containerProperties?.command) !==
@@ -213,7 +222,7 @@ export class AwsBatch implements ComputeProvider {
       q.state !== "ENABLED" ||
       q.status !== "VALID" ||
       q.computeEnvironmentOrder?.length !== 1 ||
-      (this.validationProfile && (q.tags?.PqbValidation !== validationCampaign || q.tags?.Project !== "qsb-gpu"))
+      (this.validationProfile && (q.tags?.Project !== "qsb-gpu" || (!this.sharedValidationProfile && q.tags?.PqbValidation !== validationCampaign)))
     )
       throw new Error("ProviderLimitsUnconfirmed");
     const env = await this.batch.send(
@@ -235,7 +244,7 @@ export class AwsBatch implements ComputeProvider {
       c.maxvCpus !== (this.validationProfile ? validation.maxVcpus : 4 * gpuSpendLimits.workersMax) ||
       c.instanceTypes?.length !== 1 ||
       c.instanceTypes[0] !== (this.validationProfile ? validation.instanceType : "g5.xlarge") ||
-      (this.validationProfile && (e.tags?.PqbValidation !== validationCampaign || e.tags?.Project !== "qsb-gpu"
+      (this.validationProfile && ((!this.sharedValidationProfile && e.tags?.PqbValidation !== validationCampaign) || e.tags?.Project !== "qsb-gpu"
         || e.computeEnvironmentArn !== this.queue.replace(":job-queue/", ":compute-environment/")
         || q.computeEnvironmentOrder[0].computeEnvironment !== e.computeEnvironmentArn))
     )

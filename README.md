@@ -14,7 +14,7 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB Config A and PQB) vaults: v
 - [`consensus/`](consensus/README.md): the offline Bitcoin Core script check run before a withdrawal is submitted.
 - `contracts/`: versioned search-range vectors shared with qsb-solver.
 - [`terraform/`](terraform/README.md): the AWS app stack; [`terraform/gpu/`](terraform/gpu/README.md): the AWS Batch GPU stack.
-- `ops/`: AWS identities and IAM tooling ([`github-aws`](ops/github-aws/README.md)), the optional [service fee key](ops/service-fee-key/README.md), the [IAM sandbox](ops/iam-sandbox/README.md), the positive-hit replay (`aws-gpu-migration`), and [isolated public PQB serving validation](ops/pqb-serving/README.md).
+- `ops/`: AWS identities and IAM tooling ([`github-aws`](ops/github-aws/README.md)), the optional [service fee key](ops/service-fee-key/README.md), the [IAM sandbox](ops/iam-sandbox/README.md), the positive-hit replay (`aws-gpu-migration`), and [isolated public PQB serving validation](ops/pqb-serving/README.md), with a larger A10G host option on the existing network.
 - `scripts/`: vendoring, OpenAPI generation, the operator reconcile CLIs, the script-reservation backfill and the service fee sweep.
 - `tests/`: unit, browser and reference tests.
 
@@ -25,7 +25,7 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB Config A and PQB) vaults: v
 3. The state machine's `CoordinateSearch` task invokes the coordinator Lambda (`terraform/workflow.tf`). The coordinator submits GPU work to AWS Batch, polls it, and has the reference Lambda (`worker/cpu`) re-check every hit.
 4. Once solved, the browser assembles and signs the withdrawal locally. `POST /api/jobs/:id/submit` checks the exact spend, runs the offline Core check and posts it once to MARA Slipstream ([exact submission](docs/EXACT-SUBMIT.md)).
 
-A PQB vault uses the same flow with PQB-specific problem construction and local witness assembly. Choose its protocol when creating it; a withdrawal requires the deployment to serve an enrolled solver for that protocol. The [TLS-fixed PQB release](docs/PQB.md#source-enrollment-and-evidence) is enrolled; serving it still requires an explicit deployment selection.
+A PQB vault uses the same flow with PQB-specific problem construction and local witness assembly. Choose its protocol when creating it; a withdrawal requires the deployment to serve an enrolled solver for that protocol. The [TLS-fixed PQB release](docs/PQB.md#source-enrollment-and-evidence) is enrolled and passed [isolated public consumer-workflow qualification](docs/PQB-SERVING-VALIDATION.md), including independent CPU and offline Core checks. Production serves Config A; production-account PQB runtime verification and explicit selection remain separate.
 
 The deployed API Lambda (`server/lambda.ts`) serves mainnet only. The deploy-time switches `mainnet_enabled` and `exact_submit_enabled` gate funding, search and submission ([runbook](docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches)).
 
@@ -69,3 +69,10 @@ Unit and browser tests stub the wallet, chain, miner and GPU; they don't run a G
 See [third-party notices](THIRD_PARTY_NOTICES.md). No project-wide license has been selected for original application code yet. Existing third-party licenses remain in their respective directories. Public visibility alone does not provide a broad reuse license for the original application code.
 
 Deployment settings, credentials, inventories, plans, customer data, signed transactions and wallet material are kept out of Git. The archived solver descriptor (`src/lib/releases/qsb-config-a-ranked-v2.json`) names a placeholder registry account, `000000000000`, and is not a deployable image. CUDA sources, image builds and image provenance belong to qsb-solver; this app consumes solver image digests through its release registry ([App / solver boundary](docs/SOLVER-REPOSITORY.md)).
+
+For explicitly authorized idle-pool maintenance using existing London permissions,
+the [PQB validation controller](ops/pqb-serving/README.md#authorized-replacement-of-an-idle-original-pool)
+can temporarily test the larger A10G profile in the existing subnets and restore
+the original pool afterward. Production release selection is independent.
+The committed watcher checks metadata readiness, handles Batch status transitions
+without duplicate descriptions, and records verified stops and terminal hosts.

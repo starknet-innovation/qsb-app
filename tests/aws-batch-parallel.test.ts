@@ -19,6 +19,7 @@ function provider(maxvCpus: number) {
             jobDefinitions: [{
               jobDefinitionArn: definition, status: "ACTIVE",
               containerProperties: {
+      environment: [{ name: "QSB_JOB_BUCKET", value: "qsb-gpu-jobs" }],
                 image, command, readonlyRootFilesystem: true, privileged: false,
                 resourceRequirements: [{ type: "GPU", value: "1" }, { type: "VCPU", value: "4" }],
               },

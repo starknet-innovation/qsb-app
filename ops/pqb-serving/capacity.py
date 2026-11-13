@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Isolated A10G queue/pool, verified external IAM grants, immutable private receipts."""
+"""Isolated GPU queue/pool, verified external IAM grants, immutable private receipts."""
 import argparse
 import copy
 import hashlib
@@ -9,12 +9,13 @@ from pathlib import Path
 import time
 from datetime import datetime, timezone
 
-from control import ACTIVE, Campaign, ROOT, clean_source, persist
+from control import ACTIVE, Campaign, ROOT, clean_source, dump, persist
 
 PROFILE = json.loads((ROOT / 'server/aws-batch-validation.json').read_text())
 COMPUTE_NAME = QUEUE_NAME = PROFILE['name']
 POLICY_NAME = 'qsb-pqb-validation-capacity'
-COMPUTE_ACTIONS = {'batch:CreateComputeEnvironment', 'batch:UpdateComputeEnvironment', 'batch:DeleteComputeEnvironment', 'batch:TagResource'}
+# CreateJobQueue authorizes both its queue and each referenced compute environment.
+COMPUTE_ACTIONS = {'batch:CreateComputeEnvironment', 'batch:UpdateComputeEnvironment', 'batch:DeleteComputeEnvironment', 'batch:TagResource', 'batch:CreateJobQueue'}
 QUEUE_ACTIONS = {'batch:CreateJobQueue', 'batch:UpdateJobQueue', 'batch:DeleteJobQueue', 'batch:TagResource'}
 CAPACITY_ACTIONS = COMPUTE_ACTIONS | QUEUE_ACTIONS
 
@@ -85,6 +86,9 @@ def requested_boundary(baseline, campaign, expiry):
 
 
 def validate_plan(plan, c):
+    if c.config.get('snfIsolation') is True:
+        from snf import validate_plan as validate_snf_plan
+        return validate_snf_plan(plan, c)
     if (plan['format'] != 'pqb-validation-capacity-v2'
         or plan['computeArn'] != c.arn('batch', 'compute-environment/' + COMPUTE_NAME)
         or plan['queueArn'] != c.arn('batch', 'job-queue/' + QUEUE_NAME)):
@@ -102,7 +106,7 @@ def validate_plan(plan, c):
     wanted.update(allocationStrategy=PROFILE['allocationStrategy'], instanceTypes=[PROFILE['instanceType']],
                   minvCpus=0, desiredvCpus=0, maxvCpus=PROFILE['maxVcpus'])
     if plan['computeResources'] != wanted or wanted['type'] != 'EC2' or wanted['launchTemplate'].get('version') != '1' or not wanted.get('ec2Configuration'):
-        raise RuntimeError('Preserve the reviewed isolated A10G hardware, AMI, network and host profile')
+        raise RuntimeError('Preserve the reviewed isolated GPU hardware, AMI, network and host profile')
     queue = plan['productionQueue']
     if (queue['jobQueueArn'] != c.arn('batch', 'job-queue/qsb-gpu')
         or queue['computeEnvironmentOrder'] != [{'order': 1, 'computeEnvironment': original['computeEnvironmentArn']}]):
@@ -116,7 +120,8 @@ class Capacity:
         self.batch = self.c.client('batch')
         if self.plan:
             validate_plan(self.plan, self.c)
-            for name, key in [('autopilot.json', 'autopilotSha256'), ('requested-policy.json', 'requestedPolicySha256'), ('boundary-baseline.json', 'boundaryBaselineSha256')]:
+            witnesses = [] if self.c.config.get('snfIsolation') is True else [('autopilot.json', 'autopilotSha256'), ('requested-policy.json', 'requestedPolicySha256'), ('boundary-baseline.json', 'boundaryBaselineSha256')]
+            for name, key in witnesses:
                 if hashlib.sha256((self.c.directory / 'capacity' / name).read_bytes()).hexdigest() != self.plan[key]:
                     raise RuntimeError('Capacity policy evidence changed')
             if self.c.state:
@@ -125,6 +130,7 @@ class Capacity:
                     raise RuntimeError('Capacity plan differs from the campaign binding')
 
     def metadata_session(self):
+        if self.c.config.get('snfIsolation') is True: return self.c.session
         import boto3
         source = self.c.session._session.get_scoped_config().get('source_profile')
         if not source:
@@ -135,11 +141,14 @@ class Capacity:
         return boto3.Session(aws_access_key_id=credentials['AccessKeyId'], aws_secret_access_key=credentials['SecretAccessKey'], aws_session_token=credentials['SessionToken'], region_name=self.c.region)
 
     def scaling_groups(self):
-        client = self.metadata_session().client('autoscaling', config=self.c.sdk_config)
+        client = self.metadata_session().client('autoscaling', config=self.c.read_sdk_config)
         return [g for page in client.get_paginator('describe_auto_scaling_groups').paginate()
                 for g in page['AutoScalingGroups'] if g['AutoScalingGroupName'].startswith('AWSBatch-' + COMPUTE_NAME + '-asg-')]
 
     def production_unchanged(self, require_idle=False):
+        if self.c.config.get('snfIsolation') is True:
+            from snf import check_baseline
+            return check_baseline(self.c, require_idle)
         q = self.batch.describe_job_queues(jobQueues=[self.plan['productionQueue']['jobQueueArn']])['jobQueues']
         if q != [self.plan['productionQueue']]:
             raise RuntimeError('Production queue changed; stop and reconcile')
@@ -182,9 +191,13 @@ class Capacity:
         print('Retained isolated capacity plan and exact, expiring IAM requests; no campaign deadline started')
 
     def check_grant(self):
+        if self.c.config.get('snfIsolation') is True:
+            from snf import check_authority
+            check_authority(self.c, self.plan)
+            return {'snfIsolation': True}
         if time.time() >= self.plan['expiresAt']:
             raise RuntimeError('Capacity grant expired')
-        iam = self.metadata_session().client('iam', config=self.c.sdk_config)
+        iam = self.metadata_session().client('iam', config=self.c.read_sdk_config)
         try:
             operator = iam.get_role_policy(RoleName='qsb-operator', PolicyName=POLICY_NAME)
         except iam.exceptions.NoSuchEntityException as error:
@@ -271,11 +284,86 @@ class Capacity:
         if sorted(j['jobId'] for j in rows) != ids: raise RuntimeError('Incomplete isolated job inventory')
         return rows
 
+    def reconcile_history(self, directories):
+        """Retained queue history is not a submission by the new campaign."""
+        self.c.before_deadline(); self.check_ready()
+        if self.c.state['phase'] != 'prepared' or self.c.state.get('definition') or self.c.state.get('knownJobIds'):
+            raise RuntimeError('Reconcile prior history before deploying or submitting new work')
+        expected, sources = {}, []
+        for directory in directories:
+            previous = Campaign(directory)
+            state = previous.state
+            if (not state or previous.config != self.c.config or state['name'] == self.c.state['name']
+                or state['queue'] != self.c.state['queue'] or state.get('reservationStatus') != 'released'
+                or not state.get('phase', '').endswith('-cleanup-verified')):
+                raise RuntimeError('Require a separately completed and cleaned prior campaign')
+            receipt, _ = previous.checked_final_collection()
+            binding = state['independentCleanup']
+            cleanup_path = previous.directory / binding['file']
+            if cleanup_path.parent != previous.directory or hashlib.sha256(cleanup_path.read_bytes()).hexdigest() != binding['sha256']:
+                raise RuntimeError('Prior independent cleanup binding changed')
+            cleanup = json.loads(cleanup_path.read_text())
+            if (cleanup.get('verified') is not True or cleanup.get('campaign') != state['name']
+                or cleanup.get('sourceCommit') != state['sourceCommit'] or not cleanup.get('checks')
+                or not all(row.get('passed') is True for row in cleanup['checks'])):
+                raise RuntimeError('Prior independent cleanup did not verify')
+            indices = [name for name in receipt['files'] if name.startswith('native-index-') and name.endswith('.json')]
+            if len(indices) != 1:
+                raise RuntimeError('Require one sealed prior native inventory')
+            rows = json.loads((previous.directory / indices[0]).read_text())['jobs']
+            if sorted(j['jobId'] for j in rows) != state['knownJobIds'] or receipt['nativeJobIds'] != state['knownJobIds']:
+                raise RuntimeError('Prior native inventory changed')
+            for job in rows:
+                if (job['jobId'] in expected or job['status'] not in ('SUCCEEDED', 'FAILED')
+                    or job['jobQueue'] != self.c.state['queue'] or job['jobDefinition'] != state['definition']
+                    or job['createdAt'] >= self.c.state['createdAt'] * 1000):
+                    raise RuntimeError('Prior native work is duplicated, active or incorrectly bound')
+                expected[job['jobId']] = hashlib.sha256(dump(job).encode()).hexdigest()
+            sources.append({'campaign': state['name'], 'sourceCommit': state['sourceCommit'],
+                'finalCollection': state['finalCollection'], 'independentCleanup': binding})
+        jobs = self.queue_jobs()
+        if sorted(j['jobId'] for j in jobs) != sorted(expected) or any(
+            hashlib.sha256(dump(j).encode()).hexdigest() != expected[j['jobId']] for j in jobs):
+            raise RuntimeError('Live queue history differs from the sealed prior inventories')
+        persist(self.c.directory / 'capacity/prior-terminal-history.json', {
+            'format': 'pqb-prior-terminal-history-v2', 'campaign': self.c.state['name'],
+            'sourceCommit': self.plan['sourceCommit'], 'sources': sources, 'jobSha256': expected,
+            'scope': 'Historical terminal jobs; excluded from current native accounting'}, exclusive=True)
+
+    def verify_queue_inventory(self, jobs, terminal=False):
+        path = self.c.directory / 'capacity/prior-terminal-history.json'
+        historical = {}
+        if path.exists():
+            history = json.loads(path.read_text())
+            if (history['format'] != 'pqb-prior-terminal-history-v2' or history['campaign'] != self.c.state['name']
+                or history['sourceCommit'] != self.plan['sourceCommit']):
+                raise RuntimeError('Prior terminal history binding changed')
+            historical = history['jobSha256']
+            if terminal:
+                receipt, _ = self.c.checked_final_collection()
+                if 'capacity/prior-terminal-history.json' not in receipt['files']:
+                    raise RuntimeError('Prior terminal history was not sealed before cleanup')
+        current = []
+        for job in jobs:
+            if job.get('jobQueue') != self.c.state['queue']:
+                raise RuntimeError('Isolated work changed or remains active; queue identity differs')
+            if job['jobId'] in historical:
+                if job['status'] not in ('SUCCEEDED', 'FAILED') or hashlib.sha256(dump(job).encode()).hexdigest() != historical[job['jobId']]:
+                    raise RuntimeError('Prior terminal history changed')
+            elif self.c.state.get('definition') and job['jobDefinition'] == self.c.state['definition']:
+                current.append(job['jobId'])
+            else:
+                raise RuntimeError('Isolated work changed or remains active; reconcile prior queue history')
+        if (len({j['jobId'] for j in jobs}) != len(jobs) or set(historical) - {j['jobId'] for j in jobs}
+            or set(historical).intersection(self.c.state.get('knownJobIds', []))
+            or (terminal and (any(j['status'] in ACTIVE for j in jobs) or sorted(current) != self.c.state.get('knownJobIds', [])))):
+            raise RuntimeError('Isolated work changed or remains active; collect/reconcile before deletion')
+
     def collect(self, stamp):
         target = self.c.directory / 'capacity'; target.mkdir(exist_ok=True)
         pool, queue = self.pool(), self.queue(); hosts = []
         if pool and pool.get('ecsClusterArn'):
-            ecs = self.metadata_session().client('ecs', config=self.c.sdk_config)
+            ecs = self.metadata_session().client('ecs', config=self.c.read_sdk_config)
             ids = sorted({i for status in ['ACTIVE', 'DRAINING', 'REGISTERING', 'DEREGISTERING', 'REGISTRATION_FAILED']
                 for page in ecs.get_paginator('list_container_instances').paginate(cluster=pool['ecsClusterArn'], status=status) for i in page['containerInstanceArns']})
             for offset in range(0, len(ids), 100):
@@ -294,7 +382,7 @@ class Capacity:
         self.c.state['capacity'].update(instanceIds=hosts, volumeIds=sorted(volumes | set(self.c.state['capacity'].get('volumeIds', []))))
         if pool and pool.get('ecsClusterArn'): self.c.state['capacity']['ecsClusterArn'] = pool['ecsClusterArn']
         self.c.save()
-        activities = []; scaling = self.metadata_session().client('autoscaling', config=self.c.sdk_config)
+        activities = []; scaling = self.metadata_session().client('autoscaling', config=self.c.read_sdk_config)
         for g in groups:
             activities.extend(a for p in scaling.get_paginator('describe_scaling_activities').paginate(AutoScalingGroupName=g['AutoScalingGroupName']) for a in p['Activities'])
         path = target / (stamp + '.json')
@@ -315,8 +403,7 @@ class Capacity:
                 self.wait(self.queue, lambda q: q is None, 'Queue deletion pending')
             elif queue:
                 jobs = self.queue_jobs()
-                if any(j['status'] in ACTIVE for j in jobs) or sorted(j['jobId'] for j in jobs) != self.c.state.get('knownJobIds', []):
-                    raise RuntimeError('Isolated work changed or remains active; collect/reconcile before deletion')
+                self.verify_queue_inventory(jobs, terminal=True)
                 snapshot = self.collect(str(time.time_ns()))
                 persist(self.c.directory / ('capacity/removal-seal-' + str(time.time_ns()) + '.json'),
                     {'baseFinalCollection': self.c.state['finalCollection'], 'snapshot': str(snapshot.relative_to(self.c.directory)),
@@ -370,16 +457,20 @@ class Capacity:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['plan', 'verify_grant', 'create', 'remove', 'verify_removed'])
+    parser.add_argument('mode', choices=['plan', 'verify_grant', 'create', 'reconcile_history', 'remove', 'verify_removed'])
     parser.add_argument('directory', type=Path)
     parser.add_argument('--generated-policy', type=Path)
     parser.add_argument('--requested-policy', type=Path)
     parser.add_argument('--boundary-baseline', type=Path)
+    parser.add_argument('--previous-campaign', type=Path, action='append')
     args = parser.parse_args(); capacity = Capacity(Campaign(args.directory))
     if args.mode == 'plan':
         if not args.generated_policy or not args.requested_policy or not args.boundary_baseline:
             parser.error('plan requires --generated-policy, --requested-policy and --boundary-baseline')
         capacity.make_plan(args.generated_policy, args.requested_policy, args.boundary_baseline)
+    elif args.mode == 'reconcile_history':
+        if not args.previous_campaign: parser.error('reconcile_history requires --previous-campaign')
+        capacity.reconcile_history(args.previous_campaign)
     else: getattr(capacity, args.mode)()
 
 

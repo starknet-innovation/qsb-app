@@ -50,8 +50,11 @@ jobs:
       - run: npm run typecheck
       - name: Test the CPU verifier that re-checks every GPU hit
         run: python3 tests/test_reference.py
-      - name: Check isolated PQB validation deadline and request journal
-        run: python3 -m unittest discover -s ops/pqb-serving -p 'test_*.py' -v
+      - name: Check isolated PQB validation, journal and SDK transport
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pqb-test-venv"
+          "$RUNNER_TEMP/pqb-test-venv/bin/python" -m pip install -r ops/pqb-serving/requirements.txt
+          "$RUNNER_TEMP/pqb-test-venv/bin/python" -m unittest discover -s ops/pqb-serving -p 'test_*.py' -v
       - name: Fail if a step changed the tree
         run: |
           git status --porcelain
