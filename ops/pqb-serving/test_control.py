@@ -166,7 +166,7 @@ class JournalTests(unittest.TestCase):
         operator, metadata = Mock(), Mock()
         operator.get_role.side_effect = ClientError('AccessDenied')
         metadata.get_role.side_effect = ClientError('NoSuchEntity')
-        c = self.campaign('.', operator); c.sdk_config = object()
+        c = self.campaign('.', operator); c.sdk_config = object(); c.read_sdk_config = object()
         capacity_factory = Mock(return_value=Mock(metadata_session=Mock(return_value=Mock(client=Mock(return_value=metadata)))))
         with patch.dict('sys.modules', {'botocore.exceptions': SimpleNamespace(ClientError=ClientError),
                                       'capacity': SimpleNamespace(Capacity=capacity_factory)}):

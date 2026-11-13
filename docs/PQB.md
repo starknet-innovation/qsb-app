@@ -67,6 +67,8 @@ configured artifact bucket. The consumer checks this before uploading public inp
 or preparing a paid submission. SNF bootstrap sets that binding; request-specific
 input keys and hashes remain ordinary submission overrides.
 
-The operational collector paces log reads and retries explicit read throttling
-with a fixed per-page bound. Mutations and paid submissions remain one attempt;
-collection failure still pauses and drains work for reconciliation.
+The operational collector paces log reads and routes explicitly reviewed reads
+to a separate SDK client with at most five total attempts for transient failures.
+Mutations, including journal callbacks, retain a one-attempt client. Real SDK
+loopback tests cover dropped connections, throttling, exhaustion and a lost
+mutation reply. Collection failure still pauses and drains work for reconciliation.

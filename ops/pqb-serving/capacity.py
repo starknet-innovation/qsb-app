@@ -141,7 +141,7 @@ class Capacity:
         return boto3.Session(aws_access_key_id=credentials['AccessKeyId'], aws_secret_access_key=credentials['SecretAccessKey'], aws_session_token=credentials['SessionToken'], region_name=self.c.region)
 
     def scaling_groups(self):
-        client = self.metadata_session().client('autoscaling', config=self.c.sdk_config)
+        client = self.metadata_session().client('autoscaling', config=self.c.read_sdk_config)
         return [g for page in client.get_paginator('describe_auto_scaling_groups').paginate()
                 for g in page['AutoScalingGroups'] if g['AutoScalingGroupName'].startswith('AWSBatch-' + COMPUTE_NAME + '-asg-')]
 
@@ -196,7 +196,7 @@ class Capacity:
             return check_authority(self.c, self.plan)
         if time.time() >= self.plan['expiresAt']:
             raise RuntimeError('Capacity grant expired')
-        iam = self.metadata_session().client('iam', config=self.c.sdk_config)
+        iam = self.metadata_session().client('iam', config=self.c.read_sdk_config)
         try:
             operator = iam.get_role_policy(RoleName='qsb-operator', PolicyName=POLICY_NAME)
         except iam.exceptions.NoSuchEntityException as error:
@@ -362,7 +362,7 @@ class Capacity:
         target = self.c.directory / 'capacity'; target.mkdir(exist_ok=True)
         pool, queue = self.pool(), self.queue(); hosts = []
         if pool and pool.get('ecsClusterArn'):
-            ecs = self.metadata_session().client('ecs', config=self.c.sdk_config)
+            ecs = self.metadata_session().client('ecs', config=self.c.read_sdk_config)
             ids = sorted({i for status in ['ACTIVE', 'DRAINING', 'REGISTERING', 'DEREGISTERING', 'REGISTRATION_FAILED']
                 for page in ecs.get_paginator('list_container_instances').paginate(cluster=pool['ecsClusterArn'], status=status) for i in page['containerInstanceArns']})
             for offset in range(0, len(ids), 100):
@@ -381,7 +381,7 @@ class Capacity:
         self.c.state['capacity'].update(instanceIds=hosts, volumeIds=sorted(volumes | set(self.c.state['capacity'].get('volumeIds', []))))
         if pool and pool.get('ecsClusterArn'): self.c.state['capacity']['ecsClusterArn'] = pool['ecsClusterArn']
         self.c.save()
-        activities = []; scaling = self.metadata_session().client('autoscaling', config=self.c.sdk_config)
+        activities = []; scaling = self.metadata_session().client('autoscaling', config=self.c.read_sdk_config)
         for g in groups:
             activities.extend(a for p in scaling.get_paginator('describe_scaling_activities').paginate(AutoScalingGroupName=g['AutoScalingGroupName']) for a in p['Activities'])
         path = target / (stamp + '.json')

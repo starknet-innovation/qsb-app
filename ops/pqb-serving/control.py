@@ -14,6 +14,7 @@ import subprocess
 import time
 import uuid
 import zipfile
+from aws_clients import ScopedClient
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -75,6 +76,7 @@ class Campaign:
         self.session = boto3.Session(profile_name=self.config['profile'], region_name=self.config['region'])
         self.clients = {}
         self.sdk_config = Config(connect_timeout=5, read_timeout=30, retries={'total_max_attempts': 1})
+        self.read_sdk_config = Config(connect_timeout=5, read_timeout=30, retries={'mode': 'standard', 'total_max_attempts': 5})
         self.state = json.loads(self.state_path.read_text()) if self.state_path.exists() else None
         if self.state and self.state['operatorHash'] != hashlib.sha256(dump(self.config).encode()).hexdigest():
             raise RuntimeError('Operator binding changed')
@@ -120,7 +122,8 @@ class Campaign:
 
     def client(self, name):
         if name not in self.clients:
-            self.clients[name] = self.session.client(name, config=self.sdk_config)
+            self.clients[name] = ScopedClient(name, self.session.client(name, config=self.sdk_config),
+                self.session.client(name, config=self.read_sdk_config))
         return self.clients[name]
 
     def arn(self, service, resource):
@@ -577,22 +580,13 @@ class Campaign:
             self.state['phase'] = 'solve-complete'; self.save()
 
     def log_pages(self, **params):
-        """Pace log reads and retry only explicit throttling, never a cloud mutation."""
+        """Pace log pages; the reviewed read client handles bounded transport retries."""
         logs = self.client('logs'); pages = []; seen = set(); request = dict(params)
         while True:
-            for attempt in range(5):
-                delay = max(0, getattr(self, '_last_log_read', 0) + 0.4 - time.monotonic())
-                if delay: time.sleep(delay)
-                self._last_log_read = time.monotonic()
-                try:
-                    page = logs.filter_log_events(**request)
-                    break
-                except logs.exceptions.ThrottlingException as error:
-                    target = self.directory / 'logs'; target.mkdir(exist_ok=True)
-                    persist(target / ('read-throttle-' + str(time.time_ns()) + '.json'),
-                        {'operation': 'FilterLogEvents', 'params': request, 'attempt': attempt + 1, 'error': str(error)}, exclusive=True)
-                    if attempt == 4: raise
-                    time.sleep(2 ** attempt)
+            delay = max(0, getattr(self, '_last_log_read', 0) + 0.4 - time.monotonic())
+            if delay: time.sleep(delay)
+            self._last_log_read = time.monotonic()
+            page = logs.filter_log_events(**request)
             pages.append(page)
             token = page.get('nextToken')
             if not token: return pages
@@ -703,7 +697,7 @@ class Campaign:
             # An explicit metadata-only read must verify absence; denial is not absence.
             if not hasattr(self, '_cleanup_metadata_iam'):
                 from capacity import Capacity
-                self._cleanup_metadata_iam = Capacity(self).metadata_session().client('iam', config=self.sdk_config)
+                self._cleanup_metadata_iam = Capacity(self).metadata_session().client('iam', config=self.read_sdk_config)
             return read(self._cleanup_metadata_iam)
 
     def final_collect(self):

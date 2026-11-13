@@ -195,7 +195,7 @@ Local checks (no AWS calls):
 
 ```sh
 npm run typecheck
-python3 -m unittest discover -s ops/pqb-serving -p 'test_*.py' -v
+uv run --no-project --with-requirements ops/pqb-serving/requirements.txt python -m unittest discover -s ops/pqb-serving -p 'test_*.py' -v
 ```
 
 ## Offline solved-spend component check
@@ -232,7 +232,7 @@ Amazon ECS GPU AMI, public default subnets supporting the selected hardware, and
 fresh quota. The quota may bound actual concurrency below the configured ceiling;
 record both and never infer allocated GPUs from submitted jobs.
 
-Use `uv run --no-project --with boto3 --with awscrt python` for this profile's AWS
+Use `uv run --no-project --with-requirements ops/pqb-serving/requirements.txt python` for this profile's AWS
 login credential provider. Isolated mode permits `eu-west-1` or `eu-west-2`; ordinary
 app-account mode remains London only. Select and freeze the region before preparation. After building and local public-fixture preparation:
 
@@ -242,6 +242,10 @@ python ops/pqb-serving/control.py prepare "$EVIDENCE"
 python ops/pqb-serving/snf.py bootstrap "$EVIDENCE"
 python ops/pqb-serving/control.py mirror "$EVIDENCE"
 python ops/pqb-serving/capacity.py create "$EVIDENCE"
+# If this queue ARN retains old terminal jobs, reconcile every contributing
+# completed campaign now, before capture. Omit only for an empty inventory.
+python ops/pqb-serving/capacity.py reconcile_history "$EVIDENCE" \
+  --previous-campaign "$PREVIOUS_COMPLETED_EVIDENCE"
 python ops/pqb-serving/snf.py capture "$EVIDENCE"
 python ops/pqb-serving/control.py deploy "$EVIDENCE"
 ```
@@ -269,9 +273,15 @@ configured artifact bucket. The consumer checks this before uploading public inp
 or preparing a paid submission. SNF bootstrap sets that binding; request-specific
 input keys and hashes remain ordinary submission overrides.
 
-Log collection spaces `FilterLogEvents` reads by at least 400 ms across pages and
-groups. Only explicit read throttling is retried, at most five attempts per page,
-with bounded backoff and retained failure receipts. Empty pages with continuation
-tokens are followed; repeated tokens fail closed. Cloud mutations and paid
+Log collection spaces initial `FilterLogEvents` page requests by at least 400 ms across pages and
+groups. An explicit service/operation allowlist routes reads to a separate SDK
+client with standard backoff and at most five total attempts for transient
+connections, throttling and retryable service errors. Other operations retain a
+one-attempt client, including callbacks used by the mutation journal. Only reviewed
+read paginators and waiters may use the read client. Successful response metadata
+retains SDK retry counts. Empty continuation pages are followed; repeated tokens
+fail closed. SDK dependencies are pinned in `requirements.txt`. Loopback HTTP fault
+injection verifies actual SDK recovery, exhaustion, immediate authorization-denial
+failure and a lost mutation reply making only one request, without AWS access. Cloud mutations and paid
 submissions retain their one-attempt journal and are never replayed. Complete
 workflow histories remain mandatory before removal. See the [AWS log API quotas](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/cloudwatch_limits_cwl.html).

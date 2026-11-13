@@ -30,27 +30,17 @@ class LogCollectionTests(unittest.TestCase):
         c.client = Mock(return_value=logs); c.mutate = Mock()
         return c, clock, calls
 
-    def test_throttled_page_retries_without_replaying_previous_or_skipping_empty_pages(self):
+    def test_sdk_retry_metadata_and_empty_continuation_pages_are_retained_without_replay(self):
         first = {'events': [{'eventId': 'a'}], 'nextToken': 'one'}
-        empty = {'events': [], 'nextToken': 'two'}
+        empty = {'events': [], 'nextToken': 'two', 'ResponseMetadata': {'RetryAttempts': 2}}
         last = {'events': [{'eventId': 'b'}]}
         with TemporaryDirectory() as directory:
-            c, clock, calls = self.campaign(directory, [first, Throttled('Rate exceeded'), empty, last])
+            c, clock, calls = self.campaign(directory, [first, empty, last])
             with patch('control.time.monotonic', clock.monotonic), patch('control.time.sleep', clock.sleep):
                 self.assertEqual(c.log_pages(logGroupName='ours'), [first, empty, last])
-            self.assertEqual([p.get('nextToken') for _, p in calls], [None, 'one', 'one', 'two'])
+            self.assertEqual([p.get('nextToken') for _, p in calls], [None, 'one', 'two'])
             self.assertTrue(all(b[0] - a[0] >= 0.399 for a, b in zip(calls, calls[1:])))
-            retained = list((Path(directory) / 'logs').glob('read-throttle-*.json'))
-            self.assertEqual(len(retained), 1); self.assertEqual(json.loads(retained[0].read_text())['attempt'], 1)
             c.mutate.assert_not_called(); self.assertTrue(all(call.args == ('logs',) for call in c.client.call_args_list))
-
-    def test_persistent_throttling_stops_after_five_reads_and_keeps_failures(self):
-        with TemporaryDirectory() as directory:
-            c, clock, calls = self.campaign(directory, [Throttled('Rate exceeded') for _ in range(5)])
-            with patch('control.time.monotonic', clock.monotonic), patch('control.time.sleep', clock.sleep):
-                with self.assertRaises(Throttled): c.log_pages(logGroupName='ours')
-            self.assertEqual(len(calls), 5); self.assertEqual(len(list((Path(directory) / 'logs').glob('read-throttle-*.json'))), 5)
-            c.mutate.assert_not_called()
 
     def test_other_errors_do_not_retry_or_claim_collection_success(self):
         with TemporaryDirectory() as directory:

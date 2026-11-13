@@ -1,0 +1,9 @@
+# Controller and SDK transport tests; worker runtime remains the pinned OCI image.
+boto3==1.44.2
+botocore==1.44.2
+awscrt==0.38.1
+s3transfer==0.19.3
+jmespath==1.1.0
+python-dateutil==2.9.0.post0
+six==1.17.0
+urllib3==2.8.0
