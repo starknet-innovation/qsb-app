@@ -36,9 +36,9 @@ function setup(selectedQueue = queue) {
 }
 afterEach(() => vi.unstubAllEnvs());
 
-it("prepares the owned isolated A10G pool through the real provider with an eight-slot limit", async () => {
+it("prepares the owned isolated A10G pool through the real provider with a four-slot limit", async () => {
   const t = setup();
-  expect(t.provider.parallelismLimit).toBe(8);
+  expect(t.provider.parallelismLimit).toBe(4);
   const run = await t.provider.prepareRun(image, { public: "synthetic" });
   expect(run.identity.queue).toBe(queue);
   expect(t.submit).not.toHaveBeenCalled();
@@ -55,7 +55,7 @@ it.each(["production-function", "missing-function", "wrong-owner", "wrong-pool",
     if (kind === "wrong-owner") t.e.tags.PqbValidation = "qsb-pqb-v-ffffffffffff";
     if (kind === "wrong-pool") t.q.computeEnvironmentOrder[0].computeEnvironment = ce + "-other";
     if (kind === "over-capacity") t.e.computeResources.maxvCpus = 128;
-    if (kind === "wrong-type") t.e.computeResources.instanceTypes = ["g5.4xlarge"];
+    if (kind === "wrong-type") t.e.computeResources.instanceTypes = ["g5.8xlarge"];
     if (kind === "mixed-types") t.e.computeResources.instanceTypes.push("g5.xlarge");
     if (kind === "wrong-strategy") t.e.computeResources.allocationStrategy = "BEST_FIT";
     if (kind === "second-pool") t.q.computeEnvironmentOrder.push({ order: 2, computeEnvironment: "other" });
@@ -74,7 +74,7 @@ it("permits an explicitly selected shared-pool assessment only in its dedicated 
   const t = setup(queue.replace("qsb-gpu-validation", "qsb-gpu"));
   delete t.q.tags.PqbValidation; delete t.e.tags.PqbValidation;
   vi.stubEnv("QSB_BATCH_SHARED_POOL_VALIDATION", "1");
-  expect(t.provider.parallelismLimit).toBe(8);
+  expect(t.provider.parallelismLimit).toBe(4);
   await expect(t.provider.prepareRun(image, {})).resolves.toBeTypeOf("function");
   vi.stubEnv("AWS_LAMBDA_FUNCTION_NAME", "qsb-app-coordinator");
   await expect(t.provider.prepareRun(image, {})).rejects.toThrow("ProviderLimitsUnconfirmed");

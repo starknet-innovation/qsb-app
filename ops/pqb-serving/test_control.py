@@ -11,6 +11,24 @@ spec.loader.exec_module(control)
 
 
 class JournalTests(unittest.TestCase):
+    def test_shared_window_is_fixed_at_preparation_and_cannot_be_extended(self):
+        self.assertEqual(control.campaign_seconds(), 4 * 3600)
+        self.assertEqual(control.campaign_seconds(True), 6 * 3600)
+        c = object.__new__(control.Campaign)
+        c.account, c.region = '237145860001', 'eu-west-2'
+        c.config = {'profile': 'qsb-operator-euw2', 'account': c.account, 'region': c.region}
+        name = 'qsb-pqb-v-012345abcdef'
+        c.state = {'name': name, 'createdAt': 100, 'deadline': 100 + 6 * 3600, 'reservedUsd': 200,
+            'preflightGpuSeconds': 900, 'solveGpuSeconds': 540000, 'sharedPoolReplacement': {'bound': True},
+            'tables': [name + '-preflight', name + '-solve'], 'roles': [name + '-' + k for k in ['coordinator', 'workflow', 'deadline', 'scheduler']],
+            'function': name + '-coordinator', 'cleanupFunction': name + '-deadline', 'workflow': name, 'schedule': name + '-deadline',
+            'queue': c.arn('batch', 'job-queue/qsb-gpu'), 'bucket': 'qsb-gpu-237145860001-eu-west-2-jobs'}
+        c.validate_scope()
+        c.state['deadline'] += 1
+        with self.assertRaisesRegex(RuntimeError, 'deadline'): c.validate_scope()
+        c.state['deadline'] -= 1; del c.state['sharedPoolReplacement']
+        with self.assertRaisesRegex(RuntimeError, 'deadline'): c.validate_scope()
+
     def campaign(self, directory, client):
         c = object.__new__(control.Campaign)
         c.directory = Path(directory).resolve()

@@ -22,6 +22,13 @@ ROOT = Path(__file__).resolve().parents[2]
 ACTIVE = ('SUBMITTED', 'PENDING', 'RUNNABLE', 'STARTING', 'RUNNING')
 
 
+def campaign_seconds(shared_pool=False):
+    hours = json.loads((ROOT / 'server/aws-batch-validation.json').read_text())['sharedPoolCampaignHours'] if shared_pool else 4
+    if hours not in (4, 6):
+        raise RuntimeError('Unsupported fixed campaign duration')
+    return hours * 3600
+
+
 def dump(value):
     return json.dumps(value, sort_keys=True, indent=2, default=lambda x: int(x) if isinstance(x, Decimal) and x == int(x) else str(x)) + '\n'
 
@@ -89,7 +96,7 @@ class Campaign:
 
     def validate_scope(self):
         name = self.state['name']
-        if self.state['deadline'] != self.state['createdAt'] + 4 * 3600 or self.state['reservedUsd'] != 200 or self.state['preflightGpuSeconds'] != 900 or self.state['solveGpuSeconds'] != 540000:
+        if self.state['deadline'] != self.state['createdAt'] + campaign_seconds(bool(self.state.get('sharedPoolReplacement'))) or self.state['reservedUsd'] != 200 or self.state['preflightGpuSeconds'] != 900 or self.state['solveGpuSeconds'] != 540000:
             raise RuntimeError('Campaign deadline or reserved budget changed')
         if not re.fullmatch(r'qsb-pqb-v-[a-f0-9]{12}', name):
             raise RuntimeError('Invalid dedicated campaign name')
@@ -237,7 +244,7 @@ class Campaign:
         prepared_at = int(time.time())
         self.state = {'format': 'pqb-serving-campaign-v1', 'name': name, 'sourceCommit': source,
             'operatorHash': hashlib.sha256(dump(self.config).encode()).hexdigest(), 'createdAt': prepared_at,
-            'deadline': prepared_at + 4 * 3600, 'reservedUsd': 200, 'reservationStatus': 'reserved',
+            'deadline': prepared_at + campaign_seconds(bool(shared_binding)), 'reservedUsd': 200, 'reservationStatus': 'reserved',
             'preflightGpuSeconds': 900, 'solveGpuSeconds': 540000, 'fixtureSha256': hashlib.sha256((self.directory / 'public-fixture.json').read_bytes()).hexdigest(),
             'coordinatorSha256': manifest['files']['coordinator.zip'], 'apiArtifactSha256': manifest['files']['api.zip'], 'descriptor': fixture['descriptor'],
             'queue': snapshot['coordinatorEnv']['AWS_BATCH_JOB_QUEUE'], 'bucket': snapshot['coordinatorEnv']['AWS_BATCH_JOB_BUCKET'],
@@ -383,7 +390,7 @@ class Campaign:
         asl = json.loads(snapshot['workflow']['definition'])
         asl['States']['CoordinateSearch']['Resource'] = self.arn('lambda', 'function:' + state['function'])
         asl['States']['ContinueSearch']['Parameters']['StateMachineArn'] = self.arn('states', 'stateMachine:' + state['workflow'])
-        asl['TimeoutSeconds'] = 4 * 3600
+        asl['TimeoutSeconds'] = state['deadline'] - state['createdAt']
         state['asl'] = asl; self.save()
         self.mutate('workflow', 'stepfunctions', 'create_state_machine', name=state['workflow'], definition=json.dumps(asl), roleArn=self.iam(state['roles'][1]), type='STANDARD',
             loggingConfiguration={'level': 'ALL', 'includeExecutionData': True, 'destinations': [{'cloudWatchLogsLogGroup': {'logGroupArn': self.arn('logs', 'log-group:' + logs[2]) + ':*'}}]}, tags=[{'key': t['Key'], 'value': t['Value']} for t in tags])

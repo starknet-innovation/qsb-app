@@ -78,7 +78,7 @@ def validate_plan(plan, config):
     if plan['queueRestore'] != queue_creation(queue):
         raise RuntimeError('Original queue rollback payload changed')
     expected['computeResources'].update(allocationStrategy=PROFILE['allocationStrategy'], instanceTypes=[PROFILE['instanceType']])
-    if plan['candidate'] != expected or PROFILE['gpuName'] != 'A10G' or PROFILE['vcpusPerHost'] != 8:
+    if plan['candidate'] != expected or PROFILE['gpuName'] != 'A10G' or PROFILE['vcpusPerHost'] != 16:
         raise RuntimeError('Candidate differs from the reviewed single-A10G profile')
 
 

@@ -39,10 +39,10 @@ reservation is retained in campaign accounting. Neither execution is resumed or
 replayed after an unknown submission.
 
 When the ordinary `g5.xlarge` pool has no capacity, `capacity.py` prepares an
-isolated `qsb-gpu-validation` queue and compute environment using `g5.2xlarge`
+isolated `qsb-gpu-validation` queue and compute environment using `g5.4xlarge`
 NVIDIA A10G hosts. It copies the reviewed host AMI, immutable launch-template version,
 network and instance profile. The pool uses `BEST_FIT_PROGRESSIVE`, minimum zero
-and maximum 64 vCPUs. Its provider limits the coordinator to eight single-GPU
+and maximum 64 vCPUs. Its provider limits the coordinator to four single-GPU
 hosts, within the existing global 16-slot ceiling. The production queue and pool
 are never modified. Production work appearing during collection stops the public
 assessment so it can release capacity. The larger host keeps the same A10G GPU and
@@ -156,10 +156,10 @@ QSB_NETWORK=mainnet node --import tsx ops/pqb-serving/fixture.ts verify "$EVIDEN
 
 Omit the `capacity.py` and Autopilot commands when using the original pool.
 Call `collect` regularly during each execution; it retains snapshots rather than
-rewriting originals. The whole campaign reserves $200 operationally, has a fixed
-four-hour deadline, permits at most 900 + 540,000 reserved GPU-seconds across the
-two public jobs. The ordinary provider keeps its 16-slot cap; the isolated provider
-keeps eight. The account quota applies across both pools.
+rewriting originals. Each campaign reserves $200 operationally and permits at most 900 + 540,000
+reserved GPU-seconds across the two public jobs. The original and isolated pool
+modes freeze four hours; the explicitly bound shared-pool replacement freezes six. The ordinary provider keeps its 16-slot cap; the isolated provider
+keeps four. The account quota applies across both pools.
 This is an assessment
 reservation, not a guaranteed billing limit. Current regional pricing must be
 recorded independently before preparing a new campaign.
@@ -346,3 +346,12 @@ queue settings, zero hosts and recorded-volume absence. This restores the origin
 Terraform-managed configuration, although Batch-generated cluster/group identities
 change. Keep the maintenance plan, every request/response and fresh restoration
 receipt; never apply Terraform concurrently with this maintenance operation.
+
+The shared-pool `g5.4xlarge` assessment freezes a fresh six-hour deadline at
+preparation, with four validation GPU slots and the same $200 reservation. The
+additional preparation-time window accommodates the smaller GPU count; it never
+extends an existing campaign. The original-pool and isolated-pool modes retain
+four-hour deadlines. The workflow timeout and independent stop schedule use the
+same frozen deadline. Five hosts (including a possible Batch overshoot) for six
+hours at the recorded $2.06148/hour on-demand rate would be $61.8444 in VM time;
+this excludes other services and is an estimate rather than provider billing.
