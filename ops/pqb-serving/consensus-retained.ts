@@ -57,8 +57,10 @@ export function retainedContext(dir: string, campaign: any, job: any, currentCom
   if (resourceFiles.length !== 1 || !seal.files["public-fixture.json"] || !seal.files["build-artifacts/api.zip"])
     throw Error("Missing sealed native evidence");
   const resources = json(resourceFiles[0]);
-  const rows = Object.values(resources.tables).flatMap((t: any) => t.pages.flatMap((p: any) =>
-    p.Items.map((item: any) => attribute({ M: item }))));
+  if (!Array.isArray(campaign.tables) || campaign.tables.length !== 2 || campaign.tables[0] === campaign.tables[1]
+    || !resources.tables[campaign.tables[1]]) throw Error("Missing sealed solve table");
+  const rows = resources.tables[campaign.tables[1]].pages.flatMap((p: any) =>
+    p.Items.map((item: any) => attribute({ M: item })));
   const matches = rows.filter((r: any) => r.job?.id === job.id);
   if (matches.length !== 1 || !["manifest", "manifestHash", "solution", "solver", "vaultId", "owner"].every(k =>
     isDeepStrictEqual(matches[0].job[k], job[k]))) throw Error("Final job differs from sealed coordinator result");

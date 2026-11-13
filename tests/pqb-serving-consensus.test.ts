@@ -65,10 +65,12 @@ it("binds a retained follow-up to cleanup, sealed bytes and the actual coordinat
     put("build-artifacts/manifest.json", { clean: true, commit });
     put("build-artifacts/api.zip", "test-artifact");
     put("public-fixture.json", { public: true });
-    put("final-resources-1.json", { tables: { test: { pages: [{ Items: [{ job: { M: {
+    const sealedRow: { tables: Record<string, { pages: Array<{ Items: unknown[] }> }> } = { tables: { solve: { pages: [{ Items: [{ job: { M: {
       id: { S: job.id }, manifest: { M: { public: { BOOL: true } } }, manifestHash: { S: job.manifestHash },
       solution: { M: { nonce: { N: "1" } } },
-    } } }] }] } } });
+    } } }] }] } } };
+    sealedRow.tables.preflight = structuredClone(sealedRow.tables.solve);
+    put("final-resources-1.json", sealedRow);
     const files = Object.fromEntries(["build-artifacts/manifest.json", "build-artifacts/api.zip", "public-fixture.json",
       "final-resources-1.json"].map(f => [f, binding(f).sha256]));
     put("seal.json", { name: "test", sourceCommit: commit, executions: { public: "SUCCEEDED" }, files });
@@ -78,7 +80,7 @@ it("binds a retained follow-up to cleanup, sealed bytes and the actual coordinat
       accepted: true, expectedValid: true, transactionSha256: sha(Buffer.from("00", "hex")),
     });
     put("offline-consensus-intent.json", { sourceCommit: commit, apiArtifactSha256: "api" });
-    const campaign = { name: "test", sourceCommit: commit, reservationStatus: "released", apiArtifactSha256: "api",
+    const campaign = { tables: ["preflight", "solve"], name: "test", sourceCommit: commit, reservationStatus: "released", apiArtifactSha256: "api",
       independentCleanup: binding("cleanup.json"), finalCollection: binding("seal.json") };
     expect(retainedContext(root, campaign, job, commit).originalRaw).toBe("00");
     expect(() => retainedContext(root, { ...campaign, reservationStatus: "reserved" }, job, commit)).toThrow("cleanup");
