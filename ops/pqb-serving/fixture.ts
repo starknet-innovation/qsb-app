@@ -11,6 +11,7 @@ import { checkedOutput } from "../../server/search-protocol";
 import { applyVerifiedHit } from "../../server/candidate-output";
 import { pqbPacket } from "../../src/lib/pqb";
 import { pqbReference } from "../../server/pqb-reference";
+import { nativeStartup } from "./native-startup";
 import { coordinatorPublicSolvedResult } from "../../src/mainnet/coordinatorResult";
 
 const [mode, directory, indexName] = process.argv.slice(2);
@@ -82,9 +83,10 @@ if (mode === "prepare") {
     const bytes = readFileSync(path.join(objects, n));
     return [createHash("sha256").update(bytes).digest("hex"), JSON.parse(bytes.toString()).input];
   }));
+  const campaign = JSON.parse(readFileSync(path.join(dir, "campaign.json"), "utf8"));
   const startup: unknown[] = [];
   for (const job of successful) {
-    if (job.jobDefinition !== index.definition || job.container?.image !== index.image)
+    if (job.jobDefinition !== index.definition || job.container?.image !== index.image || job.jobQueue !== campaign.queue)
       throw Error("Native Batch image/revision mismatch");
     const env = Object.fromEntries(job.container.environment.map((v: any) => [v.name, v.value]));
     const input = inputs.get(env.QSB_INPUT_SHA256);
@@ -94,11 +96,7 @@ if (mode === "prepare") {
       throw Error("Native startup receipt missing");
     const pages = JSON.parse(readFileSync(path.join(dir, logPath), "utf8"));
     const messages: string[] = pages.flatMap((p: any) => p.events.map((e: any) => e.message));
-    const driver = messages.flatMap(m => m.split("\n")).map(m => /^(?:NVIDIA )?A10G,\s*(GPU-[a-f0-9-]+),\s*([0-9]+(?:\.[0-9]+)+)\s*$/.exec(m)).find(Boolean);
-    if (!driver || !messages.some(m => /^NoNewPrivs:\s+1\s*$/m.test(m))
-      || !messages.some(m => /^CapBnd:\s+0+\s*$/m.test(m)))
-      throw Error("A10G driver or process-isolation receipt missing");
-    startup.push({ jobId: job.jobId, gpuUuid: driver[1], driver: driver[2] });
+    startup.push({ jobId: job.jobId, ...nativeStartup(messages, campaign.queue) });
   }
   const envelopes = names.filter(n => /^outputs__[a-f0-9-]+\.json$/.test(n)).map(n => {
     const envelope = JSON.parse(readFileSync(path.join(objects, n), "utf8")), input = inputs.get(envelope.inputSha256);

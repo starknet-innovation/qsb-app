@@ -14,6 +14,7 @@ import subprocess
 import time
 import uuid
 import zipfile
+from aws_clients import ScopedClient
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -44,6 +45,13 @@ def persist(path, value, exclusive=False):
         os.close(parent)
 
 
+def check_operator_config(config):
+    allowed = json.loads((ROOT / 'server/aws-batch-validation.json').read_text())['regions'] if config.get('snfIsolation') is True else ['eu-west-2']
+    if (set(config) not in ({'profile', 'account', 'region'}, {'profile', 'account', 'region', 'snfIsolation'})
+        or ('snfIsolation' in config and config['snfIsolation'] is not True) or config.get('region') not in allowed):
+        raise RuntimeError('Use the scoped operator profile, account and explicitly supported region')
+
+
 def clean_source():
     def git(*args):
         return subprocess.check_output(['git', *args], cwd=ROOT, text=True).strip()
@@ -64,11 +72,11 @@ class Campaign:
             raise RuntimeError('Keep operator configuration and receipts outside Git')
         self.state_path = self.directory / 'campaign.json'
         self.config = json.loads((self.directory / 'operator.json').read_text())
-        if set(self.config) != {'profile', 'account', 'region'} or self.config['region'] != 'eu-west-2':
-            raise RuntimeError('Use the scoped London operator profile, account and region')
+        check_operator_config(self.config)
         self.session = boto3.Session(profile_name=self.config['profile'], region_name=self.config['region'])
         self.clients = {}
         self.sdk_config = Config(connect_timeout=5, read_timeout=30, retries={'total_max_attempts': 1})
+        self.read_sdk_config = Config(connect_timeout=5, read_timeout=30, retries={'mode': 'standard', 'total_max_attempts': 5})
         self.state = json.loads(self.state_path.read_text()) if self.state_path.exists() else None
         if self.state and self.state['operatorHash'] != hashlib.sha256(dump(self.config).encode()).hexdigest():
             raise RuntimeError('Operator binding changed')
@@ -85,6 +93,12 @@ class Campaign:
             raise RuntimeError('Campaign deadline or reserved budget changed')
         if not re.fullmatch(r'qsb-pqb-v-[a-f0-9]{12}', name):
             raise RuntimeError('Invalid dedicated campaign name')
+        if self.config.get('snfIsolation') is True:
+            expected_boundary = f'arn:aws:iam::{self.account}:policy/qsb/runtime/{name}-runtime-boundary'
+            if self.state.get('snfBootstrap', {}).get('boundaryArn') != expected_boundary:
+                raise RuntimeError('Isolated bootstrap boundary scope changed')
+        elif self.state.get('snfBootstrap'):
+            raise RuntimeError('Isolated bootstrap requires the frozen explicit operator mode')
         expected = {'tables': [name + '-preflight', name + '-solve'],
             'roles': [name + '-' + n for n in ['coordinator', 'workflow', 'deadline', 'scheduler']],
             'function': name + '-coordinator', 'cleanupFunction': name + '-deadline',
@@ -94,7 +108,7 @@ class Campaign:
         if self.state.get('logs') not in (None, ['/aws/lambda/' + expected['function'], '/aws/lambda/' + expected['cleanupFunction'], '/aws/vendedlogs/states/' + name]):
             raise RuntimeError('Dedicated log scope changed')
         queue_name = json.loads((ROOT / 'server/aws-batch-validation.json').read_text())['name'] if self.state.get('capacity') else 'qsb-gpu'
-        if self.state['queue'] != self.arn('batch', 'job-queue/' + queue_name) or self.state['bucket'] != f'qsb-gpu-{self.account}-{self.region}-jobs':
+        if self.state['queue'] != self.arn('batch', 'job-queue/' + queue_name) or self.state['bucket'] != (name + '-artifacts' if self.config.get('snfIsolation') else f'qsb-gpu-{self.account}-{self.region}-jobs'):
             raise RuntimeError('Shared Batch binding changed')
         if self.state.get('capacity') and self.state.get('watchdogSchedule') != name + '-watchdog':
             raise RuntimeError('Isolated watchdog scope changed')
@@ -108,7 +122,8 @@ class Campaign:
 
     def client(self, name):
         if name not in self.clients:
-            self.clients[name] = self.session.client(name, config=self.sdk_config)
+            self.clients[name] = ScopedClient(name, self.session.client(name, config=self.sdk_config),
+                self.session.client(name, config=self.read_sdk_config))
         return self.clients[name]
 
     def arn(self, service, resource):
@@ -150,6 +165,9 @@ class Campaign:
         return result
 
     def inspect(self):
+        if self.config.get('snfIsolation') is True:
+            from snf import inspect
+            return inspect(self)
         # No application table data or secret values are read.
         coordinator = self.client('lambda').get_function_configuration(FunctionName='qsb-app-coordinator')
         env = coordinator['Environment']['Variables']
@@ -165,14 +183,11 @@ class Campaign:
             'activeJobs': active, 'workflow': workflow, 'runningExecutions': running}, exclusive=True)
         print(dump({'activeBatchJobs': sum(map(len, active.values())), 'runningProductionExecutions': len(running), 'servedRelease': env['SOLVER_RELEASE_ID']}).strip())
 
-    def prepare(self):
-        if self.state:
-            raise RuntimeError('Never restart an existing campaign')
+    def checked_build(self):
         source = clean_source()
         subprocess.run(['node', '--import', 'tsx', 'ops/pqb-serving/fixture.ts', 'validate', str(self.directory)], cwd=ROOT,
             env={**os.environ, 'QSB_NETWORK': 'mainnet'}, check=True)
         fixture = json.loads((self.directory / 'public-fixture.json').read_text())
-        snapshot = json.loads((self.directory / 'live-runtime-private.json').read_text())
         manifest = json.loads((ROOT / 'terraform/.build/manifest.json').read_text())
         if manifest['commit'] != source or not manifest['clean'] or manifest['identities']['solver']['id'] != fixture['descriptor']['id']:
             raise RuntimeError('Clean exact PQB build manifest required')
@@ -182,6 +197,17 @@ class Campaign:
         for name, digest in manifest['files'].items():
             if hashlib.sha256((ROOT / 'terraform/.build' / name).read_bytes()).hexdigest() != digest:
                 raise RuntimeError('Build artifact hash mismatch: ' + name)
+        return source, fixture, manifest
+
+    def prepare(self):
+        if self.state:
+            raise RuntimeError('Never restart an existing campaign')
+        source, fixture, manifest = self.checked_build()
+        if self.config.get('snfIsolation') is True:
+            from snf import prepare
+            prepare(self, source, fixture, manifest)
+            return
+        snapshot = json.loads((self.directory / 'live-runtime-private.json').read_text())
         if any(snapshot['activeJobs'].values()) or snapshot['runningExecutions']:
             raise RuntimeError('Baseline must be drained')
         capacity_plan = self.directory / 'capacity-plan.json'
@@ -275,14 +301,16 @@ class Campaign:
             raise RuntimeError('Shared queue changed since the reviewed baseline')
         if state.get('capacity'):
             from capacity import Capacity
-            Capacity(self).check_ready()
+            capacity = Capacity(self); capacity.check_ready()
+            capacity.verify_queue_inventory(capacity.queue_jobs())
         original = snapshot['definition'][0]
         params = {k: copy.deepcopy(original[k]) for k in ['jobDefinitionName', 'type', 'parameters', 'retryStrategy', 'containerProperties', 'timeout', 'propagateTags', 'platformCapabilities'] if k in original}
         params['containerProperties']['image'] = state['image']
         params['tags'] = {'Project': 'qsb-gpu', 'PqbValidation': state['name'], 'SourceCommit': state['sourceCommit']}
         definition = self.mutate('definition', 'batch', 'register_job_definition', **params)
         state['definition'] = definition['jobDefinitionArn']; self.save()
-        boundary = f'arn:aws:iam::{self.account}:policy/qsb/bootstrap/qsb-runtime-boundary'
+        boundary = (state['snfBootstrap']['boundaryArn'] if self.config.get('snfIsolation')
+            else f'arn:aws:iam::{self.account}:policy/qsb/bootstrap/qsb-runtime-boundary')
         tags = [{'Key': 'Project', 'Value': 'qsb-vault'}, {'Key': 'PqbValidation', 'Value': state['name']}, {'Key': 'SourceCommit', 'Value': state['sourceCommit']}]
         services = ['lambda.amazonaws.com', 'states.amazonaws.com', 'lambda.amazonaws.com', 'scheduler.amazonaws.com']
         for role, service in zip(state['roles'], services):
@@ -425,7 +453,8 @@ class Campaign:
             raise RuntimeError('Never restart the preflight')
         if self.state.get('capacity'):
             from capacity import Capacity
-            Capacity(self).check_ready()
+            capacity = Capacity(self); capacity.check_ready()
+            capacity.verify_queue_inventory(capacity.queue_jobs())
         schedule = self.client('scheduler').get_schedule(Name=self.state['schedule'])
         armed = json.loads((self.directory / 'armed-deadline.json').read_text())
         if schedule['State'] != 'ENABLED' or schedule['ScheduleExpression'] != armed['ScheduleExpression'] or schedule['Target'] != armed['Target']:
@@ -551,10 +580,35 @@ class Campaign:
             persist(self.directory / 'final-job.json', row, exclusive=True)
             self.state['phase'] = 'solve-complete'; self.save()
 
+    def log_pages(self, **params):
+        """Pace log pages; the reviewed read client handles bounded transport retries."""
+        logs = self.client('logs'); pages = []; seen = set(); request = dict(params)
+        while True:
+            delay = max(0, getattr(self, '_last_log_read', 0) + 0.4 - time.monotonic())
+            if delay: time.sleep(delay)
+            self._last_log_read = time.monotonic()
+            page = logs.filter_log_events(**request)
+            pages.append(page)
+            token = page.get('nextToken')
+            if not token: return pages
+            if token in seen: raise RuntimeError('Repeated CloudWatch log pagination token')
+            seen.add(token); request['nextToken'] = token
+
     def collect_artifacts(self, jobs, stamp, allow_missing=False):
         # Original public objects are copied without exposing them in console output.
         objects = self.directory / 'objects'; objects.mkdir(exist_ok=True)
         logs = self.directory / 'logs'; logs.mkdir(exist_ok=True)
+        if self.config.get('snfIsolation') is True:
+            from snf import collect_bootstrap
+            collect_bootstrap(self, stamp)
+            if not (self.directory / 'live-runtime-private.json').exists():
+                if jobs or not allow_missing:
+                    raise RuntimeError('Executed isolated campaign lacks captured runtime metadata')
+                persist(self.directory / ('native-index-' + stamp + '.json'), {'image': self.state.get('image'),
+                    'definition': self.state.get('definition'), 'jobs': [], 'startupLogs': {}}, exclusive=True)
+                instances = self.client('ec2').describe_instances(Filters=[{'Name': 'tag:PqbValidation', 'Values': [self.state['name']]}])
+                persist(self.directory / ('instances-' + stamp + '.json'), instances, exclusive=True)
+                return
         s3 = self.client('s3')
         for job in jobs:
             env = {v['name']: v['value'] for v in job.get('container', {}).get('environment', [])}
@@ -581,8 +635,7 @@ class Campaign:
                 try:
                     snapshot = json.loads((self.directory / 'live-runtime-private.json').read_text())
                     group = snapshot['definition'][0]['containerProperties']['logConfiguration']['options']['awslogs-group']
-                    pages = list(self.client('logs').get_paginator('filter_log_events').paginate(
-                        logGroupName=group, logStreamNames=[stream]))
+                    pages = self.log_pages(logGroupName=group, logStreamNames=[stream])
                 except self.client('logs').exceptions.ResourceNotFoundException:
                     pages = []
                 persist(logs / (job['jobId'] + '-' + stamp + '.json'), pages, exclusive=True)
@@ -608,7 +661,7 @@ class Campaign:
         # Managed workflow ALL logs retain transitions even where the operator cannot read execution data APIs.
         for index, group in enumerate(self.state.get('logs', [])):
             try:
-                pages = list(self.client('logs').get_paginator('filter_log_events').paginate(logGroupName=group))
+                pages = self.log_pages(logGroupName=group)
             except self.client('logs').exceptions.ResourceNotFoundException:
                 if not allow_missing:
                     raise
@@ -627,8 +680,28 @@ class Campaign:
         rows = sorted(rows, key=lambda r: (r['pk']['S'], r['sk']['S']))
         return hashlib.sha256(dump(rows).encode()).hexdigest()
 
-    def final_collect(self):
+    def optional_cleanup_resource(self, service, operation, **params):
         from botocore.exceptions import ClientError
+        def read(client):
+            try:
+                return getattr(client, operation)(**params)
+            except ClientError as error:
+                if error.response['Error']['Code'] not in ('ResourceNotFoundException', 'StateMachineDoesNotExist', 'NoSuchEntity'):
+                    raise
+                return None
+        try:
+            return read(self.client(service))
+        except ClientError as error:
+            if service != 'iam' or operation != 'get_role' or error.response['Error']['Code'] not in ('AccessDenied', 'AccessDeniedException'):
+                raise
+            # A never-created role cannot resolve to the operator's runtime IAM path.
+            # An explicit metadata-only read must verify absence; denial is not absence.
+            if not hasattr(self, '_cleanup_metadata_iam'):
+                from capacity import Capacity
+                self._cleanup_metadata_iam = Capacity(self).metadata_session().client('iam', config=self.read_sdk_config)
+            return read(self._cleanup_metadata_iam)
+
+    def final_collect(self):
         started = bool(list((self.directory / 'requests').glob('*-execution.intent.json')))
         for intent in (self.directory / 'requests').glob('*.intent.json'):
             response = intent.with_name(intent.name.replace('.intent.json', '.response.json'))
@@ -636,13 +709,7 @@ class Campaign:
                 raise RuntimeError('Uncertain mutation requires a separate reconciliation receipt before final cleanup: ' + intent.name)
         if not self.state.get('definition') and (self.directory / 'requests/definition.intent.json').exists():
             raise RuntimeError('Reconcile the uncertain definition identity before cleanup')
-        def optional(service, operation, **params):
-            try:
-                return getattr(self.client(service), operation)(**params)
-            except ClientError as error:
-                if error.response['Error']['Code'] not in ('ResourceNotFoundException', 'StateMachineDoesNotExist', 'NoSuchEntity'):
-                    raise
-                return None
+        optional = self.optional_cleanup_resource
         def owned(tags):
             if isinstance(tags, list):
                 tags = {t.get('Key', t.get('key')): t.get('Value', t.get('value')) for t in tags}
@@ -732,7 +799,12 @@ class Campaign:
         persist(snapshot_path, snapshot, exclusive=True)
         paths = [snapshot_path, self.directory / ('native-index-' + stamp + '.json'), self.directory / ('instances-' + stamp + '.json'), self.directory / 'public-fixture.json']
         if self.state.get('capacity'):
-            paths.append(self.directory / 'capacity-plan.json')
+            plan = self.directory / 'capacity-plan.json'
+            if plan.exists(): paths.append(plan)
+            elif not (self.config.get('snfIsolation') is True and not started and self.state['capacity']['status'] == 'bootstrapping'):
+                raise RuntimeError('Capacity plan missing')
+        if self.config.get('snfIsolation') is True:
+            paths += [self.directory / 'snf-inspect.json', self.directory / 'reference-runtime.json']
         for folder in ['requests', 'objects', 'logs', 'build-artifacts', 'capacity']:
             paths += [p for p in (self.directory / folder).rglob('*') if p.is_file()]
         files = {str(p.relative_to(self.directory)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}

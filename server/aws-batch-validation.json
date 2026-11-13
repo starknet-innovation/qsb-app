@@ -1,8 +1,12 @@
 {
   "name": "qsb-gpu-validation",
-  "region": "eu-west-2",
-  "instanceType": "g5.2xlarge",
-  "vcpusPerHost": 8,
+  "instanceType": "g5.xlarge",
+  "vcpusPerHost": 4,
   "maxVcpus": 64,
-  "allocationStrategy": "BEST_FIT_PROGRESSIVE"
+  "allocationStrategy": "BEST_FIT_PROGRESSIVE",
+  "gpuName": "A10G",
+  "regions": [
+    "eu-west-1",
+    "eu-west-2"
+  ]
 }

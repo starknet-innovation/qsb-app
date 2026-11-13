@@ -174,7 +174,7 @@ export class AwsBatch implements ComputeProvider {
     const validationCampaign = this.validationProfile
       ? /^(qsb-pqb-v-[a-f0-9]{12})-coordinator$/.exec(process.env.AWS_LAMBDA_FUNCTION_NAME ?? "")?.[1]
       : undefined;
-    if (this.validationProfile && (!validationCampaign || this.queue.split(":")[3] !== validation.region))
+    if (this.validationProfile && (!validationCampaign || !validation.regions.includes(this.queue.split(":")[3])))
       throw new Error("ProviderLimitsUnconfirmed");
     const [definitions, queues] = await Promise.all([
       this.batch.send(
@@ -198,7 +198,12 @@ export class AwsBatch implements ComputeProvider {
     )
       throw new Error("ProviderImageUnconfirmed");
     const resources = d.containerProperties?.resourceRequirements;
+    const buckets = d.containerProperties?.environment?.filter(
+      (entry) => entry.name === "QSB_JOB_BUCKET",
+    );
     if (
+      buckets?.length !== 1 ||
+      buckets[0].value !== this.bucket ||
       d.containerProperties?.readonlyRootFilesystem !== true ||
       d.containerProperties?.privileged !== false ||
       JSON.stringify(d.containerProperties?.command) !==
