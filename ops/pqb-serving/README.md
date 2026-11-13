@@ -39,14 +39,17 @@ reservation is retained in campaign accounting. Neither execution is resumed or
 replayed after an unknown submission.
 
 When the ordinary `g5.xlarge` pool has no capacity, `capacity.py` prepares an
-isolated `qsb-gpu-validation` queue and compute environment using `g5.xlarge`
+isolated `qsb-gpu-validation` queue and compute environment using `g5.2xlarge`
 NVIDIA A10G hosts. It copies the reviewed host AMI, immutable launch-template version,
 network and instance profile. The pool uses `BEST_FIT_PROGRESSIVE`, minimum zero
-and maximum 64 vCPUs. Its provider limits the coordinator to sixteen single-GPU
+and maximum 64 vCPUs. Its provider limits the coordinator to eight single-GPU
 hosts, within the existing global 16-slot ceiling. The production queue and pool
 are never modified. Production work appearing during collection stops the public
-assessment so it can release capacity. This is a validation configuration, not a
-production solver selection.
+assessment so it can release capacity. The larger host keeps the same A10G GPU and
+enrolled image while requesting a different EC2 size in the existing subnets. It is a capacity option,
+without a comparative performance claim or a change to production selection.
+The worker still requests four vCPUs and 12,000 MiB; host vCPUs bound the number of
+simultaneous single-GPU hosts.
 
 The image remains the enrolled `sm_86` artifact on A10G. Require a fresh native
 preflight on the selected hardware. The startup audit requires exactly one GPU
@@ -156,7 +159,7 @@ Call `collect` regularly during each execution; it retains snapshots rather than
 rewriting originals. The whole campaign reserves $200 operationally, has a fixed
 four-hour deadline, permits at most 900 + 540,000 reserved GPU-seconds across the
 two public jobs. The ordinary provider keeps its 16-slot cap; the isolated provider
-also keeps sixteen. The account quota applies across both pools.
+keeps eight. The account quota applies across both pools.
 This is an assessment
 reservation, not a guaranteed billing limit. Current regional pricing must be
 recorded independently before preparing a new campaign.

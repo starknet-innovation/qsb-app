@@ -1,7 +1,7 @@
 {
   "name": "qsb-gpu-validation",
-  "instanceType": "g5.xlarge",
-  "vcpusPerHost": 4,
+  "instanceType": "g5.2xlarge",
+  "vcpusPerHost": 8,
   "maxVcpus": 64,
   "allocationStrategy": "BEST_FIT_PROGRESSIVE",
   "gpuName": "A10G",

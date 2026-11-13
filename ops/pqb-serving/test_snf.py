@@ -55,7 +55,7 @@ class SnfTests(unittest.TestCase):
         c = campaign(); snapshot = {'subnets': [{'SubnetId': 'subnet-b'}, {'SubnetId': 'subnet-a'}], 'image': {'ImageId': 'ami-owned'}}
         resources = snf.compute_resources(c, snapshot)
         self.assertEqual(resources['minvCpus'], 0); self.assertEqual(resources['desiredvCpus'], 0)
-        self.assertEqual(resources['maxvCpus'], 64); self.assertEqual(resources['instanceTypes'], ['g5.xlarge'])
+        self.assertEqual(resources['maxvCpus'], 64); self.assertEqual(resources['instanceTypes'], ['g5.2xlarge'])
         self.assertEqual(resources['subnets'], ['subnet-a', 'subnet-b'])
         self.assertEqual(resources['launchTemplate'], {'launchTemplateId': 'lt-owned', 'version': '1', 'overrides': []})
         self.assertEqual(resources['securityGroupIds'], ['sg-owned'])
