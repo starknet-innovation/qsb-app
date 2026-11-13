@@ -23,7 +23,7 @@ class CapacityTests(unittest.TestCase):
             'instanceRole': 'existing-reviewed-profile', 'launchTemplate': {'launchTemplateId': 'lt-public', 'version': '1'},
             'ec2Configuration': [{'imageType': 'ECS_AL2023_NVIDIA', 'imageIdOverride': 'ami-reviewed'}]}
         updated = copy.deepcopy(resources)
-        updated.update(allocationStrategy='BEST_FIT_PROGRESSIVE', instanceTypes=['g5.2xlarge'])
+        updated.update(allocationStrategy='BEST_FIT_PROGRESSIVE', instanceTypes=[capacity.PROFILE['instanceType']])
         expiry = capacity.validate_operator_policy(policy, c)
         original = {'computeEnvironmentArn': c.arn('batch', 'compute-environment/qsb-gpu'), 'type': 'MANAGED',
                     'state': 'ENABLED', 'status': 'VALID', 'computeResources': resources}

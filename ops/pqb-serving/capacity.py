@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Isolated A10G queue/pool, verified external IAM grants, immutable private receipts."""
+"""Isolated GPU queue/pool, verified external IAM grants, immutable private receipts."""
 import argparse
 import copy
 import hashlib
@@ -103,7 +103,7 @@ def validate_plan(plan, c):
     wanted.update(allocationStrategy=PROFILE['allocationStrategy'], instanceTypes=[PROFILE['instanceType']],
                   minvCpus=0, desiredvCpus=0, maxvCpus=PROFILE['maxVcpus'])
     if plan['computeResources'] != wanted or wanted['type'] != 'EC2' or wanted['launchTemplate'].get('version') != '1' or not wanted.get('ec2Configuration'):
-        raise RuntimeError('Preserve the reviewed isolated A10G hardware, AMI, network and host profile')
+        raise RuntimeError('Preserve the reviewed isolated GPU hardware, AMI, network and host profile')
     queue = plan['productionQueue']
     if (queue['jobQueueArn'] != c.arn('batch', 'job-queue/qsb-gpu')
         or queue['computeEnvironmentOrder'] != [{'order': 1, 'computeEnvironment': original['computeEnvironmentArn']}]):

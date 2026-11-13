@@ -58,13 +58,20 @@ class FixtureTests(unittest.TestCase):
             self.assertEqual(fixture('prepare', d).returncode, 0)
             data = json.loads((d / 'public-fixture.json').read_text())
             image = data['descriptor']['image']
+            queue = 'arn:aws:batch:eu-west-2:123456789012:job-queue/qsb-gpu-validation'
+            (d / 'campaign.json').write_text(json.dumps({'queue': queue}))
             index = {'image': image, 'definition': 'test:1', 'jobs': [{'jobId': 'test', 'status': 'SUCCEEDED',
-                'jobDefinition': 'test:1', 'container': {'image': image, 'environment': []}}]}
+                'jobDefinition': 'test:1', 'jobQueue': queue, 'container': {'image': image, 'environment': []}}]}
             (d / 'objects').mkdir()
             (d / 'native-index-1.json').write_text(json.dumps(index))
             result = fixture('audit', d, 'native-index-1.json')
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Successful native job receipt missing', result.stderr)
+            index['jobs'][0]['jobQueue'] = queue + '-other'
+            (d / 'native-index-2.json').write_text(json.dumps(index))
+            result = fixture('audit', d, 'native-index-2.json')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Native Batch image/revision mismatch', result.stderr)
 
 
 if __name__ == '__main__':

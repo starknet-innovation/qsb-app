@@ -1,8 +1,9 @@
 {
   "name": "qsb-gpu-validation",
   "region": "eu-west-2",
-  "instanceType": "g5.2xlarge",
+  "instanceType": "g6.2xlarge",
   "vcpusPerHost": 8,
   "maxVcpus": 64,
-  "allocationStrategy": "BEST_FIT_PROGRESSIVE"
+  "allocationStrategy": "BEST_FIT_PROGRESSIVE",
+  "gpuName": "L4"
 }

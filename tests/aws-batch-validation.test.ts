@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { AwsBatch } from "../server/aws-batch";
+import validation from "../server/aws-batch-validation.json";
 import command from "../server/aws-batch-command.json";
 
 const campaign = "qsb-pqb-v-012345abcdef";
@@ -13,7 +14,7 @@ function setup(selectedQueue = queue) {
     tags: { Project: "qsb-gpu", PqbValidation: campaign }, computeEnvironmentOrder: [{ order: 1, computeEnvironment: ce }] };
   const e: any = { computeEnvironmentArn: ce, state: "ENABLED", status: "VALID",
     tags: { Project: "qsb-gpu", PqbValidation: campaign }, computeResources: {
-      type: "EC2", allocationStrategy: "BEST_FIT_PROGRESSIVE", minvCpus: 0, maxvCpus: 64, instanceTypes: ["g5.2xlarge"] } };
+      type: "EC2", allocationStrategy: "BEST_FIT_PROGRESSIVE", minvCpus: 0, maxvCpus: 64, instanceTypes: [validation.instanceType] } };
   const d: any = { jobDefinitionArn: definition, status: "ACTIVE", retryStrategy: { attempts: 1 }, timeout: { attemptDurationSeconds: 900 },
     containerProperties: { image, command, readonlyRootFilesystem: true, privileged: false,
       resourceRequirements: [{ type: "GPU", value: "1" }, { type: "VCPU", value: "4" }] } };
@@ -31,7 +32,7 @@ function setup(selectedQueue = queue) {
 }
 afterEach(() => vi.unstubAllEnvs());
 
-it("prepares the owned isolated A10G pool through the real provider with an eight-slot limit", async () => {
+it("prepares the owned isolated L4 pool through the real provider with an eight-slot limit", async () => {
   const t = setup();
   expect(t.provider.parallelismLimit).toBe(8);
   const run = await t.provider.prepareRun(image, { public: "synthetic" });
@@ -42,7 +43,7 @@ it("prepares the owned isolated A10G pool through the real provider with an eigh
   expect(t.submit).toHaveBeenCalledTimes(1);
 });
 
-it.each(["production-function", "missing-function", "wrong-owner", "wrong-pool", "over-capacity", "mixed-types", "wrong-strategy", "second-pool"])(
+it.each(["production-function", "missing-function", "wrong-owner", "wrong-pool", "over-capacity", "mixed-types", "wrong-type", "wrong-strategy", "second-pool"])(
   "rejects %s before storing input or paying for work", async (kind) => {
     const t = setup();
     if (kind === "production-function") vi.stubEnv("AWS_LAMBDA_FUNCTION_NAME", "qsb-app-coordinator");
@@ -50,6 +51,7 @@ it.each(["production-function", "missing-function", "wrong-owner", "wrong-pool",
     if (kind === "wrong-owner") t.e.tags.PqbValidation = "qsb-pqb-v-ffffffffffff";
     if (kind === "wrong-pool") t.q.computeEnvironmentOrder[0].computeEnvironment = ce + "-other";
     if (kind === "over-capacity") t.e.computeResources.maxvCpus = 128;
+    if (kind === "wrong-type") t.e.computeResources.instanceTypes = ["g5.2xlarge"];
     if (kind === "mixed-types") t.e.computeResources.instanceTypes.push("g5.xlarge");
     if (kind === "wrong-strategy") t.e.computeResources.allocationStrategy = "BEST_FIT";
     if (kind === "second-pool") t.q.computeEnvironmentOrder.push({ order: 2, computeEnvironment: "other" });

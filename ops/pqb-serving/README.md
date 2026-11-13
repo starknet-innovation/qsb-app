@@ -10,7 +10,7 @@ their ordinary reviewed deployment process.
 `fixture.ts prepare EXTERNAL_DIRECTORY` derives the public vault locally and
 writes only public vault/job rows and a public workflow event with fresh identifiers. It never writes the
 fixture seed to its output. A native audit requires every successful Batch job’s immutable input, completed
-output, A10G/driver and process-isolation startup logs. It re-derives all stage
+output, the configured GPU model/driver and process-isolation startup logs. It re-derives all stage
 packets from the public intent and CPU-checked predecessor hits, then rechecks every
 emitted candidate, including superseded work.
 `fixture.ts verify EXTERNAL_DIRECTORY` projects the
@@ -35,14 +35,23 @@ reservation is retained in campaign accounting. Neither execution is resumed or
 replayed after an unknown submission.
 
 When the ordinary `g5.xlarge` pool has no capacity, `capacity.py` prepares an
-isolated `qsb-gpu-validation` queue and compute environment using `g5.2xlarge`
-A10G hosts. It copies the reviewed host AMI, immutable launch-template version,
+isolated `qsb-gpu-validation` queue and compute environment using `g6.2xlarge`
+NVIDIA L4 hosts. It copies the reviewed host AMI, immutable launch-template version,
 network and instance profile. The pool uses `BEST_FIT_PROGRESSIVE`, minimum zero
 and maximum 64 vCPUs. Its provider limits the coordinator to eight single-GPU
 hosts, within the existing global 16-slot ceiling. The production queue and pool
 are never modified. Production work appearing during collection stops the public
 assessment so it can release capacity. This is a validation configuration, not a
 production solver selection.
+
+The image remains the enrolled `sm_86` artifact. NVIDIA documents that
+[8.6 cubins run on 8.9 GPUs](https://docs.nvidia.com/cuda/ada-compatibility-guide/index.html);
+[L4 has compute capability 8.9](https://developer.nvidia.com/cuda/gpus). This
+compatibility permits a fresh qualification attempt; it supplies no L4 correctness
+or timing receipt. Require the native preflight on the selected hardware and do
+not transfer A10G measurements. The startup audit requires exactly one GPU matching
+`server/aws-batch-validation.json` for the validation queue (A10G for the ordinary
+queue), its UUID/driver and the process-isolation flags.
 
 An administrator installs two temporary additions, preserving all original policy
 statements: an inline operator grant for create/update/delete/tag on exactly the
