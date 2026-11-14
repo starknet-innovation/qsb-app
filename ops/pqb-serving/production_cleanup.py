@@ -21,7 +21,7 @@ def main():
         r=subprocess.run(cmd,capture_output=True,text=True);record={'label':name,'observedAt':time.time(),'exitCode':r.returncode}
         if r.returncode:
             m=re.search(r'An error occurred \(([^)]+)\)',r.stderr);code=m[1] if m else None;record.update(errorCode=code,stderr=r.stderr);value=None if code in absent else {'unresolvedError':code or 'CLI failure'}
-        else:value=json.loads(r.stdout);record['value']=value
+        else:value=json.loads(r.stdout) if r.stdout.strip() else {};record['value']=value
         persist(d/(str(len(list(d.glob('*.json'))))+'.json'),record,exclusive=True);return value
     who=read('operator','sts','get-caller-identity',[]);check('correct account',who.get('Account')==operator['account'])
     metadata=read('metadata observer','sts','get-caller-identity',[],view=True)
