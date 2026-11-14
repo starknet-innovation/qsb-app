@@ -1,0 +1,1650 @@
+{
+  "passed": true,
+  "upstreamCommit": "eccdd09772edf14ab37fc63992b0626ad7ff2221",
+  "auditSha256": "85ba25eb1503601bed807f8c05774938e10940e5132cc53849bdde254b55ae9e",
+  "validatorSha256": "aca100ea5f38ce8d89962a7124569fc9e6dc158993a6a0d89ab3e7c264b6034f",
+  "curveBackend": {
+    "implementation": "native-coincurve",
+    "version": "21.0.0",
+    "sharedObjectSha256": "772f622a55d225abee60644f9a9d26811cb32f207bf835de82233f6155b8e917",
+    "python": "3.13.4 (v3.13.4:8a526ec7cbe, Jun  3 2025, 21:14:54) [Clang 16.0.0 (clang-1600.0.26.6)]",
+    "machine": "arm64"
+  },
+  "packets": [
+    {
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "problemSha256": "2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "sighashSamples": 8
+    },
+    {
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "problemSha256": "9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "sighashSamples": 8
+    },
+    {
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "problemSha256": "7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "sighashSamples": 8
+    }
+  ],
+  "records": [
+    {
+      "jobId": "0213d8d8-7417-4887-9e2d-226c6fd365ce",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "031b3136-4842-430e-83f7-b70d155003e7",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "099de0e8-7b81-447a-b718-3bc72775f749",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "0d0be057-424b-4e16-8cf2-4fb9384ce2ad",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "226b6ad7-1d14-4d13-85db-573309bb2c79",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "25ee7f99-beea-499e-b101-f8bf3f2df325",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "52d1e2b3-f1df-4235-90a6-8410480d156a",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "5c130c14-71c3-47d8-96b2-094c93a598f8",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "5d52aa78-7b70-4e1c-adcd-875216072dd3",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "6a769625-e381-4e3a-8319-b400002ed515",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "6dbcd0dc-9bb1-4426-8cff-6e8b7bdc3c2c",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "7a7b2a8f-abae-4da8-8096-5ff1f0920fee",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "7bf3b33d-de64-4846-bb54-2d7781af3a29",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "7e2fc95e-4d25-4987-a95b-e27396660011",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [
+        {
+          "candidate": "2147483975 1434214573 4 1 2 1",
+          "full": false,
+          "details": {
+            "nonce": 393334214573,
+            "variant": 1,
+            "menu_index": 4,
+            "encoding": 2,
+            "ladder": 0,
+            "digest": "301d02014002180ca9f5c4bb4ef434a1682efa9a068402513802cce562152aa3",
+            "der_prefix_bytes": 5
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": false,
+        "best_der_bytes": 5
+      }
+    },
+    {
+      "jobId": "974ec404-41b5-4e1e-beff-3d5a3c206ffc",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "aa38d78f-2d72-45fa-82e3-73fac5ee3155",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "b6c53f77-d794-4d74-ab51-b5feffce3530",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "bee05c8d-3033-427a-8b0c-ee371a0ad970",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "da27a77f-875b-4773-831f-b61b52c1ed82",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [
+        {
+          "candidate": "2147483782 701017131 8 0 0 1",
+          "full": false,
+          "details": {
+            "nonce": 161001017131,
+            "variant": 0,
+            "menu_index": 8,
+            "encoding": 0,
+            "ladder": 0,
+            "digest": "301d0202859a02177967eb95154a309cb382bd306ab78dfd2d45e47ef4d18f28",
+            "der_prefix_bytes": 3
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": false,
+        "best_der_bytes": 3
+      }
+    },
+    {
+      "jobId": "e12f2dc3-673c-46f4-a0f5-72ee20d63f4e",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "e29cbb5d-8488-43e2-9a54-ddef67a1bcab",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "e3330998-1d2b-46b6-9e00-4cfb5f84d991",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "e946ef34-e90c-4b35-85c8-30e9402e390d",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [
+        {
+          "candidate": "2147483965 1546952476 9 0 0 1",
+          "full": true,
+          "details": {
+            "nonce": 381446952476,
+            "variant": 0,
+            "menu_index": 9,
+            "encoding": 0,
+            "ladder": 0,
+            "digest": "301d02176ac9bde47791d3af655297d0a19e2696d9502b69fd7d5602020844e4",
+            "der_prefix_bytes": 5
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 1,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": true,
+        "best_der_bytes": 5
+      }
+    },
+    {
+      "jobId": "f162eb0a-6a07-4db9-b39a-e4b40ebb3c91",
+      "packetKey": "pinning:2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "0a570d2d-266f-466d-9802-c80f8de783dc",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "0c6a0d59-2c7b-4aac-9ece-52c18d6efd4d",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [
+        {
+          "candidate": "9,25,62,78,85,92,97,107 5 3 0 1",
+          "full": false,
+          "details": {
+            "nonce": 204546547358,
+            "variant": 3,
+            "menu_index": 5,
+            "encoding": 0,
+            "ladder": 0,
+            "digest": "301d0210a7f8a1dd91d6620298432f9d76fe971402091ec33da92915f1eef1c8",
+            "der_prefix_bytes": 3
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": false,
+        "best_der_bytes": 3
+      }
+    },
+    {
+      "jobId": "1525daf0-6365-45a8-93a6-59433138540f",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "166af508-fec3-4d7c-86f0-b25943bb8741",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "16d2b4cb-cbd5-4475-912e-fcc681e02e40",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [
+        {
+          "candidate": "2,6,22,35,59,89,91,104 10 0 1 1",
+          "full": false,
+          "details": {
+            "nonce": 59376916997,
+            "variant": 0,
+            "menu_index": 10,
+            "encoding": 1,
+            "ladder": 0,
+            "digest": "301d020ae79289ccf7b6bddf9fec020ff8be8a02c88736d74e086be9be16e5cb",
+            "der_prefix_bytes": 3
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": false,
+        "best_der_bytes": 3
+      }
+    },
+    {
+      "jobId": "18926313-0b4a-4566-8d0f-dcc7b5c33496",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "1b197acd-a69f-47d1-b2b2-c62fc00ad12d",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "2bb78eb5-5f95-4ee4-af4a-487a6f278ac1",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "39a4628b-7ffd-49f0-b61f-8b441cea6399",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "40d4f4b3-0cac-420f-a045-bddc583c9a7c",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "4fd89d47-457a-4ab0-8964-6d9028c8e14b",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "57801037-7606-4f00-978c-ebb801c23525",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "59171078-359b-4a74-946f-3f0644704444",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "5f1c08d2-7b5b-4344-8345-7dda4fc3a85a",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [
+        {
+          "candidate": "12,24,41,44,70,76,91,92 12 0 2 1",
+          "full": false,
+          "details": {
+            "nonce": 242670966287,
+            "variant": 0,
+            "menu_index": 12,
+            "encoding": 2,
+            "ladder": 0,
+            "digest": "301d02031e6b3302168892ac217f1826769b3ff0f86da0b342545b3269a9e7c3",
+            "der_prefix_bytes": 5
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": false,
+        "best_der_bytes": 5
+      }
+    },
+    {
+      "jobId": "65efbdb5-a541-4c96-b446-f56cdcaa93f3",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "662cec67-ab31-4c1c-82b7-2bacad7c7136",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "7415a1b2-cce3-458a-9652-d413d4c539ba",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "7c65a091-7b67-491c-aa1f-35244ad3c8b6",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "7e4ac0f3-d7e6-4059-a5a4-f4754dac8af1",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "9025f288-cfe9-4148-8593-e9772218c9ed",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "996cfe41-2908-43c9-be3c-5d11883f04e8",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "b2145e11-92cf-47a0-8037-a1daabb599c0",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "b9f4f890-7c99-414a-8399-88684a8bfdf1",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "baa793e5-362e-47e6-a6cf-e31332a71fd8",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "badfcd92-1f35-4503-9764-1db4b57e8230",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "bb971625-a856-453f-829e-7279e9fc18ee",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "bf9d4b3c-5e88-4e3c-ae52-44f4bf0dafc6",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [
+        {
+          "candidate": "2,23,30,36,38,60,78,79 4 3 1 1",
+          "full": false,
+          "details": {
+            "nonce": 73121633399,
+            "variant": 3,
+            "menu_index": 4,
+            "encoding": 1,
+            "ladder": 0,
+            "digest": "301d020e7b84b27d351e60e6c3c1299c7a50020bde2a0d4dfbab8656c1dbf384",
+            "der_prefix_bytes": 5
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": false,
+        "best_der_bytes": 5
+      }
+    },
+    {
+      "jobId": "ce60aec1-5eb5-4666-9975-671a345d0999",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "ce8dcf43-5ced-48d8-a61f-393a1e2cb36c",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "d52dd46e-662b-4102-9603-e40107758dc0",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [
+        {
+          "candidate": "13,20,25,48,52,71,83,88 4 1 2 1",
+          "full": true,
+          "details": {
+            "nonce": 251626294517,
+            "variant": 1,
+            "menu_index": 4,
+            "encoding": 2,
+            "ladder": 0,
+            "digest": "301d020e3787d7970b64a83539f2cbdccc98020b64062335f3c653b222db6e86",
+            "der_prefix_bytes": 5
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 1,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": true,
+        "best_der_bytes": 5
+      }
+    },
+    {
+      "jobId": "da693f6d-dc77-48c7-9b4a-a20a258f116b",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [
+        {
+          "candidate": "6,8,13,15,67,73,93,104 12 2 1 1",
+          "full": false,
+          "details": {
+            "nonce": 143685031446,
+            "variant": 2,
+            "menu_index": 12,
+            "encoding": 1,
+            "ladder": 0,
+            "digest": "301d02183bc971963ecb17e3c69c69a35efac4fc1844400207349f730201e0db",
+            "der_prefix_bytes": 5
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": false,
+        "best_der_bytes": 5
+      }
+    },
+    {
+      "jobId": "e00cac3f-8c6e-4086-951e-c09709e2cdbf",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "e0af5fc8-f114-4c4d-9729-0c91e7530634",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "e51f3b93-2344-4d59-bae5-af641e3bd3d7",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "e7487333-9187-4bb2-b2da-2c8d31e210bb",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "e85a60c5-7a63-450d-b4f0-261e92614619",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [
+        {
+          "candidate": "8,9,25,31,67,71,83,103 2 3 2 1",
+          "full": false,
+          "details": {
+            "nonce": 178536607386,
+            "variant": 3,
+            "menu_index": 2,
+            "encoding": 2,
+            "ladder": 0,
+            "digest": "301d0215848f1e28ad0e242b7dc6d465c16f79880269e5e6cd0204d4f0354f9b",
+            "der_prefix_bytes": 3
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": false,
+        "best_der_bytes": 3
+      }
+    },
+    {
+      "jobId": "e9cae18d-55da-447a-8fbb-836abfb66dba",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "ebdbdedb-24d7-4872-b21e-f06484d0faeb",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "ebf2c940-c6d0-418e-8eeb-31bfc5b02557",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "eccb4974-7cdc-414a-a79e-470f5b5a4bb0",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "f53fe620-de2b-47b9-950f-2b46e7dd5765",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "f5c353bd-6dfb-4385-b15a-1916f11392a2",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "f652c18d-2e1a-4305-adc0-e954f162de73",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [
+        {
+          "candidate": "1,12,24,74,80,88,89,97 12 3 1 1",
+          "full": false,
+          "details": {
+            "nonce": 41633216636,
+            "variant": 3,
+            "menu_index": 12,
+            "encoding": 1,
+            "ladder": 0,
+            "digest": "301d0216cdad29b666f257087175e9934d9b960cd2e93e60598e0203adcf7ccc",
+            "der_prefix_bytes": 3
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": false,
+        "best_der_bytes": 3
+      }
+    },
+    {
+      "jobId": "fa0d5949-9562-424f-b2f7-ee13c2ef2bc5",
+      "packetKey": "round1:9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "050abaa3-7e60-44c5-a78b-14ed55fa2790",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "09837e49-90dc-4392-b1aa-15f2b0adddf6",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "10c53945-2570-4aba-9a04-45c799a7610f",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "281ac2a2-5edd-46f5-88a1-a5af55e3cd58",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "2edfbcbc-e76f-47a6-8284-0fd694a06b4c",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "300e0fd2-56f7-431e-8783-2536a3e8ace4",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "442529a1-12bd-4c0c-a96e-74d4a31c60ab",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "467ec6c2-2216-4412-a7d9-af166ccb282c",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "4e696e6b-1ffd-41ab-ba6a-50690d96a72f",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "52ecfa66-0b80-453d-a4b7-8d2af9d6eb74",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "578476b0-0d9e-4e97-92da-e8b3d60cc3d9",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "589366dc-0a04-4aa9-8709-a41a471fefdc",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "5e58089f-c147-4145-ad73-e2d42362353b",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "65cd4b7f-3cbe-43c6-8346-b0df891b351e",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [
+        {
+          "candidate": "0,2,25,43,55,62,71,76,82 14 3 0 1",
+          "full": false,
+          "details": {
+            "nonce": 26699027071,
+            "variant": 3,
+            "menu_index": 14,
+            "encoding": 0,
+            "ladder": 0,
+            "digest": "301d02042d42a70102159e17479d62560c94e9e265340937cd836b10b001fcb4",
+            "der_prefix_bytes": 5
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": false,
+        "best_der_bytes": 5
+      }
+    },
+    {
+      "jobId": "667f1d2f-9018-4e75-9b8a-56abeb8d3225",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "69a59718-9b35-4318-a53e-c6bf4b225823",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [
+        {
+          "candidate": "2,19,48,50,56,57,58,86,100 2 0 0 1",
+          "full": true,
+          "details": {
+            "nonce": 482340056860,
+            "variant": 0,
+            "menu_index": 2,
+            "encoding": 0,
+            "ladder": 0,
+            "digest": "301d02056fbc7e423d021435924c9ad4076befbb6a795c2b0258e4aafbdc72f8",
+            "der_prefix_bytes": 5
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 1,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": true,
+        "best_der_bytes": 5
+      }
+    },
+    {
+      "jobId": "73161d01-ac9f-4152-a61f-459b77eb5abb",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "7427886f-c545-4427-b068-c077f68efaf1",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "7acd6978-3dd6-4320-a064-e4e4e992f7d9",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "7f7cd072-0f3d-40c5-876e-9f1adf1c3868",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "84657692-9f44-4536-b29c-54af6e170e95",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "93f13ef0-ea0f-49b7-89de-30c8a436804f",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "9ef3cbcd-8ea2-4a59-be49-783279d26dd4",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "9fb6bacd-47e8-45f6-b411-a961ff1ccc15",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [
+        {
+          "candidate": "1,2,3,13,14,16,33,43,53 6 0 0 1",
+          "full": false,
+          "details": {
+            "nonce": 186534279937,
+            "variant": 0,
+            "menu_index": 6,
+            "encoding": 0,
+            "ladder": 0,
+            "digest": "301d0204fa79146902157772f4cfa3397d232c7750d7afa91cc4fef4463edf43",
+            "der_prefix_bytes": 3
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": false,
+        "best_der_bytes": 3
+      }
+    },
+    {
+      "jobId": "a0a689c2-0d40-4559-8e77-940b2f2f1ac9",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "a0fe9a33-ccd4-465b-84c6-7687b818ea74",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "a64ee611-3acc-456d-9fc2-e0ee86c39566",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "a839d733-52fe-492e-bf31-25f8c0bba2d8",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "ab8b66ca-dc71-4414-985b-5e6adbbc2e49",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "c3ba4857-1578-4152-842d-b9d1dda2380c",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "c76d63a2-b9f8-4aaa-8a97-6b9c69add762",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "c9c14314-9547-48b0-aac4-bc1334dcad93",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "d274d30c-f976-4a48-b2f2-80646cb602b3",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [
+        {
+          "candidate": "0,14,17,53,68,77,82,93,98 12 0 0 1",
+          "full": false,
+          "details": {
+            "nonce": 128864668338,
+            "variant": 0,
+            "menu_index": 12,
+            "encoding": 0,
+            "ladder": 0,
+            "digest": "301d0218e5e83131fec5102931cc917dc8687514a4cee05cd373da60020100d2",
+            "der_prefix_bytes": 3
+          },
+          "consumerDecisionMatched": true
+        }
+      ],
+      "checks": {
+        "checked": 1,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 1,
+        "best_is_full": false,
+        "best_der_bytes": 3
+      }
+    },
+    {
+      "jobId": "d55e4d8a-d2d1-48d0-8e0e-d6f830f558ba",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "d81ad8f6-268f-4549-9dbe-9ccfe45b1357",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "dbda9acb-25a2-4f78-8581-94296ddd2dda",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "e0214d35-4c36-4cf5-bb4d-5f1672a4f937",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "f1bbcd1d-ebae-442e-b327-c8bddffcc826",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    },
+    {
+      "jobId": "f72633f1-0401-40bc-b432-3628e24e5377",
+      "packetKey": "round2:7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e",
+      "candidates": [],
+      "checks": {
+        "checked": 0,
+        "full_solutions": 0,
+        "hybrid_solutions_refused": 0,
+        "canonical_rechecks": 0,
+        "best_is_full": false,
+        "best_der_bytes": 0
+      }
+    }
+  ],
+  "fullHits": 3,
+  "scope": "Public problem bytes, sampled canonical sighashes and every emitted full-predicate verdict; no chain or miner execution"
+}

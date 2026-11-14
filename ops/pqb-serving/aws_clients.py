@@ -3,7 +3,7 @@ READS = {
     'sts': {'get_caller_identity'},
     'batch': {'describe_compute_environments', 'describe_job_definitions', 'describe_job_queues', 'describe_jobs', 'list_jobs'},
     'lambda': {'get_function_configuration', 'list_tags'},
-    'dynamodb': {'describe_table', 'get_item', 'scan', 'list_tags_of_resource'},
+    'dynamodb': {'describe_table', 'get_item', 'query', 'scan', 'list_tags_of_resource'},
     'stepfunctions': {'describe_state_machine', 'list_executions', 'list_tags_for_resource'},
     's3': {'get_object', 'head_object', 'list_buckets', 'list_objects_v2'},
     'logs': {'filter_log_events', 'describe_log_groups', 'list_tags_log_group'},

@@ -1,0 +1,10 @@
+{
+  "label": "destination",
+  "expectedValid": false,
+  "accepted": false,
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "transactionSha256": "2972fcf743f82d11ae50335cf703a4a3b0ac77639817b1a07a2ecc5454b1e26c"
+}

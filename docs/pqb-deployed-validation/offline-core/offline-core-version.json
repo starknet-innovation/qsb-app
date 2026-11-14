@@ -1,0 +1,10 @@
+{
+  "label": "version",
+  "expectedValid": false,
+  "accepted": false,
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "transactionSha256": "1d389638c6e60ea02e57ab17246bed4441d457211ea0efb84d11685ea9b3d5a8"
+}
