@@ -12,6 +12,7 @@ import { applyVerifiedHit } from "../../server/candidate-output";
 import { pqbPacket } from "../../src/lib/pqb";
 import { pqbReference } from "../../server/pqb-reference";
 import { nativeStartup } from "./native-startup";
+import { completedNativeReceipt, supersededCancellation } from "./native-result";
 import { coordinatorPublicSolvedResult } from "../../src/mainnet/coordinatorResult";
 
 const [mode, directory, indexName] = process.argv.slice(2);
@@ -109,9 +110,8 @@ if (mode === "prepare") {
     const stage = input.stage === "round0" ? "round1" : input.stage === "round1" ? "round2" : "pinning";
     const { output, range } = checkedOutput(envelope.output, solverRelease(descriptor.id),
       { ...prepared.rows[1].job, stage }, input.attempt);
-    if (native.status === "SUCCEEDED" && output.status !== "completed") throw Error("Native unit did not complete");
-    if (output.status !== "completed") throw Error("Unexpected incomplete native result");
-    return { native, envelope, input, stage, output, range };
+    const completed = completedNativeReceipt(native, output.status);
+    return { native, envelope, input, stage, output, range, completed };
   });
   // Derive every packet from the public intent and CPU-validated predecessor hits.
   // This also checks hits in superseded units, independently of coordinator selection.
@@ -133,6 +133,7 @@ if (mode === "prepare") {
         throw Error("Native problem differs from independent public export");
       const packet = pqbPacket(vault.publicStateJson, source.manifest, stage === "pinning" ? 0 : stage === "round1" ? 1 : 2, solution);
       packets.set(key, JSON.parse(JSON.stringify(packet, (_, v) => typeof v === "bigint" ? v.toString() : v)));
+      if (!row.completed) continue;
       const cpu = row.output.candidates.map(candidate => {
         const verdict = pqbReference({ action: "verify", stage, publicStateJson: vault.publicStateJson,
           manifest: source.manifest, solution, candidates: [candidate] });
@@ -162,9 +163,10 @@ if (mode === "prepare") {
     if (!input) throw Error("Cancelled native input missing");
     const stage = input.stage === "round0" ? "round1" : input.stage === "round1" ? "round2" : "pinning";
     const winners = winningCompletions.get(`${stage}:${input.problemSha256}`) ?? [];
-    if (!Number.isSafeInteger(job.stoppedAt) || !winners.some(t => t <= job.stoppedAt))
-      throw Error("Cancellation lacks an earlier CPU-validated winning unit for the same packet");
-    return { jobId: job.jobId, reason: job.statusReason, stoppedAt: job.stoppedAt, superseded: true };
+    supersededCancellation(job, winners);
+    const partial = envelopes.find(r => r.native.jobId === job.jobId && !r.completed);
+    return { jobId: job.jobId, reason: job.statusReason, stoppedAt: job.stoppedAt, superseded: true,
+      ...(partial ? { ignoredPartialResult: { status: partial.output.status, candidates: partial.output.candidates.length } } : {}) };
   });
   if (checked.length < successful.length) throw Error("Native receipt inventory incomplete");
   save(`native-accounting-audit-${Date.now()}.json`, { passed: true, checked, startup, cancellations, packets: Object.fromEntries(packets) });

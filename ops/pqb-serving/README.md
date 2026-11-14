@@ -351,6 +351,10 @@ and release are not changed. This maintenance window is unsuitable for concurren
 production GPU work; any observed unrelated activity blocks replacement/restoration.
 
 Run the normal fixed-deadline native preflight and full public synthetic solve.
+Canceled containers may retain partial failure outputs. Collection waits for the
+provider's terminal status; the final audit checks their input and range bindings,
+requires an earlier CPU-validated winning completion for the same packet, and
+retains them as cancellations without crediting their partial work or hits.
 Stop, collect, remove and independently verify campaign cleanup; then wait for the
 shared fleet and scaling demand to reach zero and run
 `shared_pool.py restore DIRECTORY`. Independently read back the original pool and

@@ -1,0 +1,152 @@
+{
+  "nativeConsumerSourceCommit": "266de4a4bf5e603f8bc85a46aaa91b5cedefcc4f",
+  "validationSourceCommit": "266de4a4bf5e603f8bc85a46aaa91b5cedefcc4f",
+  "postprocessingOnly": false,
+  "passed": true,
+  "sourceCommit": "266de4a4bf5e603f8bc85a46aaa91b5cedefcc4f",
+  "apiArtifactSha256": "8a873d1c32dfc749cfb2b3974b76aceed9b7b09f7fbf4e234bee802676b59980",
+  "binarySha256": "9497dcf47c464fc49cbf54f806707bd67f04981c789c352bafb3805fe5d6dfcd",
+  "librarySha256": "5d7874783dc4989357600b3f273a44627d8ca6ac037f63d851572ff64a756983",
+  "runtimeImageId": "sha256:3f09d02367148ef8086b8dc7ce098d16b21da58bbfe1e1167da25a17df8f0e51",
+  "runtimeRepoDigests": [
+    "public.ecr.aws/amazonlinux/amazonlinux@sha256:3f09d02367148ef8086b8dc7ce098d16b21da58bbfe1e1167da25a17df8f0e51"
+  ],
+  "checks": [
+    {
+      "label": "solved-pqb-with-public-OP_TRUE-helper",
+      "expectedValid": true,
+      "accepted": true,
+      "exitCode": 0,
+      "signal": null,
+      "stdout": "core-27.2-api2-all-inputs-valid\n",
+      "stderr": "",
+      "transactionSha256": "9e202aff0da0b07c6457943027e2ad1cb39ac30a2639c0f5baa15a9465914094"
+    },
+    {
+      "label": "destination",
+      "expectedValid": false,
+      "accepted": false,
+      "exitCode": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "transactionSha256": "2972fcf743f82d11ae50335cf703a4a3b0ac77639817b1a07a2ecc5454b1e26c"
+    },
+    {
+      "label": "output-amount",
+      "expectedValid": false,
+      "accepted": false,
+      "exitCode": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "transactionSha256": "c1906dc9952dee492109a7d6f5ec25a8675b931c21675cc31ffd697cebbcd503"
+    },
+    {
+      "label": "fee",
+      "expectedValid": false,
+      "accepted": false,
+      "exitCode": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "transactionSha256": "46a6c5668ba9908b2eba69bdfecb91ade9bdbaf12f85c3589fb0f84454840cc6"
+    },
+    {
+      "label": "extra-output",
+      "expectedValid": false,
+      "accepted": false,
+      "exitCode": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "transactionSha256": "0ee666994e5c3aeff6bfb2b842c0286b168a766f6bcb52b897f15ffba9dd3354"
+    },
+    {
+      "label": "helper-outpoint",
+      "expectedValid": false,
+      "accepted": false,
+      "exitCode": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "transactionSha256": "758d7bd7a8e4c50ac9c1464188bafdd5caeddc2eeaf3c14c853790eb9cd52c4c"
+    },
+    {
+      "label": "vault-outpoint",
+      "expectedValid": false,
+      "accepted": false,
+      "exitCode": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "transactionSha256": "ae69315e00f1d9f031522607491a6c9225e55222867ab3f3935f9c978da0b808"
+    },
+    {
+      "label": "helper-sequence",
+      "expectedValid": false,
+      "accepted": false,
+      "exitCode": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "transactionSha256": "3a047d8d267d5bc07edf47011392c8fd1c943643f276ba671c700e47881ef1d1"
+    },
+    {
+      "label": "vault-sequence",
+      "expectedValid": false,
+      "accepted": false,
+      "exitCode": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "transactionSha256": "b26af8be6eac44a32f7de3e1348faab57ba8de94716d8b46d56305d832782d09"
+    },
+    {
+      "label": "locktime",
+      "expectedValid": false,
+      "accepted": false,
+      "exitCode": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "transactionSha256": "1577fb6fb7ff6f956240b24c14578df7eeb1fc89b4d8c42da9e3437525bc8016"
+    },
+    {
+      "label": "version",
+      "expectedValid": false,
+      "accepted": false,
+      "exitCode": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "transactionSha256": "1d389638c6e60ea02e57ab17246bed4441d457211ea0efb84d11685ea9b3d5a8"
+    },
+    {
+      "label": "co-signature",
+      "expectedValid": false,
+      "accepted": false,
+      "exitCode": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "transactionSha256": "affa2873e8171acba119e342b8cbf19020ad556f7a5af62fbdf6652dfb5e8c47"
+    },
+    {
+      "label": "missing-vault-scriptsig",
+      "expectedValid": false,
+      "accepted": false,
+      "exitCode": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "transactionSha256": "7a524f3b4bf4cb00473b52fa86bb54db0fccab2a11c6a0f9cff424d0d05218ff"
+    }
+  ],
+  "limits": [
+    "Public OP_TRUE helper: no helper wallet signature",
+    "No chain/UTXO or miner acceptance",
+    "No broadcast",
+    "Legacy input scripts do not commit previous-output amounts; chain and exact-spend checks remain required"
+  ]
+}

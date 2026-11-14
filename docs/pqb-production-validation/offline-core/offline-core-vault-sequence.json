@@ -1,0 +1,10 @@
+{
+  "label": "vault-sequence",
+  "expectedValid": false,
+  "accepted": false,
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "transactionSha256": "b26af8be6eac44a32f7de3e1348faab57ba8de94716d8b46d56305d832782d09"
+}
