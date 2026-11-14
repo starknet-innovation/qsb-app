@@ -1,0 +1,57 @@
+{
+  "format": "qsb-coordinator-public-solved-result-v1",
+  "network": "mainnet",
+  "jobId": "4df49de9-8cbf-4183-94ed-56e165a4c97d",
+  "vaultId": "dada1e93-78eb-4d99-929d-234475df29b6",
+  "manifestHash": "1e3699555381ad5c8ec2233a1696817daa0815f62a7a8aab8b6b7a08114105df",
+  "manifest": {
+    "vaultId": "dada1e93-78eb-4d99-929d-234475df29b6",
+    "funding": {
+      "txid": "1111111111111111111111111111111111111111111111111111111111111111",
+      "vout": 0,
+      "value": "100000"
+    },
+    "helper": {
+      "txid": "2222222222222222222222222222222222222222222222222222222222222222",
+      "vout": 1,
+      "value": "10000"
+    },
+    "destination": "bc1qxvenxvenxvenxvenxvenxvenxvenxven2ymjt8",
+    "outputScript": "00143333333333333333333333333333333333333333",
+    "outputValue": "109000",
+    "fee": "1000",
+    "idempotencyKey": "4df49de9-8cbf-4183-94ed-56e165a4c97d",
+    "costAccepted": true,
+    "solverReleaseId": "pqb-ranked-v2-cfd99e384469-edce7a14b554"
+  },
+  "solution": {
+    "sequence": 2147483965,
+    "locktime": 1546952476,
+    "round1": [
+      13,
+      20,
+      25,
+      48,
+      52,
+      71,
+      83,
+      88
+    ],
+    "round2": [
+      2,
+      21,
+      53,
+      55,
+      61,
+      62,
+      63,
+      94,
+      108
+    ],
+    "pqb": {
+      "pinning": "2147483965 1546952476 9 0 0 1",
+      "round0": "13,20,25,48,52,71,83,88 4 1 2 1",
+      "round1": "2,19,48,50,56,57,58,86,100 2 0 0 1"
+    }
+  }
+}

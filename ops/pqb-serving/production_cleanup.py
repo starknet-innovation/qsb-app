@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import time
-from control import Campaign, dump, persist
+from control import Campaign, persist
 from production_guard import owned
 
 def main():

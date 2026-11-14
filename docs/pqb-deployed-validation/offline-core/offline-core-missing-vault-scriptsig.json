@@ -1,0 +1,10 @@
+{
+  "label": "missing-vault-scriptsig",
+  "expectedValid": false,
+  "accepted": false,
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "transactionSha256": "7a524f3b4bf4cb00473b52fa86bb54db0fccab2a11c6a0f9cff424d0d05218ff"
+}

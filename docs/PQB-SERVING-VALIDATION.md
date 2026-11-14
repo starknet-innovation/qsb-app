@@ -10,6 +10,26 @@ native, offline consensus and cleanup verification. Controller source identity
 and deployed consumer source identity are recorded separately. A prepared or
 armed campaign is not a completed qualification.
 
+## Deployed normal-pool qualification
+
+The [checksummed deployed-profile evidence](pqb-deployed-validation/README.md)
+qualifies app source `3a29b0d8e62fbaee1b507356b1ea3c7edd9c456a`, the permanent
+PQB revision and the normal sixteen-worker London `g5.xlarge` pool through the
+actual production search workflow. All 146 submissions were reconciled: 107
+completed units and 39 superseded cancellations. Independent native checking
+agreed with all 15 candidate verdicts and three full solutions; Core accepted one
+public synthetic transaction and rejected twelve mutations without networking.
+
+The complete pipeline took 3,974.530 seconds. This is a single cold first-verified
+observation rather than a matched performance comparison. Estimated VM compute
+is $20.30 with a $23.77 retained-observation bound; other services are excluded and
+provider billing was not queried. All 586 independent cleanup checks passed:
+seventeen recorded hosts and volumes are removed, test rows/objects and guard
+resources are absent, and production configuration and unrelated records are
+unchanged. The operational reservation is released. No transaction was broadcast.
+This qualifies public search, without deposit admission, wallet or funded-chain
+validation.
+
 ## Staged revision preflight
 
 The [retained revision procedure](../ops/pqb-serving/README.md#validate-a-staged-permanent-revision)

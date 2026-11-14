@@ -1,0 +1,10 @@
+{
+  "label": "locktime",
+  "expectedValid": false,
+  "accepted": false,
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "transactionSha256": "1577fb6fb7ff6f956240b24c14578df7eeb1fc89b4d8c42da9e3437525bc8016"
+}

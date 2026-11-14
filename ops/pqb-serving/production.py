@@ -123,7 +123,7 @@ class Production:
         persist(self.state_path,self.state,exclusive=True);self.scope();print(dump({'prepared':name,'deadline':self.state['deadline'],'stopAt':self.state['stopAt'],'reservedUsd':200}).strip())
 
     def guard(self,action):
-        stamp=str(time.time_ns());payload=json.dumps({'action':action}).encode()
+        payload=json.dumps({'action':action}).encode()
         def call():
             from botocore.config import Config
             if not hasattr(self,'guard_client'): self.guard_client=self.session.client('lambda',config=Config(connect_timeout=5,read_timeout=240,retries={'total_max_attempts':1}))

@@ -1,0 +1,10 @@
+{
+  "label": "co-signature",
+  "expectedValid": false,
+  "accepted": false,
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "transactionSha256": "affa2873e8171acba119e342b8cbf19020ad556f7a5af62fbdf6652dfb5e8c47"
+}

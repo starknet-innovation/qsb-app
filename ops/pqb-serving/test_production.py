@@ -3,7 +3,7 @@ import json
 from copy import deepcopy
 from unittest import TestCase, main
 from unittest.mock import Mock, patch
-from production_guard import checked_request, owned, read_rows, remember, chain, inventory, stopping, pause
+import production_guard
 
 class ProductionGuardTests(TestCase):
     def settings(self):
@@ -20,22 +20,22 @@ class ProductionGuardTests(TestCase):
             'tags':{'Project':'qsb-gpu','InputSha256':r['inputSha256'],'QsbRequest':r['jobName'][4:]},
             'container':{'environment':[{'name':'QSB_INPUT_KEY','value':r['inputKey']},{'name':'QSB_INPUT_SHA256','value':r['inputSha256']}]}}
     def test_ownership_requires_every_durable_identity_field(self):
-        s=self.settings();r=self.request();self.assertTrue(owned(self.job(),[r],s))
+        s=self.settings();r=self.request();self.assertTrue(production_guard.owned(self.job(),[r],s))
         for field in ['jobName','jobDefinition','jobQueue','tag','environment','duplicate-environment']:
             j=self.job()
             if field in ['jobName','jobDefinition','jobQueue']:j[field]='foreign'
             if field=='tag':j['tags']['QsbRequest']='foreign'
             if field=='environment':j['container']['environment'][1]['value']='c'*64
             if field=='duplicate-environment':j['container']['environment']+=j['container']['environment'][:1]
-            self.assertFalse(owned(j,[r],s),field)
+            self.assertFalse(production_guard.owned(j,[r],s),field)
     def test_request_cannot_repoint_to_other_data_or_compute(self):
         s=self.settings()
         for field,value in [('inputKey','wallet/private.json'),('queue','other'),('definition','other:2'),('inputSha256','bad'),('jobName','qsb-other')]:
             r=dict(self.request());r[field]=value
-            with self.assertRaises(RuntimeError):checked_request(r,s)
+            with self.assertRaises(RuntimeError):production_guard.checked_request(r,s)
     def test_registry_retains_requests_after_slots_are_cleared(self):
         ddb=Mock();s=self.settings();r=self.request();old={'records':[json.dumps(r,sort_keys=True)]}
-        records=remember(ddb,s,{'job':{'parallelSlots':[]}},old)
+        records=production_guard.remember(ddb,s,{'job':{'parallelSlots':[]}},old)
         self.assertEqual(records,[r]);call=ddb.update_item.call_args.kwargs;self.assertEqual(call['Key']['sk']['S'],s['ledgerSk']);self.assertIn('manifestHash',call['ConditionExpression'])
     def test_wrong_manifest_fails_before_registry_write(self):
         from boto3.dynamodb.types import TypeSerializer
@@ -43,7 +43,7 @@ class ProductionGuardTests(TestCase):
         public={'pk':s['pk'],'sk':s['sk'],'expiresAt':s['expiresAt'],'job':{'id':'public','owner':'public','vaultId':'public-vault','manifestHash':'foreign'}}
         ledger={'manifestHash':s['manifestHash'],'case':s['name']}
         ddb.get_item.side_effect=[{'Item':{k:ser(v) for k,v in public.items()}},{'Item':{k:ser(v) for k,v in ledger.items()}}]
-        with self.assertRaisesRegex(RuntimeError,'fixture binding'):read_rows(ddb,s)
+        with self.assertRaisesRegex(RuntimeError,'fixture binding'):production_guard.read_rows(ddb,s)
         ddb.update_item.assert_not_called()
     def test_history_access_is_not_used_and_chain_follows_only_proven_outputs(self):
         s=self.settings();states=Mock();states.exceptions.ExecutionDoesNotExist=type('Missing',(Exception,),{})
@@ -51,26 +51,26 @@ class ProductionGuardTests(TestCase):
         event={'owner':s['owner'],'jobId':s['jobId'],'revision':0}
         states.describe_execution.side_effect=[{'executionArn':s['rootExecution'],'input':json.dumps(event),'status':'SUCCEEDED','output':json.dumps({'ExecutionArn':child})},
             {'executionArn':child,'input':json.dumps(dict(event,polls=0)),'status':'SUCCEEDED','output':'{}'}]
-        self.assertEqual(len(chain(states,s)),2);states.get_execution_history.assert_not_called()
+        self.assertEqual(len(production_guard.chain(states,s)),2);states.get_execution_history.assert_not_called()
         self.assertEqual([c.kwargs['executionArn'] for c in states.describe_execution.call_args_list],[s['rootExecution'],child])
     def test_cross_workflow_child_is_never_read(self):
         s=self.settings();states=Mock();states.exceptions.ExecutionDoesNotExist=type('Missing',(Exception,),{})
         states.describe_execution.return_value={'input':json.dumps({'owner':'public','jobId':'public','revision':0}),'status':'SUCCEEDED','output':json.dumps({'ExecutionArn':'arn:foreign'})}
-        with self.assertRaisesRegex(RuntimeError,'chain'):chain(states,s)
+        with self.assertRaisesRegex(RuntimeError,'chain'):production_guard.chain(states,s)
         states.describe_execution.assert_called_once()
     def test_wrong_public_execution_identity_is_rejected(self):
         s=self.settings();states=Mock();states.exceptions.ExecutionDoesNotExist=type('Missing',(Exception,),{})
         states.describe_execution.return_value={'input':json.dumps({'owner':'another','jobId':'public','revision':0}),'status':'RUNNING'}
-        with self.assertRaisesRegex(RuntimeError,'public fixture'):chain(states,s)
+        with self.assertRaisesRegex(RuntimeError,'public fixture'):production_guard.chain(states,s)
     def test_same_permanent_revision_foreign_job_is_never_owned(self):
         s=self.settings();batch=Mock();foreign=self.job();foreign['jobId']='another';foreign['jobName']='qsb-ffffffff-ffff-4fff-8fff-ffffffffffff'
         batch.get_paginator.return_value.paginate.side_effect=lambda **kw:[{'jobSummaryList':[{'jobId':'paid-public'},{'jobId':'another'}]}] if kw['jobStatus']=='RUNNING' else []
-        batch.describe_jobs.return_value={'jobs':[self.job(),foreign]};jobs,other=inventory(batch,s,[self.request()]);self.assertEqual([x['jobId'] for x in jobs],['paid-public']);self.assertEqual(other,['another']);batch.submit_job.assert_not_called();batch.terminate_job.assert_not_called()
+        batch.describe_jobs.return_value={'jobs':[self.job(),foreign]};jobs,other=production_guard.inventory(batch,s,[self.request()]);self.assertEqual([x['jobId'] for x in jobs],['paid-public']);self.assertEqual(other,['another']);batch.submit_job.assert_not_called();batch.terminate_job.assert_not_called()
     def test_budget_and_expiry_stop_only_active_work(self):
         s=self.settings();v={'publicRow':{'job':{'status':'searching','gpuSubmissions':223}},'foreignActiveIds':[],'executions':[],'jobs':[]}
-        self.assertFalse(stopping(v,s,999));self.assertTrue(stopping(v,s,1000));v['publicRow']['job']['gpuSubmissions']=224;self.assertTrue(stopping(v,s,999));v['publicRow']['job']['status']='awaiting_authorization';self.assertFalse(stopping(v,s,999))
+        self.assertFalse(production_guard.stopping(v,s,999));self.assertTrue(production_guard.stopping(v,s,1000));v['publicRow']['job']['gpuSubmissions']=224;self.assertTrue(production_guard.stopping(v,s,999));v['publicRow']['job']['status']='awaiting_authorization';self.assertFalse(production_guard.stopping(v,s,999))
     def test_pause_uses_exact_public_key_manifest_and_non_resumable_failure(self):
-        ddb=Mock();s=self.settings();pause(ddb,s,'bounded stop');call=ddb.update_item.call_args.kwargs
+        ddb=Mock();s=self.settings();production_guard.pause(ddb,s,'bounded stop');call=ddb.update_item.call_args.kwargs
         self.assertEqual(call['Key'],{'pk':{'S':s['pk']},'sk':{'S':s['sk']}});self.assertEqual(call['ExpressionAttributeValues'][':failed'],{'S':'failed'});self.assertEqual(call['ExpressionAttributeValues'][':hash'],{'S':s['manifestHash']});self.assertIn('#j.#id',call['ConditionExpression']);self.assertEqual(call['ExpressionAttributeNames']['#id'],'id')
     def test_orphan_collection_never_fetches_unmatched_bodies_and_rejects_bad_sha(self):
         import hashlib,io
@@ -92,7 +92,6 @@ class ProductionGuardTests(TestCase):
                 else:c.collect_public_orphans(None)
                 s3.get_object.assert_called_once_with(Bucket='shared',Key=own,IfMatch=etag)
     def test_submission_between_row_read_and_batch_inventory_is_not_foreign(self):
-        import production_guard
         s=self.settings();clients={x:Mock() for x in ['batch','dynamodb','stepfunctions']};public={'job':{'gpuSubmissions':1}}
         clients['batch'].describe_jobs.return_value={'jobs':[self.job()]}
         with patch.object(production_guard,'read_rows',side_effect=[(None,{}),(public,{})]),patch.object(production_guard,'remember',side_effect=[[],[self.request()]]),patch.object(production_guard,'inventory',return_value=([],['paid-public'])),patch.object(production_guard,'chain',return_value=[]):
@@ -100,7 +99,6 @@ class ProductionGuardTests(TestCase):
             self.assertEqual(result['foreignActiveIds'],[]);self.assertEqual(result['jobs'],[self.job()]);self.assertEqual(result['paidSubmissions'],1)
             clients['batch'].submit_job.assert_not_called();clients['batch'].terminate_job.assert_not_called()
     def test_deadline_and_explicit_stop_pause_before_failed_observation(self):
-        import production_guard
         for event,now in [({'action':'stop'},1),({},1001),({},1)]:
             calls=[];clients={x:Mock() for x in ['batch','dynamodb','stepfunctions']}
             with self.subTest(event=event,now=now),patch.dict('os.environ',{'SETTINGS':json.dumps(self.settings())}),patch('boto3.client',side_effect=lambda name,**kw:clients[name]),patch.object(production_guard.time,'time',return_value=now),patch.object(production_guard,'pause',side_effect=lambda *args:calls.append('pause')),patch.object(production_guard,'observe',side_effect=lambda *args,**kw:(calls.append('observe'),(_ for _ in ()).throw(RuntimeError('read failed')))[1]):
@@ -152,8 +150,7 @@ class ProductionGuardTests(TestCase):
             if change=='extra-field':wrong['unrelated']='keep'
             with self.subTest(change=change),self.assertRaisesRegex(RuntimeError,'unrelated owner event'):checked_event(wrong,s)
     def test_public_metrics_decode_without_losing_integer_identity(self):
-        from production_guard import decode
         from decimal import Decimal
-        self.assertEqual(decode({'N':'489.542'}),Decimal('489.542'));self.assertEqual(decode({'N':'224'}),224)
+        self.assertEqual(production_guard.decode({'N':'489.542'}),Decimal('489.542'));self.assertEqual(production_guard.decode({'N':'224'}),224)
 
 if __name__=='__main__':main()

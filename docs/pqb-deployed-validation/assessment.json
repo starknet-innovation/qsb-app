@@ -1,0 +1,154 @@
+{
+  "passed": true,
+  "scope": "Actual deployed public synthetic search pipeline; no deposit admission, wallet, funded UTXO, broadcast or miner validation",
+  "controllerSourceCommit": "0dd98e99f61c67f7a9a5f0df273bc0f1dd339ef7",
+  "deployedSourceCommit": "3a29b0d8e62fbaee1b507356b1ea3c7edd9c456a",
+  "solverReleaseId": "pqb-ranked-v2-cfd99e384469-edce7a14b554",
+  "producerCommit": "cfd99e3844698f59679e4c15cf567db2976b9ffc",
+  "canonicalImage": "ghcr.io/starknet-innovation/qsb-solver@sha256:edce7a14b5548a079f8ebf1e866c533cb14573328cf739a6647b150cca08756e",
+  "registryIndexVerified": "sha256:edce7a14b5548a079f8ebf1e866c533cb14573328cf739a6647b150cca08756e",
+  "amd64PlatformDigest": "sha256:9aa22b922b9dbee81177ae8f622a33673c8ca92574560c9814d9cfb783f71d68",
+  "searchContract": "5217daa6415b83dcce2d85159130df4994ab0e9bb67910c7bdf00e5804f4ee71",
+  "packagedArtifactsSha256": {
+    "api.zip": "8a873d1c32dfc749cfb2b3974b76aceed9b7b09f7fbf4e234bee802676b59980",
+    "coordinator.zip": "c8bba968ab9313ff1f9808b0d40c47176b77ac3e5b6db2a1d8087c8ad2a8e478",
+    "reference.zip": "65d89c9005fc9dcb81b6113a51b46fe5e796ff3e385473404afb92bc0b9f2c91",
+    "webhooks.zip": "36e14fc8e4b111a9d90403c4d97578f88008dc1ee67be0224ae894c089f96cd8",
+    "frontend/assets/index-Cyb0U4un.css": "5b3f35217407938cb952beffe373248c219a282755de0e889a976239adb8cc9a",
+    "frontend/assets/index-TZkMqNQf.js": "5d95da4b967a5493d029b0738d4d722af1c5cf890dcc00f5335cc02a8652a29d",
+    "frontend/assets/qsb-worker-UY0JCdqm.js": "74f5a6469bb96ccf4212dc53d54ba94eb49ab024f2271c2487c0548904687179",
+    "frontend/favicon.svg": "cdace391f7d5a1452fc2e88f2049838846a76ee9e15c1e60055e3f197477aa5c",
+    "frontend/index.html": "53fa64420aecc94cfaad884a3b80f919edb9601409f0d8dc33719eaaf0a2aabd",
+    "frontend/pqb/LICENSE": "d13e6ac8092492ce31a7a79fb9e461ab1fd1ce667405c4c94a7d12f2d7bc9ecc",
+    "frontend/pqb/THIRD_PARTY_NOTICES.md": "738dbf61c6ab0bed5b225deab43dd7421d53f6c7637ceb62c8f356dea57783fd",
+    "frontend/pqb/provenance.json": "589f5f9f866c821a54b7160464d33e3fc5d54e733bd3a30dede7da7794b68dbe",
+    "frontend/pyodide/README.md": "7d434f487a81a9ea4944000fbbb5a771da89ca32fd1ff5edca0c5954b90cedec",
+    "frontend/pyodide/console-v2.html": "1b6f8595802c6dc753ddca4bd5c1271b9a23f2de2d014ad9c6a0624975b0db54",
+    "frontend/pyodide/console.html": "e7be5fc9db7c510c9287c5e25c4d63141ed8ad6707404136aec299699e42a6bd",
+    "frontend/pyodide/package.json": "81f7cf8ee62633854d610a040efe15d3f9e80cfc78fbc32426860419b8712924",
+    "frontend/pyodide/pyodide-lock.json": "3256ffc76388de0e37f4b34d42ab484268d1afc675179ff97b2a5bb14f84ccac",
+    "frontend/pyodide/pyodide.asm.js": "1263f02b5b26099b96112378156f242dd98b39a8201ba7765e5fe3d455c5ce91",
+    "frontend/pyodide/pyodide.asm.wasm": "e2f4ee75b325e35eb31bfb8c613d4dd5098f5502c156a97847686875b5025480",
+    "frontend/pyodide/pyodide.js": "718d40f1c015dd25ec724cc8fc4e2325d6a45a92ae225121ff6953f224a16f72",
+    "frontend/pyodide/pyodide.mjs": "23213d27e9dacbda6f25f955fb38dabfc40ada082c04ee253047ea5dddcaa3b5",
+    "frontend/pyodide/python_stdlib.zip": "4298b6ee445cb724c3973437da47789752b9e6ff4e26619026b283ec801fc46b",
+    "frontend/qsb/LICENSE": "8d2562b24636fb569997da918899eed12e95b573eef1207bf60be6bf7bd836ff",
+    "frontend/qsb/bitcoin_tx.py": "c7e52af90bd0d9fce9834fce26dcd67aee0d7751ee228d9730873c4d12659a5c",
+    "frontend/qsb/bridge.py": "2a786a36a988e298b4fbb6132f37a50d7610fb14fb382143518c7ad3ec6d6d96",
+    "frontend/qsb/manifest.json": "e73a049b7c02350d03d3b5409036e9d9aaf384f09500446eb497c361e1f3c60f",
+    "frontend/qsb/qsb_pipeline.py": "05334c08fa012a77ccba2887e05d78f90a8b81c0e34b786931b423f7f11255d8",
+    "frontend/qsb/secp256k1.py": "d2cebd1410b75cad606806cf02d7bee3e24724d5fcb7a53a07f598fcbc8afece"
+  },
+  "normalPool": {
+    "instanceType": "g5.xlarge",
+    "allocationStrategy": "BEST_FIT",
+    "minVcpus": 0,
+    "maxVcpus": 64,
+    "workersMax": 16
+  },
+  "recordedHosts": 17,
+  "recordedVolumes": 17,
+  "amis": [
+    "ami-0b4cef51ce909478b"
+  ],
+  "zones": {
+    "eu-west-2a": 17
+  },
+  "gpus": [
+    "A10G"
+  ],
+  "drivers": [
+    "580.178.04"
+  ],
+  "nativeSubmissions": 146,
+  "completedUnits": 107,
+  "completedByStage": {
+    "round2": 39,
+    "pinning": 24,
+    "round1": 44
+  },
+  "supersededCanceledUnits": 39,
+  "canceledByStage": {
+    "round1": 15,
+    "pinning": 14,
+    "round2": 10
+  },
+  "independentCandidateVerdicts": 15,
+  "independentFullSolutions": 3,
+  "offlinePositiveChecks": 1,
+  "offlineNegativeChecks": 12,
+  "broadcast": false,
+  "workflowExecutions": 1,
+  "pipelineStart": "2026-11-14T16:57:03.944000+00:00",
+  "pipelineFinish": "2026-11-14T18:03:18.474000+00:00",
+  "pipelineWallSeconds": 3974.53,
+  "cost": {
+    "hourlyLinuxOnDemandUsd": "1.2770000000",
+    "estimatedVmUsd": "20.29826972222222222222222223",
+    "conservativeVmUpperUsd": "23.77269316794527777777777777",
+    "providerBillingQueried": false,
+    "excludedCharges": [
+      "EBS",
+      "IPv4",
+      "registry/storage",
+      "service",
+      "logging",
+      "network"
+    ],
+    "method": "Launch to AWS shutdown transition estimate; upper bound launch to first retained explicit terminated observation. Includes idle, canceled and unused host time."
+  },
+  "cleanup": {
+    "verified": true,
+    "checks": 586,
+    "entirePublicOwnerPartitionEmpty": true,
+    "currentFleetEmpty": true,
+    "ownedObjectsRemoved": 253,
+    "unattributedNewObjects": 0,
+    "existingMetadataRowsUnchanged": 29,
+    "productionConfigurationUnchanged": true
+  },
+  "reservation": {
+    "reservedUsd": 200,
+    "status": "released"
+  },
+  "priorInterruptedAttempt": {
+    "result": "interrupted-controller-collection-failure",
+    "supersedesCleanupScopeOf": "completion-assessment.json",
+    "allSubmissionsReconciled": 16,
+    "nativeJobsStarted": 0,
+    "nativeJobsSucceeded": 0,
+    "recordedGpuHosts": 0,
+    "recordedVolumes": 0,
+    "independentCleanupChecks": 61,
+    "wholePublicOwnerPartitionEmpty": true,
+    "currentPoolFleetEmpty": true,
+    "cleanupVerified": true,
+    "unrelatedMetadataUnchanged": true,
+    "reservationStatus": "released",
+    "estimatedObservedVmComputeUsd": 0,
+    "providerBillingQueried": false,
+    "noRestart": true
+  },
+  "receipts": {
+    "final-collection.json": "58754a4f7663a4f6e6108d8c1a7b22ff09ebdc754f9936db4502e022b7ffd0dd",
+    "observation-17946793084979300001.json": "c73433beeae9c54fae541fddfd9acdc9b928270c1025983fed480bcb284b3389",
+    "native-accounting-audit-1794679547067.json": "85ba25eb1503601bed807f8c05774938e10940e5132cc53849bdde254b55ae9e",
+    "independent-native-check.json": "c809f83b8480b5a6650c18750e5b12b0500d71514ad64cc6c73b16b13cfa5fa8",
+    "offline-consensus.json": "b7f81cf37771cd9054301d7fdaec34cc2197c47d15967c6d4886d8f6771287bb",
+    "independent-cleanup-1794680010632683000.json": "fa3ff6d7f6ff26f33281dc6a169aaa06fffea66b82095cd7964f50b9f0f8cd43",
+    "existing-record-metadata-before.json": "a7df0a1d0c0c51773b0cbf639d781da2b8c68411528aa147095537395e7e3027",
+    "existing-record-metadata-after.json": "26756355c23f09e45cdcf32799db45cfea3ecf905b4c657efebabe4cd9641adb",
+    "object-inventory-before-removal.json": "81e999bbab03bd2027628d449fc367d5db7e18579f7397af45e0ba14a965072f",
+    "object-inventory-after-removal.json": "6746bd3cc6033acf447c5b9c8eef0b335aab643a57a473bcf7fa04f22ca1d60c"
+  },
+  "limits": [
+    "Single cold first-verified pipeline observation; no matched performance comparison",
+    "Trial/gate sanity and emitted-hit checks do not prove exhaustive enumeration",
+    "Public nonexistent outpoints and OP_TRUE helper for offline Core only"
+  ],
+  "assessmentScriptSha256": "06ea52af82b87ae80fcdb1eb9cf1a10139acca70c8d7118f4122a4403e7ec866",
+  "completedAt": 1794680383.586997,
+  "runtimeImageDigest": "sha256:edce7a14b5548a079f8ebf1e866c533cb14573328cf739a6647b150cca08756e",
+  "originalPrivateAssessmentSha256": "5d3e4dd43940cb950163affe8ada91b642bca72f8f02ee94a3311bd0df63b251",
+  "providerEvidence": "Original provider account/role/network/host readbacks remain private; receipt hashes bind the delivered operator assessment."
+}
