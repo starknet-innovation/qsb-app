@@ -1,0 +1,18 @@
+[package]
+name = "qsb-bdk-wallet"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "=1.0.100"
+age = "=0.12.1"
+base64 = "=0.22.1"
+bdk_wallet = "=3.2.0"
+rand = "=0.8.5"
+security-framework = "=3.7.0"
+serde_json = "=1.0.145"
+zeroize = "=1.8.2"
+
+[profile.release]
+strip = true

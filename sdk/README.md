@@ -6,6 +6,12 @@ A non-custodial client for the API in [`server/app.ts`](../server/app.ts) ([docs
 
 ## Security model
 
+The experimental [local BDK signer](../tools/qsb-bdk-wallet/README.md) keeps an
+age-encrypted seed on macOS and its unlock credential in Keychain. It validates
+BIP-322 against the service verifier and supports separately approved funding
+PSBTs. The Node adapter in `sdk/bdk-signer.ts` requires an exact-transaction approval
+callback and signs only explicitly selected wallet inputs, including a PQB helper.
+
 Never leaves your machine, and is never in a request body, URL or header:
 
 - the recovery state (`stateJson`: the one-time HORS secrets and the signature nonces). The unrevealed HORS secrets never leave your machine. The signed withdrawal reveals the preimages for the solved indices (15 of the 300), as every QSB spend does, which is why a vault is assembled only once;

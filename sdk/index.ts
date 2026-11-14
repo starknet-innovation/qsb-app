@@ -18,3 +18,4 @@ export {
 export { RefusedState, nodeQsb, type BundledQsb, type LocalQsb, type PreparedAssembly } from "./runtime";
 export type { Signer } from "./signer";
 export { loopbackTestSigner } from "./test-signer";
+export { bdkSigner, type BdkTransactionReview } from "./bdk-signer";

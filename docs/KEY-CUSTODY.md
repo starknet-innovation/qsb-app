@@ -8,6 +8,16 @@ Who holds each key, passphrase and credential through vault creation, deposit an
 
 ## Holders
 
+The experimental `tools/qsb-bdk-wallet` signer keeps its random Bitcoin seed in
+local age-encrypted files and a separate random unlock credential in macOS
+Keychain. Decrypted keys remain in the local signing process. Its encrypted backup
+copy is reopened and identity-checked. Its `backup` command creates and verifies
+a separate portable `recovery.age` using a user-chosen passphrase entered through
+local hidden-password dialogs, or generated and saved in 1Password then piped
+directly from its CLI. 1Password holds that passphrase only, never the wallet seed
+or encrypted backup. This portable copy does not need Keychain. Its remote HTTPS Esplora backend sees the payment address,
+never a key or credential. It has no broadcast command; it signs only explicitly selected native P2WPKH inputs. See its README before funding.
+
 - **Bitcoin wallet**: Xverse in the web app; SDK signers must support BIP-322 and PSBT signing with a compressed public key deriving the supplied P2WPKH or P2SH-P2WPKH payment address. Other address types are not supported by this flow. Holds the wallet private key.
 - **User's browser, or the SDK / CLI**: runs pinned, hash-checked Config A sources through Pyodide, or the pinned PQB TypeScript generator and assembler locally. Both protocols use a local browser Web Worker for generation, recovery validation and assembly. The SDK/CLI runs both TypeScript and Pyodide in the calling Node process, without worker isolation. Decrypted HORS state is held in browser/worker memory or SDK/CLI process memory; passphrases and backup files stay on the user’s side. An SDK/CLI caller that supplies its own recovery state also holds the plaintext state it generated, until it destroys it. The SDK runtime's commitments-only calls (`nodeQsb()`: `setupFromCommitments`, `prepareAssembly`, `finishAssembly`; the web app and CLI don't use them) serve HORS secrets that a key manager outside the runtime holds: the runtime gets their commitments, and at assembly only the 15 preimages the solution discloses.
 - **QSB service on AWS**: API Lambda, records table, Step Functions coordinator and CPU verifier. Holds vault and job records, session and API key hashes and webhook secrets, and reads the MARA credential. Holds no spending key.

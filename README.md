@@ -9,6 +9,7 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB Config A and PQB) vaults: v
 - `src/`: React application: encrypted local backups, wallet integration, and staged signing and recovery flows.
 - `server/`: the API (`server/app.ts`), the Step Functions coordinator, storage, chain and miner clients, and the exact-submit checks.
 - [`sdk/`](sdk/README.md): TypeScript SDK and `qsb` CLI for the same API. Recovery state, passphrases and keys stay on the caller's machine.
+- [`tools/qsb-bdk-wallet/`](tools/qsb-bdk-wallet/README.md): experimental macOS BDK signer with age-encrypted local seed, Keychain unlock credential and read-only remote chain access; no local node or broadcast command.
 - `src/pqb-core/`: the pinned MIT PQB generator and CPU reference; [PQB support](docs/PQB.md) describes custody, stages, completed-work accounting and release requirements.
 - `worker/cpu/`: the Config A CPU parameter export and hit verifier. GPU images come from [qsb-solver](https://github.com/starknet-innovation/qsb-solver).
 - [`consensus/`](consensus/README.md): the offline Bitcoin Core script check run before a withdrawal is submitted.
