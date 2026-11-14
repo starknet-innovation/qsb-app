@@ -24,6 +24,9 @@ def main():
         else:value=json.loads(r.stdout);record['value']=value
         persist(d/(str(len(list(d.glob('*.json'))))+'.json'),record,exclusive=True);return value
     who=read('operator','sts','get-caller-identity',[]);check('correct account',who.get('Account')==operator['account'])
+    metadata=read('metadata observer','sts','get-caller-identity',[],view=True)
+    if metadata.get('Account')!=operator['account']:raise RuntimeError('Metadata profile account mismatch; do not attest absence')
+    check('metadata observer account',True)
     abort=s['phase']=='abort-removal-requested';sealed=None
     if not abort:
         raw=(root/'final-collection.json').read_bytes();check('sealed receipt',hashlib.sha256(raw).hexdigest()==s['finalCollectionSha256']);sealed=json.loads(raw);check('original receipt bytes unchanged',all(hashlib.sha256((root/f).read_bytes()).hexdigest()==h for f,h in sealed['files'].items()))
