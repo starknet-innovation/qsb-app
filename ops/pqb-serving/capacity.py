@@ -105,6 +105,10 @@ def validate_plan(plan, c):
         {'type', 'subnets', 'securityGroupIds', 'instanceRole', 'launchTemplate', 'ec2Configuration'}}
     wanted.update(allocationStrategy=PROFILE['allocationStrategy'], instanceTypes=[PROFILE['instanceType']],
                   minvCpus=0, desiredvCpus=0, maxvCpus=PROFILE['maxVcpus'])
+    if plan.get('validationNetwork') is not None:
+        from validation_network import validate_binding
+        validate_binding(plan['validationNetwork'], original['computeResources']['subnets'], c.region)
+        wanted['subnets'] = [plan['validationNetwork']['selected']]
     if plan['computeResources'] != wanted or wanted['type'] != 'EC2' or wanted['launchTemplate'].get('version') != '1' or not wanted.get('ec2Configuration'):
         raise RuntimeError('Preserve the reviewed isolated GPU hardware, AMI, network and host profile')
     queue = plan['productionQueue']
@@ -157,7 +161,19 @@ class Capacity:
                 if any(p['jobSummaryList'] for p in self.batch.get_paginator('list_jobs').paginate(jobQueue=q[0]['jobQueueArn'], jobStatus=status)):
                     raise RuntimeError('Production work needs GPU capacity; stop the public assessment')
 
-    def make_plan(self, generated, requested, boundary):
+    def read_network(self, subnet, planning=False):
+        from validation_network import capture
+        ec2 = self.metadata_session().client('ec2', config=self.c.read_sdk_config)
+        return capture(ec2, self.plan['computeBaseline']['computeResources']['subnets'], subnet,
+            self.c.region, PROFILE['instanceType'], (PROFILE['maxVcpus'] // PROFILE['vcpusPerHost'] + 5) if planning else 0)
+
+    def check_network(self):
+        if self.plan.get('validationNetwork') is not None:
+            expected = self.plan['validationNetwork']
+            if self.read_network(expected['selected']) != expected:
+                raise RuntimeError('Validation network changed since planning')
+
+    def make_plan(self, generated, requested, boundary, validation_subnet=None):
         if self.plan or self.c.state:
             raise RuntimeError('Use a fresh directory; never reuse a capacity campaign')
         source = clean_source(); baseline = json.loads((self.c.directory / 'live-runtime-private.json').read_text())
@@ -181,6 +197,9 @@ class Capacity:
             'operatorPolicy': policy, 'boundaryBaseline': base_boundary, 'runtimeBoundary': requested_boundary(base_boundary, self.c, expires),
             'autopilotSha256': hashlib.sha256(generated.read_bytes()).hexdigest(), 'requestedPolicySha256': hashlib.sha256(requested.read_bytes()).hexdigest(),
             'boundaryBaselineSha256': hashlib.sha256(boundary.read_bytes()).hexdigest()}
+        if validation_subnet:
+            self.plan['validationNetwork'] = self.read_network(validation_subnet, planning=True)
+            self.plan['computeResources']['subnets'] = [validation_subnet]
         validate_plan(self.plan, self.c)
         target = self.c.directory / 'capacity'; target.mkdir(exist_ok=True)
         for name, original in [('autopilot.json', generated), ('requested-policy.json', requested), ('boundary-baseline.json', boundary)]:
@@ -195,6 +214,7 @@ class Capacity:
             from snf import check_authority
             check_authority(self.c, self.plan)
             return {'snfIsolation': True}
+        self.check_network()
         if time.time() >= self.plan['expiresAt']:
             raise RuntimeError('Capacity grant expired')
         iam = self.metadata_session().client('iam', config=self.c.read_sdk_config)
@@ -462,12 +482,14 @@ def main():
     parser.add_argument('--generated-policy', type=Path)
     parser.add_argument('--requested-policy', type=Path)
     parser.add_argument('--boundary-baseline', type=Path)
+    parser.add_argument('--validation-subnet', help='Administrator-provisioned public subnet for the isolated pool only')
     parser.add_argument('--previous-campaign', type=Path, action='append')
     args = parser.parse_args(); capacity = Capacity(Campaign(args.directory))
+    if args.validation_subnet and args.mode != 'plan': parser.error('--validation-subnet is only valid with plan')
     if args.mode == 'plan':
         if not args.generated_policy or not args.requested_policy or not args.boundary_baseline:
             parser.error('plan requires --generated-policy, --requested-policy and --boundary-baseline')
-        capacity.make_plan(args.generated_policy, args.requested_policy, args.boundary_baseline)
+        capacity.make_plan(args.generated_policy, args.requested_policy, args.boundary_baseline, args.validation_subnet)
     elif args.mode == 'reconcile_history':
         if not args.previous_campaign: parser.error('reconcile_history requires --previous-campaign')
         capacity.reconcile_history(args.previous_campaign)

@@ -1,0 +1,10 @@
+{
+  "label": "vault-outpoint",
+  "expectedValid": false,
+  "accepted": false,
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "transactionSha256": "ae69315e00f1d9f031522607491a6c9225e55222867ab3f3935f9c978da0b808"
+}

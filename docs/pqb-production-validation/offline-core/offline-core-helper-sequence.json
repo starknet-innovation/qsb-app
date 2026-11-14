@@ -1,0 +1,10 @@
+{
+  "label": "helper-sequence",
+  "expectedValid": false,
+  "accepted": false,
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "transactionSha256": "3a047d8d267d5bc07edf47011392c8fd1c943643f276ba671c700e47881ef1d1"
+}

@@ -1,0 +1,10 @@
+{
+  "label": "solved-pqb-with-public-OP_TRUE-helper",
+  "expectedValid": true,
+  "accepted": true,
+  "exitCode": 0,
+  "signal": null,
+  "stdout": "core-27.2-api2-all-inputs-valid\n",
+  "stderr": "",
+  "transactionSha256": "9e202aff0da0b07c6457943027e2ad1cb39ac30a2639c0f5baa15a9465914094"
+}

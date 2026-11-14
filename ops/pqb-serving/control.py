@@ -22,6 +22,13 @@ ROOT = Path(__file__).resolve().parents[2]
 ACTIVE = ('SUBMITTED', 'PENDING', 'RUNNABLE', 'STARTING', 'RUNNING')
 
 
+def incomplete_success(job, envelope):
+    # Canceled containers can durably write a partial result before Batch marks
+    # them terminal. Never credit that output; the final audit separately proves
+    # each cancellation was superseded by a CPU-validated winning unit.
+    return job['status'] == 'SUCCEEDED' and (envelope is None or envelope['output']['status'] != 'completed')
+
+
 def campaign_seconds(shared_pool=False):
     hours = json.loads((ROOT / 'server/aws-batch-validation.json').read_text())['sharedPoolCampaignHours'] if shared_pool else 4
     if hours not in (4, 6):
@@ -586,7 +593,7 @@ class Campaign:
             raise
         for j in jobs:
             output = self.directory / 'objects' / ('outputs__' + j['jobId'] + '.json')
-            if (j['status'] == 'SUCCEEDED' and not output.exists()) or (output.exists() and json.loads(output.read_text())['output']['status'] != 'completed'):
+            if incomplete_success(j, json.loads(output.read_text()) if output.exists() else None):
                 self.stop(reason='Incomplete native result observed during public validation')
                 raise RuntimeError('Incomplete native result observed; assessment paused and drained')
         expected_jobs = int(row['job'].get('gpuSubmissions', 0)) + (len(self.state.get('preflightJobIds', [])) if phase == 'solve' else 0)

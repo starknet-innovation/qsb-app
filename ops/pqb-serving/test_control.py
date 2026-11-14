@@ -11,6 +11,14 @@ spec.loader.exec_module(control)
 
 
 class JournalTests(unittest.TestCase):
+    def test_partial_cancellation_is_deferred_but_success_requires_complete_output(self):
+        partial = {'output': {'status': 'failed'}}
+        for status in control.ACTIVE + ('FAILED',):
+            self.assertFalse(control.incomplete_success({'status': status}, partial))
+        self.assertTrue(control.incomplete_success({'status': 'SUCCEEDED'}, partial))
+        self.assertTrue(control.incomplete_success({'status': 'SUCCEEDED'}, None))
+        self.assertFalse(control.incomplete_success({'status': 'SUCCEEDED'}, {'output': {'status': 'completed'}}))
+
     def test_verified_stop_publishes_a_terminal_phase_only_after_drain(self):
         from types import SimpleNamespace
         for failure in [False, True]:
