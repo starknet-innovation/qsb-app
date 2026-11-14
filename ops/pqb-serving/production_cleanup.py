@@ -16,7 +16,7 @@ def main():
     stamp=str(time.time_ns());d=root/('independent-readbacks-'+stamp);d.mkdir();checks=[]
     def check(name,value):checks.append({'check':name,'passed':bool(value)})
     def read(name,service,operation,args,absent=(),view=False):
-        if not operation.startswith(('get-','head-','list-','describe-')):raise RuntimeError('Read-only verification')
+        if not (operation.startswith(('get-','head-','list-','describe-')) or (service=='dynamodb' and operation=='query')):raise RuntimeError('Read-only verification')
         cmd=['aws',service,operation,'--profile','qsb-viewonly-euw2' if view else operator['profile'],'--region',operator['region'],'--cli-connect-timeout','5','--cli-read-timeout','20','--no-cli-pager','--output','json',*args]
         r=subprocess.run(cmd,capture_output=True,text=True);record={'label':name,'observedAt':time.time(),'exitCode':r.returncode}
         if r.returncode:
