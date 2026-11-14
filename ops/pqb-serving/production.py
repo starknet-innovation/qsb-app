@@ -199,7 +199,7 @@ class Production:
             persist(self.directory/'current-public-job.json',row)
             subprocess.run(['node','--import','tsx','ops/pqb-serving/fixture.ts','input-template',str(self.directory)],cwd=ROOT,env={**os.environ,'QSB_NETWORK':'mainnet'},check=True,capture_output=True)
         objects=self.directory/'objects';objects.mkdir(exist_ok=True)
-        templates=[self.directory/'preflight-input.json',*self.directory.glob('input-template-*.json'),*objects.glob('inputs__*.json')]
+        templates=[self.directory/'preflight-input.json',*self.directory.glob('input-template-*.json'),*(p for p in objects.glob('inputs__*.json') if re.fullmatch(r'inputs__[a-f0-9-]{36}\.json',p.name))]
         expected={};seen=set()
         maximum=int(json.loads((self.directory/'deployed-binding.json').read_text())['coordinatorEnv']['MAX_JOB_GPU_SECONDS'])//900+1
         for path in templates:
@@ -238,6 +238,7 @@ class Production:
         known={json.dumps(r,sort_keys=True) for r in self.state['knownRequests']};recovered=set()
         inputs={}
         for path in (self.directory/'objects').glob('inputs__*.json'):
+            if not re.fullmatch(r'inputs__[a-f0-9-]{36}\.json',path.name):continue
             raw=path.read_bytes();value=json.loads(raw)
             if value['input']['manifestHash']!=self.state['settings']['manifestHash']:raise RuntimeError('Foreign collected input')
             inputs['inputs/'+path.name[len('inputs__'):]]=hashlib.sha256(raw).hexdigest()

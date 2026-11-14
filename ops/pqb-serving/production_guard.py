@@ -127,6 +127,19 @@ def observe(clients, settings, terminal=False):
     public, ledger = read_rows(clients['dynamodb'], settings)
     records = remember(clients['dynamodb'], settings, public, ledger)
     jobs, foreign = inventory(clients['batch'], settings, records, terminal)
+    if foreign:
+        # Capture candidates first, then strongly read reservations committed
+        # before their paid POST. Do not relist after the refreshed ownership read.
+        candidates=[]
+        for offset in range(0,len(foreign),100):
+            chunk=foreign[offset:offset+100]
+            found=clients['batch'].describe_jobs(jobs=chunk)['jobs']
+            if sorted(j['jobId'] for j in found)!=sorted(chunk):raise RuntimeError('Incomplete ownership refresh')
+            candidates.extend(found)
+        public, ledger = read_rows(clients['dynamodb'], settings)
+        records = remember(clients['dynamodb'], settings, public, ledger)
+        jobs += [j for j in candidates if owned(j,records,settings)]
+        foreign = [j['jobId'] for j in candidates if j['status'] in ACTIVE and not owned(j,records,settings)]
     executions = chain(clients['stepfunctions'], settings)
     return {'publicRow': public, 'lastPublicRow': ledger.get('lastPublicRow'), 'paidSubmissions': (public or ledger.get('lastPublicRow') or {}).get('job',{}).get('gpuSubmissions',0), 'records': records, 'jobs': jobs, 'foreignActiveIds': foreign, 'executions': executions, 'drainedAt': ledger.get('drainedAt')}
 

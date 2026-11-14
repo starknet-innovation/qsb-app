@@ -83,7 +83,7 @@ class ProductionGuardTests(TestCase):
         for corrupt in [False,True]:
             with self.subTest(corrupt=corrupt),TemporaryDirectory() as directory:
                 c=object.__new__(Production);c.directory=Path(directory);c.state={'createdAt':1,'bucket':'shared','settings':{'manifestHash':base['manifestHash']}}
-                (c.directory/'preflight-input.json').write_text(json.dumps({'input':base}));(c.directory/'deployed-binding.json').write_text(json.dumps({'coordinatorEnv':{'MAX_JOB_GPU_SECONDS':'1800'}}))
+                (c.directory/'objects').mkdir();(c.directory/'objects'/'inputs__ffffffff-ffff-4fff-8fff-ffffffffffff.json.head.json').write_text(json.dumps({'VersionId':'ours','ETag':etag}));(c.directory/'preflight-input.json').write_text(json.dumps({'input':base}));(c.directory/'deployed-binding.json').write_text(json.dumps({'coordinatorEnv':{'MAX_JOB_GPU_SECONDS':'1800'}}))
                 s3=Mock();c.client=Mock(return_value=s3);s3.get_paginator.return_value.paginate.return_value=[{'Contents':[{'Key':own,'ETag':etag,'LastModified':datetime.now(timezone.utc)}, {'Key':'inputs/ffffffff-ffff-4fff-8fff-ffffffffffff.json','ETag':'"foreign"','LastModified':datetime.now(timezone.utc)}]}]
                 s3.get_object.return_value={'Body':io.BytesIO(b'wrong' if corrupt else raw),'VersionId':'ours'};s3.head_object.return_value={'VersionId':'ours'}
                 if corrupt:
@@ -91,6 +91,14 @@ class ProductionGuardTests(TestCase):
                     self.assertFalse((c.directory/'objects'/own.replace('/','__')).exists())
                 else:c.collect_public_orphans(None)
                 s3.get_object.assert_called_once_with(Bucket='shared',Key=own,IfMatch=etag)
+    def test_submission_between_row_read_and_batch_inventory_is_not_foreign(self):
+        import production_guard
+        s=self.settings();clients={x:Mock() for x in ['batch','dynamodb','stepfunctions']};public={'job':{'gpuSubmissions':1}}
+        clients['batch'].describe_jobs.return_value={'jobs':[self.job()]}
+        with patch.object(production_guard,'read_rows',side_effect=[(None,{}),(public,{})]),patch.object(production_guard,'remember',side_effect=[[],[self.request()]]),patch.object(production_guard,'inventory',return_value=([],['paid-public'])),patch.object(production_guard,'chain',return_value=[]):
+            result=production_guard.observe(clients,s)
+            self.assertEqual(result['foreignActiveIds'],[]);self.assertEqual(result['jobs'],[self.job()]);self.assertEqual(result['paidSubmissions'],1)
+            clients['batch'].submit_job.assert_not_called();clients['batch'].terminate_job.assert_not_called()
     def test_deadline_and_explicit_stop_pause_before_failed_observation(self):
         import production_guard
         for event,now in [({'action':'stop'},1),({},1001),({},1)]:
@@ -121,6 +129,7 @@ class ProductionGuardTests(TestCase):
             c.state={'knownRequests':[],'createdAt':1,'queue':'production','name':self.settings()['name'],'settings':self.settings()}
             r=self.request();raw=json.dumps({'input':{'manifestHash':self.settings()['manifestHash']}}).encode();r['inputSha256']=hashlib.sha256(raw).hexdigest()
             (c.directory/'objects'/r['inputKey'].replace('/','__')).write_bytes(raw)
+            (c.directory/'objects'/(r['inputKey'].replace('/','__')+'.head.json')).write_text(json.dumps({'VersionId':'ours'}))
             job=self.job();job['createdAt']=2000;job['status']='SUCCEEDED';job['container']['environment'][1]['value']=r['inputSha256'];job['tags']['InputSha256']=r['inputSha256']
             foreign=deepcopy(job);foreign['jobId']='foreign';foreign['container']['environment'][1]['value']='f'*64
             batch=Mock();batch.get_paginator.return_value.paginate.return_value=[{'jobSummaryList':[{'jobId':'paid-public'},{'jobId':'foreign'}]}];batch.describe_jobs.return_value={'jobs':[job,foreign]}
