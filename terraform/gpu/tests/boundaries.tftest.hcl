@@ -16,6 +16,10 @@ variables {
 run "every_gpu_role_is_bounded" {
   command = plan
   assert {
+    condition     = aws_batch_job_definition.solver.deregister_on_new_revision == false
+    error_message = "Staging an image must retain the active revision used by the app and pinned work."
+  }
+  assert {
     condition = alltrue([
       for role in [aws_iam_role.instance, aws_iam_role.job, aws_iam_role.execution, aws_iam_role.watchdog] :
       role.permissions_boundary == var.gpu_permissions_boundary_arn && role.path == "/qsb/runtime/"
@@ -31,6 +35,21 @@ run "reject_empty_boundary" {
   command = plan
   variables { gpu_permissions_boundary_arn = "" }
   expect_failures = [var.gpu_permissions_boundary_arn]
+}
+run "stage_pqb_without_retiring_config_a" {
+  command = plan
+  variables {
+    release_manifest_path = "../.build/test-gpu-pqb.json"
+    image                 = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../../src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json")).image)[1]}"
+  }
+  assert {
+    condition     = aws_batch_job_definition.solver.deregister_on_new_revision == false && local.enrolled_solver.protocol == "pqb-v1"
+    error_message = "The staged PQB image must preserve the previous active job-definition revision."
+  }
+  assert {
+    condition     = aws_batch_compute_environment.gpu.compute_resources[0].instance_type == toset(["g5.xlarge"]) && aws_batch_compute_environment.gpu.compute_resources[0].allocation_strategy == "BEST_FIT" && aws_batch_compute_environment.gpu.compute_resources[0].min_vcpus == 0
+    error_message = "Staging PQB must not silently select alternative hardware or allocate idle capacity."
+  }
 }
 run "reject_other_account_boundary" {
   command = plan

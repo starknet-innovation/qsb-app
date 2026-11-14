@@ -17,6 +17,10 @@ const gpu = structuredClone(build);
 gpu.testFixtureOnly = 'Mock plan input; not deployment evidence';
 gpu.identities = buildIdentities(descriptor.id, build.commit, build.files['reference.zip']);
 save('test-gpu-valid.json', gpu);
+const pqbDescriptor = JSON.parse(readFileSync(new URL('../../src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json', import.meta.url), 'utf8'));
+const pqb = structuredClone(gpu);
+pqb.identities = buildIdentities(pqbDescriptor.id, build.commit, build.files['reference.zip']);
+save('test-gpu-pqb.json', pqb);
 for (const [name, mutate] of Object.entries({
   'unknown-id': x => { x.identities.solver.id = 'not-enrolled'; },
   'historical-schema': x => { const old = JSON.parse(readFileSync(new URL('../../src/lib/releases/qsb-solver-v0-1-0.json', import.meta.url), 'utf8')); x.identities.solver = { id: old.id, image: old.image, solverCommit: old.solverCommit };  },
