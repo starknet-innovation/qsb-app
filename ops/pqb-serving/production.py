@@ -18,6 +18,16 @@ from datetime import datetime, timezone
 from control import Campaign, ROOT, ACTIVE, clean_source, check_operator_config, dump, persist, incomplete_success
 from production_guard import checked_request
 
+def checked_event(row,settings):
+    event=row.get('event',{});subject=event.get('subjectId')
+    prefix='withdrawal.' if subject==settings['jobId'] else 'deposit.' if subject==settings['vaultId'] else None
+    if (set(row)!={'pk','sk','version','event','expiresAt'} or row['pk']!=settings['pk'] or row['version']!=0
+        or not prefix or event.get('type')!=prefix+event.get('status','')
+        or not re.fullmatch(r'evt_[a-f0-9]{32}',event.get('id',''))
+        or not row['sk'].startswith('EVENT#') or not row['sk'].endswith('#'+event['id'])
+        or set(event)-{'id','type','subjectId','status','stage','at'}):raise RuntimeError('Refuse unrelated owner event')
+    return row
+
 class Production:
     client = Campaign.client
     mutate = Campaign.mutate
@@ -314,6 +324,10 @@ class Production:
             item=self.client('dynamodb').get_item(TableName=self.state['settings']['table'],Key={'pk':{'S':self.state['settings']['pk']},'sk':{'S':sk}},ConsistentRead=True).get('Item')
             if item:rows[sk]=item
             elif sk==self.state['settings']['ledgerSk'] or ((self.directory/'requests/execution.intent.json').exists() and time.time()<self.state['expiresAt']):raise RuntimeError('Fixture evidence row missing before TTL or registry missing')
+        for item in self.owner_rows():
+            if item['sk']['S'].startswith('EVENT#'):
+                checked_event({k:decode(v) for k,v in item.items()},self.state['settings']);rows[item['sk']['S']]=item
+            elif item['sk']['S'] not in rows:raise RuntimeError('Unrelated public partition row')
         persist(self.directory/'final-rows.json',rows,exclusive=True);persist(self.directory/'final-observation.json',value,exclusive=True)
         group='/aws/lambda/'+self.state['guardFunction'];persist(self.directory/'guard-logs.json',self.log_pages(logGroupName=group),exclusive=True)
         files=[f for f in self.directory.rglob('*') if f.is_file() and f.name not in ('campaign.json','final-collection.json') and not f.name.endswith('.lock')]
@@ -352,6 +366,8 @@ class Production:
                 if decoded['job']['status'] in ('queued','searching'):raise RuntimeError('Fixture still active')
             elif sk.startswith('VAULT#'):
                 condition='#vault.#id = :id AND #vault.scriptHash = :hash AND #v = :version';names={'#vault':'vault','#v':'version','#id':'id'};values={':id':{'S':settings['vaultId']},':hash':{'S':decoded['vault']['scriptHash']},':version':{'N':str(decoded['version'])}}
+            elif sk.startswith('EVENT#'):
+                checked_event(decoded,settings);condition='#event = :event AND #v = :version';names={'#event':'event','#v':'version'};values={':event':item['event'],':version':item['version']}
             elif sk==settings['ledgerSk']:
                 condition='manifestHash = :hash AND #c = :case AND drainedAt = :drained';names={'#c':'case'};values={':hash':{'S':settings['manifestHash']},':case':{'S':self.state['name']},':drained':item['drainedAt']}
                 if item.get('records'):condition+=' AND #records = :records';names['#records']='records';values[':records']=item['records']
@@ -366,6 +382,25 @@ class Production:
         if self.client('logs').list_tags_log_group(logGroupName=group)['tags'].get('PqbValidation')!=self.state['name']:raise RuntimeError('Log ownership changed')
         self.mutate('remove-logs','logs','delete_log_group',logGroupName=group)
         self.state['phase']='removal-requested';self.save();print('Removed only public fixture objects/rows and dedicated guard resources; verify independently')
+
+    def owner_rows(self):
+        settings=self.state['settings'];rows=[]
+        for page in self.client('dynamodb').get_paginator('query').paginate(TableName=settings['table'],KeyConditionExpression='pk = :pk',ExpressionAttributeValues={':pk':{'S':settings['pk']}},ConsistentRead=True):rows+=page['Items']
+        return rows
+
+    def events(self):
+        # Reconciliation after an older removal: never restart or submit work.
+        from production_guard import decode
+        if self.state['phase']!='removal-requested' or not self.state.get('drained'):raise RuntimeError('Remove and drain before event reconciliation')
+        raw=(self.directory/'final-collection.json').read_bytes()
+        if hashlib.sha256(raw).hexdigest()!=self.state['finalCollectionSha256']:raise RuntimeError('Sealed scope changed')
+        if any(page['executions'] for page in self.client('stepfunctions').get_paginator('list_executions').paginate(stateMachineArn=self.state['workflow'],statusFilter='RUNNING')):raise RuntimeError('Wait for workflow completion')
+        rows=self.owner_rows();settings=self.state['settings']
+        for item in rows:checked_event({k:decode(v) for k,v in item.items()},settings)
+        persist(self.directory/('event-reconciliation-'+str(time.time_ns())+'.json'),rows,exclusive=True)
+        for item in rows:
+            self.mutate('remove-event-'+hashlib.sha256(item['sk']['S'].encode()).hexdigest(),'dynamodb','delete_item',TableName=settings['table'],Key={k:item[k] for k in ['pk','sk']},ConditionExpression='#event = :event AND #v = :version',ExpressionAttributeNames={'#event':'event','#v':'version'},ExpressionAttributeValues={':event':item['event'],':version':item['version']})
+        print('Only attributed synthetic owner events removed; verify the full partition independently')
 
     def abort(self):
         # Before fixture insertion there can be no compute trigger from this controller.
@@ -429,5 +464,5 @@ class Production:
                 self.stop();raise
 
 def main():
-    os.umask(0o077);p=argparse.ArgumentParser(description=__doc__);p.add_argument('mode',choices=['prepare','arm','start','collect','run','stop','seal','remove','abort']);p.add_argument('directory',type=Path);a=p.parse_args();getattr(Production(a.directory),a.mode)()
+    os.umask(0o077);p=argparse.ArgumentParser(description=__doc__);p.add_argument('mode',choices=['prepare','arm','start','collect','run','stop','seal','remove','events','abort']);p.add_argument('directory',type=Path);a=p.parse_args();getattr(Production(a.directory),a.mode)()
 if __name__=='__main__':main()

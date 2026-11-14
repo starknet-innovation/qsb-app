@@ -463,8 +463,10 @@ solutions. Run the pinned upstream native cross-check and offline Core positive
 and negative checks against the collected final result before reporting success.
 
 After completion or failure, run `stop`, `seal`, then `remove`. Cleanup deletes only
-this fixture's three rows, proven public objects and dedicated guard resources;
+this fixture's vault, job, registry and attributed owner-event rows, proven public objects and dedicated guard resources;
 it retains production functions, workflow, table, definition and shared logs.
+An older removal can reconcile only residual attributed events with `events`;
+independent verification always requires the entire synthetic owner partition empty.
 If arming fails before any fixture-write or execution intent, use `abort` instead.
 Run `production_cleanup.py DIRECTORY` independently and wait for normal scale-down,
 recorded host termination and recorded volume deletion. Release the reservation

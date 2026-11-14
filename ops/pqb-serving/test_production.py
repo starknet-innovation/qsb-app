@@ -137,6 +137,20 @@ class ProductionGuardTests(TestCase):
             self.assertTrue(c.reconcile_completed_requests());kwargs=c.mutate.call_args.kwargs
             self.assertEqual(kwargs['Key']['pk']['S'],self.settings()['pk']);self.assertEqual(kwargs['ExpressionAttributeValues'][':records']['SS'],[json.dumps(r,sort_keys=True)])
             batch.submit_job.assert_not_called();batch.terminate_job.assert_not_called()
+    def test_owner_event_cleanup_rejects_other_subjects_and_partitions(self):
+        from production import checked_event
+        s=self.settings();event={'id':'evt_'+'a'*32,'type':'withdrawal.searching','subjectId':s['jobId'],'status':'searching','stage':'pinning','at':'2026-11-14T16:00:00Z'}
+        row={'pk':s['pk'],'sk':'EVENT#2026-11-14T16:00:00Z#'+event['id'],'version':0,'event':event,'expiresAt':2000}
+        self.assertEqual(checked_event(row,s),row)
+        for change in ['owner','subject','type','identity','version','extra-field']:
+            wrong=deepcopy(row)
+            if change=='owner':wrong['pk']='OWNER#foreign'
+            if change=='subject':wrong['event']['subjectId']='foreign'
+            if change=='type':wrong['event']['type']='deposit.confirmed'
+            if change=='identity':wrong['sk']='EVENT#other'
+            if change=='version':wrong['version']=1
+            if change=='extra-field':wrong['unrelated']='keep'
+            with self.subTest(change=change),self.assertRaisesRegex(RuntimeError,'unrelated owner event'):checked_event(wrong,s)
     def test_public_metrics_decode_without_losing_integer_identity(self):
         from production_guard import decode
         from decimal import Decimal

@@ -38,6 +38,8 @@ def main():
     group='/aws/lambda/'+s['guardFunction'];logs=read('guard logs','logs','describe-log-groups',['--log-group-name-prefix',group]);check('guard logs absent','logGroups' in logs and all(x['logGroupName']!=group for x in logs['logGroups']))
     for sk in [settings['sk'],'VAULT#'+settings['vaultId'],settings['ledgerSk']]:
         value=read('fixture row','dynamodb','get-item',['--table-name',settings['table'],'--key',json.dumps({'pk':{'S':settings['pk']},'sk':{'S':sk}}),'--consistent-read']);check('public row absent '+sk,'unresolvedError' not in value and not value.get('Item'))
+    partition=read('public owner partition','dynamodb','query',['--table-name',settings['table'],'--key-condition-expression','pk = :pk','--expression-attribute-values',json.dumps({':pk':{'S':settings['pk']}}),'--select','COUNT','--consistent-read'])
+    check('entire synthetic owner partition empty',partition.get('Count')==0 and not partition.get('LastEvaluatedKey'))
     snapshot=json.loads((root/'deployed-binding.json').read_text())
     for n,expected in snapshot['functions'].items():
         actual=read('deployed '+n,'lambda','get-function-configuration',['--function-name','qsb-app-'+n])
