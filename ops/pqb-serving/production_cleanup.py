@@ -56,6 +56,10 @@ def main():
     for offset in range(0,len(ids),100):jobs+=read('owned native jobs','batch','describe-jobs',['--jobs',*ids[offset:offset+100]]).get('jobs',[])
     check('all owned native work terminal',sorted(j['jobId'] for j in jobs)==sorted(ids) and all(j['status'] in ('SUCCEEDED','FAILED') and owned(j,s['knownRequests'],settings) for j in jobs))
     if sealed:check('paid work reconciled',len(jobs)==sealed['paidSubmissions']==len(s['knownRequests']))
+    groups=snapshot['computeEnvironments'][0]['computeResources']['securityGroupIds']
+    fleet=read('current pool fleet','ec2','describe-instances',['--filters','Name=instance.group-id,Values='+','.join(groups)])
+    check('current pool fleet empty','Reservations' in fleet and not any(i['State']['Name']!='terminated' for r in fleet['Reservations'] for i in r['Instances']))
+    if 'Reservations' in fleet:persist(root/('instances-'+stamp+'.json'),fleet,exclusive=True)
     baseline=json.loads((root/'instance-baseline.json').read_text());oldids={i['InstanceId'] for r in baseline['Reservations'] for i in r['Instances']};hosts={};volumes=set()
     history=[*(root/'capacity/instance-history').glob('*.json'),*root.glob('instances-*.json')]
     for f in history:
