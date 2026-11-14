@@ -378,9 +378,12 @@ resource "aws_batch_job_queue" "gpu" {
 resource "aws_batch_job_definition" "solver" {
   depends_on = [terraform_data.release_identity]
 
-  name                  = "qsb-gpu-solver"
-  type                  = "container"
-  platform_capabilities = ["EC2"]
+  name = "qsb-gpu-solver"
+  type = "container"
+  # Stage a new immutable image without disabling the revision the app still
+  # serves. Retire old revisions explicitly after pinned work is reconciled.
+  deregister_on_new_revision = false
+  platform_capabilities      = ["EC2"]
   retry_strategy {
     attempts = 1
   }

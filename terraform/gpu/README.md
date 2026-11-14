@@ -26,6 +26,17 @@ First build the app with the served release (`--solver-release`); this creates t
 
 Bind outputs `queue`, `definition`, and `bucket` to the application stack's `batch_job_queue`, `batch_job_definition`, and `batch_job_bucket`. A new image means a new job-definition revision: follow "Job-definition revision changes and recovery" in the [runbook](../../docs/OPERATIONAL-RUNBOOK.md#job-definition-revision-changes-and-recovery). The coordinator refuses a changed image, retry count, timeout, instance type or capacity before paid submission.
 
+Image updates retain previous job-definition revisions as `ACTIVE`
+(`deregister_on_new_revision = false`). Staging a PQB revision therefore leaves
+the currently served Config A revision usable. The app keeps its recorded
+revision until a separate reviewed app deployment changes it. Confirm the exact
+new revision and image, run its bounded public-input preflight, and require the
+queue and durable submission intents to be reconciled before switching the app.
+Retaining a revision does not migrate pinned requests or make an old image
+compatible with PQB. Deregister superseded revisions explicitly only after
+reconciliation and the rollback decision; destroying the managed job-definition
+resource deregisters every active revision with that job-definition name.
+
 After a new revision, run one bounded preflight through it (driver visible, image pulled by digest); never retry an uncertain SubmitJob response (the API has no idempotency token). Verify the job is terminal and EC2 capacity returns to zero. Don't use a wallet operation or a transaction as a GPU test.
 
 Jobs store the Batch job ID in the legacy `runpodId` field, and `computeProvider=aws-batch` marks them. A job from the earlier Runpod provider pauses for operator reconciliation instead of being polled or replayed on AWS; nothing calls Runpod.
