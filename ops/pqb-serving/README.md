@@ -51,6 +51,18 @@ without a comparative performance claim or a change to production selection.
 The worker still requests four vCPUs and 12,000 MiB; host vCPUs bound the number of
 simultaneous single-GPU hosts.
 
+An administrator-provisioned validation subnet in a new zone can be selected with
+`capacity.py plan ... --validation-subnet SUBNET_ID`. It is used only by the
+isolated pool; production subnets and routing are untouched. Planning requires the
+`Project=qsb` and `PqbValidation=public-serving` subnet tags, an available public
+subnet in the production VPC and a different zone, explicit association with the
+same production internet route table and network ACL, an offered GPU instance type
+and address headroom for the configured maximum host count plus a reserve. An offering is not a stock guarantee.
+The plan freezes subnet, route and ACL identities and rechecks them before capacity
+creation and runtime use. Allocation may consume free IPs without changing that
+identity. The controller creates or deletes no network resources; the administrator
+owns subnet creation and removal after independently verified pool cleanup.
+
 The image remains the enrolled `sm_86` artifact on A10G. Require a fresh native
 preflight on the selected hardware. The startup audit requires exactly one GPU
 matching `server/aws-batch-validation.json`, its UUID/driver and the

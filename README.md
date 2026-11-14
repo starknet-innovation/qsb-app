@@ -14,7 +14,7 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB Config A and PQB) vaults: v
 - [`consensus/`](consensus/README.md): the offline Bitcoin Core script check run before a withdrawal is submitted.
 - `contracts/`: versioned search-range vectors shared with qsb-solver.
 - [`terraform/`](terraform/README.md): the AWS app stack; [`terraform/gpu/`](terraform/gpu/README.md): the AWS Batch GPU stack.
-- `ops/`: AWS identities and IAM tooling ([`github-aws`](ops/github-aws/README.md)), the [IAM sandbox](ops/iam-sandbox/README.md), the positive-hit replay (`aws-gpu-migration`), and [isolated public PQB serving validation](ops/pqb-serving/README.md), with a larger A10G host option on the existing network.
+- `ops/`: AWS identities and IAM tooling ([`github-aws`](ops/github-aws/README.md)), the [IAM sandbox](ops/iam-sandbox/README.md), the positive-hit replay (`aws-gpu-migration`), and [isolated public PQB serving validation](ops/pqb-serving/README.md), with a larger A10G host on the existing network or a checked administrator-provisioned subnet for another availability zone.
 - `scripts/`: vendoring, OpenAPI generation, the operator reconcile CLIs and the script-reservation backfill.
 - `tests/`: unit, browser and reference tests.
 
