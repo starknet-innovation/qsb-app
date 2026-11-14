@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 
+from deadline import owns_job
 from control import ROOT, ACTIVE, check_operator_config, clean_source, dump, persist
 
 
@@ -124,7 +125,7 @@ class Monitor:
 
     def guard(self):
         jobs = active_inventory(self.read, self.state['queue'])
-        if any(j['jobDefinition'] != self.state['definition'] or j['jobQueue'] != self.state['queue'] for j in jobs):
+        if any(not owns_job(j, self.state) or j['jobQueue'] != self.state['queue'] for j in jobs):
             raise RuntimeError('Unrelated work appeared; yield capacity without terminating it')
         return jobs
 

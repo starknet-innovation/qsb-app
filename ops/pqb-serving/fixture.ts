@@ -7,7 +7,7 @@ import descriptor from "../../src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.js
 import { adoptPqb } from "../../src/lib/pqb";
 import { publicVaultSchema, canonicalManifest, type Job } from "../../src/lib/model";
 import { withVaultConfiguration, pinSolver, solverRelease, canonical } from "../../src/lib/provenance";
-import { checkedOutput } from "../../server/search-protocol";
+import { workerInput, parseParameters, referenceInput, checkedOutput } from "../../server/search-protocol";
 import { applyVerifiedHit } from "../../server/candidate-output";
 import { pqbPacket } from "../../src/lib/pqb";
 import { pqbReference } from "../../server/pqb-reference";
@@ -16,7 +16,7 @@ import { completedNativeReceipt, supersededCancellation } from "./native-result"
 import { coordinatorPublicSolvedResult } from "../../src/mainnet/coordinatorResult";
 
 const [mode, directory, indexName] = process.argv.slice(2);
-if (!["prepare", "validate", "verify", "audit"].includes(mode) || !directory) throw Error("Use prepare|validate|audit|verify EXTERNAL_DIRECTORY");
+if (!["prepare", "validate", "verify", "audit", "preflight-input"].includes(mode) || !directory) throw Error("Use prepare|validate|audit|verify EXTERNAL_DIRECTORY");
 const dir = path.resolve(directory);
 if (dir === process.cwd() || dir.startsWith(process.cwd() + path.sep)) throw Error("Keep evidence outside Git");
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -45,6 +45,13 @@ if (mode === "prepare") {
       { pk: `OWNER#${owner}`, sk: `VAULT#${vault.id}`, version: 0, vault },
       { pk: `OWNER#${owner}`, sk: `JOB#${job.id}`, version: 0, job } ] });
   console.log(JSON.stringify({ prepared: true, release: descriptor.id, manifestHash: job.manifestHash }));
+} else if (mode === "preflight-input") {
+  // Run validate first: the controller only calls this for the committed public fixture.
+  const prepared = JSON.parse(readFileSync(path.join(dir, "public-fixture.json"), "utf8"));
+  const job = prepared.rows[1].job as Job;
+  const parameters = parseParameters(pqbReference({ action: "export", ...referenceInput(prepared.rows[0].vault, job) }), true);
+  const input = workerInput(descriptor, job, 0, parameters);
+  save("preflight-input.json", { input, inputSha256: sha(JSON.stringify({ input })) });
 } else if (mode === "validate") {
   const prepared = JSON.parse(readFileSync(path.join(dir, "public-fixture.json"), "utf8"));
   if (canonical(Object.keys(prepared).sort()) !== canonical(["descriptor", "event", "format", "rows"]) ||

@@ -15,6 +15,7 @@ import time
 import uuid
 import zipfile
 from aws_clients import ScopedClient
+from deadline import owns_job
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -131,8 +132,49 @@ class Campaign:
             raise RuntimeError('Unexpected Batch definition namespace')
         if definition:
             found = self.client('batch').describe_job_definitions(jobDefinitions=[definition])['jobDefinitions']
+            if self.state.get('retainedDefinition'):
+                if self.config.get('snfIsolation') or self.state.get('capacity') or self.state.get('sharedPoolReplacement') or not re.fullmatch('[a-f0-9]{64}', self.state.get('inputSha256', '')):
+                    raise RuntimeError('Retained preflight scope changed')
+                binding = json.loads((self.directory / 'retained-preflight-binding.json').read_text())
+                if binding != {'definition': self.state['retainedDefinition'], 'inputSha256': self.state['inputSha256'], 'fixtureSha256': self.state['fixtureSha256']}:
+                    raise RuntimeError('Retained preflight binding changed')
+                if len(found) != 1 or found[0] != self.state['retainedDefinition'] or found[0].get('status') != 'ACTIVE':
+                    raise RuntimeError('Retained definition changed')
+                return
+            if self.state.get('inputSha256'):
+                raise RuntimeError('Input scope requires retained-definition mode')
             if len(found) != 1 or found[0].get('tags', {}).get('PqbValidation') != name:
                 raise RuntimeError('Batch revision is not owned by this campaign')
+
+    @staticmethod
+    def check_retained_definition(candidate, baseline, descriptor):
+        # Compare every provider-returned runtime field, allowing only identity,
+        # image and Terraform tags to differ. Empty optional lists are AWS defaults.
+        def normalized(value):
+            value = copy.deepcopy(value)
+            for key in ('jobDefinitionArn', 'revision', 'tags', 'status'):
+                value.pop(key, None)
+            container = value['containerProperties']
+            for parent, keys in [(container, ('mountPoints', 'ulimits', 'volumes', 'secrets')),
+                    (container.get('linuxParameters', {}), ('devices',)),
+                    (container.get('logConfiguration', {}), ('secretOptions',))]:
+                for key in keys:
+                    if parent.get(key) == []: parent.pop(key)
+            container['image'] = descriptor['image'].split('@')[1]
+            return value
+        if candidate.get('status') != 'ACTIVE' or candidate.get('tags', {}).get('Project') != 'qsb-gpu' or 'PqbValidation' in candidate.get('tags', {}):
+            raise RuntimeError('Expected an active permanent staged definition')
+        expected_image = baseline['containerProperties']['image'].split('@')[0] + '@' + descriptor['image'].split('@')[1]
+        if candidate['containerProperties']['image'] != expected_image or normalized(candidate) != normalized(baseline):
+            raise RuntimeError('Staged definition differs from the reviewed image-only revision')
+
+    def stop_settings(self):
+        fixture = json.loads((self.directory / 'public-fixture.json').read_text())
+        settings = {'tables': self.state['tables'], 'pk': fixture['rows'][1]['pk'], 'sk': fixture['rows'][1]['sk'],
+            'queue': self.state['queue'], 'definition': self.state['definition']}
+        if self.state.get('retainedDefinition'):
+            settings['inputSha256'] = self.state['inputSha256']
+        return settings
 
     def client(self, name):
         if name not in self.clients:
@@ -218,10 +260,12 @@ class Campaign:
                 raise RuntimeError('Build artifact hash mismatch: ' + name)
         return source, fixture, manifest
 
-    def prepare(self):
+    def prepare(self, existing_definition=None):
         if self.state:
             raise RuntimeError('Never restart an existing campaign')
         source, fixture, manifest = self.checked_build()
+        if existing_definition and (self.config.get('snfIsolation') or (self.directory / 'capacity-plan.json').exists() or (self.directory / 'shared-pool-binding.json').exists()):
+            raise RuntimeError('Retained definition requires the ordinary production pool')
         if self.config.get('snfIsolation') is True:
             from snf import prepare
             prepare(self, source, fixture, manifest)
@@ -264,6 +308,16 @@ class Campaign:
             self.state['watchdogSchedule'] = name + '-watchdog'
         if shared_binding:
             self.state['sharedPoolReplacement'] = shared_binding
+        if existing_definition:
+            subprocess.run(['node', '--import', 'tsx', 'ops/pqb-serving/fixture.ts', 'preflight-input', str(self.directory)], cwd=ROOT,
+                env={**os.environ, 'QSB_NETWORK': 'mainnet'}, check=True)
+            binding = json.loads((self.directory / 'preflight-input.json').read_text())
+            found = self.client('batch').describe_job_definitions(jobDefinitions=[existing_definition])['jobDefinitions']
+            if len(found) != 1:
+                raise RuntimeError('Retained definition missing')
+            self.check_retained_definition(found[0], snapshot['definition'][0], fixture['descriptor'])
+            self.state.update(definition=existing_definition, retainedDefinition=found[0], inputSha256=binding['inputSha256'])
+            persist(self.directory / 'retained-preflight-binding.json', {'definition': found[0], 'inputSha256': binding['inputSha256'], 'fixtureSha256': self.state['fixtureSha256']}, exclusive=True)
         retained = self.directory / 'build-artifacts'; retained.mkdir()
         for name in ['manifest.json', 'api.zip', 'coordinator.zip', 'reference.zip', 'webhooks.zip']:
             shutil.copyfile(ROOT / 'terraform/.build' / name, retained / name)
@@ -333,8 +387,13 @@ class Campaign:
         params = {k: copy.deepcopy(original[k]) for k in ['jobDefinitionName', 'type', 'parameters', 'retryStrategy', 'containerProperties', 'timeout', 'propagateTags', 'platformCapabilities'] if k in original}
         params['containerProperties']['image'] = state['image']
         params['tags'] = {'Project': 'qsb-gpu', 'PqbValidation': state['name'], 'SourceCommit': state['sourceCommit']}
-        definition = self.mutate('definition', 'batch', 'register_job_definition', **params)
-        state['definition'] = definition['jobDefinitionArn']; self.save()
+        if state.get('retainedDefinition'):
+            self.validate_scope()
+            if state['retainedDefinition']['containerProperties']['image'] != state['image']:
+                raise RuntimeError('Retained image differs from verified mirror')
+        else:
+            definition = self.mutate('definition', 'batch', 'register_job_definition', **params)
+            state['definition'] = definition['jobDefinitionArn']; self.save()
         boundary = (state['snfBootstrap']['boundaryArn'] if self.config.get('snfIsolation')
             else f'arn:aws:iam::{self.account}:policy/qsb/bootstrap/qsb-runtime-boundary')
         tags = [{'Key': 'Project', 'Value': 'qsb-vault'}, {'Key': 'PqbValidation', 'Value': state['name']}, {'Key': 'SourceCommit', 'Value': state['sourceCommit']}]
@@ -387,7 +446,7 @@ class Campaign:
         if base64.b64decode(response['CodeSha256']).hex() != state['coordinatorSha256']:
             raise RuntimeError('Deployed coordinator bytes differ')
         fixture = json.loads((self.directory / 'public-fixture.json').read_text())
-        settings = {'deadline': state['deadline'], 'tables': state['tables'], 'pk': fixture['rows'][1]['pk'], 'sk': fixture['rows'][1]['sk'], 'queue': state['queue'], 'definition': state['definition']}
+        settings = dict(self.stop_settings(), deadline=state['deadline'])
         if state.get('capacity'):
             settings['watchdogMaxAgeSeconds'] = 1800
         zip_bytes = io.BytesIO()
@@ -472,6 +531,8 @@ class Campaign:
 
     def start(self, phase):
         from boto3.dynamodb.types import TypeSerializer
+        if self.state.get('retainedDefinition') and phase != 'preflight':
+            raise RuntimeError('Retained definitions support one preflight only')
         self.before_deadline()
         if phase not in ('preflight', 'solve') or self.state['phase'] not in ('armed', 'preflight-passed'):
             raise RuntimeError('Invalid phase transition')
@@ -543,7 +604,7 @@ class Campaign:
         jobs = []
         ids = sorted(ids)
         for offset in range(0, len(ids), 100):
-            jobs += [j for j in self.client('batch').describe_jobs(jobs=ids[offset:offset + 100])['jobs'] if j['jobDefinition'] == self.state['definition']]
+            jobs += [j for j in self.client('batch').describe_jobs(jobs=ids[offset:offset + 100])['jobs'] if owns_job(j, self.state)]
         return jobs
 
     def collect(self):
@@ -622,6 +683,32 @@ class Campaign:
             if token in seen: raise RuntimeError('Repeated CloudWatch log pagination token')
             seen.add(token); request['nextToken'] = token
 
+    def orphan_inputs(self, s3, fixture, allow_missing):
+        if not self.state.get('retainedDefinition'):
+            return (obj for page in s3.get_paginator('list_objects_v2').paginate(Bucket=self.state['bucket'], Prefix='inputs/')
+                for obj in page.get('Contents', []) if obj['LastModified'].timestamp() >= self.state['createdAt'])
+        # Never inspect foreign bodies in the shared bucket. An accepted POST may
+        # be unknown, but its input key was durably recorded in our public table.
+        from boto3.dynamodb.types import TypeDeserializer
+        client = self.client('dynamodb')
+        try:
+            row = client.get_item(TableName=self.state['tables'][0],
+                Key={k: {'S': fixture['rows'][1][k]} for k in ('pk', 'sk')}, ConsistentRead=True).get('Item')
+        except client.exceptions.ResourceNotFoundException:
+            if not allow_missing: raise
+            return []
+        if not row: return []
+        job = TypeDeserializer().deserialize(row['job'])
+        records = [job.get('batchSubmission'), *(slot.get('batchSubmission') for slot in job.get('parallelSlots', []))]
+        keys = set()
+        for record in records:
+            if record is None: continue
+            if (record.get('inputSha256') != self.state['inputSha256'] or record.get('definition') != self.state['definition']
+                or record.get('queue') != self.state['queue'] or not re.fullmatch(r'inputs/[a-f0-9-]{36}\.json', record.get('inputKey', ''))):
+                raise RuntimeError('Public retained preflight submission identity changed')
+            keys.add(record['inputKey'])
+        return [{'Key': key} for key in sorted(keys)]
+
     def collect_artifacts(self, jobs, stamp, allow_missing=False):
         # Original public objects are copied without exposing them in console output.
         objects = self.directory / 'objects'; objects.mkdir(exist_ok=True)
@@ -669,21 +756,18 @@ class Campaign:
                 persist(logs / (job['jobId'] + '-' + stamp + '.json'), pages, exclusive=True)
         fixture = json.loads((self.directory / 'public-fixture.json').read_text())
         manifest_hash = fixture['rows'][1]['job']['manifestHash']
-        for page in s3.get_paginator('list_objects_v2').paginate(Bucket=self.state['bucket'], Prefix='inputs/'):
-            for obj in page.get('Contents', []):
-                if obj['LastModified'].timestamp() < self.state['createdAt']:
-                    continue
-                target = objects / obj['Key'].replace('/', '__')
-                if target.exists():
-                    continue
-                with s3.get_object(Bucket=self.state['bucket'], Key=obj['Key'])['Body'] as body:
-                    data = body.read()
-                value = json.loads(data)
-                if value.get('input', {}).get('manifestHash') != manifest_hash:
-                    continue
-                with open(target, 'xb') as out:
-                    out.write(data); out.flush(); os.fsync(out.fileno())
-                persist(objects / (target.name + '.head.json'), s3.head_object(Bucket=self.state['bucket'], Key=obj['Key']), exclusive=True)
+        for obj in self.orphan_inputs(s3, fixture, allow_missing):
+            target = objects / obj['Key'].replace('/', '__')
+            if target.exists():
+                continue
+            with s3.get_object(Bucket=self.state['bucket'], Key=obj['Key'])['Body'] as body:
+                data = body.read()
+            value = json.loads(data)
+            if value.get('input', {}).get('manifestHash') != manifest_hash:
+                continue
+            with open(target, 'xb') as out:
+                out.write(data); out.flush(); os.fsync(out.fileno())
+            persist(objects / (target.name + '.head.json'), s3.head_object(Bucket=self.state['bucket'], Key=obj['Key']), exclusive=True)
         persist(self.directory / ('native-index-' + stamp + '.json'), {'image': self.state.get('image'), 'definition': self.state.get('definition'),
             'jobs': jobs, 'startupLogs': {j['jobId']: 'logs/' + j['jobId'] + '-' + stamp + '.json' for j in jobs if j.get('container', {}).get('logStreamName')}}, exclusive=True)
         # Managed workflow ALL logs retain transitions even where the operator cannot read execution data APIs.
@@ -902,7 +986,7 @@ class Campaign:
             self.mutate('remove-function-' + name, 'lambda', 'delete_function', FunctionName=name)
         for table in resources['tables']:
             self.mutate('remove-table-' + table, 'dynamodb', 'delete_table', TableName=table)
-        if self.state.get('definition'):
+        if self.state.get('definition') and not self.state.get('retainedDefinition'):
             self.mutate('remove-definition', 'batch', 'deregister_job_definition', jobDefinition=self.state['definition'])
         for role, metadata in resources['roles'].items():
             if 'validation' in metadata['policies']:
@@ -919,7 +1003,7 @@ class Campaign:
         spec = importlib.util.spec_from_file_location('pqb_deadline', ROOT / 'ops/pqb-serving/deadline.py')
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         fixture = json.loads((self.directory / 'public-fixture.json').read_text())
-        settings = {'tables': self.state['tables'], 'pk': fixture['rows'][1]['pk'], 'sk': fixture['rows'][1]['sk'], 'queue': self.state['queue'], 'definition': self.state['definition'], 'stopReason': reason}
+        settings = dict(self.stop_settings(), stopReason=reason)
         # A fresh explicit stop receipt; never retry a compute submission.
         stamp = str(time.time_ns())
         persist(self.directory / ('stop-' + stamp + '.intent.json'), settings, exclusive=True)
@@ -937,10 +1021,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=['inspect', 'prepare', 'mirror', 'deploy', 'start', 'collect', 'final_collect', 'stop', 'remove'])
     parser.add_argument('directory', type=Path)
+    parser.add_argument('--existing-definition', help='Prepare one public preflight against a retained permanent revision')
     parser.add_argument('--phase', choices=['preflight', 'solve'])
     args = parser.parse_args()
+    if args.existing_definition and args.mode != 'prepare':
+        parser.error('--existing-definition is only accepted by prepare')
     campaign = Campaign(args.directory)
-    if args.mode == 'start':
+    if args.mode == 'prepare':
+        campaign.prepare(args.existing_definition)
+    elif args.mode == 'start':
         campaign.start(args.phase)
     else:
         getattr(campaign, args.mode)()
