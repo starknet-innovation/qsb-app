@@ -284,6 +284,26 @@ The withdrawal API Lambda has a 120-second timeout, but CloudFront returns a tim
 
 It reads the table with a Scan and writes only `SCRIPT#` rows, with PutItem. Its report names vault ids, never owner addresses.
 
+## Service fee
+
+The optional USD 200 service fee is the user's choice. The webapp offers it as a checkbox on the deposit, and the SDK and CLI as `serviceFee: { maxSats }` and `--service-fee <max sats>`. The deposit then pays it as output 1. Nothing enforces it: an unpaid fee changes nothing, and nothing records whether a vault's deposit paid it. The fee address is the KMS key's P2WPKH address, the same for every payment, so payments to it are public and linkable on chain. The price is Coinbase's BTC-USD spot price, which each API instance reuses for a minute after a successful read; if Coinbase is down, `GET /v1/service-fee` answers 503 and the webapp offers to deposit without the fee.
+
+**Turn it on or off.** See [terraform/README.md](../terraform/README.md#service-fee-key): an administrator creates the key, then `service_fee_enabled` adds its public key to the API.
+
+**Move what the fee address received.** A signer the key policy names, with the `signerGrant` in its IAM policy ([ops/service-fee-key](../ops/service-fee-key/README.md)), runs the sweep in the key's account and region, signed in through IAM Identity Center:
+
+```sh
+npm run service-fee -- address
+npm run service-fee -- sweep --to <destination> --fee-rate <sat/vB>
+npm run service-fee -- sweep --to <destination> --fee-rate <sat/vB> --sign
+```
+
+- `address` prints the fee address, derived from the key's public key.
+- `sweep` reads the address's confirmed outputs from the chain API and plans one transaction moving all of them to the destination, less the miner fee. It signs nothing. It refuses a miner fee over 10% of the amount moved.
+- `--sign` has KMS sign each input with SIGHASH_ALL, makes every signature low-S, checks it against the key, and prints the raw transaction and its txid. It broadcasts nothing: check the destination, amount and fee, then broadcast `rawTxHex` yourself (any node or public relay; it's a standard P2WPKH spend). The miner fee rate is the one given; there's no change output and no RBF bump, so pick a rate that confirms.
+
+Don't disable or delete the key while the address holds funds: the key can't be exported, so the funds go with it.
+
 ## Operator session
 
 Reconciliation, plans and the script-reservation backfill run as `qsb-operator`. In the current account it is assumed from the Identity Center permission set; see the profiles in [ops/github-aws/README.md](../ops/github-aws/README.md#human-access-without-root). Sessions last at most an hour. The scoped runtime reconcile role Terraform declares (`operator_reconcile_role_arn`) stays dormant: `qsb-operator` is denied role chaining, so don't configure a profile for it.

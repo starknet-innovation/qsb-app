@@ -104,6 +104,7 @@ import {
   type Delivery,
 } from "./webhooks";
 import { httpsTransport, systemResolver } from "./webhook-transport";
+import { serviceFee as configuredServiceFee, type ServiceFeeDependencies } from "./service-fee";
 const workflowClient = new SFNClient({ region: process.env.AWS_REGION });
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -177,6 +178,8 @@ export function createApp(
     ownerLimits?: OwnerLimits;
     /** Tests only: a shorter SCRIPT_LOOKUP_MS. */
     scriptLookupMs?: number;
+    /** The optional service fee's key and price. The deployment reads QSB_SERVICE_FEE_PUBLIC_KEY. */
+    serviceFee?: ServiceFeeDependencies;
   } = {},
 ) {
   // Routes write through `store`, so withdrawal and deposit status changes become owner
@@ -214,6 +217,7 @@ export function createApp(
   const ledger = dependencies.chain || chain,
     miner = dependencies.miner || slipstream;
   const enabled = dependencies.enabled ?? transactionsEnabled;
+  const serviceFee = configuredServiceFee(dependencies.serviceFee);
   const apiKeys = dependencies.apiKeys ?? apiKeysEnabled();
   const limits = () => dependencies.ownerLimits ?? ownerLimits();
   // Cost- and funds-moving routes only; sign-in and reads stay open so the app can show this.
@@ -405,7 +409,20 @@ export function createApp(
       withdrawalDeadline: null,
       computeBudget: null,
       ownerLimits: await ownerLimitsConfig(credential(c)),
+      serviceFeeAddress: serviceFee?.address ?? null,
     });
+  });
+  // The optional, opt-in service fee: its amount in sats at the current BTC/USD price and the
+  // address it's paid to. The deposit carries it as output 1; nothing checks that it's paid.
+  app.get("/api/service-fee", async (c) => {
+    c.header("Cache-Control", "no-store");
+    if (!serviceFee)
+      return apiError(c, 404, "service_fee_not_offered", "This deployment doesn't offer the service fee.");
+    try {
+      return c.json(await serviceFee.quote());
+    } catch {
+      return apiError(c, 503, "service_fee_price_unavailable", "The BTC/USD price is temporarily unavailable.");
+    }
   });
   app.get("/api/rates", async (c) => {
     try {

@@ -3,6 +3,7 @@ import { BITCOIN_NETWORK } from "./network";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { withdrawalSchema, type Withdrawal, type Job } from "./model";
+import type { ServiceFeeOutput } from "./service-fee";
 export type FundingInput = {
   txid: string;
   vout: number;
@@ -15,15 +16,28 @@ export function outputScript(address: string): Uint8Array {
   return btc.OutScript.encode(btc.Address(BITCOIN_NETWORK).decode(address));
 }
 const opts = { allowUnknownOutputs: true, allowUnknownInputs: true };
+/** The optional service fee output's script, refused below the P2WPKH dust limit. */
+function serviceFeeScript(serviceFee: ServiceFeeOutput): Uint8Array {
+  const decoded = btc.Address(BITCOIN_NETWORK).decode(serviceFee.address);
+  if (decoded.type !== "wpkh") throw new Error("The service fee address isn't a P2WPKH address.");
+  if (serviceFee.amount < changeDustLimit(false)) throw new Error("The service fee is below the dust limit.");
+  return btc.OutScript.encode(decoded);
+}
+/**
+ * The unsigned deposit: output 0 pays the vault `amount`; with `serviceFee`, output 1 pays the
+ * opted-in service fee; the last output, if any, is change back to the wallet.
+ */
 export function fundingPsbt(
   inputs: FundingInput[],
   scriptHex: string,
   amount: bigint,
   fee: bigint,
   changeAddress: string,
+  serviceFee?: ServiceFeeOutput,
 ) {
   if (amount <= 0n || fee <= 0n)
     throw new Error("Amount and fee must be positive.");
+  const feeScript = serviceFee ? serviceFeeScript(serviceFee) : undefined;
   if (!inputs.length)
     throw new Error("Select at least one confirmed payment UTXO.");
   const script = hex.decode(scriptHex);
@@ -67,11 +81,12 @@ export function fundingPsbt(
     });
     total += input.value;
   }
-  const change = total - amount - fee;
-  if (change < 0n) throw new Error("Insufficient funds, including miner fee.");
+  const change = total - amount - fee - (serviceFee?.amount ?? 0n);
+  if (change < 0n) throw new Error(serviceFee ? "Insufficient funds, including the miner and service fees." : "Insufficient funds, including miner fee.");
   if (change > 0n && change < changeDustLimit(nestedPaymentAddress(changeAddress)))
     throw new Error("Change is too small. Adjust amount or inputs.");
   tx.addOutput({ amount, script });
+  if (serviceFee && feeScript) tx.addOutput({ amount: serviceFee.amount, script: feeScript });
   if (change > 0n) tx.addOutputAddress(changeAddress, change, BITCOIN_NETWORK);
   return tx;
 }
@@ -88,23 +103,26 @@ export function nestedPaymentAddress(address: string): boolean {
  * Every input spends the wallet's P2WPKH or nested-SegWit payment output. Its witness is
  * [DER signature, compressed key], counted at the 72-byte DER maximum, so the size is an
  * upper bound and the paid rate is never below the requested one. Nested inputs also
- * carry a 23-byte scriptSig pushing the P2WPKH redeem script.
+ * carry a 23-byte scriptSig pushing the P2WPKH redeem script. `serviceFee` adds the
+ * service fee's P2WPKH output.
  */
 export function fundingVsize(
   inputCount: number,
   nested: boolean,
   vaultScriptLength: number,
   change: boolean,
+  serviceFee = false,
 ): number {
   if (!Number.isSafeInteger(inputCount) || inputCount < 1)
     throw new Error("Select at least one confirmed payment UTXO.");
   const changeScript = nested ? 23 : 22;
   const outputs =
     8 + varintSize(vaultScriptLength) + vaultScriptLength +
+    (serviceFee ? 8 + 1 + 22 : 0) +
     (change ? 8 + 1 + changeScript : 0);
   const base =
     4 + varintSize(inputCount) + inputCount * (41 + (nested ? 23 : 0)) +
-    varintSize(change ? 2 : 1) + outputs + 4;
+    varintSize(1 + (serviceFee ? 1 : 0) + (change ? 1 : 0)) + outputs + 4;
   const witness = 2 + inputCount * (1 + 1 + 72 + 1 + 33);
   return Math.ceil((base * 4 + witness) / 4);
 }
@@ -157,7 +175,8 @@ export function belowMinerFloor(milliSatPerVb: bigint, floorSatPerVb: number): b
  * The miner fee fundingPsbt should use for a sat/vB rate. With change, the fee is
  * rate × vsize rounded up. If the change would be below the dust limit, the
  * transaction has no change output and that remainder is added to the fee, so the
- * effective rate is higher than requested (vsize and fee are both reported).
+ * effective rate is higher than requested (vsize and fee are both reported). An opted-in
+ * `serviceFee` (sats) is paid on top of `amount` and takes its own output.
  */
 export function fundingFeeForRate(
   inputValues: bigint[],
@@ -165,18 +184,20 @@ export function fundingFeeForRate(
   vaultScriptLength: number,
   amount: bigint,
   milliSatPerVb: bigint,
+  serviceFee?: bigint,
 ): { fee: bigint; vsize: number; change: boolean } {
   if (amount <= 0n) throw new Error("Amount and fee must be positive.");
+  const paid = amount + (serviceFee ?? 0n);
+  const short = serviceFee !== undefined ? "Insufficient funds, including the miner and service fees." : "Insufficient funds, including miner fee.";
   const total = inputValues.reduce((sum, value) => sum + value, 0n);
   const feeAt = (vsize: number) => (BigInt(vsize) * milliSatPerVb + 999n) / 1000n;
-  const withChange = fundingVsize(inputValues.length, nested, vaultScriptLength, true);
+  const withChange = fundingVsize(inputValues.length, nested, vaultScriptLength, true, serviceFee !== undefined);
   const feeWithChange = feeAt(withChange);
-  if (total - amount - feeWithChange >= changeDustLimit(nested))
+  if (total - paid - feeWithChange >= changeDustLimit(nested))
     return { fee: feeWithChange, vsize: withChange, change: true };
-  const withoutChange = fundingVsize(inputValues.length, nested, vaultScriptLength, false);
-  if (total - amount < feeAt(withoutChange))
-    throw new Error("Insufficient funds, including miner fee.");
-  return { fee: total - amount, vsize: withoutChange, change: false };
+  const withoutChange = fundingVsize(inputValues.length, nested, vaultScriptLength, false, serviceFee !== undefined);
+  if (total - paid < feeAt(withoutChange)) throw new Error(short);
+  return { fee: total - paid, vsize: withoutChange, change: false };
 }
 /**
  * Upper bound on a Config A QSB scriptSig, from cmd_assemble in public/qsb/qsb_pipeline.py.

@@ -16,11 +16,12 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB Config A and PQB) vaults: v
 - [`terraform/`](terraform/README.md): the AWS app stack; [`terraform/gpu/`](terraform/gpu/README.md): the AWS Batch GPU stack.
 - `ops/`: AWS identities and IAM tooling ([`github-aws`](ops/github-aws/README.md)), the [IAM sandbox](ops/iam-sandbox/README.md), the positive-hit replay (`aws-gpu-migration`), and [isolated public PQB serving validation](ops/pqb-serving/README.md), with a larger A10G host on the existing network or a checked administrator-provisioned subnet for another availability zone.
 - `scripts/`: vendoring, OpenAPI generation, the operator reconcile CLIs and the script-reservation backfill.
+- Optional service fee: the [KMS key tooling](ops/service-fee-key/README.md) in `ops/service-fee-key/` and the operator sweep in `scripts/service-fee.ts`.
 - `tests/`: unit, browser and reference tests.
 
 ## How a withdrawal runs
 
-1. The browser (or the SDK) generates the vault locally, or the SDK checks recovery state its caller generated ([own state](sdk/README.md#your-own-recovery-state)), and registers only its public record. The user signs the one deposit in their wallet, and the API relays it to MARA Slipstream.
+1. The browser (or the SDK) generates the vault locally, or the SDK checks recovery state its caller generated ([own state](sdk/README.md#your-own-recovery-state)), and registers only its public record. The user signs the one deposit in their wallet, and the API relays it to MARA Slipstream. If the deployment offers it, the user can choose to pay the optional USD 200 service fee in BTC as a second output of that deposit ([service fee](docs/API.md#service-fee)).
 2. `POST /api/jobs` in `createApp` (`server/app.ts`) checks the served solver release, reserves the vault's outpoints atomically, writes the job and calls `startWorkflow`, which starts the withdrawal state machine.
 3. The state machine's `CoordinateSearch` task invokes the coordinator Lambda (`terraform/workflow.tf`). The coordinator submits GPU work to AWS Batch, polls it, and has the reference Lambda (`worker/cpu`) re-check every hit.
 4. Once solved, the browser assembles and signs the withdrawal locally. `POST /api/jobs/:id/submit` checks the exact spend, runs the offline Core check and posts it once to MARA Slipstream ([exact submission](docs/EXACT-SUBMIT.md)).

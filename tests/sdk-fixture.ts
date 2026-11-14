@@ -6,6 +6,7 @@ import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { createApp } from "../server/app";
+import type { ServiceFeeDependencies } from "../server/service-fee";
 import { MemoryStore } from "../server/store";
 import { Esplora } from "../server/chain";
 import type { OwnerLimits } from "../server/owner-limits";
@@ -95,7 +96,7 @@ export class FakeChain {
 
 export type Recorded = { method: string; url: string; headers: Record<string, string>; body: string };
 
-export function world(server: { ownerLimits?: OwnerLimits; apiKeys?: boolean } = {}) {
+export function world(server: { ownerLimits?: OwnerLimits; apiKeys?: boolean; serviceFee?: ServiceFeeDependencies } = {}) {
   const store = new MemoryStore();
   const chain = new FakeChain();
   const minerSubmissions: string[] = [];
