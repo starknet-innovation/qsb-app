@@ -1,0 +1,181 @@
+{
+  "format": "pqb-production-consumer-qualification-v1",
+  "assessmentDateUtc": "2026-11-14T01:06:07.936283+00:00",
+  "descriptor": {
+    "generatorCommit": "eccdd09772edf14ab37fc63992b0626ad7ff2221",
+    "id": "pqb-ranked-v2-cfd99e384469-edce7a14b554",
+    "image": "ghcr.io/starknet-innovation/qsb-solver@sha256:edce7a14b5548a079f8ebf1e866c533cb14573328cf739a6647b150cca08756e",
+    "kernelCommit": "cfd99e3844698f59679e4c15cf567db2976b9ffc",
+    "protocol": "pqb-v1",
+    "schemaVersion": 3,
+    "searchContract": "5217daa6415b83dcce2d85159130df4994ab0e9bb67910c7bdf00e5804f4ee71",
+    "searchVersion": "pqb-ranked-v2",
+    "solverCommit": "cfd99e3844698f59679e4c15cf567db2976b9ffc",
+    "solverRepository": "https://github.com/starknet-innovation/qsb-solver"
+  },
+  "nativeConsumerSourceCommit": "266de4a4bf5e603f8bc85a46aaa91b5cedefcc4f",
+  "offlineCheckerSourceCommit": "266de4a4bf5e603f8bc85a46aaa91b5cedefcc4f",
+  "packagedArtifactsSha256": {
+    "api.zip": "8a873d1c32dfc749cfb2b3974b76aceed9b7b09f7fbf4e234bee802676b59980",
+    "coordinator.zip": "c8bba968ab9313ff1f9808b0d40c47176b77ac3e5b6db2a1d8087c8ad2a8e478",
+    "reference.zip": "65d89c9005fc9dcb81b6113a51b46fe5e796ff3e385473404afb92bc0b9f2c91",
+    "webhooks.zip": "36e14fc8e4b111a9d90403c4d97578f88008dc1ee67be0224ae894c089f96cd8",
+    "frontend/assets/index-Cyb0U4un.css": "5b3f35217407938cb952beffe373248c219a282755de0e889a976239adb8cc9a",
+    "frontend/assets/index-TZkMqNQf.js": "5d95da4b967a5493d029b0738d4d722af1c5cf890dcc00f5335cc02a8652a29d",
+    "frontend/assets/qsb-worker-UY0JCdqm.js": "74f5a6469bb96ccf4212dc53d54ba94eb49ab024f2271c2487c0548904687179",
+    "frontend/favicon.svg": "cdace391f7d5a1452fc2e88f2049838846a76ee9e15c1e60055e3f197477aa5c",
+    "frontend/index.html": "53fa64420aecc94cfaad884a3b80f919edb9601409f0d8dc33719eaaf0a2aabd",
+    "frontend/pqb/LICENSE": "d13e6ac8092492ce31a7a79fb9e461ab1fd1ce667405c4c94a7d12f2d7bc9ecc",
+    "frontend/pqb/THIRD_PARTY_NOTICES.md": "738dbf61c6ab0bed5b225deab43dd7421d53f6c7637ceb62c8f356dea57783fd",
+    "frontend/pqb/provenance.json": "589f5f9f866c821a54b7160464d33e3fc5d54e733bd3a30dede7da7794b68dbe",
+    "frontend/pyodide/README.md": "7d434f487a81a9ea4944000fbbb5a771da89ca32fd1ff5edca0c5954b90cedec",
+    "frontend/pyodide/console-v2.html": "1b6f8595802c6dc753ddca4bd5c1271b9a23f2de2d014ad9c6a0624975b0db54",
+    "frontend/pyodide/console.html": "e7be5fc9db7c510c9287c5e25c4d63141ed8ad6707404136aec299699e42a6bd",
+    "frontend/pyodide/package.json": "81f7cf8ee62633854d610a040efe15d3f9e80cfc78fbc32426860419b8712924",
+    "frontend/pyodide/pyodide-lock.json": "3256ffc76388de0e37f4b34d42ab484268d1afc675179ff97b2a5bb14f84ccac",
+    "frontend/pyodide/pyodide.asm.js": "1263f02b5b26099b96112378156f242dd98b39a8201ba7765e5fe3d455c5ce91",
+    "frontend/pyodide/pyodide.asm.wasm": "e2f4ee75b325e35eb31bfb8c613d4dd5098f5502c156a97847686875b5025480",
+    "frontend/pyodide/pyodide.js": "718d40f1c015dd25ec724cc8fc4e2325d6a45a92ae225121ff6953f224a16f72",
+    "frontend/pyodide/pyodide.mjs": "23213d27e9dacbda6f25f955fb38dabfc40ada082c04ee253047ea5dddcaa3b5",
+    "frontend/pyodide/python_stdlib.zip": "4298b6ee445cb724c3973437da47789752b9e6ff4e26619026b283ec801fc46b",
+    "frontend/qsb/LICENSE": "8d2562b24636fb569997da918899eed12e95b573eef1207bf60be6bf7bd836ff",
+    "frontend/qsb/bitcoin_tx.py": "c7e52af90bd0d9fce9834fce26dcd67aee0d7751ee228d9730873c4d12659a5c",
+    "frontend/qsb/bridge.py": "2a786a36a988e298b4fbb6132f37a50d7610fb14fb382143518c7ad3ec6d6d96",
+    "frontend/qsb/manifest.json": "e73a049b7c02350d03d3b5409036e9d9aaf384f09500446eb497c361e1f3c60f",
+    "frontend/qsb/qsb_pipeline.py": "05334c08fa012a77ccba2887e05d78f90a8b81c0e34b786931b423f7f11255d8",
+    "frontend/qsb/secp256k1.py": "d2cebd1410b75cad606806cf02d7bee3e24724d5fcb7a53a07f598fcbc8afece"
+  },
+  "producerProvenance": {
+    "verified": true,
+    "workflowRun": "https://github.com/starknet-innovation/qsb-solver/actions/runs/43205074943/attempts/1",
+    "amd64ImageManifest": "sha256:9aa22b922b9dbee81177ae8f622a33673c8ca92574560c9814d9cfb783f71d68",
+    "mirrorReceipt": {
+      "file": "mirror.response.json",
+      "sha256": "c78d9e3fd70afd7a7388b844599b4044e15d702557f08ad64fb41eef4677e0bc"
+    },
+    "verifiedAttestationAndMirrorLog": {
+      "file": "mirror.log",
+      "sha256": "c836fc54a2de87250c44995d0e32fbb5199bfd8975472ff030b42dc1f2fb47d5"
+    },
+    "existingProducerAssessment": "https://github.com/starknet-innovation/qsb-solver/blob/7694d68d34092ee4aa3c58f3220011bbfff75a1b/docs/pqb/2026-11-12-tls-replacement.md"
+  },
+  "runtime": {
+    "region": "eu-west-2",
+    "instanceType": "g5.4xlarge",
+    "gpu": "A10G",
+    "driverVersions": [
+      "580.178.04"
+    ],
+    "cudaRuntime": "12.8.1",
+    "allocationStrategy": "BEST_FIT_PROGRESSIVE",
+    "maxVcpus": 64,
+    "minVcpus": 0,
+    "validationGpuSlots": 4,
+    "existingSubnetsUsed": true,
+    "iamChanges": false,
+    "networkChanges": false,
+    "nativeDevicesWithCompletedUnits": 9
+  },
+  "results": {
+    "nativePreflightUnits": 1,
+    "fullSolveCompletedUnits": 102,
+    "completedUnitsIncludingPreflight": 103,
+    "unitsByStageIncludingPreflight": {
+      "pinning": 24,
+      "round1": 43,
+      "round2": 36
+    },
+    "paidSolveSubmissions": 110,
+    "supersededCancellations": 8,
+    "emittedCandidatesIndependentlyChecked": 14,
+    "fullSolutions": 3,
+    "offlineCoreAccepted": 1,
+    "offlineCoreRejectedMutations": 12,
+    "broadcast": false
+  },
+  "timing": {
+    "preflightWorkflowSeconds": 709.609,
+    "fullWorkflowSeconds": 13013.448,
+    "fullWorkflowStart": "2026-11-13T22:10:29.682000+01:00",
+    "fullWorkflowStop": "2026-11-14T01:47:23.130000+01:00",
+    "fullWorkflowExecutionsIncludingContinuations": 3,
+    "boundary": "Workflow start through final continuation success, including queue/startup, compute, transport, coordinator CPU checks and polling; collector completion is later.",
+    "matchedPerformanceComparison": false
+  },
+  "cost": {
+    "linuxOnDemandHourlyUsd": "2.06148",
+    "estimatedVmComputeUsd": "28.92141913333333333333333334",
+    "conservativeVmUpperEstimateUsd": "31.65121858904283333333333333",
+    "estimatedLondonVmIncludingInterruptedUsd": "38.85832536666666666666666667",
+    "upperLondonVmIncludingInterruptedUsd": "47.41956008859948940114000000",
+    "zeroHostCapacityBlockedAttemptsVmUsd": "0",
+    "providerBillingQueried": false,
+    "excludedCharges": [
+      "EBS",
+      "IPv4",
+      "storage/registry",
+      "service",
+      "logging",
+      "network"
+    ],
+    "method": "Estimate launch to AWS shutdown transition; upper bound launch to first retained explicit terminated observation, including idle, failed and superseded host time."
+  },
+  "priorInterruptedLondonCampaigns": [
+    {
+      "campaign": "qsb-pqb-v-f12a1261fc7b",
+      "sourceCommit": "cc7594afdf0f225b09dbcc69c34ed75b5b30bbbf",
+      "assessmentSha256": "5a10c14f7420a97be080312e487286f60c9de3a46609610658400ec3c2a7e3ad",
+      "estimatedVmUsd": "1.981883966666666666666666667",
+      "upperVmUsd": "4.159879317934656067806666667"
+    },
+    {
+      "campaign": "qsb-pqb-v-cd9a3b40a562",
+      "sourceCommit": "8b73649bb0fdc9dd7de6a108ece3de986d1319f9",
+      "assessmentSha256": "90ee89c1d8b42d4ee0a4b8515b5652278fde07208548134506f2c76d088f23f8",
+      "estimatedVmUsd": "7.955022266666666666666666666",
+      "upperVmUsd": "11.60846218162200000000000000"
+    }
+  ],
+  "cleanup": {
+    "verified": true,
+    "checksPassed": 281,
+    "recordedHosts": 12,
+    "recordedVolumes": 12,
+    "dedicatedCampaignResourcesRemoved": true,
+    "fleetIdle": true,
+    "originalPoolAndQueueRestored": true,
+    "restoredInstanceType": "g5.xlarge",
+    "restoredAllocationStrategy": "BEST_FIT",
+    "restorationChecksPassed": 11,
+    "productionBundlesAndConfigASettingsUnchanged": true,
+    "reservationStatus": "released",
+    "reservedUsd": 200,
+    "privateCleanupReceipt": {
+      "file": "independent-cleanup-1794617736173517000.json",
+      "sha256": "7d7fd0de4d5274f645114b239ab944f3801fc62b06fa509fa2debdab88981cad"
+    },
+    "privateRestorationReceipt": {
+      "file": "independent-restoration-1794618220299530000.json",
+      "sha256": "0c69876298cc1a5f6612be7c5e74f843d2450181b8689bbd3bad0d07ea0877a1"
+    },
+    "retainedResources": [
+      "Immutable ECR mirror",
+      "Existing production network and shared resources"
+    ]
+  },
+  "adoption": {
+    "qualifiedScope": "Temporary production-account London g5.4xlarge public-validation profile and the recorded immutable consumer bundles",
+    "productionServingSelection": "Config A",
+    "reviewedDeploymentAndHardwareSelectionStillRequired": true,
+    "previousConfigARelease": "qsb-ranked-v2-40b5d9f9f741-6b4ac63b897c",
+    "previousQualifiedPqbRelease": null
+  },
+  "limits": [
+    "Public synthetic nonexistent outpoints and OP_TRUE helper",
+    "No wallet signature, chain/UTXO or miner acceptance or broadcast",
+    "Single complete pipeline assessment, no matched performance comparison or exhaustive domain coverage proof",
+    "Temporary London g5.4xlarge validation profile; production hardware/release adoption remains separate",
+    "Completed-unit trial/gate sanity checks are statistical and do not prove exhaustive enumeration.",
+    "Original provider and operator receipts remain private; public data below reproduce the request/result and offline checking scope."
+  ]
+}

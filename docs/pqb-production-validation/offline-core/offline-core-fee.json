@@ -1,0 +1,10 @@
+{
+  "label": "fee",
+  "expectedValid": false,
+  "accepted": false,
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "transactionSha256": "46a6c5668ba9908b2eba69bdfecb91ade9bdbaf12f85c3589fb0f84454840cc6"
+}

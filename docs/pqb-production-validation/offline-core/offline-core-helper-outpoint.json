@@ -1,0 +1,10 @@
+{
+  "label": "helper-outpoint",
+  "expectedValid": false,
+  "accepted": false,
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "transactionSha256": "758d7bd7a8e4c50ac9c1464188bafdd5caeddc2eeaf3c14c853790eb9cd52c4c"
+}

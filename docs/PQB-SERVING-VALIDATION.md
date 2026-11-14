@@ -1,4 +1,41 @@
-# PQB public consumer-workflow qualification
+# PQB public consumer-workflow qualifications
+
+## London production-account validation
+
+The [checksummed London evidence](pqb-production-validation/README.md) qualifies
+the enrolled TLS-fixed image through the real Step Functions coordinator and
+immutable Batch/S3 consumer on the temporary four-slot `g5.4xlarge` A10G profile in
+the two existing production subnets. Native consumer/controller and offline
+checker source is `266de4a4bf5e603f8bc85a46aaa91b5cedefcc4f`. No IAM or networking
+change was needed.
+
+The native audit checked 103 completed units: one preflight plus 102 solve units
+(23 pinning, 43 round 1, 36 round 2). Eight superseded cancellations receive no
+completion or hit credit. Independent pinned upstream native checking reproduced
+all fourteen emitted-candidate verdicts and all three full solutions. The exact
+solved public transaction passed the Core interpreter and all twelve negative
+mutations were rejected.
+
+The full pipeline took 13,013.448 seconds across its root workflow and two
+continuations, including queue/startup, transport, compute, coordinator CPU checks
+and polling. This single first-verified solve provides no matched performance
+comparison or exhaustive domain-coverage proof.
+
+Estimated VM compute is $28.92; the retained termination-observation bound is
+$31.65. Including both interrupted London runs gives $38.86 estimated VM compute
+and a $47.42 conservative bound. Other service charges are excluded and provider
+billing was not queried. All 281 independent cleanup checks passed: twelve
+recorded hosts and twelve volumes are removed and dedicated campaign resources
+are absent. Eleven restoration checks verified the original `g5.xlarge`/`BEST_FIT`
+pool and queue, zero fleet demand/hosts and unchanged production bundle hashes and
+Config A settings. The operational reservation is released. Original provider
+receipts remain private, with hashes in the public assessment.
+
+This receipt applies to the temporary London validation profile and its recorded
+consumer bundles. Serving PQB requires a reviewed deployment and hardware
+selection; production continues to serve Config A.
+
+## Independent Ireland qualification
 
 The enrolled TLS-fixed PQB image passed its native preflight and complete public
 synthetic solve through the actual Step Functions coordinator and AWS Batch/S3
@@ -51,8 +88,8 @@ deleted. The immutable registry mirror and untouched pre-existing network are
 intentionally retained.
 
 Production continues to select Config A with its existing coordinator bundle.
-These receipts qualify the isolated SNF Ireland account; production London PQB IAM,
-capacity and native runtime verification remain separate. Selecting PQB requires
+These Ireland receipts qualify the isolated SNF account; London has the separate
+validation above. Selecting PQB requires
 its own reviewed deployment decision. The previous Config A descriptor/image and
 deployment stay available for rollback; they cannot spend PQB vaults or resume PQB
 jobs. There is no separately qualified prior PQB release for that purpose.

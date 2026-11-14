@@ -1,0 +1,10 @@
+{
+  "label": "extra-output",
+  "expectedValid": false,
+  "accepted": false,
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "transactionSha256": "0ee666994e5c3aeff6bfb2b842c0286b168a766f6bcb52b897f15ffba9dd3354"
+}
