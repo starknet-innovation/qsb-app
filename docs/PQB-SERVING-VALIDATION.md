@@ -1,5 +1,15 @@
 # PQB public consumer-workflow qualifications
 
+## Staged revision preflight
+
+The [retained revision procedure](../ops/pqb-serving/README.md#validate-a-staged-permanent-revision)
+checks the actual permanent GPU staging target through the normal consumer
+transport. It freezes one public input hash, retains the staged definition during
+cleanup and forbids a full solve in that mode. A successful preflight qualifies
+one complete native work unit on that exact target; full-pipeline applicability
+also requires comparing the built consumer artifacts to the receipts below.
+Production release selection remains a separate deployment decision.
+
 ## London production-account validation
 
 The [checksummed London evidence](pqb-production-validation/README.md) qualifies
