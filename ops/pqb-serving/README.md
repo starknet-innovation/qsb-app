@@ -415,3 +415,59 @@ stopping work. Each process is bound to its starting phase and exits promptly wh
 that phase completes; wait for its successful exit before starting the next phase
 and its watcher. A lock file remaining after exit is harmless: the operating
 system releases the lock when the process closes or exits.
+
+## Deployed public-data validation
+
+`production.py` exercises the selected production Step Functions workflow,
+coordinator, CPU reference checker, Batch definition and S3 transport directly.
+It creates a never-funded synthetic vault/job under an otherwise empty public
+fixture owner and starts exactly one named root execution. Continuations are
+followed from that execution's returned ARN. This validates the deployed search
+pipeline; it does not validate deposit admission, wallet recovery, funded UTXOs,
+transaction submission or miner inclusion. No submit API or broadcast path runs.
+
+Use a fresh private directory outside Git with `operator.json` (existing London
+profile/account/region) and `deployment.json` (known state bucket and deployed
+source commit). Prepare the public fixture with `fixture.ts prepare DIRECTORY`.
+From a clean pushed controller checkout, build the selected PQB release, then run
+`production.py prepare DIRECTORY`, `arm DIRECTORY`, `start DIRECTORY`, and
+`run DIRECTORY`, using the pinned requirements. Preparation verifies deployed
+bundle hashes against the local clean build and freezes both the controller and
+deployed source identities. Production settings and existing records remain in
+place. Do not run the clone-oriented controller or watcher on this campaign.
+
+Each campaign reserves $200 with a fixed four-hour deadline. A separate guard
+begins draining at three and a half hours, or on failure, foreign active work, or
+224 observed submissions. This submission threshold is an early stop rather than
+an atomic cap; concurrent coordinator work can already be in flight. The normal
+production spend limits and sixteen-worker pool remain active. Public fixture rows
+expire at three hours forty-five minutes. The guard's own registry retains request
+identities and the last public row for reconciliation after TTL deletion.
+
+The guard and scheduler use separate temporary roles under the existing runtime
+boundary. The guard can observe and stop attributed work, but cannot submit it.
+It reads only this public owner, validates the frozen job/manifest identity, and
+follows only its own execution chain using `DescribeExecution`. It does not read
+execution histories or unrelated execution inputs. Batch termination requires the
+queue, definition, durable request name, input key/hash and all ownership tags to
+match. Unrelated work stops the assessment without being terminated.
+
+Collection retains all paid request/result pairs, native accounting and workflow
+outputs. Potential abandoned input uploads are selected by metadata ETag against
+canonical public envelopes and confirmed by SHA-256 before retention or deletion;
+unmatched object bodies are never read. Removed slots can be reconciled from
+these exact public input bytes and independent matching immutable Batch metadata.
+Successful completion requires all paid
+submissions reconciled, the independent consumer audit and all three full
+solutions. Run the pinned upstream native cross-check and offline Core positive
+and negative checks against the collected final result before reporting success.
+
+After completion or failure, run `stop`, `seal`, then `remove`. Cleanup deletes only
+this fixture's three rows, proven public objects and dedicated guard resources;
+it retains production functions, workflow, table, definition and shared logs.
+If arming fails before any fixture-write or execution intent, use `abort` instead.
+Run `production_cleanup.py DIRECTORY` independently and wait for normal scale-down,
+recorded host termination and recorded volume deletion. Release the reservation
+only after its fresh receipt reports every check passed. Preserve original receipts
+and report estimated costs separately from provider billing. Never retry an
+uncertain paid trigger or extend the frozen deadline.

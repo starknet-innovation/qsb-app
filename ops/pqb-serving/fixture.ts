@@ -1,5 +1,5 @@
 /** Public synthetic fixture only. No wallet input, signing, chain submission or network writes. */
-import { readFileSync, writeFileSync, openSync, fsyncSync, closeSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, openSync, fsyncSync, closeSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import fixture from "../../tests/fixtures/pqb-reference.json";
@@ -16,7 +16,7 @@ import { completedNativeReceipt, supersededCancellation } from "./native-result"
 import { coordinatorPublicSolvedResult } from "../../src/mainnet/coordinatorResult";
 
 const [mode, directory, indexName] = process.argv.slice(2);
-if (!["prepare", "validate", "verify", "audit", "preflight-input"].includes(mode) || !directory) throw Error("Use prepare|validate|audit|verify EXTERNAL_DIRECTORY");
+if (!["prepare", "validate", "verify", "audit", "preflight-input", "input-template"].includes(mode) || !directory) throw Error("Use prepare|validate|audit|verify EXTERNAL_DIRECTORY");
 const dir = path.resolve(directory);
 if (dir === process.cwd() || dir.startsWith(process.cwd() + path.sep)) throw Error("Keep evidence outside Git");
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -45,6 +45,21 @@ if (mode === "prepare") {
       { pk: `OWNER#${owner}`, sk: `VAULT#${vault.id}`, version: 0, vault },
       { pk: `OWNER#${owner}`, sk: `JOB#${job.id}`, version: 0, job } ] });
   console.log(JSON.stringify({ prepared: true, release: descriptor.id, manifestHash: job.manifestHash }));
+} else if (mode === "input-template") {
+  const prepared = JSON.parse(readFileSync(path.join(dir, "public-fixture.json"), "utf8"));
+  const row = JSON.parse(readFileSync(path.join(dir, "current-public-job.json"), "utf8"));
+  const job = row.job as Job, original = prepared.rows[1].job as Job;
+  if (job.id !== original.id || job.owner !== original.owner || job.vaultId !== original.vaultId
+    || canonical(job.manifest) !== canonical(original.manifest) || job.manifestHash !== original.manifestHash
+    || canonical(job.solver) !== canonical(original.solver)) throw Error("Public input template binding changed");
+  const stages = ["pinning", ...(job.solution ? ["round1"] : []), ...(job.solution?.round1?.length ? ["round2"] : [])] as const;
+  for (const stage of stages) {
+    const searchJob = { ...job, stage } as Job;
+    const parameters = parseParameters(pqbReference({ action: "export", ...referenceInput(prepared.rows[0].vault, searchJob) }), true);
+    const input = workerInput(descriptor, searchJob, 0, parameters), name = `input-template-${sha(JSON.stringify({ input }))}.json`;
+    if (!existsSync(path.join(dir, name))) save(name, { input });
+    console.log(name);
+  }
 } else if (mode === "preflight-input") {
   // Run validate first: the controller only calls this for the committed public fixture.
   const prepared = JSON.parse(readFileSync(path.join(dir, "public-fixture.json"), "utf8"));

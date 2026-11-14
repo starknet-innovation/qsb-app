@@ -1,5 +1,15 @@
 # PQB public consumer-workflow qualifications
 
+## Validate the deployed selection
+
+The [deployed public-data procedure](../ops/pqb-serving/README.md#deployed-public-data-validation)
+checks the actual selected production workflow and permanent Batch revision using
+public synthetic inputs. It preserves production switches and existing jobs,
+bounds compute with a separate non-submitting guard and requires independent
+native, offline consensus and cleanup verification. Controller source identity
+and deployed consumer source identity are recorded separately. A prepared or
+armed campaign is not a completed qualification.
+
 ## Staged revision preflight
 
 The [retained revision procedure](../ops/pqb-serving/README.md#validate-a-staged-permanent-revision)
@@ -42,8 +52,8 @@ Config A settings. The operational reservation is released. Original provider
 receipts remain private, with hashes in the public assessment.
 
 This receipt applies to the temporary London validation profile and its recorded
-consumer bundles. Serving PQB requires a reviewed deployment and hardware
-selection; production continues to serve Config A.
+consumer bundles. This historical receipt does not attest the current production selection;
+validate the selected deployment with the procedure above.
 
 ## Independent Ireland qualification
 

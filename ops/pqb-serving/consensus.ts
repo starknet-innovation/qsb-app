@@ -63,7 +63,7 @@ if (retained && (runtime.Id !== retained.intent.runtimeImageId
   || sha(readFileSync(path.join(native, "libbitcoinconsensus.so.0"))) !== retained.intent.librarySha256))
   throw Error("Retained Core binary or runtime differs");
 if (retainedMode) mkdirSync(output, { mode: 0o700 });
-const provenance = retained?.provenance ?? { nativeConsumerSourceCommit: campaign.sourceCommit, validationSourceCommit: commit,
+const provenance = retained?.provenance ?? { nativeConsumerSourceCommit: campaign.deployedSourceCommit ?? campaign.sourceCommit, validationSourceCommit: commit,
   postprocessingOnly: false };
 const checks: unknown[] = [];
 function save(name: string, value: string) {
