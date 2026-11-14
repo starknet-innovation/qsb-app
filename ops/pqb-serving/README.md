@@ -118,6 +118,25 @@ work). Never terminate a production host or delete shared resources. Release the
 campaign's operational reservation only after independently verified cleanup;
 estimated compute and reserved budget are not provider billing.
 
+## Validate a staged permanent revision
+
+Use `control.py prepare EXTERNAL_DIRECTORY --existing-definition EXACT_REVISION_ARN`
+to run one public native preflight against a permanent staged revision in the
+ordinary London pool. The controller requires an active permanent image-only
+revision of the served runtime and freezes its complete definition, public fixture
+and the exact first-unit input-envelope SHA-256. It uses the ordinary provider
+checks; no validation hardware flag is enabled. This mode cannot start a solve.
+
+The deadline drain, collector and monitor bind ownership to both the revision and
+the frozen input hash in the Batch environment and tags. Unrelated work on the
+same revision causes the monitor to yield without collecting or terminating it.
+Removal deletes only dedicated campaign resources and public objects; it retains
+the staged definition. Independently verify that definition remains active and
+unchanged, the served Config A revision remains active, production selection is
+unchanged, and recorded hosts and volumes are removed before releasing the
+reservation. A passing preflight is one complete native unit, not a new full solve;
+assess earlier full-pipeline evidence separately against the actual bundle bytes.
+
 ## Operator sequence
 
 Use a fresh directory outside every checkout. Its `operator.json` contains only

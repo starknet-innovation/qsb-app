@@ -4,6 +4,16 @@ import os
 import time
 
 
+def owns_job(job, settings):
+    if job['jobDefinition'] != settings['definition']:
+        return False
+    digest = settings.get('inputSha256')
+    if digest is None:
+        return True
+    values = [v.get('value') for v in job.get('container', {}).get('environment', []) if v.get('name') == 'QSB_INPUT_SHA256']
+    return job.get('jobQueue') == settings['queue'] and values == [digest] and job.get('tags', {}).get('InputSha256') == digest
+
+
 def expired_jobs(batch, settings, now):
     expired = []
     for status in ('SUBMITTED', 'PENDING', 'RUNNABLE', 'STARTING', 'RUNNING'):
@@ -11,7 +21,7 @@ def expired_jobs(batch, settings, now):
             ids = [j['jobId'] for j in page['jobSummaryList']]
             for offset in range(0, len(ids), 100):
                 for job in batch.describe_jobs(jobs=ids[offset:offset + 100])['jobs']:
-                    if job['jobDefinition'] != settings['definition']:
+                    if not owns_job(job, settings):
                         continue
                     created = job.get('createdAt')
                     if not isinstance(created, (int, float)) or created <= 0 or now - created / 1000 >= settings['watchdogMaxAgeSeconds']:
@@ -42,7 +52,7 @@ def stop(clients, settings):
             ids = [j['jobId'] for j in page['jobSummaryList']]
             for offset in range(0, len(ids), 100):
                 for job in batch.describe_jobs(jobs=ids[offset:offset + 100])['jobs']:
-                    if job['jobDefinition'] != settings['definition']:
+                    if not owns_job(job, settings):
                         continue
                     if job.get('tags', {}).get('Project') != 'qsb-gpu':
                         raise RuntimeError('Campaign revision has an unexpected job tag')
