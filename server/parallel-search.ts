@@ -7,7 +7,7 @@ import {
 } from "../src/lib/provenance";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled } from "./network";
-import { chain } from "./chain";
+import { checkSearchNetwork, type SearchEvent } from "./search-network";
 import { configuredCompute, computeConfigured } from "./compute-provider";
 import {
   type Job,
@@ -31,7 +31,7 @@ import { meterChunk } from "./gpu-usage";
 import { UnreadableOutput, type ComputeStatus } from "./aws-batch";
 import type { Row, Store } from "./store";
 
-type Event = { owner: string; jobId: string; revision: number; polls?: number };
+type Event = SearchEvent;
 type Cpu = (payload: unknown) => Promise<any>;
 
 export const UNKNOWN_SUBMISSION =
@@ -222,7 +222,10 @@ export async function parallelTick(event: Event, row: Row, store: Store, cpu: Cp
   if (!vaultRow) throw new Error("VaultNotFound");
   const vault = vaultRow.vault as PublicVault;
   if (vault.network !== NETWORK_ID) throw new Error("VaultNetworkMismatch");
-  await chain.assertNetwork();
+  const networkWait = await checkSearchNetwork(event, job, persist,
+    slots.some(slot => Boolean(slot.runpodId)), job.status === "searching" && unknown());
+  if (networkWait) return networkWait;
+  event = { ...event, chainReadFailures: 0 };
   if (vault.configuration && !job.solver) throw new Error("SolverPinRequired");
   const selected = job.solver
     ? assertSolverPin(job.solver, vault)
