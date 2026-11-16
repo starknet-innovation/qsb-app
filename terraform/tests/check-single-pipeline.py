@@ -99,7 +99,7 @@ DATA_SOURCES = {'aws_partition', 'aws_cloudfront_cache_policy', 'aws_cloudfront_
 # Where file-reading functions may read: the reviewed policies, build artifacts, the build manifest
 # override and the GPU spend constants.
 FILE_INPUTS = re.compile(r'(?:"\$\{path\.module\}/policies/[a-z0-9-]+\.json"|"\$\{local\.artifacts\}/'
-                         r'|var\.build_manifest_path\)|"\$\{path\.module\}/\.\./server/gpu-spend\.json")')
+                         r'|var\.build_manifest_path\)|"\$\{path\.module\}/\.\./server/(?:gpu-spend|aws-batch-capacity)\.json")')
 
 
 # The withdrawal workflow retries only a throttled coordinator invoke, which Lambda refused before the coordinator

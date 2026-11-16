@@ -4,13 +4,21 @@ variable "build_manifest_path" {
   description = "Optional build manifest path; artifact hashes are always checked against this module's .build directory."
 }
 locals {
-  artifacts         = "${path.module}/.build"
-  build             = jsondecode(file("${local.artifacts}/manifest.json"))
-  checked_build     = var.build_manifest_path != null ? jsondecode(file(var.build_manifest_path)) : local.build
-  workflow_arn      = "arn:${data.aws_partition.current.partition}:states:${var.region}:${var.aws_account_id}:stateMachine:${var.name}-withdrawal"
-  solver_release_id = try(local.build.identities.solver.id, "")
-  compute           = var.batch_job_queue != "" && var.batch_job_definition != "" && var.batch_job_bucket != ""
-  gpu_spend         = jsondecode(file("${path.module}/../server/gpu-spend.json"))
+  artifacts               = "${path.module}/.build"
+  build                   = jsondecode(file("${local.artifacts}/manifest.json"))
+  checked_build           = var.build_manifest_path != null ? jsondecode(file(var.build_manifest_path)) : local.build
+  workflow_arn            = "arn:${data.aws_partition.current.partition}:states:${var.region}:${var.aws_account_id}:stateMachine:${var.name}-withdrawal"
+  solver_release_id       = try(local.build.identities.solver.id, "")
+  compute                 = var.batch_job_queue != "" && var.batch_job_definition != "" && var.batch_job_bucket != ""
+  gpu_spend               = jsondecode(file("${path.module}/../server/gpu-spend.json"))
+  gpu_capacity            = jsondecode(file("${path.module}/../server/aws-batch-capacity.json"))
+  gpu_vcpu_ceiling        = local.gpu_capacity.vcpusPerWorkerBudget * local.gpu_spend.workersMax
+  gpu_fallback_types      = [for name, host in local.gpu_capacity.instanceTypes : name if host.vcpus <= local.gpu_vcpu_ceiling / 2]
+  gpu_instance_types      = length(local.gpu_fallback_types) > 0 ? local.gpu_fallback_types : [for name, host in local.gpu_capacity.instanceTypes : name if host.vcpus <= local.gpu_vcpu_ceiling]
+  gpu_largest_host_vcpus  = max([for name in local.gpu_instance_types : local.gpu_capacity.instanceTypes[name].vcpus]...)
+  gpu_allocation_strategy = length(local.gpu_instance_types) > 1 ? "BEST_FIT_PROGRESSIVE" : "BEST_FIT"
+  gpu_max_vcpus           = local.gpu_vcpu_ceiling - (length(local.gpu_instance_types) > 1 ? local.gpu_largest_host_vcpus : 0)
+  gpu_parallel_slots      = min(local.gpu_spend.workersMax, floor(local.gpu_max_vcpus / local.gpu_largest_host_vcpus))
   gpu_limit_env = {
     GPU_WORKERS_MAX          = tostring(local.gpu_spend.workersMax)
     GPU_WORKERS_MIN          = tostring(local.gpu_spend.workersMin)
@@ -34,6 +42,10 @@ locals {
 resource "terraform_data" "release" {
   input = var.source_commit
   lifecycle {
+    precondition {
+      condition     = local.gpu_parallel_slots >= 1
+      error_message = "The selected A10G host must fit within the existing GPU pool vCPU ceiling."
+    }
     precondition {
       condition     = local.build.commit == var.source_commit && local.build.clean && local.build.network == var.network
       error_message = "Rebuild from the requested clean commit and matching network before deployment."

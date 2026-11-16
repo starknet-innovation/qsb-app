@@ -27,8 +27,8 @@ run "every_gpu_role_is_bounded" {
     error_message = "All four GPU roles must carry the required GPU boundary on the operator-managed path."
   }
   assert {
-    condition     = aws_batch_compute_environment.gpu.compute_resources[0].min_vcpus == 0 && aws_batch_compute_environment.gpu.compute_resources[0].max_vcpus == 4 * jsondecode(file("../../server/gpu-spend.json")).workersMax
-    error_message = "Boundary enrollment must not change zero idle capacity or the one instance per GPU worker configuration."
+    condition     = aws_batch_compute_environment.gpu.compute_resources[0].min_vcpus == 0 && output.gpu_capacity.vcpuCeiling == 4 * jsondecode(file("../../server/gpu-spend.json")).workersMax && aws_batch_compute_environment.gpu.compute_resources[0].max_vcpus + 16 == output.gpu_capacity.vcpuCeiling
+    error_message = "Boundary enrollment must not change zero idle capacity or the total vCPU ceiling including one-host overshoot."
   }
 }
 run "reject_empty_boundary" {
@@ -47,7 +47,7 @@ run "stage_pqb_without_retiring_config_a" {
     error_message = "The staged PQB image must preserve the previous active job-definition revision."
   }
   assert {
-    condition     = aws_batch_compute_environment.gpu.compute_resources[0].instance_type == toset(["g5.xlarge"]) && aws_batch_compute_environment.gpu.compute_resources[0].allocation_strategy == "BEST_FIT" && aws_batch_compute_environment.gpu.compute_resources[0].min_vcpus == 0
+    condition     = aws_batch_compute_environment.gpu.compute_resources[0].instance_type == toset(["g5.xlarge", "g5.2xlarge", "g5.4xlarge"]) && aws_batch_compute_environment.gpu.compute_resources[0].allocation_strategy == "BEST_FIT_PROGRESSIVE" && aws_batch_compute_environment.gpu.compute_resources[0].min_vcpus == 0
     error_message = "Staging PQB must not silently select alternative hardware or allocate idle capacity."
   }
 }
@@ -130,4 +130,12 @@ run "reject_image_from_another_region" {
   command = plan
   variables { image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/qsb-solver@${split("@", jsondecode(file("../../src/lib/releases/qsb-solver-aws-v0-1-0.json")).image)[1]}" }
   expect_failures = [var.image]
+}
+
+run "fallback_stays_within_total_vcpu_budget" {
+  command = plan
+  assert {
+    condition     = output.gpu_capacity.maxVcpus == 48 && output.gpu_capacity.vcpuCeiling == 64 && output.gpu_capacity.parallelSlots == 3 && aws_batch_compute_environment.gpu.compute_resources[0].max_vcpus == output.gpu_capacity.maxVcpus
+    error_message = "The fallback pool must leave 16 vCPUs for one-host overshoot and limit queued parallel chunks to three."
+  }
 }
