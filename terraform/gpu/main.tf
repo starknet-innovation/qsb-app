@@ -65,7 +65,7 @@ locals {
   }
   enrolled_solver = try(local.enrolled_releases[local.release_build.identities.solver.id], null)
   gpu_capacity    = jsondecode(file("${path.module}/../../server/aws-batch-capacity.json"))
-  # The reviewed vCPU budget accommodates the largest single-A10G host per worker.
+  # The reviewed pool vCPU budget supports bounded A10G fallback concurrency.
   gpu_workers             = jsondecode(file("${path.module}/../../server/gpu-spend.json")).workersMax
   gpu_vcpu_ceiling        = local.gpu_capacity.vcpusPerWorkerBudget * local.gpu_workers
   gpu_fallback_types      = [for name, host in local.gpu_capacity.instanceTypes : name if host.vcpus <= local.gpu_vcpu_ceiling / 2]

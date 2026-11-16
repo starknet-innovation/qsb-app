@@ -2,7 +2,7 @@ import { BatchClient } from "@aws-sdk/client-batch";
 import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
 import command from "../server/aws-batch-command.json";
-// One-worker policy (8 nominal vCPUs, two allowed host sizes); parallel tests cover production.
+// One GPU per withdrawal (7 nominal vCPUs); parallel tests cover production.
 vi.mock("../server/gpu-spend", async (importOriginal) => {
   const actual = await importOriginal<any>();
   return { ...actual, gpuSpendLimits: { ...actual.gpuSpendLimits, workersMax: 1 } };
@@ -55,10 +55,10 @@ function setup(realSubmit = false) {
     status: "VALID",
     computeResources: {
       type: "EC2",
-      allocationStrategy: "BEST_FIT_PROGRESSIVE",
+      allocationStrategy: "BEST_FIT",
       minvCpus: 0,
-      maxvCpus: 8,
-      instanceTypes: ["g5.xlarge", "g5.2xlarge"],
+      maxvCpus: 7,
+      instanceTypes: ["g5.xlarge"],
     },
   };
   const job: any = {
@@ -123,10 +123,10 @@ it.each(["image", "retry", "size", "spot", "overrun", "caps"])(
     if (kind === "caps") t.config.containerProperties.command = [];
     if (kind === "image") t.config.containerProperties.image += "wrong";
     if (kind === "retry") t.config.retryStrategy.attempts = 2;
-    if (kind === "size") t.compute.computeResources.maxvCpus = 4;
+    if (kind === "size") t.compute.computeResources.maxvCpus = 8;
     if (kind === "spot") t.compute.computeResources.type = "SPOT";
     if (kind === "overrun")
-      t.compute.computeResources.allocationStrategy = "BEST_FIT";
+      t.compute.computeResources.allocationStrategy = "BEST_FIT_PROGRESSIVE";
     await expect(
       t.provider.prepareRun(image, { public: "fixture" }),
     ).rejects.toThrow();
