@@ -33,12 +33,13 @@ resource "aws_sfn_state_machine" "withdrawal" {
     CoordinateSearch       = { Type = "Task", Resource = "arn:${data.aws_partition.current.partition}:lambda:${var.region}:${var.aws_account_id}:function:${var.name}-coordinator", TimeoutSeconds = aws_lambda_function.coordinator.timeout + 5, Retry = [{ ErrorEquals = ["Lambda.TooManyRequestsException"], IntervalSeconds = 3, BackoffRate = 2, MaxAttempts = 6, JitterStrategy = "FULL" }], Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.failure", Next = "NeedsOperatorAttention" }], Next = "SearchFinished" },
     SearchFinished         = { Type = "Choice", Choices = [{ Variable = "$.done", BooleanEquals = true, Next = "Finished" }, { Variable = "$.polls", NumericGreaterThanEquals = 1000, Next = "SaveContinuation" }], Default = "WaitForCompute" },
     WaitForCompute         = { Type = "Wait", SecondsPath = "$.waitSeconds", Next = "CoordinateSearch" },
-    SaveContinuation       = { Type = "Pass", Parameters = { continuation = { "owner.$" = "$.owner", "jobId.$" = "$.jobId", "revision.$" = "$.revision", polls = 0 } }, Next = "ContinueSearch" },
+    SaveContinuation       = { Type = "Pass", Parameters = { continuation = { "owner.$" = "$.owner", "jobId.$" = "$.jobId", "revision.$" = "$.revision", "chainReadFailures.$" = "$.chainReadFailures", polls = 0 } }, Next = "ContinueSearch" },
     ContinueSearch         = { Type = "Task", Resource = "arn:aws:states:::aws-sdk:sfn:startExecution", Parameters = { StateMachineArn = local.workflow_arn, "Input.$" = "States.JsonToString($.continuation)" }, Next = "Finished" },
     Finished               = { Type = "Succeed" },
     NeedsOperatorAttention = { Type = "Fail", Error = "WorkflowInterrupted", Cause = "Reconcile durable intents and provider IDs before retrying paid work." }
   } })
-  depends_on = [terraform_data.release, aws_iam_role_policy.workflow]
+  # Continuations consume the counter emitted by the coordinator: update its code first.
+  depends_on = [terraform_data.release, aws_iam_role_policy.workflow, aws_lambda_function.coordinator]
 }
 resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   for_each            = local.functions

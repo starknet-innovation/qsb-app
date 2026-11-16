@@ -7,7 +7,7 @@ import {
 } from "../src/lib/provenance";
 import { NETWORK_ID } from "../src/lib/network";
 import { transactionsEnabled } from "./network";
-import { chain } from "./chain";
+import { checkSearchNetwork, type SearchEvent } from "./search-network";
 import { store as records, type Store } from "./store";
 import { recordOwnerEvents } from "./owner-events";
 import { httpsTransport, systemResolver } from "./webhook-transport";
@@ -30,7 +30,7 @@ import {
   publishedHitRecords,
 } from "./hit-capacity";
 const cpuClient = new LambdaClient({ region: process.env.AWS_REGION });
-type Event = { owner: string; jobId: string; revision: number; polls?: number };
+type Event = SearchEvent;
 async function cpu(payload: unknown) {
   const e = payload as { publicStateJson?: string };
   if (e.publicStateJson && JSON.parse(e.publicStateJson).config === "PQB") return pqbReference(payload);
@@ -77,7 +77,7 @@ export async function handler(
   // work and POSTs, bounded, and can't change its result or error.
   const store = recordOwnerEvents(records);
   try {
-    return await coordinate(event, store);
+    return await coordinate({ ...event, chainReadFailures: event.chainReadFailures ?? 0 }, store);
   } finally {
     const remaining = context?.getRemainingTimeInMillis?.() ?? Infinity;
     await store.settle({
@@ -179,7 +179,10 @@ async function coordinate(event: Event, store: Store) {
   if (!vaultRow) throw new Error("VaultNotFound");
   const vault = vaultRow.vault as PublicVault;
   if (vault.network !== NETWORK_ID) throw new Error("VaultNetworkMismatch");
-  await chain.assertNetwork();
+  const networkWait = await checkSearchNetwork(event, job, save,
+    Boolean(job.runpodId), job.status === "searching" && !job.runpodId);
+  if (networkWait) return networkWait;
+  event = { ...event, chainReadFailures: 0 };
   if (vault.configuration && !job.solver) throw new Error("SolverPinRequired");
   // Legacy jobs retain the historical release explicitly, never the current default.
   const selected = job.solver

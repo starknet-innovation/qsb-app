@@ -738,3 +738,74 @@ describe("GPU usage metering", () => {
     expect(gpuSpendLimits.workersMax).toBeGreaterThan(1);
   });
 });
+
+
+describe("chain checkpoint recovery", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const tick = async (input: import("../server/search-network").SearchEvent) => {
+    const result = await handler(input);
+    if (!("owner" in result)) throw new Error("Unexpected provider-health result");
+    return result;
+  };
+  const unavailable = async () => {
+    const { withApiErrorCode } = await import("../server/api-errors");
+    return withApiErrorCode("chain_unavailable", () => { throw new TypeError("fetch failed"); });
+  };
+  const networkSpy = async () => vi.spyOn((await import("../server/chain")).chain, "assertNetwork");
+
+  it("recovers a transport failure without preparing or repeating a paid submission", async () => {
+    await seed({ status: "searching", parallelSlots: [slot(0)], gpuSubmissions: 1, gpuBudgetReservedSeconds: 900 });
+    const check = await networkSpy();
+    check.mockImplementationOnce(unavailable);
+    const waiting = await tick(event);
+    expect(waiting).toMatchObject({ done: false, waitSeconds: 15, chainReadFailures: 1 });
+    expect(mocks.status).not.toHaveBeenCalled();
+    expect(mocks.prepareRun).not.toHaveBeenCalled();
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(await saved()).toMatchObject({ status: "searching", parallelSlots: [expect.objectContaining({ runpodId: "c0" })], gpuSubmissions: 1, gpuBudgetReservedSeconds: 900 });
+    const resumed = await tick(waiting);
+    expect(resumed).toMatchObject({ done: false, chainReadFailures: 0 });
+    expect(mocks.status).toHaveBeenCalled();
+  });
+
+  it("pauses on the third outage and drains saved provider IDs without another chain read", async () => {
+    await seed({ status: "searching", parallelSlots: [slot(0)], gpuSubmissions: 1, gpuBudgetReservedSeconds: 900 });
+    const check = await networkSpy();
+    check.mockImplementation(unavailable);
+    let next = await tick(event);
+    next = await tick(next);
+    next = await tick(next);
+    expect(next).toMatchObject({ done: false, chainReadFailures: 3 });
+    expect(await saved()).toMatchObject({ status: "paused", error: expect.stringContaining("Chain provider unavailable"), parallelSlots: [expect.objectContaining({ runpodId: "c0" })], gpuSubmissions: 1, gpuBudgetReservedSeconds: 900 });
+    expect(mocks.prepareRun).not.toHaveBeenCalled();
+    expect(mocks.run).not.toHaveBeenCalled();
+    mocks.status.mockResolvedValue({ status: "IN_PROGRESS" });
+    next = await tick(next);
+    expect(next).toMatchObject({ done: false });
+    expect(mocks.cancel).toHaveBeenCalled();
+    mocks.status.mockResolvedValue({ status: "CANCELLED", createdAt: 1000, stoppedAt: 2000 });
+    expect(await tick(next)).toMatchObject({ done: true });
+    expect(check).toHaveBeenCalledTimes(3);
+    expect(await saved()).toMatchObject({ status: "paused", parallelSlots: [expect.objectContaining({ runpodId: "c0" })] });
+  });
+
+  it("keeps an uncertain submission fenced when the chain provider stays unavailable", async () => {
+    await seed({ status: "searching", parallelSlots: [slot(0, "pinning", null)], oneSubmissionAllowed: true, gpuSubmissions: 1, gpuBudgetReservedSeconds: 900 });
+    (await networkSpy()).mockImplementation(unavailable);
+    const result = await tick({ ...event, chainReadFailures: 2 });
+    expect(result).toMatchObject({ done: true });
+    const job = await saved();
+    expect(job).toMatchObject({ status: "paused", error: expect.stringContaining("Submission outcome unknown"), gpuSubmissions: 1, gpuBudgetReservedSeconds: 900 });
+    expect(job).not.toHaveProperty("oneSubmissionAllowed");
+    expect(mocks.prepareRun).not.toHaveBeenCalled();
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a provider identity mismatch", async () => {
+    await seed();
+    (await networkSpy()).mockRejectedValue(new Error("Chain provider is not Bitcoin mainnet"));
+    await expect(tick(event)).rejects.toThrow("not Bitcoin mainnet");
+    expect(mocks.prepareRun).not.toHaveBeenCalled();
+  });
+});
