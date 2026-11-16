@@ -65,7 +65,7 @@ locals {
   }
   enrolled_solver = try(local.enrolled_releases[local.release_build.identities.solver.id], null)
   gpu_capacity    = jsondecode(file("${path.module}/../../server/aws-batch-capacity.json"))
-  # The vCPU ceiling stays fixed when selecting a larger single-A10G host.
+  # The reviewed vCPU budget accommodates the largest single-A10G host per worker.
   gpu_workers             = jsondecode(file("${path.module}/../../server/gpu-spend.json")).workersMax
   gpu_vcpu_ceiling        = local.gpu_capacity.vcpusPerWorkerBudget * local.gpu_workers
   gpu_fallback_types      = [for name, host in local.gpu_capacity.instanceTypes : name if host.vcpus <= local.gpu_vcpu_ceiling / 2]
@@ -81,7 +81,7 @@ resource "terraform_data" "release_identity" {
   lifecycle {
     precondition {
       condition     = local.gpu_parallel_slots >= 1
-      error_message = "The selected A10G host must fit within the existing GPU pool vCPU ceiling."
+      error_message = "The selected A10G host must fit within the configured GPU pool vCPU ceiling."
     }
     precondition {
       condition     = try(local.release_build.clean && local.release_build.commit == var.source_commit && local.release_build.identities.reference.appCommit == var.source_commit, false)

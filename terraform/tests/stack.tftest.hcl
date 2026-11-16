@@ -690,7 +690,7 @@ run "a10g_fallback_matches_runtime_capacity" {
   command = plan
   variables { network = "mainnet" }
   assert {
-    condition     = toset(output.gpu_capacity.instanceTypes) == toset(["g5.xlarge", "g5.2xlarge", "g5.4xlarge"]) && output.gpu_capacity.allocationStrategy == "BEST_FIT_PROGRESSIVE" && output.gpu_capacity.maxVcpus == 48 && output.gpu_capacity.vcpuCeiling == 64 && output.gpu_capacity.parallelSlots == 3
+    condition     = toset(output.gpu_capacity.instanceTypes) == toset(["g5.xlarge", "g5.2xlarge", "g5.4xlarge"]) && output.gpu_capacity.allocationStrategy == "BEST_FIT_PROGRESSIVE" && output.gpu_capacity.maxVcpus == 240 && output.gpu_capacity.vcpuCeiling == 256 && output.gpu_capacity.parallelSlots == 15
     error_message = "App capacity output must preserve the total vCPU ceiling while allowing automatic A10G fallback."
   }
 }

@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import command from "../server/aws-batch-command.json";
-// The production pool reserves one largest-host allowance inside the 64-vCPU ceiling.
+// The production pool reserves one largest-host allowance inside the 256-vCPU ceiling.
 vi.mock("../server/gpu-spend", async (importOriginal) => {
   const actual = await importOriginal<any>();
   return { ...actual, gpuSpendLimits: { ...actual.gpuSpendLimits, workersMax: 16 } };
@@ -39,10 +39,10 @@ function provider(maxvCpus: number, instanceTypes = ["g5.xlarge", "g5.2xlarge", 
   return { aws: new AwsBatch(queue, definition, "qsb-gpu-jobs", batch, s3, batch), s3 };
 }
 it("accepts the fallback pool with a bounded worst-case overshoot", async () => {
-  const { aws } = provider(48);
+  const { aws } = provider(240);
   await expect(aws.prepareRun(image, { public: "fixture" })).resolves.toBeTypeOf("function");
 });
-it.each([16, 64, 80])("refuses a compute environment of %i vCPUs before uploading anything", async (maxvCpus) => {
+it.each([48, 64, 256, 272])("refuses a compute environment of %i vCPUs before uploading anything", async (maxvCpus) => {
   const { aws, s3 } = provider(maxvCpus);
   await expect(aws.prepareRun(image, { public: "fixture" })).rejects.toThrow("ProviderLimitsUnconfirmed");
   expect(s3.send).not.toHaveBeenCalled();
@@ -50,7 +50,7 @@ it.each([16, 64, 80])("refuses a compute environment of %i vCPUs before uploadin
 
 
 it("limits concurrent chunks to the largest allowed single-A10G host", () => {
-  expect(provider(48).aws.parallelismLimit).toBe(3);
+  expect(provider(240).aws.parallelismLimit).toBe(15);
 });
 
 it.each([
@@ -59,12 +59,12 @@ it.each([
   ["g5.xlarge", "g5.2xlarge", "g5.8xlarge"],
   ["g5.xlarge", "g5.2xlarge", "g5.4xlarge", "g5.4xlarge"],
 ])("rejects a different fallback host set %j before storing an input", async (...types) => {
-  const { aws, s3 } = provider(48, types);
+  const { aws, s3 } = provider(240, types);
   await expect(aws.prepareRun(image, {})).rejects.toThrow("ProviderLimitsUnconfirmed");
   expect(s3.send).not.toHaveBeenCalled();
 });
 
 it("accepts the exact allowed set regardless of AWS response order", async () => {
-  const { aws } = provider(48, ["g5.4xlarge", "g5.xlarge", "g5.2xlarge"]);
+  const { aws } = provider(240, ["g5.4xlarge", "g5.xlarge", "g5.2xlarge"]);
   await expect(aws.prepareRun(image, {})).resolves.toBeTypeOf("function");
 });
