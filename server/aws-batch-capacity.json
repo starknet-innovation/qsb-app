@@ -1,0 +1,14 @@
+{
+  "vcpusPerWorkerBudget": 4,
+  "instanceTypes": {
+    "g5.xlarge": {
+      "vcpus": 4
+    },
+    "g5.2xlarge": {
+      "vcpus": 8
+    },
+    "g5.4xlarge": {
+      "vcpus": 16
+    }
+  }
+}

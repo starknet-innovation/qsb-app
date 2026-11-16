@@ -21,6 +21,7 @@ import type { BatchSubmissionIdentity } from "../src/lib/model";
 import command from "./aws-batch-command.json";
 import { gpuSpendLimits } from "./gpu-spend";
 import validation from "./aws-batch-validation.json";
+import { productionCapacity } from "./aws-batch-capacity";
 export type ComputeStatus = {
   id: string;
   status:
@@ -104,7 +105,7 @@ export class AwsBatch implements ComputeProvider {
   get parallelismLimit() {
     return this.validationProfile
       ? Math.min(gpuSpendLimits.workersMax, Math.floor(validation.maxVcpus / validation.vcpusPerHost))
-      : gpuSpendLimits.workersMax;
+      : productionCapacity().parallelismLimit;
   }
   constructor(
     private queue: string,
@@ -174,6 +175,7 @@ export class AwsBatch implements ComputeProvider {
     };
   }
   async prepareRun(image: string, input: unknown) {
+    const capacity = this.validationProfile ? undefined : productionCapacity();
     const validationCampaign = this.validationProfile
       ? /^(qsb-pqb-v-[a-f0-9]{12})-coordinator$/.exec(process.env.AWS_LAMBDA_FUNCTION_NAME ?? "")?.[1]
       : undefined;
@@ -238,12 +240,12 @@ export class AwsBatch implements ComputeProvider {
       e.status !== "VALID" ||
       env.computeEnvironments?.length !== 1 ||
       c?.type !== "EC2" ||
-      c.allocationStrategy !== (this.validationProfile ? validation.allocationStrategy : "BEST_FIT") ||
+      c.allocationStrategy !== (this.validationProfile ? validation.allocationStrategy : capacity!.allocationStrategy) ||
       c.minvCpus !== 0 ||
-      // One g5.xlarge (4 vCPUs, one A10G) per parallel worker.
-      c.maxvCpus !== (this.validationProfile ? validation.maxVcpus : 4 * gpuSpendLimits.workersMax) ||
-      c.instanceTypes?.length !== 1 ||
-      c.instanceTypes[0] !== (this.validationProfile ? validation.instanceType : "g5.xlarge") ||
+      c.maxvCpus !== (this.validationProfile ? validation.maxVcpus : capacity!.maxVcpus) ||
+      (!c.instanceTypes || c.instanceTypes.length !== (this.validationProfile ? 1 : capacity!.instanceTypes.length)
+        || new Set(c.instanceTypes).size !== c.instanceTypes.length
+        || c.instanceTypes.some(type => !(this.validationProfile ? [validation.instanceType] : capacity!.instanceTypes).includes(type))) ||
       (this.validationProfile && ((!this.sharedValidationProfile && e.tags?.PqbValidation !== validationCampaign) || e.tags?.Project !== "qsb-gpu"
         || e.computeEnvironmentArn !== this.queue.replace(":job-queue/", ":compute-environment/")
         || q.computeEnvironmentOrder[0].computeEnvironment !== e.computeEnvironmentArn))

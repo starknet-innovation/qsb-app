@@ -1,8 +1,8 @@
 # QSB GPU backend on AWS Batch
 
-This stack runs the qsb-solver pinning and subset worker on On-Demand g5.xlarge A10G instances in `var.region` (eu-west-2; see [REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md)): one per GPU a withdrawal may use at once (`workersMax` in `server/gpu-spend.json`, currently 16, sized to a 64-vCPU quota; a new region or account needs the same quota). Its state is separate from the app stack's, and provisioning GPU compute doesn't turn mainnet on.
+This stack runs the qsb-solver pinning and subset worker on On-Demand A10G instances in `var.region` (eu-west-2; see [REGION-MIGRATION.md](../../docs/REGION-MIGRATION.md)), one GPU per host. Its state is separate from the app stack's, and provisioning compute does not turn mainnet on.
 
-Capacity: EC2 BEST_FIT, min 0/max 4 × `workersMax` vCPUs (`server/gpu-spend.json`; one g5.xlarge per GPU a withdrawal may use at once), g5.xlarge only. Verify that the operator account's G/VT quota supports that many vCPUs. Job definitions require one GPU, 4 vCPUs, 12 GB RAM, one attempt and a 900-second running timeout. An independent five-minute EventBridge/Lambda watchdog terminates jobs older than 30 minutes, including startup/queue time. It never submits replacements. Capacity scales to zero after AWS Batch's idle cooldown; this is not an instantaneous stop or a hard dollar budget. Idle startup/termination and storage are chargeable.
+Capacity is derived from `server/aws-batch-capacity.json` and `server/gpu-spend.json`: automatic fallback across the allowed A10G sizes, minimum zero, and a nominal maximum that reserves one largest-host allowance inside the existing total vCPU ceiling. Verify that the operator account's G/VT quota supports that many vCPUs. Job definitions require one GPU, 4 vCPUs, 12 GB RAM, one attempt and a 900-second running timeout. An independent five-minute EventBridge/Lambda watchdog terminates jobs older than 30 minutes, including startup/queue time. It never submits replacements. Capacity scales to zero after AWS Batch's idle cooldown; this is not an instantaneous stop or a hard dollar budget. Idle startup/termination and storage are chargeable.
 
 The worker image is the served release's image, copied by digest into this account's private `qsb-solver` ECR repository ([serving a release](../../docs/SOLVER-REPOSITORY.md#serving-a-release)). Inputs and outputs contain public search data only, live in encrypted private S3 and expire after 30 days. Jobs run without privileged mode, drop all capabilities and have a read-only root filesystem with writable /tmp. Their task role can only read inputs and write outputs. Network HTTPS is required for S3/ECR/Batch; no inbound ports are open. The host uses IMDSv2 and encrypted delete-on-termination EBS.
 
@@ -54,3 +54,24 @@ These mocked-provider plans assert the boundary on every GPU role, the retained
 role path and zero minimum capacity, and reject empty, cross-account or wrong-path
 boundary values. They do not certify live operator authorization, bootstrap policy
 contents or deployment success.
+
+
+## Automatic A10G capacity fallback
+
+The shared catalog `server/aws-batch-capacity.json` allows `g5.xlarge`, `g5.2xlarge` and `g5.4xlarge`, each with one A10G. Both stacks and the runtime derive their capacity policy from it and `workersMax`; no operator host-size override is needed. `BEST_FIT_PROGRESSIVE` lets AWS choose another allowed size when capacity is unavailable. It prefers cost per vCPU, so larger hosts can be selected even when a smaller size is offered, and each larger host costs more per GPU-hour. A type offering is not a stock guarantee.
+
+AWS can exceed a progressive pool's nominal maximum by one instance. With the shipped 16-worker budget, the nominal maximum is 48 vCPUs and the largest allowed host is 16 vCPUs: the resulting total remains within the existing 64-vCPU ceiling. The coordinator permits three simultaneous chunks, each of which fits on the largest host. This trades peak small-host concurrency for availability across sizes without building a long queue behind a smaller number of large hosts. When a reduced worker budget admits only one safe host type, the policy uses `BEST_FIT` with its ordinary vCPU ceiling instead.
+
+`AwsBatch.prepareRun` checks the exact allowed type set, strategy and nominal ceiling before uploading inputs or submitting paid work. Duplicates, missing types, unreviewed types and raised ceilings are refused. GPU seconds, per-job and owner reservations, independent verification, worker image and immutable release descriptors are unchanged. More expensive hosts do not reduce the amount of GPU work. Both stacks expose the derived policy as `gpu_capacity`.
+
+### Replacing an installed BEST_FIT pool
+
+`BEST_FIT` does not support instance-type infrastructure updates. Its migration to progressive fallback requires replacing the drained compute environment while keeping one `qsb-gpu` queue and one withdrawal pipeline:
+
+1. Commit and push the reviewed source, then build clean artifacts. Record the deployment commit and plans for both stacks. Preserve previous manifests and capacity settings for rollback.
+2. Quiesce job creation and resume, pause all withdrawals, and confirm every attached provider job is terminal, no submission outcome is unknown, the queue is drained and GPU hosts have terminated. Preserve IDs, reservations and attempts. Do not replace capacity while live work can still arrive.
+3. Disable the drained queue and review a GPU Terraform plan with explicit replacement of both `aws_batch_job_queue.gpu` and `aws_batch_compute_environment.gpu` (`-replace=aws_batch_job_queue.gpu -replace=aws_batch_compute_environment.gpu`). The old queue must be deleted before its attached compute environment can be deleted. Preserve the queue and environment names, job-definition revision and bindings; do not create another pipeline or hand-edit Batch-managed Auto Scaling groups or launch templates.
+4. Apply that exact GPU plan, creating the replacement environment and its single queue in dependency order, then apply the app stack from the same commit. A mismatched live policy refuses new paid submissions. Verify both `gpu_capacity` outputs, live environment strategy/types/nominal ceiling, solver image, source and artifact hashes. In the shipped configuration verify 48 nominal vCPUs, a 64-vCPU total bound and three parallel slots.
+5. Run a bounded public-data native preflight on the selected host size, exact image and runtime, and independently CPU-check its result before resuming funded work. The same A10G does not turn evidence from another host size into a fresh preflight. Restore admission, then explicitly resume paused withdrawals. Resume retains earlier accounting and observes old provider IDs before creating new intents.
+
+For rollback, drain again and use the recorded prior capacity policy and clean artifacts. Changing capacity never enables a mainnet or exact-submit switch.

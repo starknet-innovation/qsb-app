@@ -128,6 +128,8 @@ Runs are one at a time. A newer push waits for the current run, and replaces any
 
 Supply all three `batch_job_queue`, `batch_job_definition` (revisioned ARN), and `batch_job_bucket` from the independently deployed [`gpu/`](gpu/README.md) stack, or leave all three empty. Only the coordinator can submit paid jobs; the reconcile CLI can inspect jobs and read output artifacts but never submits. No AWS Batch API key or Secrets Manager secret is used. Select the matching enrolled schema-v3 `solver_release_id`. Configuring compute doesn't enable mainnet or exact submission.
 
+The app and GPU stacks derive automatic A10G fallback from `server/aws-batch-capacity.json`. `gpu_capacity` reports the allowed types, allocation strategy, nominal maximum vCPUs, total vCPU ceiling including AWS's possible one-host overshoot, and parallel slots. Follow the [drained capacity replacement procedure](gpu/README.md#automatic-a10g-capacity-fallback) when migrating an installed `BEST_FIT` pool. The coordinator refuses a different live configuration before paid work.
+
 The coordinator Lambda environment and `gpu_limits` output publish `workersMax`, `workersMin` and `executionTimeoutMs` from `server/gpu-spend.json`, plus `MAX_JOB_GPU_SECONDS` (4,096 GPU-hours per job). Terraform doesn't duplicate those literals. Before each paid submission the coordinator verifies the AWS Batch job definition and compute environment limits and doesn't submit unless they match. The spend rules are in the runbook's [GPU capacity and spend](../docs/OPERATIONAL-RUNBOOK.md#gpu-capacity-and-spend). Applying Terraform doesn't call AWS Batch or start a workflow.
 
 ### State and configuration

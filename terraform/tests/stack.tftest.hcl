@@ -685,3 +685,12 @@ run "webhook_dispatcher_enabled" {
     error_message = "Enabling the dispatcher adds no index and changes no API or coordinator grant and no mainnet switch."
   }
 }
+
+run "a10g_fallback_matches_runtime_capacity" {
+  command = plan
+  variables { network = "mainnet" }
+  assert {
+    condition     = toset(output.gpu_capacity.instanceTypes) == toset(["g5.xlarge", "g5.2xlarge", "g5.4xlarge"]) && output.gpu_capacity.allocationStrategy == "BEST_FIT_PROGRESSIVE" && output.gpu_capacity.maxVcpus == 48 && output.gpu_capacity.vcpuCeiling == 64 && output.gpu_capacity.parallelSlots == 3
+    error_message = "App capacity output must preserve the total vCPU ceiling while allowing automatic A10G fallback."
+  }
+}

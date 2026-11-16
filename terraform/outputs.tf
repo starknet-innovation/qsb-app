@@ -17,6 +17,15 @@ output "gpu_limits" {
     executionTimeoutMs = local.gpu_spend.executionTimeoutMs
   }
 }
+output "gpu_capacity" {
+  value = {
+    instanceTypes      = local.gpu_instance_types
+    allocationStrategy = local.gpu_allocation_strategy
+    maxVcpus           = local.gpu_max_vcpus
+    vcpuCeiling        = local.gpu_vcpu_ceiling
+    parallelSlots      = local.gpu_parallel_slots
+  }
+}
 output "operator_reconcile_role_arn" { value = aws_iam_role.operator_reconcile.arn }
 
 output "exact_submit_enabled" { value = var.mainnet_enabled && var.exact_submit_enabled }

@@ -64,13 +64,25 @@ locals {
     jsondecode(file("${path.module}/../../src/lib/releases/${name}")).id => jsondecode(file("${path.module}/../../src/lib/releases/${name}"))
   }
   enrolled_solver = try(local.enrolled_releases[local.release_build.identities.solver.id], null)
-  # One g5.xlarge (4 vCPUs, one A10G) per GPU a withdrawal may use at once. The coordinator
-  # refuses to submit unless the live compute environment matches this exactly.
-  gpu_workers = jsondecode(file("${path.module}/../../server/gpu-spend.json")).workersMax
+  gpu_capacity    = jsondecode(file("${path.module}/../../server/aws-batch-capacity.json"))
+  # The vCPU ceiling stays fixed when selecting a larger single-A10G host.
+  gpu_workers             = jsondecode(file("${path.module}/../../server/gpu-spend.json")).workersMax
+  gpu_vcpu_ceiling        = local.gpu_capacity.vcpusPerWorkerBudget * local.gpu_workers
+  gpu_fallback_types      = [for name, host in local.gpu_capacity.instanceTypes : name if host.vcpus <= local.gpu_vcpu_ceiling / 2]
+  gpu_instance_types      = length(local.gpu_fallback_types) > 0 ? local.gpu_fallback_types : [for name, host in local.gpu_capacity.instanceTypes : name if host.vcpus <= local.gpu_vcpu_ceiling]
+  gpu_largest_host_vcpus  = max([for name in local.gpu_instance_types : local.gpu_capacity.instanceTypes[name].vcpus]...)
+  gpu_allocation_strategy = length(local.gpu_instance_types) > 1 ? "BEST_FIT_PROGRESSIVE" : "BEST_FIT"
+  gpu_max_vcpus           = local.gpu_vcpu_ceiling - (length(local.gpu_instance_types) > 1 ? local.gpu_largest_host_vcpus : 0)
+  gpu_parallel_slots      = min(local.gpu_workers, floor(local.gpu_max_vcpus / local.gpu_largest_host_vcpus))
+
 }
 resource "terraform_data" "release_identity" {
   input = local.release_build.identities
   lifecycle {
+    precondition {
+      condition     = local.gpu_parallel_slots >= 1
+      error_message = "The selected A10G host must fit within the existing GPU pool vCPU ceiling."
+    }
     precondition {
       condition     = try(local.release_build.clean && local.release_build.commit == var.source_commit && local.release_build.identities.reference.appCommit == var.source_commit, false)
       error_message = "Use a generated clean app build matching source_commit."
@@ -341,10 +353,10 @@ resource "aws_batch_compute_environment" "gpu" {
   compute_resources {
 
     type                = "EC2"
-    allocation_strategy = "BEST_FIT"
+    allocation_strategy = local.gpu_allocation_strategy
     min_vcpus           = 0
-    max_vcpus           = 4 * local.gpu_workers
-    instance_type       = ["g5.xlarge"]
+    max_vcpus           = local.gpu_max_vcpus
+    instance_type       = local.gpu_instance_types
     instance_role       = aws_iam_instance_profile.gpu.arn
     subnets             = var.subnets
     security_group_ids  = [aws_security_group.gpu.id]
@@ -422,6 +434,15 @@ resource "aws_batch_job_definition" "solver" {
 }
 output "queue" {
   value = aws_batch_job_queue.gpu.arn
+}
+output "gpu_capacity" {
+  value = {
+    instanceTypes      = local.gpu_instance_types
+    allocationStrategy = local.gpu_allocation_strategy
+    maxVcpus           = local.gpu_max_vcpus
+    vcpuCeiling        = local.gpu_vcpu_ceiling
+    parallelSlots      = local.gpu_parallel_slots
+  }
 }
 output "definition" {
   value = aws_batch_job_definition.solver.arn
