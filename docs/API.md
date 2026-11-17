@@ -18,6 +18,8 @@ The deployed API is a Lambda function URL with `AWS_IAM` auth, which CloudFront 
 
 The webapp and the SDK send both ([`src/lib/session.ts`](../src/lib/session.ts)), and CORS allows them.
 
+CORS allows the deployment's own CloudFront origin and `https://starknet-innovation.github.io` (`CORS_EXTRA_ORIGINS` in [`server/app.ts`](../server/app.ts)). A sign-in challenge always names the CloudFront origin, whichever origin asked for it. Credentials travel in headers, never cookies, so CORS doesn't allow credentials.
+
 ## OpenAPI
 
 [`docs/api/openapi.json`](api/openapi.json) is the OpenAPI 3.1 document for the mainnet API: every route, its sign-in requirement, request and response schemas, and the error codes each route can return, by status. Its paths are relative to its two servers, `/v1` and the `/api` compatibility alias.

@@ -157,6 +157,11 @@ const SCRIPT_LOOKUP_MS = 15_000;
 const ORIGIN_TTL_MS = 5 * 60_000;
 /** How long before a container reads the row again after finding it missing, or failing to read it. */
 const ORIGIN_RETRY_MS = 30_000;
+/**
+ * Browser origins CORS allows besides the app's own, whether or not the deployment has recorded that one. They
+ * aren't named in sign-in challenges: the challenge always names the app's origin.
+ */
+const CORS_EXTRA_ORIGINS = ["https://starknet-innovation.github.io"];
 export function createApp(
   records: Store = defaultStore,
   dependencies: {
@@ -250,8 +255,8 @@ export function createApp(
   // else the deployment's SYSTEM#DEPLOYMENT row, which Terraform writes once CloudFront exists (terraform/web.tf).
   // The row is re-read ORIGIN_TTL_MS after a read that found it, so a replaced distribution reaches warm containers,
   // and ORIGIN_RETRY_MS after one that didn't. A failed read keeps the origin last read. On Lambda there is no
-  // fallback: with no origin, sign-in answers 503 app_origin_unavailable and CORS allows none, while every other
-  // route works. Elsewhere, a server without APP_ORIGIN or the row names the Vite dev origin.
+  // fallback: with no origin, sign-in answers 503 app_origin_unavailable and CORS allows only CORS_EXTRA_ORIGINS,
+  // while every other route works. Elsewhere, a server without APP_ORIGIN or the row names the Vite dev origin.
   const configuredOrigin = process.env.APP_ORIGIN;
   const onLambda = Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
   let originRead: { origin?: string; readAgainAt: number } | undefined;
@@ -279,9 +284,8 @@ export function createApp(
   });
   app.use("*", async (c, next) => {
     const origin = await appOrigin();
-    if (!origin) return next();
     return cors({
-      origin,
+      origin: origin ? [origin, ...CORS_EXTRA_ORIGINS] : CORS_EXTRA_ORIGINS,
       allowHeaders: ["Content-Type", CREDENTIAL_HEADER, BODY_HASH_HEADER, "Authorization", "Idempotency-Key"],
       allowMethods: ["GET", "POST", "OPTIONS"],
     })(c, next);
