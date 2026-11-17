@@ -1,471 +1,172 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { formatBtc, parseBtc } from "../src/lib/model";
-import { ApiRequestError, QsbClient, preparedDepositSchema, publicApi, type WithdrawalReview } from "./client";
-import {
-  Prompter,
-  SignatureNeeded,
-  UsageError,
-  assertOutputs,
-  clearSession,
-  externalSigner,
-  fileAuthorizations,
-  filePendingDeposits,
-  loadSession,
-  readApiKey,
-  readPassphrase,
-  readPsbtFile,
-  readTextFile,
-  saveSession,
-  writeNewPrivateFile,
-  writePublicFile,
-  type CliIo,
-} from "./cli-io";
-import type { LocalQsb } from "./runtime";
-import { loopbackTestSigner } from "./test-signer";
+import { apiErrorCodes } from "../server/api-errors";
+import { parseBtc } from "../src/lib/model";
+import { ApiRequestError, QsbClient, preparedDepositSchema, publicApi } from "./client";
+import { ExternalAgentError, externalAgent } from "./agent";
+import { Prompter, UsageError, assertOutputs, filePendingDeposits, readPsbtFile, readTextFile,
+  writePublicFile, type CliIo } from "./cli-io";
 
-const usage = `qsb: non-custodial QSB client. Keys, recovery state and passphrases stay on this machine.
+const usage = `Usage: qsb <command> [options] (QSB_NETWORK must be mainnet)
 
-Usage: qsb <command> [options]      (QSB_NETWORK must be mainnet)
+All custody, signing, credentials and durable one-time authorizations belong to an external agent.
+No backups, passphrases, seeds, raw keys or session caches are accepted by this CLI.
 
-Account
-  login                         BIP-322 sign-in; caches the 1-hour session token (owner-only file)
-  logout                        Forget the cached session
-  config | rates | utxos        Server configuration, MARA fee rates, confirmed payment outputs
-  service-fee                   The optional service fee's current quote (sats, BTC/USD, address)
-Vaults
-  vault create --name <name> --backup <new file> [--config A|PQB] [--state <file>]
-                  --state uses recovery state you generated (the JSON the pipeline's setup writes)
-                  instead of generating it. It's refused unless it's exactly what the pipeline builds
-                  from its HORS secrets, checked locally before the backup is saved or the vault registered.
-  vault list
-Deposits (one per vault)
-  deposit prepare <vault> --backup <file> --amount <BTC> --fee-rate <sat/vB> --utxo <txid:vout>... --out <file>
+  config | rates | service-fee
+  utxos | vault list
+  vault create --name <name> --descriptor <public JSON file>
+  deposit prepare <vault> --amount <BTC> --fee-rate <sat/vB> --utxo <txid:vout>... --out <file>
                   [--service-fee <max sats>]
-                  --service-fee also pays the optional USD 200 service fee in BTC, at the server's current
-                  quote, as its own output on top of the amount, if it's at most <max sats>. It isn't required.
-  deposit submit --prepared <file> --signed <psbt> --accept-costs
+  deposit submit --prepared <file> --signed <PSBT file> --accept-costs
   deposit status <vault> | deposit resubmit <vault>
-Withdrawals
-  withdraw create <vault> --backup <file> --out-backup <new file> --helper <txid:vout>
-                  --destination <address> --fee-rate <sat/vB> --accept-costs [--solver <id>]
-  withdraw list | status <job> | pause <job> | resume <job>
-  withdraw assemble <job> --backup <file> [--out-backup <new file>] --out <file> [--signed-psbt <file>]
-  withdraw submit --signed <file> [--approve-txid <txid>]
-                  Shows the destination, payout, fee, fee rate and transaction ID, then asks you to type
-                  the ID. --approve-txid skips that question: it bypasses a person at the terminal and is
-                  meant for integrators with their own approval gate. It still submits only that exact ID.
+  withdraw create <vault> --helper <txid:vout> --destination <address> --fee-rate <sat/vB> --accept-costs
+                  [--solver <id>]
+                  Retry with the vault id and --accept-costs only: the agent retains the exact intent.
+  withdraw list | withdraw status <job> | withdraw pause <job> | withdraw resume <job>
+  withdraw prepare <job> --out <public signing request JSON>
+  withdraw assemble <job> --out <signed result JSON>
+  withdraw submit --signed <result JSON> [--approve-txid <txid>]
 
-Options
-  --api <url>            API origin (or QSB_API_URL)
-  --base-path <path>     /v1 (default), or /api, the compatibility alias
-  --app-origin <url>     Origin the server's sign-in challenge must name (or QSB_APP_ORIGIN;
-                         default: the --api origin). Nothing else is ever signed.
-  --address <address>    Payment address (or QSB_ADDRESS)
-  --public-key <hex>     Its compressed public key (or QSB_PUBLIC_KEY)
-  --signer <kind>        external (default): write PSBTs and challenges, read signatures back.
-                         test-key: raw key from QSB_TEST_SIGNER_KEY, loopback API only.
-  --passphrase-fd <n>    Read the recovery passphrase from a file descriptor (or QSB_PASSPHRASE,
-                         or a terminal prompt). Passphrases are never taken from arguments.
-  --api-key-fd <n>       Authenticate with an API key read from a file descriptor (or QSB_API_KEY)
-                         instead of a wallet sign-in. Keys are never taken from arguments.
-  --home <dir>           Session cache and pending deposits (or QSB_HOME; default ~/.qsb)
-  --no-cache             Keep the session token in memory only
-  --psbt-out <file>      Where the external signer writes an unsigned PSBT
-  --message-out <file>   Where the external signer also writes the sign-in message
+  --api <url>          Or QSB_API_URL
+  --base-path <path>   /v1 (default) or /api
+  --agent <executable> Or QSB_AGENT; caller-owned JSON-over-pipes adapter, no shell arguments
+  --address <address> Or QSB_ADDRESS
+  --public-key <hex>  Or QSB_PUBLIC_KEY
+  --home <dir>        Public pending deposit records only (default ~/.qsb)
+  --help
+
+The agent must independently approve exact transactions and durably enforce one intent and assembly
+per vault across every device. --approve-txid bypasses the terminal approval prompt; use it only after
+your own approval gate. See sdk/README.md for the agent protocol.
 `;
-
 const options = {
-  api: { type: "string" },
-  "base-path": { type: "string" },
-  "app-origin": { type: "string" },
-  address: { type: "string" },
-  "public-key": { type: "string" },
-  signer: { type: "string" },
-  "passphrase-fd": { type: "string" },
-  "api-key-fd": { type: "string" },
-  home: { type: "string" },
-  "no-cache": { type: "boolean" },
-  "psbt-out": { type: "string" },
-  "message-out": { type: "string" },
-  "signed-psbt": { type: "string" },
-  name: { type: "string" },
-  config: { type: "string" },
-  backup: { type: "string" },
-  state: { type: "string" },
-  "out-backup": { type: "string" },
-  amount: { type: "string" },
-  "fee-rate": { type: "string" },
-  utxo: { type: "string", multiple: true },
-  out: { type: "string" },
-  prepared: { type: "string" },
-  signed: { type: "string" },
-  "accept-costs": { type: "boolean" },
-  "service-fee": { type: "string" },
-  helper: { type: "string" },
-  destination: { type: "string" },
-  solver: { type: "string" },
-  "approve-txid": { type: "string" },
-  help: { type: "boolean", short: "h" },
+  api: { type: "string" }, "base-path": { type: "string" }, agent: { type: "string" },
+  address: { type: "string" }, "public-key": { type: "string" }, home: { type: "string" },
+  name: { type: "string" }, descriptor: { type: "string" }, amount: { type: "string" },
+  "fee-rate": { type: "string" }, utxo: { type: "string", multiple: true }, out: { type: "string" },
+  prepared: { type: "string" }, signed: { type: "string" }, "accept-costs": { type: "boolean" },
+  "service-fee": { type: "string" }, helper: { type: "string" }, destination: { type: "string" },
+  solver: { type: "string" }, "approve-txid": { type: "string" }, help: { type: "boolean", short: "h" },
 } as const;
-
-function outpoint(value: string) {
+function point(value: string) {
   const match = /^([0-9a-f]{64}):(\d{1,10})$/i.exec(value);
-  if (!match) throw new UsageError(`Expected <txid>:<vout>, got ${value}.`);
+  if (!match || Number(match[2]) > 0xffffffff) throw new UsageError("Expected <txid>:<vout>.");
   return { txid: match[1].toLowerCase(), vout: Number(match[2]) };
 }
-const sats = (value: string) => `${formatBtc(value)} BTC (${BigInt(value).toLocaleString("en-US")} sats)`;
-function reviewText(review: WithdrawalReview) {
-  return [
-    `Withdrawal ready to submit on bitcoin ${review.network}`,
-    `  Transaction ID: ${review.txid}`,
-    `  Destination:    ${review.destination}`,
-    `  Payout:         ${sats(review.outputValue)}`,
-    `  Miner fee:      ${sats(review.fee)}`,
-    `  Fee rate:       ${review.feeRate.toFixed(2)} sat/vB over ${review.vsize} vB (MARA minimum ${review.minerMinimumFeeRate} sat/vB)`,
-    "Submitting sends this exact transaction to MARA Slipstream. It can't be changed or recalled.",
-    "",
-  ].join("\n");
-}
-
-/** Run one CLI command. `qsb` is a trusted test seam for the local QSB runtime. */
-export async function runCli(argv: string[], io: CliIo, qsb?: LocalQsb): Promise<number> {
+export async function runCli(argv: string[], io: CliIo): Promise<number> {
   const prompts = new Prompter(io);
-  const say = (text: string) => io.stderr.write(`${text}\n`);
-  const print = (value: unknown) => io.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+  let diagnostic = "QSB setup failed. Check the API URL, payment identity and external agent.";
+  const print = (value: unknown) => io.stdout.write(JSON.stringify(value, null, 2) + "\n");
   try {
-    const { values, positionals } = parseArgs({ args: argv, options, allowPositionals: true, strict: true });
-    const [group, action, target] = positionals;
-    if (values.help || !group) {
-      io.stdout.write(usage);
-      return values.help ? 0 : 2;
-    }
-    const need = <K extends keyof typeof values>(key: K): NonNullable<(typeof values)[K]> => {
-      const value = values[key];
-      if (value === undefined) throw new UsageError(`--${String(key)} is required.`);
-      return value as NonNullable<(typeof values)[K]>;
+    const { values: v, positionals: words } = parseArgs({ args: argv, options, allowPositionals: true, strict: true });
+    if (v.help || !words.length) { io.stdout.write(usage); return v.help ? 0 : 2; }
+    const need = (value: string | undefined, label: string) => {
+      if (!value) throw new UsageError(`${label} is required.`); return value;
     };
-    /** The command's words plus its id, if it takes one. */
-    const arity = (count: number) => {
-      if (positionals.length !== count) throw new UsageError("Wrong number of arguments. See --help.");
-    };
-    const home = path.resolve(io.cwd, values.home ?? io.env.QSB_HOME ?? path.join(homedir(), ".qsb"));
-    if (group === "logout") {
-      await clearSession(home);
-      say("Cached session removed.");
-      return 0;
-    }
-    const api = values.api ?? io.env.QSB_API_URL;
-    if (!api) throw new UsageError("Set the API origin with --api or QSB_API_URL.");
-    const basePath = values["base-path"] ?? "/v1";
+    const api = need(v.api ?? io.env.QSB_API_URL, "--api");
+    const basePath = v["base-path"] ?? "/v1";
     if (basePath !== "/v1" && basePath !== "/api") throw new UsageError("--base-path is /v1 or /api.");
-    // Public routes: no wallet needed to look at a deployment first.
-    if (group === "config" || group === "rates" || group === "service-fee") {
-      arity(1);
-      const open = publicApi({ baseUrl: api, basePath, fetch: io.fetch });
-      print(await (group === "config" ? open.config() : group === "rates" ? open.rates() : open.serviceFee()));
+    const [group, action, target] = words;
+    diagnostic = group === "vault" ? "Vault operation failed. Check the public descriptor and external recovery availability."
+      : group === "deposit" ? "Deposit operation failed. Check public funding status and the prepared PSBT; retain any pending signed bytes."
+      : group === "withdraw" ? action === "submit"
+        ? "Withdrawal submission was not confirmed. Keep the signed result and check public job status; do not repeat an uncertain submission."
+        : action === "create" ? "Search creation failed. Check public job status and the external intent journal before retrying."
+        : "Withdrawal operation failed. Check public job status, the external authorization journal and the exact signing request."
+      : "Public lookup failed. Check the API endpoint and public service status.";
+    const arity = (n: number) => { if (words.length !== n) throw new UsageError("Wrong number of arguments. See --help."); };
+    if (["config", "rates", "service-fee"].includes(group)) {
+      arity(1); const apiClient = publicApi({ baseUrl: api, basePath, fetch: io.fetch });
+      print(await (group === "config" ? apiClient.config() : group === "rates" ? apiClient.rates() : apiClient.serviceFee()));
       return 0;
     }
-    const kind = values.signer ?? "external";
-    if (kind !== "external" && kind !== "test-key") throw new UsageError("--signer is external or test-key.");
-    if (kind === "test-key" && !io.env.QSB_TEST_SIGNER_KEY)
-      throw new UsageError("The test-key signer reads a WIF key from QSB_TEST_SIGNER_KEY.");
-    const signer =
-      kind === "test-key"
-        ? loopbackTestSigner(io.env.QSB_TEST_SIGNER_KEY!, api)
-        : externalSigner(
-            io,
-            prompts,
-            {
-              address: values.address ?? io.env.QSB_ADDRESS ?? "",
-              publicKey: values["public-key"] ?? io.env.QSB_PUBLIC_KEY ?? "",
-            },
-            {
-              messageOut: values["message-out"],
-              psbtOut: values["psbt-out"],
-              signedPsbt: values["signed-psbt"],
-            },
-          );
-    if (!signer.address || !signer.publicKey)
-      throw new UsageError("Set --address and --public-key (or QSB_ADDRESS and QSB_PUBLIC_KEY).");
-    const apiKey = readApiKey(io, values["api-key-fd"]);
-    // With a key there's no wallet sign-in, so nothing to cache.
-    const cache = !values["no-cache"] && !apiKey;
-    const token = cache ? await loadSession(home, api, signer.address) : undefined;
-    const client = new QsbClient({
-      baseUrl: api,
-      basePath,
-      appOrigin: values["app-origin"] ?? io.env.QSB_APP_ORIGIN,
-      signer,
-      fetch: io.fetch,
-      qsb,
-      pendingDeposits: filePendingDeposits(home),
-      authorizations: fileAuthorizations(home),
-      token,
-      apiKey,
+    const providers = externalAgent(need(v.agent ?? io.env.QSB_AGENT, "--agent"), {
+      baseUrl: api, address: need(v.address ?? io.env.QSB_ADDRESS, "--address"),
+      publicKey: need(v["public-key"] ?? io.env.QSB_PUBLIC_KEY, "--public-key"), cwd: io.cwd, env: io.env,
     });
-    const signIn = async () => {
-      if (apiKey) return;
-      if (token) {
-        try {
-          await client.vaults.list();
-          return;
-        } catch (error) {
-          if (!(error instanceof ApiRequestError && error.status === 401)) throw error;
-        }
-      }
-      await client.login();
-      if (cache) await saveSession(home, api, signer.address, client.token!);
-    };
-    const passphrase = (confirm = false) => readPassphrase(io, prompts, values["passphrase-fd"], confirm);
-    const backup = () => readTextFile(io, need("backup"));
-    const accepted = () => {
-      if (!values["accept-costs"])
-        throw new UsageError(
-          "Add --accept-costs after reviewing the costs: miner fees are paid in Bitcoin, GPU search time has no fixed quote, and customer billing isn't enabled.",
-        );
+    const client = new QsbClient({ baseUrl: api, basePath, fetch: io.fetch, ...providers,
+      pendingDeposits: filePendingDeposits(path.resolve(io.cwd, v.home ?? io.env.QSB_HOME ?? path.join(homedir(), ".qsb"))) });
+    const cost = () => {
+      if (!v["accept-costs"]) throw new UsageError("--accept-costs is required after reviewing miner fees and GPU search costs.");
       return true as const;
     };
-    const id = (label: string) => {
-      if (!target) throw new UsageError(`Give the ${label} id.`);
-      return target;
+    const identifier = () => need(target, "vault/job id");
+    const out = () => {
+      const file = need(v.out, "--out"); assertOutputs(io, [file], [v.descriptor, v.prepared, v.signed]); return file;
     };
-
     switch (`${group} ${action ?? ""}`.trim()) {
-      case "login":
-        arity(1);
-        await client.login();
-        if (cache) await saveSession(home, api, signer.address, client.token!);
-        say(cache ? `Signed in as ${signer.address}; the session is cached in ${home}.` : `Signed in as ${signer.address}.`);
-        return 0;
-      case "utxos":
-        arity(1);
-        await signIn();
-        print(await client.utxos());
-        return 0;
-      case "vault create": {
-        arity(2);
-        const file = need("backup"), name = need("name");
-        assertOutputs(io, [file], [values.state], [values["message-out"]]);
-        const stateJson = values.state === undefined ? undefined : await readTextFile(io, values.state);
-        if (values.config !== undefined && values.config !== "A" && values.config !== "PQB") throw new Error("--config must be A or PQB");
-        const secret = await passphrase(true);
-        await signIn();
-        say(stateJson === undefined ? "Generating QSB keys locally…" : `Checking the recovery state in ${values.state} locally…`);
-        const { vault } = await client.vaults.create({
-          name,
-          config: values.config as "A" | "PQB" | undefined,
-          passphrase: secret,
-          saveBackup: (text) => writeNewPrivateFile(io, file, text),
-          ...(stateJson === undefined ? {} : { stateJson }),
-        });
-        say(`Encrypted recovery backup saved to ${file}. Keep it and its passphrase: the server holds only public data, and nobody can recover the vault without both.`);
-        if (stateJson !== undefined)
-          say(`${values.state} still holds the recovery state unencrypted. Once the backup is safe, destroy that copy, and never use the state for another vault.`);
-        print({ vault });
-        return 0;
-      }
-      case "vault list":
-        arity(2);
-        await signIn();
-        print(await client.vaults.list());
-        return 0;
+      case "utxos": arity(1); print(await client.utxos()); return 0;
+      case "vault list": arity(2); print(await client.vaults.list()); return 0;
+      case "vault create":
+        arity(2); print(await client.vaults.create({ name: need(v.name, "--name"),
+          descriptor: JSON.parse(await readTextFile(io, need(v.descriptor, "--descriptor"))) })); return 0;
       case "deposit prepare": {
-        arity(3);
-        const vaultId = id("vault");
-        const out = need("out");
-        const psbtFile = values["psbt-out"] ?? `${out.replace(/\.json$/, "")}.psbt`;
-        assertOutputs(io, [out, psbtFile], [values.backup], [values["message-out"]]);
-        const text = await backup();
-        const secret = await passphrase();
-        await signIn();
-        const prepared = await client.deposits.prepare(vaultId, {
-          backup: text,
-          passphrase: secret,
-          amount: parseBtc(need("amount")),
-          feeRate: need("fee-rate"),
-          utxos: (values.utxo ?? []).map(outpoint),
-          ...(values["service-fee"] !== undefined ? { serviceFee: { maxSats: values["service-fee"] } } : {}),
-        });
-        await writePublicFile(io, out, `${JSON.stringify(prepared, null, 2)}\n`);
-        await writePublicFile(io, psbtFile, `${prepared.psbt}\n`);
-        say(
-          [
-            `Deposit of ${sats(prepared.amount)} into ${vaultId}`,
-            ...(prepared.serviceFee
-              ? [`  Service fee: ${sats(prepared.serviceFee.amount)} (USD ${prepared.serviceFee.usd} at ${prepared.serviceFee.btcUsd} USD/BTC) to ${prepared.serviceFee.address}`]
-              : []),
-            `  Miner fee: ${sats(prepared.fee)}, at most ${prepared.vsize} vB`,
-            `  Change:    ${sats(prepared.change)} back to ${prepared.owner}`,
-            `Unsigned PSBT: ${psbtFile}. Sign inputs ${prepared.signInputs.join(", ")} in your wallet without broadcasting,`,
-            `then run: deposit submit --prepared ${out} --signed <signed psbt> --accept-costs`,
-          ].join("\n"),
-        );
-        print(prepared);
-        return 0;
+        arity(3); const file = out();
+        const prepared = await client.deposits.prepare(identifier(), { amount: parseBtc(need(v.amount, "--amount")),
+          feeRate: need(v["fee-rate"], "--fee-rate"), utxos: (v.utxo ?? []).map(point),
+          ...(v["service-fee"] ? { serviceFee: { maxSats: v["service-fee"] } } : {}) });
+        await writePublicFile(io, file, JSON.stringify(prepared, null, 2) + "\n"); print(prepared); return 0;
       }
       case "deposit submit": {
-        arity(2);
-        const prepared = preparedDepositSchema.parse(JSON.parse(await readTextFile(io, need("prepared"))));
-        const signed = await readPsbtFile(io, need("signed"));
-        const costAccepted = accepted();
-        await signIn();
-        const result = await client.deposits.submit(prepared, signed, { costAccepted });
-        print(result);
-        if (result.submission === "submitted") {
-          say(`MARA Slipstream has deposit ${result.txid}. Wait for confirmation before withdrawing.`);
-          return 0;
-        }
-        say(
-          result.submission === "rejected"
-            ? `MARA refused the deposit: ${result.reason ?? "no reason given"}. Nothing was sent to the network.`
-            : `MARA's answer to deposit ${result.txid} was lost. Don't deposit again; run deposit resubmit ${prepared.vaultId}.`,
-        );
-        return 1;
+        arity(2); const accepted = cost();
+        const result = await client.deposits.submit(preparedDepositSchema.parse(JSON.parse(await readTextFile(io, need(v.prepared, "--prepared")))),
+          await readPsbtFile(io, need(v.signed, "--signed")), { costAccepted: accepted });
+        print(result); return result.submission === "submitted" ? 0 : 1;
       }
-      case "deposit status":
-        arity(3);
-        await signIn();
-        print(await client.deposits.status(id("vault")));
-        return 0;
+      case "deposit status": arity(3); print(await client.deposits.status(identifier())); return 0;
       case "deposit resubmit": {
-        arity(3);
-        await signIn();
-        const result = await client.deposits.resubmit(id("vault"));
-        print(result);
-        if (result.submission === "submitted") return 0;
-        say(
-          result.submission === "rejected"
-            ? `MARA refused the deposit: ${result.reason ?? "no reason given"}.`
-            : "MARA's answer is still unclear. The same deposit can be resent again; don't make another deposit.",
-        );
-        return 1;
+        arity(3); const result = await client.deposits.resubmit(identifier()); print(result); return result.submission === "submitted" ? 0 : 1;
       }
-      case "withdraw create": {
-        arity(3);
-        const vaultId = id("vault");
-        // A new intent is bound into a new backup before any paid work; a resume takes none of these.
-        if ((values.helper || values.destination || values["fee-rate"]) && !values["out-backup"])
-          throw new UsageError("A new withdrawal needs --out-backup <new file>: the backup that binds its payout is saved first.");
-        assertOutputs(io, [values["out-backup"]], [values.backup], [values["message-out"]]);
-        const text = await backup();
-        const costAccepted = accepted();
-        const secret = await passphrase();
-        await signIn();
-        let saved = false;
-        const { job } = await client.withdrawals.create({
-          vaultId,
-          backup: text,
-          passphrase: secret,
-          ...(values.helper ? { helper: outpoint(values.helper) } : {}),
-          ...(values.destination ? { destination: values.destination } : {}),
-          ...(values["fee-rate"] ? { feeRate: values["fee-rate"] } : {}),
-          ...(values.solver ? { solverReleaseId: values.solver } : {}),
-          costAccepted,
-          saveBackup: async (encrypted) => {
-            await writeNewPrivateFile(io, need("out-backup"), encrypted);
-            saved = true;
-          },
-        });
-        say(
-          [
-            `Withdrawal search ${job.id} is ${job.status}.`,
-            `  Destination: ${job.manifest.destination}`,
-            `  Payout:      ${sats(job.manifest.outputValue)}`,
-            `  Miner fee:   ${sats(job.manifest.fee)}`,
-            saved
-              ? `The withdrawal backup ${values["out-backup"]} binds this payout; use it to authorize the result.`
-              : `Resumed the intent saved in ${values.backup}; no new backup was written.`,
-          ].join("\n"),
-        );
-        print({ job });
-        return 0;
-      }
-      case "withdraw list":
-        arity(2);
-        await signIn();
-        print(await client.withdrawals.list());
-        return 0;
-      case "withdraw status":
-      case "withdraw pause":
-      case "withdraw resume": {
-        arity(3);
-        const jobId = id("job");
-        await signIn();
-        print(await client.withdrawals[action as "status" | "pause" | "resume"](jobId));
-        return 0;
-      }
-      case "withdraw assemble": {
-        arity(3);
-        const jobId = id("job");
-        const out = need("out");
-        assertOutputs(
-          io,
-          [values["out-backup"], out],
-          [values.backup, values["signed-psbt"]],
-          [values["psbt-out"], values["message-out"]],
-        );
-        const text = await backup();
-        const secret = await passphrase();
-        await signIn();
-        let sealed: string | undefined;
-        const signed = await client.withdrawals
-          .assemble(jobId, {
-            backup: text,
-            passphrase: secret,
-            saveBackup: async (encrypted: string) => {
-              if (!values["out-backup"])
-                throw new UsageError(
-                  "This backup doesn't bind the assembled transaction yet: add --out-backup <new file> to save the signing backup before signing.",
-                );
-              await writeNewPrivateFile(io, values["out-backup"], encrypted);
-              sealed = values["out-backup"];
-              say(`Signing backup saved to ${sealed}. It binds this exact transaction; use it from now on.`);
-            },
-          })
-          .catch((error) => {
-            if (error instanceof SignatureNeeded && sealed)
-              throw new SignatureNeeded(`${error.message} Pass --backup ${sealed} instead of --out-backup.`);
-            throw error;
-          });
-        await writePublicFile(io, out, `${JSON.stringify(signed, null, 2)}\n`);
-        say(`Signed withdrawal ${signed.txid} saved to ${out}. Nothing was broadcast. Review and submit it with: withdraw submit --signed ${out}`);
-        print({ jobId: signed.jobId, txid: signed.txid, signed: out });
-        return 0;
+      case "withdraw create":
+        arity(3); print(await client.withdrawals.create({ vaultId: identifier(), costAccepted: cost(),
+          ...(v.helper ? { helper: point(v.helper) } : {}), ...(v.destination ? { destination: v.destination } : {}),
+          ...(v["fee-rate"] ? { feeRate: v["fee-rate"] } : {}), ...(v.solver ? { solverReleaseId: v.solver } : {}) })); return 0;
+      case "withdraw list": arity(2); print(await client.withdrawals.list()); return 0;
+      case "withdraw status": case "withdraw pause": case "withdraw resume":
+        arity(3); print(await client.withdrawals[action as "status" | "pause" | "resume"](identifier())); return 0;
+      case "withdraw prepare": case "withdraw assemble": {
+        arity(3); const file = out();
+        const result = action === "prepare" ? await client.withdrawals.prepare(identifier()) : await client.withdrawals.assemble(identifier());
+        await writePublicFile(io, file, JSON.stringify(result, null, 2) + "\n"); print(result); return 0;
       }
       case "withdraw submit": {
         arity(2);
-        const signed = JSON.parse(await readTextFile(io, need("signed")));
-        await signIn();
-        const result = await client.withdrawals.submit(signed, {
-          approve: async (review) => {
-            say(reviewText(review));
-            if (values["approve-txid"] !== undefined) {
-              say("Warning: --approve-txid approves non-interactively; no one confirms at this terminal. It submits only if it names the transaction ID above.");
-              return values["approve-txid"];
-            }
-            if (!io.interactive)
-              throw new UsageError("Review the transaction above, then re-run with --approve-txid <its transaction ID>.");
-            return (await prompts.line("Type the transaction ID to approve and submit it: ")).trim();
-          },
-        });
-        say(`${result.status}: ${result.txid}. Keep the signed file and check withdraw status; do not submit again.`);
+        if (!io.interactive && !v["approve-txid"])
+          throw new UsageError("Non-interactive submission requires --approve-txid after reviewing the exact transaction.");
+        const signed = JSON.parse(await readTextFile(io, need(v.signed, "--signed")));
+        const result = await client.withdrawals.submit(signed, { approve: async review => {
+          io.stderr.write(`Mainnet withdrawal ${review.txid}\nDestination: ${review.destination}\nPayout: ${review.outputValue} sats\nFee: ${review.fee} sats (${review.feeRate} sat/vB)\n`);
+          if (v["approve-txid"]) { io.stderr.write("Non-interactive approval: your external approval gate must have approved these exact bytes.\n"); return v["approve-txid"]; }
+          return prompts.line("Type the exact transaction ID to submit: ");
+        } });
         print(result);
         return result.status === "uncertain" ? 1 : 0;
       }
-      default:
-        throw new UsageError(`Unknown command "${positionals.join(" ")}". See --help.`);
+      default: throw new UsageError("Unknown command. See --help.");
     }
   } catch (error) {
-    if (error instanceof SignatureNeeded) {
-      say(error.message);
-      return 3;
-    }
-    const coded = error instanceof ApiRequestError && error.code ? ` (${error.code})` : "";
-    say(`qsb: ${error instanceof Error ? error.message : String(error)}${coded}`);
-    return error instanceof UsageError || (error as { code?: string } | null)?.code?.startsWith("ERR_PARSE_ARGS") ? 2 : 1;
-  } finally {
-    prompts.close();
-  }
+    // Only local static diagnostics and codes from the owning API allowlist may be displayed.
+    // Never echo arbitrary exception text, agent payloads/stderr, argv values or JSON parse input.
+    const usageError = error instanceof UsageError || (error as { code?: string })?.code?.startsWith("ERR_PARSE_ARGS");
+    const api = error instanceof ApiRequestError ? error
+      : error instanceof Error && error.cause instanceof ApiRequestError ? error.cause : undefined;
+    if (error instanceof UsageError) diagnostic = error.diagnostic;
+    else if (usageError) diagnostic = "Invalid or unknown command option. See --help.";
+    else if (error instanceof ExternalAgentError) {
+      const messages: Record<ExternalAgentError["operation"], string> = {
+        "credentials.get": "External credentials are unavailable. Refresh or unlock credentials in your external provider.",
+        "authorizations.get": "The external authorization journal is unavailable. Restore access to the shared durable store.",
+        "authorizations.claim": "The external authorization claim failed. Check journal availability or a conflicting claim; resume the original intent/assembly and never reset claims.",
+        "custody.confirmVault": "External recovery confirmation failed. Verify durable recovery for this exact public descriptor.",
+        "custody.authorizeWithdrawal": "External withdrawal authorization failed. Review the exact signing request and the manager's one-time authorization state.",
+        "wallet.signPsbt": "External wallet signing failed. Check the wallet connection and exact PSBT approval.",
+      };
+      diagnostic = messages[error.operation];
+    } else if (api?.code && Object.hasOwn(apiErrorCodes, api.code))
+      diagnostic = `API ${api.code}: ${apiErrorCodes[api.code as keyof typeof apiErrorCodes]}`;
+    else if (api?.status === 401) diagnostic = "API authentication failed. Refresh credentials in the external provider.";
+    io.stderr.write(diagnostic + "\n");
+    return usageError ? 2 : 1;
+  } finally { prompts.close(); }
 }

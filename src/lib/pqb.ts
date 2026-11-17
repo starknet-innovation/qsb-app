@@ -7,7 +7,7 @@ import {
   roundSelection, witnessPlan, type Packet, type SolvedStage,
 } from "../pqb-core/grind";
 import { fromHex, hex } from "../pqb-core/primitives";
-import { serializeTx, type Tx } from "../pqb-core/tx";
+import { parseScript, serializeTx, type Tx } from "../pqb-core/tx";
 import { pinFields, pinNonceOf } from "../pqb-core/spend";
 import type { Job, Withdrawal } from "./model";
 
@@ -34,6 +34,28 @@ export const pqbPublicStateSchema = z.object({
   if (new Set(s.round_table).size !== 109)
     ctx.addIssue({ code: "custom", message: "Duplicate PQB table entry" });
 });
+
+/** Bind the ordered shared table to the generator's D/F/C stride-3 pushes in the actual script. */
+export function validatePqbPublicState(text: string) {
+  const state = pqbPublicStateSchema.parse(JSON.parse(text));
+  const tokens = parseScript(fromHex(state.full_script_hex));
+  const one = (i: number) => tokens[i]?.[1] === 0x51 ||
+    (tokens[i]?.[2]?.length === 1 && tokens[i][2]![0] === 1);
+  const candidates: string[][] = [];
+  for (let start = 1; start + state.round_table.length * 3 <= tokens.length; start++) {
+    if (!one(start - 1)) continue; // TSENT, followed by D_j, F_j=1, C_j in setup order.
+    const table: string[] = [];
+    for (let j = 0; j < state.round_table.length; j++) {
+      const pos = start + 3 * j, signature = tokens[pos]?.[2], commitment = tokens[pos + 2]?.[2];
+      if (signature?.length !== 9 || !one(pos + 1) || commitment?.length !== 20) break;
+      table.push(hex(signature));
+    }
+    if (table.length === state.round_table.length) candidates.push(table);
+  }
+  if (candidates.length !== 1 || candidates[0].some((sig, i) => sig !== state.round_table[i]))
+    throw new Error("PQB round table does not match the ordered table in its locking script.");
+  return state;
+}
 
 const recovery = z.object({ config: z.literal("PQB"), seed: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
 const hit = z.string().min(1).max(200);
@@ -78,7 +100,7 @@ export function pqbTransaction(m: Withdrawal, sequence = 0x80000000, locktime = 
 /** Rebuild the public problem from the approved manifest, never from worker-supplied bytes. */
 export function pqbPacket(publicStateJson: string, m: Withdrawal, stage: number,
   solution?: Job["solution"]): Packet {
-  const s = pqbPublicStateSchema.parse(JSON.parse(publicStateJson));
+  const s = validatePqbPublicState(publicStateJson);
   if (![0, 1, 2].includes(stage)) throw new Error("Invalid PQB stage");
   const nonce = stage ? pinNonceOf(solution!.locktime, solution!.sequence) : 0n;
   if (nonce === null) throw new Error("Invalid PQB pinning nonce");

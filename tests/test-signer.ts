@@ -3,7 +3,7 @@ import { base64, hex } from "@scure/base";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { Signer as Bip322 } from "bip322-js";
 import { BITCOIN_NETWORK } from "../src/lib/network";
-import { apiBase, isLoopback, type Signer } from "./signer";
+import { apiBase, isLoopback, type Signer } from "../sdk/signer";
 
 /**
  * A P2WPKH signer holding a raw private key, for tests and local development
@@ -11,7 +11,7 @@ import { apiBase, isLoopback, type Signer } from "./signer";
  * [::1]), and QsbClient refuses to pair it with any other API URL. Use a
  * wallet or an external signer for anything else.
  */
-export function loopbackTestSigner(key: Uint8Array | string, apiUrl: string): Signer {
+export function loopbackTestSigner(key: Uint8Array | string, apiUrl: string): Signer & { signMessage(address: string, message: string): Promise<string> } {
   if (!isLoopback(apiBase(apiUrl)))
     throw new Error("The local test signer only works with a loopback API URL.");
   const privateKey =

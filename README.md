@@ -8,7 +8,7 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB Config A and PQB) vaults: v
 
 - `src/`: React application: encrypted local backups, wallet integration, and staged signing and recovery flows.
 - `server/`: the API (`server/app.ts`), the Step Functions coordinator, storage, chain and miner clients, and the exact-submit checks.
-- [`sdk/`](sdk/README.md): TypeScript SDK and `qsb` CLI for the same API. Recovery state, passphrases and keys stay on the caller's machine.
+- [`sdk/`](sdk/README.md): TypeScript SDK and `qsb` CLI for the same API. Key material, recovery storage, signing and credential management are supplied by external caller-owned providers.
 - `src/pqb-core/`: the pinned MIT PQB generator and CPU reference; [PQB support](docs/PQB.md) describes custody, stages, completed-work accounting and release requirements.
 - `worker/cpu/`: the Config A CPU parameter export and hit verifier. GPU images come from [qsb-solver](https://github.com/starknet-innovation/qsb-solver).
 - [`consensus/`](consensus/README.md): the offline Bitcoin Core script check run before a withdrawal is submitted.
@@ -21,7 +21,7 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB Config A and PQB) vaults: v
 
 ## How a withdrawal runs
 
-1. The browser (or the SDK) generates the vault locally, or the SDK checks recovery state its caller generated ([own state](sdk/README.md#your-own-recovery-state)), and registers only its public record. The user signs the one deposit in their wallet, and the API relays it to MARA Slipstream. If the deployment offers it, the user can choose to pay the optional USD 200 service fee in BTC as a second output of that deposit ([service fee](docs/API.md#service-fee)).
+1. The browser generates the vault locally. The SDK registers a public descriptor produced and durably backed up by an external key manager ([SDK custody](sdk/README.md#pqb-external-custody)). Both register only public data. The user signs the one deposit in their wallet, and the API relays it to MARA Slipstream. If the deployment offers it, the user can choose to pay the optional USD 200 service fee in BTC as a second output of that deposit ([service fee](docs/API.md#service-fee)).
 2. `POST /api/jobs` in `createApp` (`server/app.ts`) checks the served solver release, reserves the vault's outpoints atomically, writes the job and calls `startWorkflow`, which starts the withdrawal state machine.
 3. The state machine's `CoordinateSearch` task invokes the coordinator Lambda (`terraform/workflow.tf`). The coordinator submits GPU work to AWS Batch, polls it, and has the reference Lambda (`worker/cpu`) re-check every hit. A temporary failure at its read-only chain identity check is retried; a persistent outage pauses the withdrawal and drains existing GPU jobs without repeating submissions.
 4. Once solved, the browser assembles and signs the withdrawal locally. `POST /api/jobs/:id/submit` checks the exact spend, runs the offline Core check and posts it once to MARA Slipstream ([exact submission](docs/EXACT-SUBMIT.md)).

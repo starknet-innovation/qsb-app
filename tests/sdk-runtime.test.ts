@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { QSB_SOURCES, startQsbRuntime, type QsbMethod } from "../src/lib/qsb-runtime";
-import { nodeQsb } from "../sdk/runtime";
+import { nodeQsb } from "./recovery-runtime";
 
 const file = (name: string) => new Uint8Array(readFileSync(new URL(`../public/qsb/${name}`, import.meta.url)));
 function fakePython() {

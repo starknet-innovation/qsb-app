@@ -7,7 +7,7 @@ import { z } from "zod";
 import { ApiRequestError, CREDENTIAL_HEADER, createSessionClient } from "../src/lib/session";
 import { NETWORK_ID } from "../src/lib/network";
 import { operationsAllowed } from "../src/lib/readiness";
-import { assertVaultConfiguration, withVaultConfiguration } from "../src/lib/provenance";
+import { canonical, assertVaultConfiguration, withVaultConfiguration } from "../src/lib/provenance";
 import {
   canonicalManifest,
   outpoint,
@@ -18,21 +18,14 @@ import {
   withdrawalSchema,
   type Job,
   type PublicVault,
-  type Recovery,
   type StrayPayments,
   type Withdrawal,
 } from "../src/lib/model";
 import {
-  assertRecoveryAssembly,
-  assertRecoveryAuthorization,
-  bindRecoveryAssembly,
-  decryptRecovery,
-  encryptRecovery,
-} from "../src/lib/backup";
-import {
   belowMinerFloor,
   fundingFeeForRate,
   fundingPsbt,
+  helperPsbt,
   minerMinimumRate,
   nestedPaymentAddress,
   outputScript,
@@ -49,10 +42,14 @@ import {
   signedCoordinatorResult,
 } from "../src/mainnet/localSignature";
 import {
+  coordinatorPublicSolvedResult,
+  coordinatorSolvedResultSchema,
   coordinatorSignedResultSchema,
   type CoordinatorSignedResult,
 } from "../src/mainnet/coordinatorResult";
-import { persistentGuard } from "../src/mainnet/persistentGuard";
+import { publicRuntime } from "./public-runtime";
+import type { AuthorizationStore, CreateWithdrawal, Credentials, ExternalCustody, VaultDescriptor, WithdrawalSigningRequest } from "./custody";
+export type { AuthorizationStore } from "./custody";
 import {
   btcUsdPrice,
   checkServiceFeeQuote,
@@ -64,7 +61,7 @@ import {
 // The request bodies the server's handlers parse, so a request can't drift from the API.
 import { fundResubmitRequest, fundSubmitRequest, submitRequest } from "../server/api-schemas";
 import type { Wallet } from "../src/lib/wallet";
-import { RefusedState, nodeQsb, type BundledQsb, type LocalQsb } from "./runtime";
+
 import { apiBase, isLoopback, signerWallet, type Signer } from "./signer";
 
 export { ApiRequestError };
@@ -91,8 +88,6 @@ export type ApiConfig = {
 export type Rates = { submit_fee_rate: number; market_rate?: number; effective_rate?: number };
 /** Opting in to the service fee: the most sats you'll pay, and optionally the address you expect. */
 export type ServiceFeeLimit = { maxSats: bigint | string; address?: string };
-/** Persists an encrypted recovery backup. It must resolve only once the text is safely stored. */
-export type SaveBackup = (encryptedBackup: string) => Promise<void>;
 /** A signed deposit kept before it's sent, so a retry can only resend these bytes. Public data. */
 export type PendingDeposit = { txid: string; amount: string; rawTxHex: string };
 export interface PendingDeposits {
@@ -133,36 +128,18 @@ export type QsbClientOptions = {
   baseUrl: string;
   /** `/v1` (default), the stable prefix, or `/api`, the compatibility alias. */
   basePath?: "/v1" | "/api";
-  /**
-   * The app origin the server names in its sign-in challenge (its APP_ORIGIN when set, otherwise, on the
-   * deployment, its SYSTEM#DEPLOYMENT row); defaults to
-   * `baseUrl`'s origin. A challenge naming any other origin is never signed, so an endpoint
-   * can't relay another deployment's challenge to obtain a session there.
-   */
-  appOrigin?: string;
+  /** External wallet PSBT signer. */
   signer: Signer;
   /** Transport; defaults to the global fetch. */
   fetch?: typeof fetch;
-  /**
-   * Local QSB generator and assembler; defaults to Pyodide in this process. It never checks a
-   * `vaults.create` `stateJson`: the package's own runtime does.
-   */
-  qsb?: LocalQsb;
+  /** External vault authority; no recovery secrets may cross this interface. */
+  custody: ExternalCustody;
+  /** Durable, atomic, shared one-time journal; required, with no in-memory default. */
+  authorizations: AuthorizationStore;
+  /** External credential provider. The SDK does not sign in or persist credentials. */
+  credentials: Credentials;
   /** Where signed deposits wait until the miner has them; defaults to memory. */
   pendingDeposits?: PendingDeposits;
-  /**
-   * This device's one-time authorizations, under the webapp's keys:
-   * `qsb-intent:<scriptHash>` (the withdrawal intent) and `qsb-assembly:<scriptHash>`
-   * (the assembled transaction). A different value for a vault is refused. Defaults to memory.
-   */
-  authorizations?: AuthorizationStore;
-  /** A session token from an earlier login by the same address. */
-  token?: string;
-  /**
-   * An API key (`qsb_mainnet_…`) minted by this owner, sent instead of a session. Its scopes
-   * decide what it can do; minting, listing and revoking keys still need a wallet session.
-   */
-  apiKey?: string;
   timeoutMs?: number;
 };
 
@@ -209,19 +186,6 @@ const depositAnswerSchema = z.object({
 export type PreparedDeposit = z.infer<typeof preparedDepositSchema>;
 
 /**
- * Where the SDK keeps this device's one-time authorizations: the part of Web Storage it uses, so a Node
- * consumer needs no DOM types. `localStorage` fits, as does the CLI's owner-only file store.
- */
-export type AuthorizationStore = {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-};
-
-function memoryStorage(): AuthorizationStore {
-  const rows = new Map<string, string>();
-  return { getItem: (key) => rows.get(key) ?? null, setItem: (key, value) => void rows.set(key, value) };
-}
-/**
  * The server's own refusal of a disabled submission: a 503 with code `submit_disabled`. Any
  * other failure, including an uncoded 503 from a gateway or an older server, or the API's 502
  * or 503 for a failed chain or miner request, is uncertain.
@@ -249,32 +213,9 @@ function refused(error: ApiRequestError, what: string, next = ""): Error {
     cause: error,
   });
 }
-/**
- * The server's refusals of a vault whose script isn't new: final, and nothing was registered. Each
- * says what to do with the backup just saved. The vault that has the script may be the caller's
- * own, and a paid script's backup may be the only copy of the secrets that spend what was paid.
- */
-const scriptRefusals: Record<NonNullable<RefusedState["code"]>, string> = {
-  vault_script_registered:
-    "another vault on this deployment already has this script. A script locks one vault, which takes one deposit. Nothing was registered, and the backup just saved is for no new vault: don't pay into this script. Destroy that backup only if you hold another copy of this state.",
-  vault_script_paid:
-    "something has already paid this script on chain. A script locks one vault, which takes one deposit, so no new vault can have it. Nothing was registered. Keep the backup just saved, or another copy of this state: it holds the secrets that can spend what was paid. Don't pay into this script for a new vault.",
-};
-/** A deposit route's refusal of a vault whose script another vault holds: final, nothing was sent. */
+/** A deposit route's final refusal of a reused script. */
 function scriptHeld(error: unknown): error is ApiRequestError {
   return error instanceof ApiRequestError && error.status === 409 && error.code === "vault_script_registered";
-}
-/** The server's chain lookup failed before it wrote anything: not a verdict on the state. */
-function chainFailure(error: unknown): error is ApiRequestError & { code: string } {
-  return error instanceof ApiRequestError && (error.code === "chain_unavailable" || error.code === "chain_error");
-}
-function scriptRefusal(error: unknown): error is ApiRequestError & { code: keyof typeof scriptRefusals } {
-  return (
-    error instanceof ApiRequestError &&
-    error.status === 409 &&
-    error.code !== undefined &&
-    Object.hasOwn(scriptRefusals, error.code)
-  );
 }
 /** Refuse early when the deployment says this owner can't act, or its limits are misconfigured. */
 function assertOwnerAllowed(config: ApiConfig) {
@@ -309,30 +250,23 @@ function memoryPending(): PendingDeposits {
 function decodePsbt(psbt: string | Uint8Array): Uint8Array {
   return typeof psbt === "string" ? base64.decode(psbt.trim()) : psbt;
 }
-function signInMessage(address: string, origin: string) {
-  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(
-    `^QSB Vault sign-in\\nOrigin: ${escape(origin)}\\nAddress: ${escape(address)}\\nNetwork: bitcoin-${NETWORK_ID}\\nNonce: [0-9a-f-]{36}\\nExpires: [^\\n]{1,40}\\nThis signature authorizes this session only\\. It does not authorize a Bitcoin transaction\\.$`,
-  );
-}
-
 /** The HTTP transport: one origin, no redirects, a timeout, and the webapp's session client. */
 const apiKeyFormat = /^qsb_mainnet_[A-Za-z0-9_-]{43}$/;
-function transport(options: Pick<QsbClientOptions, "baseUrl" | "basePath" | "fetch" | "timeoutMs" | "apiKey">) {
-  const apiKey = options.apiKey;
-  // Never echo the key: it's a bearer credential.
-  if (apiKey !== undefined && (!apiKeyFormat.test(apiKey) || !apiKey.startsWith(`qsb_${NETWORK_ID}_`)))
-    throw new Error(`The API key isn't a ${NETWORK_ID} key (qsb_${NETWORK_ID}_…).`);
+function transport(options: Pick<QsbClientOptions, "baseUrl" | "basePath" | "fetch" | "timeoutMs"> & { credentials?: Credentials }) {
   const origin = apiBase(options.baseUrl).href.replace(/\/$/, "");
   const base = options.basePath ?? "/v1";
   if (base !== "/v1" && base !== "/api") throw new Error("The API base path is /v1 or /api.");
   const send = options.fetch ?? fetch;
   const timeout = options.timeoutMs ?? 60000;
   // The session client prefixes each route with `base`; this adds the deployment's origin.
-  return createSessionClient(((path: string, init?: RequestInit) => {
+  return createSessionClient((async (path: string, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
-    // A wallet session, once signed in, takes precedence; otherwise the key authenticates.
-    if (apiKey && !headers.has(CREDENTIAL_HEADER)) headers.set(CREDENTIAL_HEADER, `Bearer ${apiKey}`);
+    if (options.credentials) {
+      const credential = await options.credentials.get();
+      if (!/^[A-Za-z0-9_-]{43}$/.test(credential) && !apiKeyFormat.test(credential))
+        throw new Error("External credentials returned an invalid credential.");
+      headers.set(CREDENTIAL_HEADER, `Bearer ${credential}`);
+    }
     return send(`${origin}${path}`, {
       ...init,
       headers,
@@ -357,20 +291,18 @@ function quoteOnly(value: unknown): ServiceFeeQuote {
 }
 
 /**
- * A non-custodial client for the QSB API. Recovery state, passphrases and
- * keys stay on this machine: state is generated, encrypted, validated and
- * assembled locally, and only public vault data, unsigned requests and signed
- * transactions are sent.
+ * A public planner and validator for the QSB API. All key, recovery and credential
+ * lifecycle management belongs to caller-owned external providers.
  */
 export class QsbClient {
   private readonly session: ReturnType<typeof createSessionClient>;
   private readonly signer: Signer;
   private readonly wallet: Wallet;
-  private readonly qsb: LocalQsb;
+  private readonly runtime = publicRuntime();
+  private readonly custody: ExternalCustody;
   private readonly pending: PendingDeposits;
   private readonly authorizations: AuthorizationStore;
-  private readonly guard: ReturnType<typeof persistentGuard>;
-  private readonly appOrigin: string;
+
 
   constructor(options: QsbClientOptions) {
     const base = apiBase(options.baseUrl);
@@ -378,34 +310,14 @@ export class QsbClient {
       throw new Error("This signer holds a raw key and only works with a loopback API URL.");
     this.signer = options.signer;
     this.wallet = signerWallet(options.signer);
-    this.qsb = options.qsb ?? nodeQsb();
+    if (!options.custody || !options.authorizations || !options.credentials)
+      throw new Error("External custody, durable authorizations and credentials are required.");
+    this.custody = options.custody;
     this.pending = options.pendingDeposits ?? memoryPending();
-    this.authorizations = options.authorizations ?? memoryStorage();
-    this.guard = persistentGuard(this.authorizations);
+    this.authorizations = options.authorizations;
     this.session = transport(options);
-    this.appOrigin = new URL(options.appOrigin ?? base.origin).origin;
-    // A raw-key signer must not sign another deployment's challenge relayed through a local proxy.
-    if (options.signer.loopbackOnly && !isLoopback(new URL(this.appOrigin)))
-      throw new Error("This signer holds a raw key and only signs in to a loopback app origin.");
-    if (options.token) this.session.restoreSession(options.token);
   }
 
-  /** The current bearer token, for a caller that caches it (owner-only file permissions). */
-  get token(): string | undefined {
-    return this.session.currentToken();
-  }
-
-  /** BIP-322 sign-in. The challenge must be the app's session-only message for this address. */
-  async login(): Promise<void> {
-    const expected = signInMessage(this.wallet.address, this.appOrigin);
-    await this.session.authenticate(this.wallet.address, (message) => {
-      if (!expected.test(message))
-        throw new Error(
-          `The sign-in challenge is not the session-only message of ${this.appOrigin} for this address. Nothing was signed.`,
-        );
-      return this.signer.signMessage(this.wallet.address, message);
-    });
-  }
   config(): Promise<ApiConfig> {
     return this.session.api<ApiConfig>("/config");
   }
@@ -438,17 +350,8 @@ export class QsbClient {
   }
 
   readonly vaults = {
-    /**
-     * Generate QSB state locally, encrypt the recovery backup locally, hand it
-     * to `saveBackup`, check it unlocks, then register only the public vault.
-     * With `stateJson`, the vault uses that recovery state instead, once this
-     * package's own runtime finds it is exactly the state the pipeline builds
-     * from its HORS secrets, and no vault of this address has a script that
-     * pushes one of its HORS commitments. Refusals are `RefusedState`s, as is the server's
-     * refusal of a script that isn't new (`vault_script_registered`, `vault_script_paid`).
-     */
-    create: (input: { name: string; passphrase: string; saveBackup: SaveBackup; config?: "A" | "PQB"; stateJson?: string }) =>
-      this.createVault(input),
+    /** Register public material only, after the external manager confirms durable recoverability. */
+    create: (input: { name: string; descriptor: VaultDescriptor }) => this.createVault(input),
     list: () =>
       this.session.api<{
         vaults: PublicVault[];
@@ -460,7 +363,7 @@ export class QsbClient {
   };
   readonly deposits = {
     /**
-     * An unsigned deposit PSBT paying the vault, after checking the backup matches its script.
+     * An unsigned deposit PSBT after public validation and external recoverability confirmation.
      * With `serviceFee`, it also pays the optional service fee at the current quote, as output 1,
      * on top of `amount`: only up to `maxSats`, and only to the deployment's configured fee
      * address (and to `address`, when given). The amount is fixed here, at prepare.
@@ -468,8 +371,6 @@ export class QsbClient {
     prepare: (
       vaultId: string,
       input: {
-        backup: string;
-        passphrase: string;
         amount: bigint | string;
         feeRate: string;
         utxos: { txid: string; vout: number }[];
@@ -487,22 +388,8 @@ export class QsbClient {
     resubmit: (vaultId: string) => this.resubmitDeposit(vaultId),
   };
   readonly withdrawals = {
-    /**
-     * Fix the payout and fee, bind them into a new encrypted backup
-     * (`saveBackup` runs before any billable work), then create the search.
-     * A backup that already holds an intent resumes that intent unchanged.
-     */
-    create: (input: {
-      vaultId: string;
-      backup: string;
-      passphrase: string;
-      helper?: { txid: string; vout: number };
-      destination?: string;
-      feeRate?: string;
-      solverReleaseId?: string;
-      costAccepted: true;
-      saveBackup: SaveBackup;
-    }) => this.createWithdrawal(input),
+    /** Persist the exact intent externally before starting paid work; resume it unchanged after a crash. */
+    create: (input: CreateWithdrawal) => this.createWithdrawal(input),
     list: async () => (await this.session.api<{ jobs: Job[] }>("/jobs")).jobs,
     status: (jobId: string) =>
       this.session.api<{ job: Job; [field: string]: unknown }>(`/jobs/${id(jobId, "job")}/status`),
@@ -516,14 +403,10 @@ export class QsbClient {
         throw ownerRefusal(error) ? refused(error, "to resume the search") : error;
       }
     },
-    /**
-     * Rebuild the withdrawal locally from the backup and the coordinator's
-     * public solved result, seal the signing backup (`saveBackup`) if the
-     * backup doesn't bind this assembly yet, then have the signer sign the
-     * helper input. Works hours later, in a new process, from the job id.
-     */
-    assemble: (jobId: string, input: { backup: string; passphrase: string; saveBackup?: SaveBackup }) =>
-      this.assembleWithdrawal(jobId, input),
+    /** Public solution, exact spend and verified previous outputs for an external vault signer. */
+    prepare: (jobId: string) => this.prepareWithdrawal(jobId),
+    /** External vault authorization followed by verified helper signing. No seed enters the SDK. */
+    assemble: (jobId: string) => this.assembleWithdrawal(jobId),
     /** Submit only after `approve` returns this exact transaction's txid. */
     submit: (signed: CoordinatorSignedResult, input: { approve: ApproveWithdrawal }) =>
       this.submitWithdrawal(signed, input),
@@ -561,19 +444,6 @@ export class QsbClient {
     if (belowMinerFloor(milliSatPerVb, floor))
       throw new Error(`The fee rate is below MARA's current minimum of ${floor} sat/vB. Nothing was submitted.`);
   }
-  /** Decrypt locally and check the state against the vault's script, as the webapp does. */
-  private async unlock(backup: string, passphrase: string, vault: PublicVault, qsb = this.qsb): Promise<Recovery> {
-    const recovery = await decryptRecovery(backup, passphrase);
-    assertVaultConfiguration(vault);
-    if (
-      recovery.vault.id !== vault.id ||
-      recovery.vault.scriptHash !== vault.scriptHash ||
-      recovery.vault.scriptHex !== vault.scriptHex ||
-      (await qsb.validateRecovery(recovery.stateJson)) !== vault.scriptHash
-    )
-      throw new Error("This backup belongs to a different vault.");
-    return recovery;
-  }
   private async fundingInput(point: Point): Promise<FundingInput> {
     const { previousTxHex } = await this.session.api<{ previousTxHex: string }>(
       "/payment-input",
@@ -599,101 +469,40 @@ export class QsbClient {
     });
   }
 
-  /** A caller's recovery state, once `qsb` accepts it and no vault of this address shares its secrets. */
-  private async adoptState(qsb: BundledQsb, stateJson: string) {
-    // Listed first, so an API key without the read scope is refused before the check runs.
-    const { vaults } = await this.vaults.list();
-    let data: Awaited<ReturnType<BundledQsb["adoptQsb"]>>;
-    try {
-      data = await qsb.adoptQsb(stateJson);
-    } catch (error) {
-      if (!(error instanceof RefusedState)) throw error;
-      throw new RefusedState(`The supplied recovery state was refused: ${error.message.replace(/\.$/, "")}. Nothing was saved or registered.`, {
-        cause: error,
-      });
-    }
-    const sharing = sharingSecrets(vaults, data.publicStateJson);
-    if (sharing)
-      throw new RefusedState(
-        `This recovery state reuses HORS secrets of vault ${sharing.id}. A state's secrets lock one vault, which takes one deposit; nothing was saved or registered.`,
-      );
-    return data;
+  private async checkedVault(value: PublicVault): Promise<PublicVault> {
+    const vault = publicVaultSchema.parse(value);
+    assertVaultConfiguration(vault);
+    if (vault.paymentAddress !== this.wallet.address) throw new Error("Vault belongs to a different wallet.");
+    await this.runtime.validate(vault);
+    return vault;
   }
 
-  private async createVault(input: { name: string; passphrase: string; saveBackup: SaveBackup; config?: "A" | "PQB"; stateJson?: string }) {
+  private intentKey(vault: PublicVault) { return `qsb-intent:${NETWORK_ID}:${vault.scriptHash}`; }
+  private assemblyKey(vault: PublicVault) { return `qsb-assembly:${NETWORK_ID}:${vault.scriptHash}`; }
+
+  private async createVault(input: { name: string; descriptor: VaultDescriptor }) {
+    // Strict schemas prevent unknown/private fields from being projected into a request.
+    const descriptor = z.object({ config: z.enum(["A", "PQB"]), scriptHex: z.string(), scriptHash: txid,
+      publicStateJson: z.string().max(60000) }).strict().parse(input.descriptor);
     const name = input.name.trim();
-    if (!name || name.length > 60) throw new Error("Give the vault a name of 1 to 60 characters.");
-    if (input.passphrase.length < 14)
-      throw new Error("Use a recovery passphrase of at least 14 characters.");
     assertOwnerAllowed(await this.assertServerNetwork());
-    // A supplied state is checked, and its backup re-opened, only by a fresh interpreter of this package's
-    // runtime: a replaced `qsb` could pass a script the state's secrets can't spend, locking the deposit.
-    const supplied = input.stateJson === undefined ? undefined : { qsb: nodeQsb(), stateJson: input.stateJson };
-    const qsb = supplied?.qsb ?? this.qsb;
-    try {
-      const data = supplied ? await this.adoptState(supplied.qsb, supplied.stateJson)
-        : input.config === undefined ? await qsb.generateQsb() : await qsb.generateQsb(input.config);
-      validatePublicState(data.publicStateJson);
-      const config = JSON.parse(data.publicStateJson).config as "A" | "PQB";
-      if (input.config && input.config !== config) throw new Error("Supplied state protocol does not match config");
-      const vault = withVaultConfiguration({
-        id: randomUUID(),
-        name,
-        createdAt: new Date().toISOString(),
-        network: NETWORK_ID,
-        config,
-        scriptHex: data.scriptHex,
-        scriptHash: data.scriptHash,
-        publicStateJson: data.publicStateJson,
-        paymentAddress: this.wallet.address,
-        status: "unfunded",
-      });
-      const backup = await encryptRecovery(
-        { format: "qsb-recovery-v1", vault, stateJson: data.stateJson },
-        input.passphrase,
-      );
-      await input.saveBackup(backup);
-      await this.unlock(backup, input.passphrase, vault, qsb);
-      // Again, for a vault registered from the same secrets while this backup was saved. The server
-      // refuses a reserved or paid script, by any address; this also finds this address's vaults whose
-      // scripts push the secrets: another script, or one with no reservation.
-      const sharing = supplied ? sharingSecrets((await this.vaults.list()).vaults, data.publicStateJson) : undefined;
-      if (sharing)
-        throw new RefusedState(
-          `This recovery state reuses HORS secrets of vault ${sharing.id}, registered while its backup was saved. Nothing was registered: discard the backup just saved, which duplicates secrets of vault ${sharing.id}.`,
-        );
-      const registered = await this.session
-        .api<{ vault: PublicVault }>("/vaults", publicVaultSchema.parse(vault))
-        .catch((error) => {
-          if (scriptRefusal(error))
-            throw new RefusedState(
-              `The deployment refused to register the vault (${error.code}): ${scriptRefusals[error.code]}`,
-              { cause: error, code: error.code },
-            );
-          if (chainFailure(error))
-            throw new Error(
-              `The deployment couldn't check the vault's script on chain (${error.code}), so it registered nothing. ${
-                supplied
-                  ? "The backup just saved is for a vault id that won't be registered: keep the state, retry with it, and use the backup that retry saves. Don't pay into the script until a retry registers it."
-                  : "The backup just saved is for an unregistered vault: never pay into its script. A retry makes a new vault and a new backup."
-              }`,
-              { cause: error },
-            );
-          throw ownerRefusal(error)
-            ? refused(error, "to register the vault", " The saved backup is for an unregistered vault: never pay into its script.")
-            : error;
-        });
-      return { vault: registered.vault, backup };
-    } finally {
-      qsb.lockQsb();
-    }
+    const vault = await this.checkedVault(withVaultConfiguration({
+      id: randomUUID(), name, createdAt: new Date().toISOString(), network: NETWORK_ID,
+      ...descriptor, paymentAddress: this.wallet.address, status: "unfunded",
+    }));
+    if (sharingSecrets((await this.vaults.list()).vaults, vault.publicStateJson))
+      throw new Error("This descriptor reuses another vault's one-time material.");
+    await this.custody.confirmVault(structuredClone(vault));
+    if (sharingSecrets((await this.vaults.list()).vaults, vault.publicStateJson))
+      throw new Error("This descriptor reuses another vault's one-time material.");
+    const registered = await this.session.api<{ vault: PublicVault }>("/vaults", vault);
+    if (canonical(registered.vault) !== canonical(vault)) throw new Error("Registered vault differs from the approved descriptor.");
+    return { vault };
   }
 
   private async prepareDeposit(
     vaultId: string,
     input: {
-      backup: string;
-      passphrase: string;
       amount: bigint | string;
       feeRate: string;
       utxos: { txid: string; vout: number }[];
@@ -716,11 +525,8 @@ export class QsbClient {
       );
     if (vault.status !== "unfunded" || vault.funding)
       throw new Error("This vault already has a deposit. A vault takes one deposit; do not deposit again.");
-    try {
-      await this.unlock(input.backup, input.passphrase, vault);
-    } finally {
-      this.qsb.lockQsb();
-    }
+    await this.checkedVault(vault);
+    await this.custody.confirmVault(structuredClone(vault));
     const amount = BigInt(sats.parse(String(input.amount)));
     if (amount === 0n) throw new Error("Amount must be greater than zero.");
     const rate = parseFeeRate(input.feeRate);
@@ -918,31 +724,15 @@ export class QsbClient {
     return status;
   }
 
-  private async createWithdrawal(input: {
-    vaultId: string;
-    backup: string;
-    passphrase: string;
-    helper?: { txid: string; vout: number };
-    destination?: string;
-    feeRate?: string;
-    solverReleaseId?: string;
-    costAccepted: true;
-    saveBackup: SaveBackup;
-  }): Promise<{ job: Job; backup?: string }> {
+  private async createWithdrawal(input: CreateWithdrawal): Promise<{ job: Job }> {
     if (input.costAccepted !== true)
       throw new Error("Accept the costs first: withdrawals.create needs { costAccepted: true }.");
     const config = await this.assertOperations();
     assertOwnerAllowed(config);
     const vault = await this.vault(input.vaultId);
-    let recovery: Recovery;
-    try {
-      recovery = await this.unlock(input.backup, input.passphrase, vault);
-    } finally {
-      this.qsb.lockQsb();
-    }
-    const saved = recovery.authorization
-      ? withdrawalSchema.parse(JSON.parse(recovery.authorization.manifestJson))
-      : undefined;
+    await this.checkedVault(vault);
+    const savedText = await this.authorizations.get(this.intentKey(vault));
+    const saved = savedText === undefined ? undefined : withdrawalSchema.parse(JSON.parse(savedText));
     const other = (await this.withdrawals.list()).find(
       (job) => job.vaultId === vault.id && job.id !== saved?.idempotencyKey,
     );
@@ -958,7 +748,6 @@ export class QsbClient {
       throw new Error("The deployment solver differs from the requested one. Nothing was created.");
     const nested = nestedPaymentAddress(this.wallet.address);
     let manifest: Withdrawal;
-    let backup: string | undefined;
     if (saved) {
       // Resume the saved intent exactly: its payout and one-time keys are already bound.
       if (
@@ -967,15 +756,15 @@ export class QsbClient {
           (input.helper.txid.toLowerCase() !== saved.helper.txid || input.helper.vout !== saved.helper.vout)) ||
         input.feeRate !== undefined
       )
-        throw new Error("This backup already authorizes a withdrawal. Resume it unchanged; do not reuse its one-time keys.");
+        throw new Error("This vault already authorizes a withdrawal. Resume it unchanged; do not reuse its one-time keys.");
       if (saved.solverReleaseId !== config.solverReleaseId)
-        throw new Error("The saved intent uses a different solver. Keep its backup and contact the operator; do not create a new intent.");
+        throw new Error("The saved intent uses a different solver. Keep its external authorization and contact the operator; do not create a new intent.");
       if ((["txid", "vout", "value"] as const).some((field) => saved.funding[field] !== funding[field]))
         throw new Error("The saved intent spends a different deposit.");
       const vsize = withdrawalVsize(nested, saved.outputScript.length / 2, vaultScriptSigBound(vault.config));
       await this.assertMinerFloor((BigInt(saved.fee) * 1000n) / BigInt(vsize));
       manifest = saved;
-      this.guard.claim(`qsb-intent:${vault.scriptHash}`, digest(JSON.stringify(saved)));
+      await this.authorizations.claim(this.intentKey(vault), JSON.stringify(canonicalManifest(saved)));
     } else {
       if (!input.helper || !input.destination || !input.feeRate)
         throw new Error("Choose a helper output, a destination and a fee rate.");
@@ -998,91 +787,74 @@ export class QsbClient {
         costAccepted: true,
         solverReleaseId: config.solverReleaseId,
       });
-      const manifestJson = JSON.stringify(manifest);
-      const manifestHash = digest(manifestJson);
-      await assertRecoveryAuthorization(recovery, manifestHash);
-      // This device keeps one intent per vault, as the webapp does. A fresh intent can't match
-      // a remembered one, so refuse before saving anything.
-      const intentKey = `qsb-intent:${vault.scriptHash}`;
-      if (this.authorizations.getItem(intentKey) !== null)
-        throw new Error("This vault already authorizes a different withdrawal or assembly. Resume its original backup.");
-      backup = await encryptRecovery(
-        { ...recovery, authorization: { manifestJson, manifestHash } },
-        input.passphrase,
-      );
-      // Keep the recovery before starting billable work: it binds the payout to the one-time keys.
-      // Remember the intent only once a backup holds it, so a failed save strands nothing.
-      await input.saveBackup(backup);
-      this.guard.claim(intentKey, manifestHash);
+      // The external store must atomically refuse a conflicting claim, across all processes/devices.
+      await this.authorizations.claim(this.intentKey(vault), JSON.stringify(canonicalManifest(manifest)));
     }
     const manifestHash = digest(JSON.stringify(manifest));
     let job: Job;
     try {
       ({ job } = await this.session.api<{ job: Job }>("/jobs", manifest));
     } catch (error) {
-      const retry = backup ? " The new backup holds this intent; create the withdrawal again from it once allowed." : "";
-      if (ownerRefusal(error)) throw refused(error, "to create the search", ` Nothing was reserved.${retry}`);
-      // Refused (an input_* code, say) or unanswered: either way the intent is only in the backup.
-      // Creating it again from that backup is idempotent, so a retry can never make a second search.
-      if (!backup) throw error;
-      throw new Error(
-        `The withdrawal search isn't confirmed: ${error instanceof Error ? error.message : String(error)} The new backup holds this intent; retry withdrawals.create with it, not with the original backup.`,
-        { cause: error },
-      );
+      if (ownerRefusal(error)) throw refused(error, "to create the search", " Resume the externally saved intent unchanged.");
+      throw new Error("The search outcome is unconfirmed. Retry withdrawals.create with the vault id only; the external journal retains the exact intent.", { cause: error });
     }
     if (job.id !== manifest.idempotencyKey || job.manifestHash !== manifestHash)
-      throw new Error("The server returned a different withdrawal. Keep the backup and check withdrawals.list.");
-    return { job, ...(backup ? { backup } : {}) };
+      throw new Error("The server returned a different withdrawal. Keep the external authorization and check withdrawals.list.");
+    return { job };
   }
 
-  private async assembleWithdrawal(
-    jobId: string,
-    input: { backup: string; passphrase: string; saveBackup?: SaveBackup },
-  ): Promise<CoordinatorSignedResult> {
+  private async prepareWithdrawal(jobId: string): Promise<WithdrawalSigningRequest> {
     const { job } = await this.withdrawals.status(jobId);
-    if (job.status !== "awaiting_authorization" || !job.solution)
-      throw new Error(`The search has no solved result to authorize (status ${job.status}).`);
+    const expected = coordinatorPublicSolvedResult(job);
+    const solved = coordinatorSolvedResultSchema.parse(await this.session.api<unknown>(`/jobs/${job.id}/solved-result`));
+    if (canonical(expected) !== canonical(solved)) throw new Error("Solved result does not match this withdrawal.");
     const funding = await this.depositStatus(job.vaultId);
-    let local: Awaited<ReturnType<typeof rebuildWithdrawalFromSolvedResult>>;
-    try {
-      const recovery = await this.unlock(input.backup, input.passphrase, funding.vault);
-      const intent = recovery.authorization;
-      if (!intent) throw new Error("Use the withdrawal backup saved when this withdrawal was created.");
-      if (
-        digest(intent.manifestJson) !== intent.manifestHash ||
-        digest(JSON.stringify(canonicalManifest(job.manifest))) !== intent.manifestHash ||
-        job.manifestHash !== intent.manifestHash
-      )
-        throw new Error("The job differs from the withdrawal intent in your backup.");
-      this.guard.claim(`qsb-intent:${funding.vault.scriptHash}`, intent.manifestHash);
-      const solved = await this.session.api<unknown>(`/jobs/${job.id}/solved-result`);
-      local = await rebuildWithdrawalFromSolvedResult({
-        solved,
-        job,
-        stateJson: recovery.stateJson,
-        helper: await this.fundingInput(job.manifest.helper),
-        fundingPreviousTxHex: funding.previousTxHex,
-        vaultScriptHex: funding.vault.scriptHex,
-        assemble: this.qsb.assembleQsb,
-      });
-      const bound = await bindRecoveryAssembly(recovery, local.solved.solution, local.raw);
-      // One assembly per vault on this device, even from an older backup that doesn't bind one yet.
-      this.guard.claim(`qsb-assembly:${funding.vault.scriptHash}`, bound.authorization!.assembly!.rawTxHash);
-      if (!intent.assembly) {
-        // Seal the exact solution and transaction into the backup before the helper is signed.
-        if (!input.saveBackup)
-          throw new Error("This backup doesn't bind the assembled transaction yet. Pass saveBackup to keep the signing backup first.");
-        await input.saveBackup(await encryptRecovery(bound, input.passphrase));
-      }
-      await assertRecoveryAssembly(bound, local.solved.solution, local.raw);
-    } finally {
-      this.qsb.lockQsb();
-    }
-    const returned = await this.signer.signPsbt(
-      this.wallet.address,
-      base64.encode(local.transaction.toPSBT()),
-      [0],
-    );
+    const vault = await this.checkedVault(funding.vault);
+    const manifest = canonicalManifest(solved.manifest);
+    if (await this.authorizations.get(this.intentKey(vault)) !== JSON.stringify(manifest))
+      throw new Error("The job differs from the externally authorized withdrawal intent.");
+    const helper = await this.fundingInput(manifest.helper);
+    const prepared = await this.runtime.prepare(vault, manifest, solved.solution);
+    // Validate both previous outputs and the exact transaction BEFORE asking for one-time material.
+    // helperPsbt requires a vault scriptSig; a temporary public placeholder is discarded immediately.
+    const template = btc.Transaction.fromRaw(hex.decode(prepared.transaction), opts);
+    if (template.getInput(0).finalScriptSig?.length || template.getInput(1).finalScriptSig?.length ||
+      template.getInput(0).finalScriptWitness?.length || template.getInput(1).finalScriptWitness?.length)
+      throw new Error("Signing template must be unsigned.");
+    template.updateInput(1, { finalScriptSig: new Uint8Array([0]) }, true);
+    const raw = hex.encode(template.toBytes(true, true));
+    verifyWithdrawalCommitment(raw, manifest, solved.solution);
+    // This validates previous txids, values, scripts and helper ownership.
+    helperPsbt(raw, helper, funding.previousTxHex, { value: manifest.funding.value, scriptHex: vault.scriptHex });
+    return { format: "qsb-external-signing-request-v1", vault, solved, ...prepared,
+      fundingPreviousTxHex: funding.previousTxHex, helperPreviousTxHex: helper.previousTxHex,
+      helperAddress: this.wallet.address, helperPublicKey: this.wallet.publicKey };
+  }
+
+  private async assembleWithdrawal(jobId: string): Promise<CoordinatorSignedResult> {
+    const request = await this.prepareWithdrawal(jobId);
+    const key = this.assemblyKey(request.vault);
+    // Bind public transaction AND solution before any preimages or signatures can be disclosed.
+    const binding = digest(canonical({ manifestHash: request.solved.manifestHash,
+      transaction: request.transaction, solution: request.solved.solution }));
+    await this.authorizations.claim(key, binding);
+    const response = await this.custody.authorizeWithdrawal(structuredClone(request));
+    const raw = hex.encode(hex.decode(z.string().regex(/^(?:[0-9a-f]{2})+$/i).max(3000000).parse(response)));
+    // A crash/retry may request authorization again, but can never use a different returned assembly.
+    const local = await rebuildWithdrawalFromSolvedResult({ solved: request.solved,
+      job: { id: request.solved.jobId, vaultId: request.vault.id, manifestHash: request.solved.manifestHash,
+        manifest: request.solved.manifest, solution: request.solved.solution } as Job,
+      stateJson: "", helper: { ...request.solved.manifest.helper, value: BigInt(request.solved.manifest.helper.value),
+        previousTxHex: request.helperPreviousTxHex, address: this.wallet.address, publicKey: this.wallet.publicKey },
+      fundingPreviousTxHex: request.fundingPreviousTxHex, vaultScriptHex: request.vault.scriptHex,
+      assemble: async () => raw });
+    const returnedTx = btc.Transaction.fromRaw(hex.decode(raw), opts);
+    if (returnedTx.getInput(0).finalScriptSig?.length || returnedTx.getInput(0).finalScriptWitness?.length ||
+      returnedTx.getInput(1).finalScriptWitness?.length)
+      throw new Error("External vault authorization must leave helper input unsigned and use a legacy vault scriptSig.");
+    await this.runtime.verify(request.vault, request.solved.manifest, request.solved.solution, raw);
+    await this.authorizations.claim(`${key}:raw`, digest(raw));
+    const returned = await this.signer.signPsbt(this.wallet.address, base64.encode(local.transaction.toPSBT()), [0]);
     return signedCoordinatorResult(local.solved, local.transaction, decodePsbt(returned), this.wallet);
   }
 
@@ -1116,9 +888,32 @@ export class QsbClient {
       job.vaultId !== manifest.vaultId
     )
       throw new Error("The withdrawal's stored intent differs from the one bound at assembly. Nothing was submitted.");
+    const request = await this.prepareWithdrawal(job.id);
+    if (JSON.stringify(manifest) !== await this.authorizations.get(this.intentKey(request.vault)))
+      throw new Error("The signed result differs from the externally approved intent.");
     verifyWithdrawalCommitment(signed.rawTxHex, manifest, job.solution);
-    if (btc.Transaction.fromRaw(hex.decode(signed.rawTxHex), opts).id !== signed.txid)
+    const actual = btc.Transaction.fromRaw(hex.decode(signed.rawTxHex), opts);
+    if (actual.id !== signed.txid)
       throw new Error("The signed result's txid differs from its transaction. Nothing was submitted.");
+    // Recreate the exact assembly before helper signing, to validate an imported signed file too.
+    const assembly = new btc.Transaction({ ...opts, version: actual.version, lockTime: actual.lockTime });
+    for (let i = 0; i < actual.inputsLength; i++) {
+      const v = actual.getInput(i);
+      assembly.addInput({ txid: v.txid, index: v.index, sequence: v.sequence });
+    }
+    assembly.addOutput(actual.getOutput(0));
+    assembly.updateInput(1, { finalScriptSig: actual.getInput(1).finalScriptSig }, true);
+    const raw = hex.encode(assembly.toBytes(true, true));
+    if (await this.authorizations.get(`${this.assemblyKey(request.vault)}:raw`) !== digest(raw))
+      throw new Error("The signed result differs from the externally bound assembly.");
+    const expected = helperPsbt(raw, { ...manifest.helper, value: BigInt(manifest.helper.value),
+      previousTxHex: request.helperPreviousTxHex, address: this.wallet.address, publicKey: this.wallet.publicKey },
+      request.fundingPreviousTxHex, { value: manifest.funding.value, scriptHex: request.vault.scriptHex });
+    const returned = expected.clone();
+    returned.updateInput(0, { finalScriptSig: actual.getInput(0).finalScriptSig,
+      finalScriptWitness: actual.getInput(0).finalScriptWitness }, true);
+    if (signedCoordinatorResult(request.solved, expected, returned.toPSBT(), this.wallet).rawTxHex !== signed.rawTxHex)
+      throw new Error("The imported signed result failed helper verification.");
     const vsize = transactionVsize(signed.rawTxHex);
     const milliSatPerVb = (BigInt(manifest.fee) * 1000n) / BigInt(vsize);
     const floor = await this.minerFloor();

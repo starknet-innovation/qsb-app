@@ -101,7 +101,7 @@ What this doesn't cover:
 - A vault row without a `SCRIPT#` reservation wouldn't stop a second registration of its script until its first deposit write claimed one, or a payment to it showed on the chain API (`vault_script_paid`); a Slipstream deposit shows there once it's mined. The operator's backfill writes any missing reservations ([runbook](OPERATIONAL-RUNBOOK.md#reserve-the-scripts-of-existing-vaults)).
 - A script registered on another deployment is refused here only once a payment to it shows on the chain API.
 - An unreserved vault row's first deposit write claims its script even when another unreserved row on that script already has a deposit: the deposit routes don't ask the chain. The backfill reports such a pair.
-- The reservation is for one exact script. HORS secrets reused in a different script (part of a state, or reordered) aren't refused by the server. The SDK refuses a supplied state whose commitments a vault script of the signed-in address already pushes ([SDK](../sdk/README.md#your-own-recovery-state)).
+- The reservation is for one exact script. HORS secrets reused in a different script (part of a state, or reordered) aren't refused by the server. The SDK refuses a public descriptor whose commitments a vault script of the signed-in address already pushes. The external manager must enforce one-time material uniqueness across all wallets and deployments ([SDK](../sdk/README.md#pqb-external-custody)).
 
 ## Stray payments
 
@@ -282,7 +282,7 @@ is 409, revoking an unknown key is 404, and keys switched off are 503.
 
 ## Vault protocols
 
-`POST /vaults` accepts `config: "A"` (QSB Config A) or `config: "PQB"`, with a matching `configuration.protocol` and pinned generator commit. PQB's public state contains only its script, dummy-signature table and curve-point menus; the seed and menu scalars are never request fields. Both protocols use the same registration and one-deposit rules.
+`POST /vaults` accepts `config: "A"` (QSB Config A) or `config: "PQB"`, with a matching `configuration.protocol` and pinned generator commit. PQB's public state contains only its script, dummy-signature table and curve-point menus; the seed and menu scalars are never request fields. Its ordered dummy-signature table must match the canonical shared-table layout in its locking script; reordered or mutated entries are refused. Both protocols use the same registration and one-deposit rules.
 
 `GET /config` returns `solverProtocol` (`qsb-config-a-v1`, `pqb-v1` or null) alongside `solverReleaseId`. A new withdrawal requires the served release to match its vault's protocol and generator, otherwise `solver_not_served` is returned before outpoint reservation. A deployment serves one release at a time.
 

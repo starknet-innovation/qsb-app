@@ -215,7 +215,7 @@ describe("SDK deposit with the opted-in service fee", () => {
   const server = { serviceFee: { publicKey: SERVICE_FEE_KEY, price: async () => "1000000" } };
   const prepare = (v: Awaited<ReturnType<typeof createdVault>>, serviceFee?: { maxSats: bigint | string; address?: string }) =>
     v.client.deposits.prepare(v.vault.id, {
-      backup: v.backups[0], passphrase, amount: 200000n, feeRate: "2", utxos: [{ txid: v.owner.fundingTxid, vout: 0 }], serviceFee,
+      amount: 200000n, feeRate: "2", utxos: [{ txid: v.owner.fundingTxid, vout: 0 }], serviceFee,
     });
   const other = btc.p2wpkh(secp256k1.getPublicKey(new Uint8Array(32).fill(4), true), BITCOIN_NETWORK).address!;
 

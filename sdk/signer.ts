@@ -5,17 +5,15 @@ import { outputScript } from "../src/lib/transactions";
 import type { Wallet } from "../src/lib/wallet";
 
 /**
- * The caller's Bitcoin wallet: any BIP-322 message signer and PSBT signer
+ * The caller's Bitcoin wallet: a PSBT signer
  * (hardware wallet, HWI, Sparrow, an HSM). The SDK never sees its keys.
  * `address` is the payment address: P2WPKH, or P2SH-P2WPKH (nested SegWit),
- * derived from the compressed `publicKey`. The same address signs in, funds
+ * derived from the compressed `publicKey`. The external credential provider authenticates the same address, which funds
  * deposits and provides the withdrawal helper input.
  */
 export interface Signer {
   readonly address: string;
   readonly publicKey: string;
-  /** A BIP-322 signature (base64) of `message` by `address`. */
-  signMessage(address: string, message: string): Promise<string>;
   /** Sign `inputs` of a base64 PSBT with `address`'s key and return the PSBT (base64). Never broadcast. */
   signPsbt(address: string, psbt: string, inputs: number[]): Promise<string>;
   /** Set by signers that hold a raw key and may only talk to a local API. */
