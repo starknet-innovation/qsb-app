@@ -9,6 +9,7 @@ import { CostDisclosure } from "./Costs";
 import { base64, hex } from "@scure/base";
 import { api } from "./lib/api";
 import { NO_DEPOSIT, depositRefusal } from "./lib/vault-registration";
+import { SERVICE_FEE_USD, checkServiceFeeQuote } from "./lib/service-fee";
 import { signPsbt, type Wallet } from "./lib/wallet";
 import {
   fundingFeeForRate,
@@ -55,6 +56,8 @@ import {
 } from "./lib/model";
 
 type Point = { txid: string; vout: number; value: string };
+/** A service fee quote older than this is refreshed before signing. */
+const SERVICE_FEE_QUOTE_MS = 15 * 60 * 1000;
 const digest = async (text: string) =>
   hex.encode(
     new Uint8Array(
@@ -135,6 +138,13 @@ export default function TransactionDialog({
   // The server said this vault takes no deposit: nothing more to sign or send here.
   const [noDeposit, setNoDeposit] = useState(false);
   const [copyNotice, setCopyNotice] = useState("");
+  // The optional service fee: offered by the deployment, chosen by the user, and its quote (or why
+  // there isn't one). It's paid as the deposit's output 1; nothing requires it.
+  const [serviceFeeAddress, setServiceFeeAddress] = useState<string | null>(null);
+  const [payServiceFee, setPayServiceFee] = useState(false);
+  // The checked quote and when this browser received it, or why there's none.
+  const [serviceFeeQuote, setServiceFeeQuote] = useState<(ReturnType<typeof checkServiceFeeQuote> & { receivedAt: number }) | string>();
+  const serviceFeeRead = useRef(0);
   const submitAttempted = useRef(false);
   // Unlock the backup, choose the details, then review. An authorization, or a deposit that
   // is already signed, has nothing to choose and goes straight to review.
@@ -257,7 +267,12 @@ export default function TransactionDialog({
     if (deposit && !job) {
       const active = generation.current;
       api<{ exactSubmitEnabled?: boolean }>("/config")
-        .then((cfg) => { if (active === generation.current) setSubmissionOpen(operationsAllowed(cfg) && cfg.exactSubmitEnabled === true); })
+        .then((cfg) => {
+          if (active !== generation.current) return;
+          setSubmissionOpen(operationsAllowed(cfg) && cfg.exactSubmitEnabled === true);
+          const feeAddress = (cfg as { serviceFeeAddress?: unknown }).serviceFeeAddress;
+          setServiceFeeAddress(typeof feeAddress === "string" ? feeAddress : null);
+        })
         .catch(() => { if (active === generation.current) setSubmissionOpen(false); });
       const kept = readFundingGuard();
       if (kept?.rawTxHex) void confirmRecorded(kept.rawTxHex);
@@ -312,11 +327,32 @@ export default function TransactionDialog({
     if (belowMinerFloor(milliSatPerVb, floor))
       throw Error(`The fee rate is below MARA's current minimum of ${floor} sat/vB. Nothing was submitted.`);
   }
+  async function loadServiceFeeQuote() {
+    const active = generation.current, read = ++serviceFeeRead.current;
+    const current = () => active === generation.current && read === serviceFeeRead.current;
+    setServiceFeeQuote(undefined);
+    try {
+      const quote = checkServiceFeeQuote(await api("/service-fee"));
+      // The quote must pay the address the deployment's configuration names.
+      if (quote.address !== serviceFeeAddress) throw Error("its address isn't this deployment's fee address");
+      if (current()) setServiceFeeQuote({ ...quote, receivedAt: Date.now() });
+    } catch (e) {
+      if (current())
+        setServiceFeeQuote(`The service fee quote is unavailable: ${e instanceof Error ? e.message : "the request failed"}. Untick it to deposit without it, or try again.`);
+    }
+  }
+  // The opted-in service fee output, once its quote is read; a string says why it isn't.
+  const serviceFeeChoice = !payServiceFee
+    ? undefined
+    : typeof serviceFeeQuote === "object"
+      ? serviceFeeQuote
+      : serviceFeeQuote ?? "Getting the service fee quote…";
   // Deposit fee from a sat/vB rate and the transaction's worst-case signed size.
   const depositQuote = (() => {
     if (!deposit || job) return undefined;
     const selected = points.filter((p) => selection.includes(key(p)));
     if (!selected.length || !amount.trim() || !feeRate.trim()) return undefined;
+    if (typeof serviceFeeChoice === "string") return serviceFeeChoice;
     try {
       return fundingFeeForRate(
         selected.map((p) => BigInt(p.value)),
@@ -324,6 +360,7 @@ export default function TransactionDialog({
         vault.scriptHex.length / 2,
         parseBtc(amount),
         parseFeeRate(feeRate),
+        serviceFeeChoice?.output.amount,
       );
     } catch (e) {
       return e instanceof Error ? e.message : "Unable to estimate the miner fee.";
@@ -531,12 +568,25 @@ export default function TransactionDialog({
           rate = parseFeeRate(feeRate);
         await assertMinerFloor(rate);
         check();
+        // The reviewed service fee, if chosen. A stale quote is refreshed and shown, not signed.
+        let serviceFee: ReturnType<typeof checkServiceFeeQuote> | undefined;
+        if (payServiceFee) {
+          if (typeof serviceFeeQuote !== "object") throw Error("The service fee quote isn't ready. Nothing was signed.");
+          if (Date.now() - serviceFeeQuote.receivedAt > SERVICE_FEE_QUOTE_MS) {
+            // The amount may change, so the new one needs the user's consent again.
+            setAccepted(false);
+            await loadServiceFeeQuote();
+            throw Error("The service fee quote was more than 15 minutes old, so it was refreshed. Check the new amount, accept the costs again and sign. Nothing was signed.");
+          }
+          serviceFee = serviceFeeQuote;
+        }
         const quote = fundingFeeForRate(
             inputs.map((i) => i.value),
             nestedPaymentAddress(wallet.address),
             vault.scriptHex.length / 2,
             amountSats,
             rate,
+            serviceFee?.output.amount,
           ),
           feeSats = quote.fee;
         const expected = fundingPsbt(
@@ -545,8 +595,9 @@ export default function TransactionDialog({
           amountSats,
           feeSats,
           wallet.address,
+          serviceFee?.output,
         );
-        if (expected.outputsLength !== (quote.change ? 2 : 1))
+        if (expected.outputsLength !== 1 + (serviceFee ? 1 : 0) + (quote.change ? 1 : 0))
           throw Error("The deposit fee estimate doesn't match the transaction. No transaction was submitted.");
         check();
         refusePendingDeposit();
@@ -843,9 +894,17 @@ export default function TransactionDialog({
       if (typeof feeQuote !== "object") return undefined;
       if (deposit) {
         const amountSats = parseBtc(amount);
-        const change = selected.reduce((n, p) => n + BigInt(p.value), 0n) - amountSats - feeQuote.fee;
+        const service = typeof serviceFeeChoice === "object" ? serviceFeeChoice : undefined;
+        const serviceSats = service?.output.amount ?? 0n;
+        const change = selected.reduce((n, p) => n + BigInt(p.value), 0n) - amountSats - feeQuote.fee - serviceSats;
         return [
           ["Deposit to the vault", btc(amountSats)],
+          ...(service
+            ? [[
+                "Service fee (optional)",
+                `${sats(serviceSats)}: USD ${service.usd} at ${service.btcUsd} USD/BTC, to ${service.address}`,
+              ] as [string, string]]
+            : []),
           ["Miner fee", sats(feeQuote.fee)],
           [
             "Change back to your wallet",
@@ -853,7 +912,7 @@ export default function TransactionDialog({
               ? btc(change)
               : "None: it would be below the dust limit, so it goes to the fee",
           ],
-          ["Leaves your wallet", btc(amountSats + feeQuote.fee)],
+          ["Leaves your wallet", btc(amountSats + feeQuote.fee + serviceSats)],
         ];
       }
       if (!vault.funding || !selected[0] || payout === undefined) return undefined;
@@ -1182,6 +1241,21 @@ export default function TransactionDialog({
                 />
               </label>
             )}
+            {deposit && serviceFeeAddress && (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={payServiceFee}
+                  onChange={(e) => {
+                    setPayServiceFee(e.target.checked);
+                    if (e.target.checked) void loadServiceFeeQuote();
+                    else serviceFeeRead.current++;
+                  }}
+                />
+                Pay the optional USD {SERVICE_FEE_USD} service fee in BTC. It's added to this deposit as
+                its own output, on top of the vault amount. You can use the product without it.
+              </label>
+            )}
             {typeof feeQuote === "object" && "saved" in feeQuote ? (
               <p className="fee-estimate">
                 Miner fee {feeQuote.fee.toLocaleString()} sats ({formatBtc(feeQuote.fee)} BTC), fixed by the saved intent.
@@ -1289,11 +1363,13 @@ export default function TransactionDialog({
               <div className="cost-summary">
                 <p>
                   {!summary && <><strong>Miner fee: {feeBtc ? `${feeBtc} BTC` : "not set yet"}.</strong>{" "}</>}
-                  GPU compute, service and processing fees aren't billed yet.
+                  {deposit && typeof serviceFeeChoice === "object"
+                    ? `This deposit pays the optional USD ${serviceFeeChoice.usd} service fee you chose, ${BigInt(serviceFeeChoice.sats).toLocaleString()} sats, shown above. GPU compute and processing fees aren't billed yet.`
+                    : "GPU compute, service and processing fees aren't billed yet."}
                 </p>
                 <details>
                   <summary>See itemized costs</summary>
-                  <CostDisclosure feeBtc={feeBtc} job={job} />
+                  <CostDisclosure feeBtc={feeBtc} job={job} serviceFee={deposit && typeof serviceFeeChoice === "object" ? serviceFeeChoice : undefined} />
                 </details>
               </div>
             )}

@@ -130,7 +130,7 @@
     <h1>QSB vault: who holds which secret</h1>
     <p class="sub">How keys, passphrases and credentials move through vault creation, deposit and withdrawal. Wallet keys, passphrases and unrevealed HORS secrets stay on the user's side. Sign-in proofs, bearer credentials and signed transactions cross the boundary; withdrawals disclose selected HORS preimages and, for PQB, menu signatures and an ECDSA co-signature/public key. PQB seeds and private co-signature keys stay local.</p>
   </div>
-  <div class="keymsg">The <b>supported service flow</b> requires the backup, passphrase and original wallet. That wallet is not bound into the vault script: decrypted recovery state can enable a spend with another controlled helper outside the service. The service holds no spending key.</div>
+  <div class="keymsg">The <b>supported service flow</b> requires the backup, passphrase and original wallet. That wallet is not bound into the vault script: decrypted recovery state can enable a spend with another controlled helper outside the service. The service holds no key that can spend a vault. An optional service fee key in AWS KMS spends only the fee address.</div>
 </header>
 
 <div class="legend">
@@ -191,7 +191,7 @@
   </div>
   <div class="cell browser">
     <div class="step">Unlocks the backup locally to check it still opens. Nothing secret is sent.</div>
-    <div class="step">Builds a deposit paying the vault script. Each vault takes exactly one deposit.</div>
+    <div class="step">Builds a deposit paying the vault script. If the user opts in, it also pays the service fee as output 1. Each vault takes exactly one deposit.</div>
   </div>
   <div class="cell browser">
     <div class="step">Unlocks the backup; you choose a destination, helper output and fee rate. Payout = full funding value + helper value − fee; no independent amount choice.</div>
@@ -213,12 +213,13 @@
   <!-- SERVICE LANE -->
   <div class="lane-label service">
     <h2>QSB service <span style="font-weight:500;color:var(--muted)">on AWS</span></h2>
-    <p>API Lambda, records table, Step Functions coordinator and CPU verifier. Holds no spending key.</p>
+    <p>API Lambda, records table, Step Functions coordinator and CPU verifier. Holds no key that can spend a vault. The optional service fee key stays in AWS KMS; the API holds only its public key.</p>
     <div class="holds">
       <span class="chip pub">vault and job records</span>
       <span class="chip cred">token and key hashes</span>
       <span class="chip cred">MARA credential</span>
       <span class="chip cred">webhook secrets</span>
+      <span class="chip pub">fee public key</span>
     </div>
   </div>
   <div class="cell service">
@@ -226,7 +227,7 @@
     <div class="step">Stores the public vault record. At creation it receives public commitments and, for PQB, a dummy-signature table and curve-point menus. No seed, scalar, private key or HORS preimage.<br><span class="chip pub">public vault</span></div>
   </div>
   <div class="cell service">
-    <div class="step">Checks the transaction pays the vault script, records the exact bytes and submits them to MARA.</div>
+    <div class="step">Checks output 0 pays the vault script, records the exact bytes and submits them to MARA. It doesn't check the optional service fee.</div>
     <div class="step">Reads the optional MARA credential from Secrets Manager; only the API function can, with the credentials Lambda issues to it.<br><span class="chip cred">MARA Slipstream credential</span></div>
   </div>
   <div class="cell service">
@@ -248,7 +249,7 @@
   <!-- EXTERNAL LANE -->
   <div class="lane-label external">
     <h2>Outside parties</h2>
-    <p>The chain API receives public lookups, such as a new vault's script hash. The GPU solver receives public search inputs; PQB menus are curve points, never scalars. MARA receives signed transactions and optional authorization/client-code credentials. MARA and Bitcoin see the selected HORS preimages disclosed in withdrawals.</p>
+    <p>The chain API receives public lookups, such as a new vault's script hash. With the optional service fee, Coinbase receives price requests that carry nothing about the user. The GPU solver receives public search inputs; PQB menus are curve points, never scalars. MARA receives signed transactions and optional authorization/client-code credentials. MARA and Bitcoin see the selected HORS preimages disclosed in withdrawals.</p>
   </div>
   <div class="cell external">
     <div class="step"><b>Chain API</b> (Esplora) looks up the script hash, so the service can refuse a script something has already paid.</div>
@@ -278,6 +279,7 @@
       <tr><td><span class="chip cred">Session token / API key</span><br>1 h / scoped, up to 90 days</td><td>API, after a BIP-322 sign-in</td><td>Browser, or the SDK caller</td><td>SHA-256 hash at rest; receives bearer credentials on authenticated requests</td></tr>
       <tr><td><span class="chip cred">Webhook signing secret</span></td><td>API, shown once to the owner</td><td>Owner's webhook receiver</td><td>The secret, to sign deliveries (HMAC-SHA256)</td></tr>
       <tr><td><span class="chip cred">MARA Slipstream credential</span><br>optional</td><td>Administrator</td><td>AWS Secrets Manager</td><td>Read at runtime by the API function only, with the credentials Lambda issues to it (copied out, those work until they expire); sent only to MARA</td></tr>
+      <tr><td><span class="chip secret">Service fee key</span><br>optional</td><td>Administrator, in AWS KMS</td><td>AWS KMS; not exportable</td><td>The public key only, in the API's environment. Only the key policy's signers (who sign in with MFA through IAM Identity Center) can sign, to move the fee address's funds</td></tr>
     </table>
   </div>
   <div class="panel">
@@ -287,6 +289,7 @@
       <div><b>QSB service</b><span>Can refuse or delay a withdrawal, but not redirect it: the destination is fixed by signatures made on the user's machine.</span></div>
       <div><b>GPU solver</b><span>Untrusted compute on public data. Only independently CPU-verified hits can be used as solutions; verification does not necessarily examine every returned hit.</span></div>
       <div><b>Operator</b><span>MFA-backed role that reconciles records after an unknown outcome and writes missing script reservations. It can't sign, and its tools never resubmit.</span></div>
+      <div><b>Fee signers</b><span>Optional. The principals the fee key's policy names, signing in with MFA through IAM Identity Center. They sign spends of the fee address only, never of a vault; the sweep tool broadcasts nothing.</span></div>
       <div><b>MARA</b><span>Receives fully signed transactions and optional authorization/client-code credentials; withdrawals include the disclosed HORS preimages.</span></div>
     </div>
     <p class="trust"><b>Trust note.</b> The web app is served from the deployment, so whoever can deploy controls the code that runs in the browser and can read the MARA credential. The SDK and CLI run code the user installs.</p>

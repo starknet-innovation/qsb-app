@@ -1,6 +1,6 @@
 # API
 
-The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side, except the HORS preimages a signed withdrawal reveals by design. This page covers its prefixes, request headers, OpenAPI document, errors, per-owner limits, vault registration, stray payments, idempotency, API keys, and its event log and webhooks.
+The server is a JSON HTTP API: `createApp` in [`server/app.ts`](../server/app.ts), served on Lambda by [`server/lambda.ts`](../server/lambda.ts). It is non-custodial: keys, passphrases and one-time material stay on the caller's side, except the HORS preimages a signed withdrawal reveals by design. This page covers its prefixes, request headers, OpenAPI document, errors, per-owner limits, vault registration, stray payments, the optional service fee, idempotency, API keys, and its event log and webhooks.
 
 ## Prefixes
 
@@ -63,6 +63,7 @@ Errors produced in front of the app have no `code`. That includes errors from Cl
 | Withdrawal submission | `intent_not_found`, `intent_conflict`, `exact_spend_mismatch`, `consensus_rejected`, `inclusion_check_failed` |
 | Inputs | `input_not_found`, `input_mismatch`, `input_unconfirmed`, `input_spent` |
 | Chain and miner | `chain_transaction_not_found`, `chain_unavailable`, `chain_error`, `miner_unavailable`, `miner_request_failed`, `miner_rate_unavailable` |
+| Service fee | `service_fee_not_offered`, `service_fee_price_unavailable` |
 | Webhooks | `webhook_url_invalid`, `webhook_url_forbidden`, `webhook_url_unresolvable`, `webhook_limit_reached`, `webhook_not_found` |
 | General | `state_conflict`, `internal_error` |
 
@@ -118,6 +119,15 @@ The webapp calls this route on its own while it's open and on screen:
 - A submitted withdrawal is checked with `GET /api/transactions/:id/status` once a minute.
 
 In each browser, one tab per wallet does the checking, and none does while a transaction dialog is open. Other browsers and devices check on their own. This needs the browser's Web Locks API. Without it, the webapp checks only when the user presses "Check now", which every vault with a deposit has.
+
+## Service fee
+
+A deployment may offer an optional, fixed USD 200 service fee, paid in BTC. Paying it is the user's choice: nothing in the API requires it or checks it, and every route works the same without it.
+
+- `GET /api/config` reports `serviceFeeAddress`: the fee's address when the deployment has a fee key (`QSB_SERVICE_FEE_PUBLIC_KEY`, set by Terraform's `service_fee_enabled`), otherwise null. It needs no price, so it answers while the price source is down.
+- `GET /api/service-fee` needs no sign-in. It returns `usd` (200), `btcUsd` (the Coinbase BTC-USD spot price; each API instance reuses a successful read for a minute), `source` (`coinbase`), `sats` (200 USD at that price, rounded up), `address` and `quotedAt` (when the price was read). Without a fee key it's 404 `service_fee_not_offered`; when the price can't be read, 503 `service_fee_price_unavailable`.
+- The address is the P2WPKH address of an AWS KMS secp256k1 key. The API holds only its public key and can't sign with it ([key custody](KEY-CUSTODY.md), [runbook](OPERATIONAL-RUNBOOK.md#service-fee)).
+- A user who opts in adds the fee to the vault's one deposit as output 1, after the vault's output 0 and before any change, on top of the vault amount. The deposit routes read only output 0, so they treat a deposit with the fee like any other. The webapp and the SDK check that a quote's `sats` is the fee at its own `btcUsd`, at a price of at least 10,000 USD/BTC, and that it pays the configured `serviceFeeAddress` before they add it; the SDK also refuses a quote above the caller's `maxSats`.
 
 ## Events and webhooks
 

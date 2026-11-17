@@ -92,6 +92,8 @@ export const apiErrorCodes = {
   miner_request_failed:
     "A miner request failed, or its answer was malformed. Retry later.",
   miner_rate_unavailable: "The miner's live fee quote is unavailable. Retry later.",
+  service_fee_not_offered: "This deployment doesn't offer the optional service fee.",
+  service_fee_price_unavailable: "The BTC/USD price for the service fee is unavailable. Retry later.",
   webhook_url_invalid:
     "The webhook URL isn't a URL, isn't https on port 443, or has credentials in it.",
   webhook_url_forbidden:

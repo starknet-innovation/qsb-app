@@ -43,6 +43,7 @@ const { vault: own } = await qsb.vaults.create({ name: "cold-2", passphrase, sav
 
 // Deposit: one per vault. You sign the PSBT; the server relays it to MARA Slipstream.
 const prepared = await qsb.deposits.prepare(vault.id, { backup, passphrase, amount: 200_000n, feeRate: "2", utxos });
+// Optional: serviceFee: { maxSats } also pays the USD 200 service fee as output 1 (see qsb.serviceFee()).
 const signed = await signer.signPsbt(signer.address, prepared.psbt, prepared.signInputs);
 await qsb.deposits.submit(prepared, signed, { costAccepted: true });
 
@@ -65,19 +66,22 @@ The routes below are shown under `/api`; the SDK, like the mainnet webapp, calls
 | --- | --- | --- |
 | `login()` | `POST /api/auth/challenge`, `/verify` | checks the challenge text, then `signer.signMessage` |
 | `config()`, `rates()`, `utxos()` | `GET /api/config`, `/rates`, `/payment-utxos` | |
+| `serviceFee()` | `GET /api/service-fee` | checks the quote's amount against its price, and its P2WPKH address |
 | `vaults.create` | `GET /api/vaults` (with `stateJson` only), `POST /api/vaults` | generate, or check `stateJson`; encrypt, `saveBackup`, re-open and validate |
 | `vaults.list` | `GET /api/vaults` | |
-| `deposits.prepare` | `/payment-input`, `/rates` | validate the backup against the vault, build the PSBT, check MARA's floor |
-| `deposits.submit` | `POST /api/vaults/:id/fund/submit` | rebuild the expected PSBT, verify the signed one, keep it pending |
+| `deposits.prepare` | `/payment-input`, `/rates`, and `/service-fee` with `serviceFee` | validate the backup against the vault, build the PSBT, check MARA's floor |
+| `deposits.submit` | `POST /api/vaults/:id/fund/submit` | rebuild the expected PSBT, check a fee is still the USD amount at its price and pays the configured address, verify the signed one, keep it pending |
 | `deposits.status`, `deposits.resubmit` | `GET …/funding`, `POST …/fund/submit` or `…/fund/resubmit` | resubmit resends the same bytes only |
 | `withdrawals.create` | `POST /api/jobs` | fix the fee, bind the intent into a new backup (`saveBackup`) first |
 | `withdrawals.list`, `status`, `pause`, `resume` | `/api/jobs…` | |
 | `withdrawals.assemble` | `…/solved-result`, `…/funding`, `/payment-input` | assemble from the backup, seal the signing backup, sign the helper input |
 | `withdrawals.submit` | `POST /api/jobs/:id/submit` | re-check the bytes against the job, then `approve(review)` |
 
-`publicApi({ baseUrl })` reads `config()` and `rates()` without a signer. Errors from the server are `ApiRequestError`s with `status` and, when the server sends one, a machine-readable `code` ([docs/API.md](../docs/API.md)); the CLI prints the code after the message. Some methods turn a server error into their own error, with the `ApiRequestError` as its `cause`: the per-owner refusals below, which are final; in `vaults.create`, the refusals of a script, which are final, and a failed chain lookup, which a retry can get past ([own state](#your-own-recovery-state)); and in `deposits.submit` and `deposits.resubmit`, `vault_script_registered`, which is final.
+`publicApi({ baseUrl })` reads `config()`, `rates()` and `serviceFee()` without a signer. Errors from the server are `ApiRequestError`s with `status` and, when the server sends one, a machine-readable `code` ([docs/API.md](../docs/API.md)); the CLI prints the code after the message. Some methods turn a server error into their own error, with the `ApiRequestError` as its `cause`: the per-owner refusals below, which are final; in `vaults.create`, the refusals of a script, which are final, and a failed chain lookup, which a retry can get past ([own state](#your-own-recovery-state)); and in `deposits.submit` and `deposits.resubmit`, `vault_script_registered`, which is final.
 
 Per-owner limits ([docs/API.md](../docs/API.md#per-owner-limits)): the SDK reads `ownerLimits` from `/api/config` first, and refuses before generating, saving or signing anything when the signed-in wallet isn't allowlisted or the limits are misconfigured (`ownerLimits: null`). A refusal the server returns anyway (`owner_not_allowlisted`, `owner_active_withdrawal_limit`, `owner_gpu_budget_reached`, `owner_limits_invalid`) is final for that request: nothing was written or sent by it. A signed deposit stays pending for `deposits.resubmit`, and a new withdrawal's intent stays in its new backup for a later `withdrawals.create`. `qsb config` shows `ownerLimits`.
+
+Optional service fee ([docs/API.md](../docs/API.md#service-fee)): when `config()` reports a `serviceFeeAddress`, `deposits.prepare(…, { serviceFee: { maxSats, address } })` adds the fixed USD 200 fee, in sats at the server's current quote, as the deposit's output 1, on top of `amount`. The server picks the price, so the SDK refuses a quote above `maxSats`, one that doesn't pay the configured `serviceFeeAddress`, and, when you give `address`, one that doesn't pay it. The amount is fixed at prepare: a prepared deposit keeps its quote however long it waits to be signed. It records the fee under `serviceFee` (address, sats, USD, price, quote time), and `change` is net of it. It's the caller's choice: without `serviceFee` the deposit pays no fee, and nothing in the API requires it.
 
 Rules that carry over from the webapp:
 
@@ -130,6 +134,7 @@ npm run qsb -- vault create --name cold-1 --backup vault.json
 #   or, from recovery state you generated: vault create --name cold-2 --backup vault2.json --state qsb_state.json
 npm run qsb -- utxos
 npm run qsb -- deposit prepare <vault> --backup vault.json --amount 0.002 --fee-rate 2 --utxo <txid:vout> --out deposit.json
+#   add --service-fee <max sats> to also pay the optional USD 200 service fee; `npm run qsb -- service-fee` shows the quote
 #   sign deposit.psbt in your wallet (Sparrow, HWI, …) without broadcasting
 npm run qsb -- deposit submit --prepared deposit.json --signed deposit-signed.psbt --accept-costs
 npm run qsb -- deposit status <vault>
@@ -150,7 +155,7 @@ The default signer is external: the CLI writes each request (the sign-in message
 
 `--signer test-key` uses a raw WIF key from `QSB_TEST_SIGNER_KEY`, for tests and local development against `npm run dev`. It refuses any API URL that isn't loopback (127.0.0.1, localhost or [::1]). With `npm run dev`, use `--api http://127.0.0.1:5173`: the challenge names that origin, and Vite proxies `/v1` (and `/api`) to the local API.
 
-`config` and `rates` need no wallet. With an API key in `QSB_API_KEY` or `--api-key-fd <n>` (never an argument), the CLI skips the wallet sign-in and caches no session; it still needs `--address` and `--public-key` for the PSBTs. Every other command needs `--address` and `--public-key`, or the test key.
+`config`, `rates` and `service-fee` need no wallet. With an API key in `QSB_API_KEY` or `--api-key-fd <n>` (never an argument), the CLI skips the wallet sign-in and caches no session; it still needs `--address` and `--public-key` for the PSBTs. Every other command needs `--address` and `--public-key`, or the test key.
 
 ## Package
 

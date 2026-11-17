@@ -34,6 +34,7 @@ import { NETWORK_ID } from "../src/lib/network";
 import { BODY_HASH_HEADER, CREDENTIAL_HEADER } from "../src/lib/session";
 import { coordinatorSolvedResultSchema } from "../src/mainnet/coordinatorResult";
 import { slipstreamRatesSchema } from "./providers";
+import { serviceFeeQuoteSchema } from "../src/lib/service-fee";
 import {
   apiKeyIdParam,
   apiKeyRequest,
@@ -410,6 +411,10 @@ const configResponse = z.object({
       })
       .nullable(),
     "The per-owner limits in force, or null when a limit setting is malformed.",
+  ),
+  serviceFeeAddress: describe(
+    z.string().nullable(),
+    "The optional service fee's P2WPKH address, or null when this deployment doesn't offer the fee (GET /api/service-fee).",
   ),
 });
 const transactionStatusResponse = z.object({
@@ -793,6 +798,19 @@ export const apiRoutes: readonly ApiRoute[] = [
       200: { description: "The quote.", schema: slipstreamRatesSchema },
     },
     errors: { 503: ["miner_rate_unavailable"] },
+  },
+  {
+    method: "get",
+    path: "/api/service-fee",
+    operationId: "getServiceFee",
+    summary: "The optional service fee's current quote",
+    description:
+      "The fixed USD service fee in sats at the current BTC/USD spot price, and the P2WPKH address it's paid to. A user who opts in adds it to the vault's deposit as output 1, after the vault output. The service doesn't require it.",
+    auth: false,
+    responses: {
+      200: { description: "The quote.", schema: serviceFeeQuoteSchema },
+    },
+    errors: { 404: ["service_fee_not_offered"], 503: ["service_fee_price_unavailable"] },
   },
   {
     method: "post",

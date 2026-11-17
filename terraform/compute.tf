@@ -64,6 +64,18 @@ resource "aws_iam_role_policy" "miner_credential" {
   role   = aws_iam_role.lambda["api"].id
   policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = var.slipstream_secret_arn, Condition = { ArnLike = { "lambda:SourceFunctionArn" = "arn:aws:lambda:${var.region}:${var.aws_account_id}:function:${var.name}-api" } } }] })
 }
+# The optional service fee's key, created by an administrator (ops/service-fee-key). Only its public key is read,
+# at plan time, by the deploy role; the API derives the fee address from it and holds no KMS permission.
+data "aws_kms_public_key" "service_fee" {
+  count  = var.service_fee_enabled ? 1 : 0
+  key_id = "alias/qsb/service-fee"
+  lifecycle {
+    postcondition {
+      condition     = self.customer_master_key_spec == "ECC_SECG_P256K1" && self.key_usage == "SIGN_VERIFY" && split(":", self.arn)[3] == var.region && split(":", self.arn)[4] == var.aws_account_id
+      error_message = "alias/qsb/service-fee must be an ECC_SECG_P256K1 SIGN_VERIFY key in this stack's account and region."
+    }
+  }
+}
 resource "aws_iam_role_policy" "start" {
   role   = aws_iam_role.lambda["api"].id
   policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "states:StartExecution", Resource = local.workflow_arn }] })
@@ -116,7 +128,7 @@ resource "aws_lambda_function" "api" {
     application_log_level = "INFO"
   }
   environment {
-    variables = merge({ TABLE_NAME = aws_dynamodb_table.records.name, QSB_EXACT_SUBMIT_ENABLED = tostring(var.exact_submit_enabled), WORKFLOW_ARN = local.workflow_arn, QSB_NETWORK = var.network, SOLVER_RELEASE_ID = local.solver_release_id, QSB_MAINNET_ENABLED = tostring(var.mainnet_enabled), QSB_API_KEYS_ENABLED = tostring(var.api_keys_enabled) }, local.owner_limit_env, var.slipstream_secret_arn == "" ? {} : { SLIPSTREAM_SECRET_ARN = var.slipstream_secret_arn })
+    variables = merge({ TABLE_NAME = aws_dynamodb_table.records.name, QSB_EXACT_SUBMIT_ENABLED = tostring(var.exact_submit_enabled), WORKFLOW_ARN = local.workflow_arn, QSB_NETWORK = var.network, SOLVER_RELEASE_ID = local.solver_release_id, QSB_MAINNET_ENABLED = tostring(var.mainnet_enabled), QSB_API_KEYS_ENABLED = tostring(var.api_keys_enabled) }, local.owner_limit_env, var.slipstream_secret_arn == "" ? {} : { SLIPSTREAM_SECRET_ARN = var.slipstream_secret_arn }, var.service_fee_enabled ? { QSB_SERVICE_FEE_PUBLIC_KEY = data.aws_kms_public_key.service_fee[0].public_key } : {})
   }
   depends_on = [terraform_data.release, aws_iam_role_policy.logs, aws_iam_role_policy.records, aws_iam_role_policy.start, aws_iam_role_policy.miner_credential]
 }

@@ -80,6 +80,16 @@ class SinglePipelinePolicies(unittest.TestCase):
             with self.subTest(names=names), self.assertRaises(SystemExit):
                 render(inventory)
 
+    def test_deployer_reads_only_the_service_fee_public_key_and_runtime_gets_no_kms(self):
+        self.assertEqual(self.statement('deploy', 'ServiceFeePublicKey'), {
+            'Sid': 'ServiceFeePublicKey', 'Effect': 'Allow', 'Action': ['kms:GetPublicKey'],
+            'Resource': ['arn:aws:kms:eu-west-2:123456789012:key/*'],
+            'Condition': {'ForAnyValue:StringEquals': {'kms:ResourceAliases': 'alias/qsb/service-fee'}},
+        })
+        kms = [a for p in ('deploy', 'boundary') for s in self.policies[p]['Statement'] if s['Effect'] == 'Allow'
+               for a in s['Action'] if a.startswith('kms:')]
+        self.assertEqual(kms, ['kms:GetPublicKey'])
+
     def test_role_deletion_lookup_is_scoped_without_instance_profile_management(self):
         statement = self.statement('deploy', 'ManageRuntimeRoles')
         self.assertIn('iam:ListInstanceProfilesForRole', statement['Action'])

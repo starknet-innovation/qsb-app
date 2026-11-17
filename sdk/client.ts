@@ -53,6 +53,14 @@ import {
   type CoordinatorSignedResult,
 } from "../src/mainnet/coordinatorResult";
 import { persistentGuard } from "../src/mainnet/persistentGuard";
+import {
+  btcUsdPrice,
+  checkServiceFeeQuote,
+  serviceFeeSats,
+  SERVICE_FEE_PRICE_SOURCE,
+  SERVICE_FEE_USD,
+  type ServiceFeeQuote,
+} from "../src/lib/service-fee";
 // The request bodies the server's handlers parse, so a request can't drift from the API.
 import { fundResubmitRequest, fundSubmitRequest, submitRequest } from "../server/api-schemas";
 import type { Wallet } from "../src/lib/wallet";
@@ -76,9 +84,13 @@ export type ApiConfig = {
     maxActiveJobs: number | null;
     maxGpuSeconds: number | null;
   } | null;
+  /** The optional service fee's address, or null when the deployment doesn't offer it (`serviceFee()`). */
+  serviceFeeAddress?: string | null;
   [field: string]: unknown;
 };
 export type Rates = { submit_fee_rate: number; market_rate?: number; effective_rate?: number };
+/** Opting in to the service fee: the most sats you'll pay, and optionally the address you expect. */
+export type ServiceFeeLimit = { maxSats: bigint | string; address?: string };
 /** Persists an encrypted recovery backup. It must resolve only once the text is safely stored. */
 export type SaveBackup = (encryptedBackup: string) => Promise<void>;
 /** A signed deposit kept before it's sent, so a retry can only resend these bytes. Public data. */
@@ -174,6 +186,18 @@ export const preparedDepositSchema = z
     fee: sats,
     change: sats,
     vsize: z.number().int().positive(),
+    /** The opted-in service fee, paid by output 1. Absent when the deposit pays none. */
+    serviceFee: z
+      .object({
+        address: z.string().min(14).max(100),
+        amount: sats,
+        usd: z.literal(SERVICE_FEE_USD),
+        btcUsd: btcUsdPrice,
+        source: z.literal(SERVICE_FEE_PRICE_SOURCE),
+        quotedAt: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 const depositAnswerSchema = z.object({
@@ -323,7 +347,13 @@ export function publicApi(options: Pick<QsbClientOptions, "baseUrl" | "basePath"
   return {
     config: () => session.api<ApiConfig>("/config"),
     rates: () => session.api<Rates>("/rates"),
+    serviceFee: async (): Promise<ServiceFeeQuote> => quoteOnly(await session.api<unknown>("/service-fee")),
   };
+}
+/** A checked service fee quote, as the server sent it. */
+function quoteOnly(value: unknown): ServiceFeeQuote {
+  const { output: _output, ...quote } = checkServiceFeeQuote(value);
+  return quote;
 }
 
 /**
@@ -382,6 +412,26 @@ export class QsbClient {
   rates(): Promise<Rates> {
     return this.session.api<Rates>("/rates");
   }
+  /**
+   * The optional service fee: the fixed USD amount in sats at the server's current BTC/USD price,
+   * and its address. It's checked to be self-consistent; pass `serviceFee: true` to
+   * `deposits.prepare` to pay it.
+   */
+  async serviceFee(): Promise<ServiceFeeQuote> {
+    return quoteOnly(await this.session.api<unknown>("/service-fee"));
+  }
+  /** The current quote, refused unless it pays the configured address (and `limit.address`) at most `limit.maxSats`. */
+  private async serviceFeeWithin(config: ApiConfig, limit: ServiceFeeLimit) {
+    const max = BigInt(sats.parse(String(limit.maxSats)));
+    const quote = checkServiceFeeQuote(await this.session.api<unknown>("/service-fee"));
+    if (typeof config.serviceFeeAddress !== "string" || quote.address !== config.serviceFeeAddress)
+      throw new Error("The service fee quote doesn't pay this deployment's configured fee address. Nothing was prepared.");
+    if (limit.address !== undefined && quote.address !== limit.address)
+      throw new Error(`The service fee pays ${quote.address}, not ${limit.address}. Nothing was prepared.`);
+    if (quote.output.amount > max)
+      throw new Error(`The service fee is ${quote.sats} sats (USD ${quote.usd} at ${quote.btcUsd} USD/BTC), above your limit of ${max} sats. Nothing was prepared.`);
+    return quote;
+  }
   /** Confirmed payment outputs of the signed-in address. */
   async utxos(): Promise<Point[]> {
     return (await this.session.api<{ utxos: Point[] }>("/payment-utxos")).utxos;
@@ -409,7 +459,12 @@ export class QsbClient {
       }>("/vaults"),
   };
   readonly deposits = {
-    /** An unsigned deposit PSBT paying the vault, after checking the backup matches its script. */
+    /**
+     * An unsigned deposit PSBT paying the vault, after checking the backup matches its script.
+     * With `serviceFee`, it also pays the optional service fee at the current quote, as output 1,
+     * on top of `amount`: only up to `maxSats`, and only to the deployment's configured fee
+     * address (and to `address`, when given). The amount is fixed here, at prepare.
+     */
     prepare: (
       vaultId: string,
       input: {
@@ -418,6 +473,7 @@ export class QsbClient {
         amount: bigint | string;
         feeRate: string;
         utxos: { txid: string; vout: number }[];
+        serviceFee?: ServiceFeeLimit;
       },
     ) => this.prepareDeposit(vaultId, input),
     /** Check the signed PSBT against the prepared one, keep it as pending, then have the server relay it. */
@@ -641,6 +697,7 @@ export class QsbClient {
       amount: bigint | string;
       feeRate: string;
       utxos: { txid: string; vout: number }[];
+      serviceFee?: ServiceFeeLimit;
     },
   ): Promise<PreparedDeposit> {
     const config = await this.assertOperations();
@@ -671,15 +728,17 @@ export class QsbClient {
       throw new Error("Select between one and eight payment outputs.");
     const inputs = await Promise.all((await this.selectUtxos(input.utxos)).map((p) => this.fundingInput(p)));
     await this.assertMinerFloor(rate);
+    const service = input.serviceFee ? await this.serviceFeeWithin(config, input.serviceFee) : undefined;
     const quote = fundingFeeForRate(
       inputs.map((i) => i.value),
       nestedPaymentAddress(this.wallet.address),
       vault.scriptHex.length / 2,
       amount,
       rate,
+      service?.output.amount,
     );
-    const tx = fundingPsbt(inputs, vault.scriptHex, amount, quote.fee, this.wallet.address);
-    if (tx.outputsLength !== (quote.change ? 2 : 1))
+    const tx = fundingPsbt(inputs, vault.scriptHex, amount, quote.fee, this.wallet.address, service?.output);
+    if (tx.outputsLength !== 1 + (service ? 1 : 0) + (quote.change ? 1 : 0))
       throw new Error("The deposit fee estimate doesn't match the transaction. Nothing was prepared.");
     const total = inputs.reduce((sum, i) => sum + i.value, 0n);
     return preparedDepositSchema.parse({
@@ -692,8 +751,20 @@ export class QsbClient {
       signInputs: inputs.map((_, index) => index),
       amount: amount.toString(),
       fee: quote.fee.toString(),
-      change: (total - amount - quote.fee).toString(),
+      change: (total - amount - quote.fee - (service?.output.amount ?? 0n)).toString(),
       vsize: quote.vsize,
+      ...(service
+        ? {
+            serviceFee: {
+              address: service.address,
+              amount: service.sats,
+              usd: service.usd,
+              btcUsd: service.btcUsd,
+              source: service.source,
+              quotedAt: service.quotedAt,
+            },
+          }
+        : {}),
     });
   }
   /** Rebuild the prepared PSBT from its own inputs and the vault, so an edited file can't pass. */
@@ -715,12 +786,18 @@ export class QsbClient {
         address: this.wallet.address,
       });
     }
+    // An edited file could change the fee: it must still be the USD amount at its own price.
+    if (prepared.serviceFee && BigInt(prepared.serviceFee.amount) !== serviceFeeSats(prepared.serviceFee.btcUsd))
+      throw new Error("The prepared deposit's service fee doesn't match its price.");
     const expected = fundingPsbt(
       inputs,
       vault.scriptHex,
       BigInt(prepared.amount),
       BigInt(prepared.fee),
       this.wallet.address,
+      prepared.serviceFee
+        ? { address: prepared.serviceFee.address, amount: BigInt(prepared.serviceFee.amount) }
+        : undefined,
     );
     if (
       hex.encode(expected.unsignedTx) !== hex.encode(unsigned.unsignedTx) ||
@@ -747,6 +824,9 @@ export class QsbClient {
     assertVaultConfiguration(vault);
     if (vault.scriptHash !== prepared.scriptHash)
       throw new Error("The prepared deposit belongs to a different vault script.");
+    // An edited file could redirect the service fee: it must still pay the deployment's address.
+    if (prepared.serviceFee && config.serviceFeeAddress !== prepared.serviceFee.address)
+      throw new Error("The prepared deposit's service fee doesn't pay this deployment's fee address. Nothing was sent.");
     const signed = verifySignedPsbt(this.expectedDeposit(prepared, vault), decodePsbt(signedPsbt));
     for (let i = 0; i < signed.inputsLength; i++) {
       const signedInput = signed.getInput(i);

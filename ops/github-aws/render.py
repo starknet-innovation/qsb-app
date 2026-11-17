@@ -72,6 +72,10 @@ def render(c):
     allow('PassRuntimeRoles',['iam:PassRole'],[runtime_roles],{'StringEquals':{'iam:PassedToService':['lambda.amazonaws.com','states.amazonaws.com','scheduler.amazonaws.com']}})
     # EventBridge Scheduler schedules named qsb-* in the default group. Schedules carry no tags.
     allow('QsbSchedules',['scheduler:CreateSchedule','scheduler:GetSchedule','scheduler:UpdateSchedule','scheduler:DeleteSchedule'],[arn('scheduler','schedule/default/qsb-*')])
+    # The optional service fee's key (ops/service-fee-key) is administrator-created. With service_fee_enabled, Terraform
+    # reads its public key at plan time and gives the API only that. Reading a public key is all a deploy may do with it:
+    # never sign, and no runtime role gets a KMS grant (the boundary has none).
+    allow('ServiceFeePublicKey',['kms:GetPublicKey'],[arn('kms','key/*')],{'ForAnyValue:StringEquals':{'kms:ResourceAliases':'alias/qsb/service-fee'}})
     allow('StateList',['s3:ListBucket','s3:GetBucketLocation'],['arn:aws:s3:::'+c['state_bucket']])
     allow('StateObjects',['s3:GetObject','s3:PutObject'],['arn:aws:s3:::'+c['state_bucket']+'/qsb/*'])
     allow('StateLocks',['s3:DeleteObject'],['arn:aws:s3:::'+c['state_bucket']+'/qsb/*.tflock'])

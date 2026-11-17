@@ -12,7 +12,7 @@ As of 23 October 2026. #8, the plan to a first mainnet withdrawal, is complete; 
 - **API.** CloudFront calls the API's Lambda function URL (`AWS_IAM` auth) through origin access control; there is no API Gateway (`terraform/web.tf`). The URL answers only requests signed by CloudFront, or by principals in this account with Lambda invoke permission: `qsb-operator`, the deploy role and the administrator.
 - **Solver.** `combined-aws-sm86-v0.3.0` (`qsb-ranked-v2-40b5d9f9f741-6b4ac63b897c`), the optimized subset kernel with the repaired pinning on a runtime with Ubuntu updates applied at build, served since 2 October 2026. `combined-aws-sm86-v0.2.0` stays enrolled for rollback ([SOLVER-REPOSITORY.md](SOLVER-REPOSITORY.md)).
 - **GPUs.** On-Demand `g5.xlarge` (one A10G each), up to 16 per withdrawal (`workersMax` in `server/gpu-spend.json`), scaling to zero when idle.
-- **Switches.** An uncached `GET /api/config` reports the mainnet and submit switches. Approvals and switch changes are recorded in the private deployment record, not in Git ([runbook](OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches)). API keys, the scheduled webhook dispatcher and the per-owner limits are off by default.
+- **Switches.** An uncached `GET /api/config` reports the mainnet and submit switches. Approvals and switch changes are recorded in the private deployment record, not in Git ([runbook](OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches)). API keys, the scheduled webhook dispatcher, the per-owner limits and the optional service fee are off by default.
 - **Deploys.** `QSB_AWS_DEPLOY_ENABLED` is `true`: `.github/workflows/deploy.yml` plans each push to `main` and applies after an approval. A `qsb-operator` can also apply a reviewed plan ([terraform/README.md](../terraform/README.md#deploy-from-github)).
 
 ## Decisions
@@ -40,6 +40,7 @@ As of 23 October 2026. #8, the plan to a first mainnet withdrawal, is complete; 
 - **Legacy supervised jobs.** Persisted jobs marked `execution.kind: "qsb-supervised-service-v1"` stay rejected by exact submission and by the solved-result, pause, resume and status routes, and the UI hides their pause and resume controls. These guards stay until the production inventory is complete and any matching rows are reconciled or quarantined; removing the old UI doesn't show the table holds none.
 - **#122:** support more than one QSB generator version, with the first generator change.
 - **#85 phase 3:** billing, terms of use, WAF and rate limits. This needs a separate decision.
+- **Service fee:** the optional USD 200 fee (paid in BTC, opt-in, not enforced) is built but not offered. Turning it on needs the KMS key created ([ops/service-fee-key](../ops/service-fee-key/README.md)), the installed deploy policy updated, and a legal and tax review of charging it.
 - **#119:** the QSB author's answers on the security figure, SHA-256 Config A, re-authorization and the single output.
 - **The old eu-west-1 stack's** services were retired on 30 September 2026 (REGION-MIGRATION.md step 11), and its data was kept. Deleting that data is the remaining cleanup.
 - **Local operator profiles:** the local-profile part of REGION-MIGRATION.md step 12 (pointing `qsb-view` and `qsb-operator` at the new account) is still to do.
