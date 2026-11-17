@@ -26,12 +26,16 @@ it.each([false, true])("runs the external-agent CLI with durable authorization a
   const descriptor = await manager.generate("PQB");
   const cwd = mkdtempSync(path.join(tmpdir(), "qsb-agent-e2e-"));
   const root = fileURLToPath(new URL("../", import.meta.url));
-  const agent = path.join(cwd, "external-agent");
-  writeFileSync(agent, `#!${process.execPath} --import ${path.join(root, "node_modules/tsx/dist/loader.mjs")}
+  const agent = path.join(cwd, "external-agent.mjs");
+  // Keep the shebang argument-free: Linux passes everything after the interpreter as ONE
+  // argument, unlike macOS. Register the TS loader before dynamically importing test helpers.
+  writeFileSync(agent, `#!${process.execPath}
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { loopbackTestSigner } from ${JSON.stringify(path.join(root, "tests/test-signer.ts"))};
-import { localQsb } from ${JSON.stringify(path.join(root, "tests/sdk-fixture.ts"))};
+import { register } from ${JSON.stringify(import.meta.resolve("tsx/esm/api"))};
+register();
+const { loopbackTestSigner } = await import(${JSON.stringify(path.join(root, "tests/test-signer.ts"))});
+const { localQsb } = await import(${JSON.stringify(path.join(root, "tests/sdk-fixture.ts"))});
 const request = JSON.parse(readFileSync(0, 'utf8'));
 const { operation, input, context } = request;
 const dir = process.env.AGENT_JOURNAL; mkdirSync(dir, { recursive: true });
