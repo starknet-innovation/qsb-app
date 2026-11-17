@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { PassThrough, Readable } from "node:stream";
+import { PassThrough } from "node:stream";
 import { expect, it, vi } from "vitest";
 import { runCli } from "../sdk/cli";
 import { loopbackTestSigner } from "./test-signer";
