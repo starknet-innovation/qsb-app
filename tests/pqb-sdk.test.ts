@@ -6,7 +6,7 @@ vi.mock("../src/lib/releases/registry.generated", async () => {
 import { pqbFixture, servedFixture } from "./solver-fixture";
 import { API, managedProviders, wallet, world } from "./sdk-fixture";
 import { QsbClient } from "../sdk/client";
-import { assertSolverPin } from "../src/lib/provenance";
+import { assertSolverPin, withVaultConfiguration } from "../src/lib/provenance";
 import { publicRuntime } from "../sdk/public-runtime";
 beforeEach(() => {
   vi.stubEnv("SOLVER_RELEASE_ID", pqbFixture.id);
@@ -56,4 +56,34 @@ it("rejects private PQB public-state fields and mismatched scripts", async () =>
   const state = JSON.parse(descriptor.publicStateJson);
   await expect(client.vaults.create({ name: "private", descriptor: { ...descriptor, publicStateJson: JSON.stringify({ ...state, seed: "ab".repeat(32) }) } })).rejects.toThrow();
   await expect(publicRuntime().validate({ ...descriptor, publicStateJson: JSON.stringify({ ...state, full_script_hex: "51" }) } as never)).rejects.toThrow("does not match");
+});
+
+it("rejects reordered or mutated PQB tables before external confirmation or vault registration", async () => {
+  const w = world(), owner = wallet(w.chain), manager = await managedProviders(w, owner);
+  const descriptor = await manager.generate("PQB");
+  const client = new QsbClient({ baseUrl: API, fetch: w.fetch, ...manager.providers });
+  const original = JSON.parse(descriptor.publicStateJson);
+  const swapped = structuredClone(original);
+  [swapped.round_table[0], swapped.round_table[1]] = [swapped.round_table[1], swapped.round_table[0]];
+  const mutated = structuredClone(original); mutated.round_table[0] = "31" + mutated.round_table[0].slice(2);
+  const confirm = vi.spyOn(manager.providers.custody, "confirmVault");
+  for (const state of [swapped, mutated]) {
+    const changed = { ...descriptor, publicStateJson: JSON.stringify(state) };
+    await expect(publicRuntime().validate(changed as never)).rejects.toThrow("ordered table");
+    await expect(client.vaults.create({ name: "inconsistent", descriptor: changed })).rejects.toThrow("ordered table");
+  }
+  expect(confirm).not.toHaveBeenCalled();
+  expect(w.requests.filter(r => r.method === "POST" && r.url.endsWith("/vaults"))).toHaveLength(0);
+  // The owning API must refuse the same inconsistent descriptor even if a caller bypasses the SDK.
+  for (const state of [swapped, mutated]) {
+    const vault = withVaultConfiguration({ ...descriptor, publicStateJson: JSON.stringify(state),
+      id: crypto.randomUUID(), name: "bad public table", createdAt: new Date().toISOString(),
+      network: "mainnet", paymentAddress: owner.address, status: "unfunded" });
+    const response = await w.fetch(`${API}/v1/vaults`, { method: "POST", headers: {
+      "Content-Type": "application/json", "X-Qsb-Authorization": `Bearer ${manager.session.currentToken()}`,
+    }, body: JSON.stringify(vault) });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "vault_invalid" });
+  }
+  expect([...w.store.rows.values()].filter(row => row.vault)).toHaveLength(0);
 });

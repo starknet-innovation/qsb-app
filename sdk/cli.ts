@@ -1,9 +1,10 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { apiErrorCodes } from "../server/api-errors";
 import { parseBtc } from "../src/lib/model";
-import { QsbClient, preparedDepositSchema, publicApi } from "./client";
-import { externalAgent } from "./agent";
+import { ApiRequestError, QsbClient, preparedDepositSchema, publicApi } from "./client";
+import { ExternalAgentError, externalAgent } from "./agent";
 import { Prompter, UsageError, assertOutputs, filePendingDeposits, readPsbtFile, readTextFile,
   writePublicFile, type CliIo } from "./cli-io";
 
@@ -55,6 +56,7 @@ function point(value: string) {
 }
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
   const prompts = new Prompter(io);
+  let diagnostic = "QSB setup failed. Check the API URL, payment identity and external agent.";
   const print = (value: unknown) => io.stdout.write(JSON.stringify(value, null, 2) + "\n");
   try {
     const { values: v, positionals: words } = parseArgs({ args: argv, options, allowPositionals: true, strict: true });
@@ -66,6 +68,13 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     const basePath = v["base-path"] ?? "/v1";
     if (basePath !== "/v1" && basePath !== "/api") throw new UsageError("--base-path is /v1 or /api.");
     const [group, action, target] = words;
+    diagnostic = group === "vault" ? "Vault operation failed. Check the public descriptor and external recovery availability."
+      : group === "deposit" ? "Deposit operation failed. Check public funding status and the prepared PSBT; retain any pending signed bytes."
+      : group === "withdraw" ? action === "submit"
+        ? "Withdrawal submission was not confirmed. Keep the signed result and check public job status; do not repeat an uncertain submission."
+        : action === "create" ? "Search creation failed. Check public job status and the external intent journal before retrying."
+        : "Withdrawal operation failed. Check public job status, the external authorization journal and the exact signing request."
+      : "Public lookup failed. Check the API endpoint and public service status.";
     const arity = (n: number) => { if (words.length !== n) throw new UsageError("Wrong number of arguments. See --help."); };
     if (["config", "rates", "service-fee"].includes(group)) {
       arity(1); const apiClient = publicApi({ baseUrl: api, basePath, fetch: io.fetch });
@@ -122,7 +131,10 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
         await writePublicFile(io, file, JSON.stringify(result, null, 2) + "\n"); print(result); return 0;
       }
       case "withdraw submit": {
-        arity(2); const signed = JSON.parse(await readTextFile(io, need(v.signed, "--signed")));
+        arity(2);
+        if (!io.interactive && !v["approve-txid"])
+          throw new UsageError("Non-interactive submission requires --approve-txid after reviewing the exact transaction.");
+        const signed = JSON.parse(await readTextFile(io, need(v.signed, "--signed")));
         const result = await client.withdrawals.submit(signed, { approve: async review => {
           io.stderr.write(`Mainnet withdrawal ${review.txid}\nDestination: ${review.destination}\nPayout: ${review.outputValue} sats\nFee: ${review.fee} sats (${review.feeRate} sat/vB)\n`);
           if (v["approve-txid"]) { io.stderr.write("Non-interactive approval: your external approval gate must have approved these exact bytes.\n"); return v["approve-txid"]; }
@@ -134,9 +146,27 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       default: throw new UsageError("Unknown command. See --help.");
     }
   } catch (error) {
-    // Never echo an agent response, credential, argv value or JSON parse payload.
+    // Only local static diagnostics and codes from the owning API allowlist may be displayed.
+    // Never echo arbitrary exception text, agent payloads/stderr, argv values or JSON parse input.
     const usageError = error instanceof UsageError || (error as { code?: string })?.code?.startsWith("ERR_PARSE_ARGS");
-    io.stderr.write(`${usageError ? "Invalid command or options. See --help." : "QSB operation failed. Check public status and the external agent; do not repeat an uncertain submission."}\n`);
+    const api = error instanceof ApiRequestError ? error
+      : error instanceof Error && error.cause instanceof ApiRequestError ? error.cause : undefined;
+    if (error instanceof UsageError) diagnostic = error.diagnostic;
+    else if (usageError) diagnostic = "Invalid or unknown command option. See --help.";
+    else if (error instanceof ExternalAgentError) {
+      const messages: Record<ExternalAgentError["operation"], string> = {
+        "credentials.get": "External credentials are unavailable. Refresh or unlock credentials in your external provider.",
+        "authorizations.get": "The external authorization journal is unavailable. Restore access to the shared durable store.",
+        "authorizations.claim": "The external authorization claim failed. Check journal availability or a conflicting claim; resume the original intent/assembly and never reset claims.",
+        "custody.confirmVault": "External recovery confirmation failed. Verify durable recovery for this exact public descriptor.",
+        "custody.authorizeWithdrawal": "External withdrawal authorization failed. Review the exact signing request and the manager's one-time authorization state.",
+        "wallet.signPsbt": "External wallet signing failed. Check the wallet connection and exact PSBT approval.",
+      };
+      diagnostic = messages[error.operation];
+    } else if (api?.code && Object.hasOwn(apiErrorCodes, api.code))
+      diagnostic = `API ${api.code}: ${apiErrorCodes[api.code as keyof typeof apiErrorCodes]}`;
+    else if (api?.status === 401) diagnostic = "API authentication failed. Refresh credentials in the external provider.";
+    io.stderr.write(diagnostic + "\n");
     return usageError ? 2 : 1;
   } finally { prompts.close(); }
 }

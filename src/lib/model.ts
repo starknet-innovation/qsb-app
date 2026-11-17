@@ -1,4 +1,4 @@
-import { pqbPublicStateSchema } from "./pqb";
+import { validatePqbPublicState } from "./pqb";
 export type BatchSubmissionIdentity = {
   jobName: string;
   inputSha256: string;
@@ -255,7 +255,7 @@ export function formatBtc(value: string | bigint): string {
 export function validatePublicState(value: string): void {
   const s = JSON.parse(value) as Record<string, unknown>;
   if (s.config === "PQB") {
-    pqbPublicStateSchema.parse(s);
+    validatePqbPublicState(value);
     return;
   }
   const allowed = [

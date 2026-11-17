@@ -17,7 +17,10 @@ export type CliIo = {
   fetch?: typeof fetch;
 };
 
-export class UsageError extends Error {}
+/** Only the diagnostic is printed; paths and file contents stay out of errors shown by the CLI. */
+export class UsageError extends Error {
+  constructor(message: string, readonly diagnostic = message) { super(message); }
+}
 /** The external signer wrote a request and needs the signed file on a re-run. */
 export class SignatureNeeded extends Error {}
 
@@ -87,15 +90,15 @@ export function assertOutputs(
   for (const file of [...outputs, ...maybeExisting]) {
     if (file === undefined) continue;
     const target = resolveIn(io, file);
-    if (seen.has(target)) throw new UsageError(`${file} is used twice. Give every output its own new path.`);
+    if (seen.has(target)) throw new UsageError(`${file} is used twice. Give every output its own new path.`, "An output reuses an input or output path. Choose distinct new output paths.");
     seen.add(target);
   }
   for (const file of outputs) {
     if (file === undefined) continue;
     if (existsSync(resolveIn(io, file)))
-      throw new UsageError(`${file} already exists. Nothing is overwritten; choose a new path.`);
+      throw new UsageError(`${file} already exists. Nothing is overwritten; choose a new path.`, "The output file already exists. Choose a new path; files are never overwritten.");
     if (!existsSync(path.dirname(resolveIn(io, file))))
-      throw new UsageError(`The directory for ${file} doesn't exist.`);
+      throw new UsageError(`The directory for ${file} doesn't exist.`, "The output directory does not exist. Create it or choose another directory.");
   }
 }
 /** Create `target` exclusively, write it, and flush it and its directory to disk. */
@@ -121,7 +124,7 @@ async function writeNew(io: CliIo, file: string, text: string, sameContentOk = f
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     if (!sameContentOk || (await readBounded(target, file)).toString("utf8") !== text)
-      throw new UsageError(`${file} already exists. Nothing is overwritten; choose a new path.`);
+      throw new UsageError(`${file} already exists. Nothing is overwritten; choose a new path.`, "The output file already exists. Choose a new path; files are never overwritten.");
   }
   return target;
 }
@@ -133,7 +136,7 @@ export function writePublicFile(io: CliIo, file: string, text: string, sameConte
 async function readBounded(target: string, file: string): Promise<Buffer> {
   const handle = await open(target, "r", PRIVATE);
   try {
-    if ((await handle.stat()).size > 4000000) throw new UsageError(`${file} is too large.`);
+    if ((await handle.stat()).size > 4000000) throw new UsageError(`${file} is too large.`, "The input file exceeds the size limit.");
     return await handle.readFile();
   } finally {
     await handle.close();

@@ -282,7 +282,7 @@ is 409, revoking an unknown key is 404, and keys switched off are 503.
 
 ## Vault protocols
 
-`POST /vaults` accepts `config: "A"` (QSB Config A) or `config: "PQB"`, with a matching `configuration.protocol` and pinned generator commit. PQB's public state contains only its script, dummy-signature table and curve-point menus; the seed and menu scalars are never request fields. Both protocols use the same registration and one-deposit rules.
+`POST /vaults` accepts `config: "A"` (QSB Config A) or `config: "PQB"`, with a matching `configuration.protocol` and pinned generator commit. PQB's public state contains only its script, dummy-signature table and curve-point menus; the seed and menu scalars are never request fields. Its ordered dummy-signature table must match the canonical shared-table layout in its locking script; reordered or mutated entries are refused. Both protocols use the same registration and one-deposit rules.
 
 `GET /config` returns `solverProtocol` (`qsb-config-a-v1`, `pqb-v1` or null) alongside `solverReleaseId`. A new withdrawal requires the served release to match its vault's protocol and generator, otherwise `solver_not_served` is returned before outpoint reservation. A deployment serves one release at a time.
 
