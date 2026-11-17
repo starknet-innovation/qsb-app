@@ -2,7 +2,7 @@ import { ripemd160 } from "@noble/hashes/legacy.js";
 
 /**
  * The QSB Python runtime shared by the browser worker (qsb-worker.ts) and the
- * Node SDK (sdk/runtime.ts). Both load the same vendored public/qsb files and
+ * Node SDK public validator (sdk/public-runtime.ts). Both load the same vendored public/qsb files and
  * check them against public/qsb/manifest.json. Recovery material is only ever
  * an argument to `call`; nothing here sends it anywhere.
  */

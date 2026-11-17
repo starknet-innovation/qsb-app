@@ -51,20 +51,32 @@ try {
   run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", path.join(work, packed.filename)],
     { cwd: consumer, stdio: "ignore" });
 
-  // 4. The SDK loads from the package and runs the pinned Python there, after its manifest check.
+  // 4. The public SDK loads from the package; its Config A facade validates public commitments only.
   const env = { ...process.env, QSB_NETWORK: "mainnet" };
-  const smoke = `
-    import { ApiRequestError, QsbClient, RefusedState, loopbackTestSigner, nodeQsb, preparedDepositSchema } from "${name}";
-    const exported = [ApiRequestError, QsbClient, RefusedState, loopbackTestSigner, nodeQsb, preparedDepositSchema].every(Boolean);
+  const fixture = run("node", ["--import", "tsx", "--input-type=module", "-e", `
+    import { nodeQsb } from "./tests/recovery-runtime.ts";
+    import { createHash } from "node:crypto";
+    const commitments = [0,1].map(r => Array.from({length:150}, (_, i) => createHash("ripemd160").update(r+":"+i).digest("hex")));
     const qsb = nodeQsb();
-    const generated = await qsb.generateQsb();
-    const valid = (await qsb.validateRecovery(generated.stateJson)) === generated.scriptHash;
-    const adopted = JSON.stringify(await qsb.adoptQsb(generated.stateJson)) === JSON.stringify(generated);
-    qsb.lockQsb();
-    console.log(JSON.stringify({ exported, valid, adopted }));`;
+    console.log(JSON.stringify({ config: "A", ...await qsb.setupFromCommitments(commitments) }));
+    qsb.lockQsb();`], { cwd: root, env }).trim().split("\n").pop();
+  writeFileSync(path.join(consumer, "public-vault.json"), fixture);
+  const smoke = `
+    import * as sdk from "${name}";
+    import { readFileSync } from "node:fs";
+    const vault = JSON.parse(readFileSync("public-vault.json", "utf8"));
+    await sdk.publicRuntime().validate(vault);
+    const exported = [sdk.ApiRequestError, sdk.QsbClient, sdk.preparedDepositSchema].every(Boolean);
+    const absent = ["nodeQsb", "RefusedState", "loopbackTestSigner"].every(k => !(k in sdk));
+    console.log(JSON.stringify({ exported, absent }));`;
   const result = JSON.parse(run("node", ["--input-type=module", "-e", smoke], { cwd: consumer, env }).trim().split("\n").pop());
-  if (!result.exported || !result.valid || !result.adopted)
-    fail(`the installed SDK didn't generate, validate and adopt a vault's state: ${JSON.stringify(result)}`);
+  if (!result.exported || !result.absent)
+    fail("the installed public SDK exports secret-handling APIs or lacks its public exports");
+  for (const bundle of ["dist/index.js", "dist/cli.js"]) {
+    const source = readFileSync(path.join(sdk, bundle), "utf8");
+    for (const forbidden of ["function generatePqb(", "function adoptPqb(", "function decryptRecovery(", "function encryptRecovery(", "function loopbackTestSigner("])
+      if (source.includes(forbidden)) fail(`${bundle} bundles ${forbidden}`);
+  }
 
   // 5. The qsb bin runs, and refuses to guess a network.
   const help = run(path.join(consumer, "node_modules", ".bin", "qsb"), ["--help"], { cwd: consumer, env });
@@ -80,12 +92,16 @@ try {
   // 6. The declarations type-check for TypeScript consumers: a bundler, and a strict Node ESM project
   // (NodeNext, declaration files checked, Node's types only, no DOM).
   writeFileSync(path.join(consumer, "use.ts"), `
-    import { QsbClient, nodeQsb, type AuthorizationStore, type Signer } from "${name}";
+    import { QsbClient, type AuthorizationStore, type ExternalCustody, type Credentials, type Signer, type VaultDescriptor } from "${name}";
     declare const signer: Signer;
-    const authorizations: AuthorizationStore = { getItem: () => null, setItem: () => {} };
-    const client: QsbClient = new QsbClient({ baseUrl: "https://app.example", signer, authorizations });
-    const own = (stateJson: string) => client.vaults.create({ name: "own", passphrase: "p", saveBackup: async () => {}, stateJson });
-    void own; void nodeQsb;`);
+    declare const authorizations: AuthorizationStore;
+    declare const custody: ExternalCustody;
+    declare const credentials: Credentials;
+    declare const descriptor: VaultDescriptor;
+    const client = new QsbClient({ baseUrl: "https://app.example", signer, authorizations, custody, credentials });
+    void client.vaults.create({ name: "external", descriptor });
+    // @ts-expect-error recovery secrets do not enter this API
+    void client.vaults.create({ name: "secret", passphrase: "p", stateJson: "{}" });`);
   const consumers = {
     bundler: { module: "ESNext", moduleResolution: "Bundler", skipLibCheck: true },
     nodenext: { module: "NodeNext", moduleResolution: "NodeNext", skipLibCheck: false },
@@ -104,7 +120,7 @@ try {
   }
 
   console.log(`SDK package check passed: ${files.length} files, ${(packed.size / 1024).toFixed(0)} KiB packed. ` +
-    "Installed outside the repository, it generated, validated and adopted a vault's state in Pyodide, ran qsb, and type-checked for " +
+    "Installed outside the repository, it validated a public vault in Pyodide without exposing secret APIs, ran qsb, and type-checked for " +
     "bundler and NodeNext consumers.");
 } finally {
   rmSync(work, { recursive: true, force: true });

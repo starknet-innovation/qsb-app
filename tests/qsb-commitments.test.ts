@@ -8,7 +8,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { loadPyodide } from "pyodide";
 import { startQsbRuntime, type QsbMethod } from "../src/lib/qsb-runtime";
 import { commitmentOperations, type PreparedAssembly } from "../src/lib/qsb-operations";
-import { nodeQsb } from "../sdk/runtime";
+import { nodeQsb } from "./recovery-runtime";
 
 /**
  * The commitments-only bridge entries (bridge.py: setup_from_commitments, prepare, finish).

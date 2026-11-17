@@ -37,15 +37,15 @@ vi.mock("node:fs", async (importOriginal) => {
     },
   };
 });
-const { filePendingDeposits, writeNewPrivateFile } = await import("../sdk/cli-io");
+const { filePendingDeposits, writePublicFile } = await import("../sdk/cli-io");
 
-it("flushes a backup and its directory before saying it is saved, and pending deposits too", async () => {
+it("flushes a public artifact and its directory before saying it is saved, and pending deposits too", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "qsb-cli-"));
   const io = { env: {}, stdin: Readable.from([]), stdout: new PassThrough(), stderr: new PassThrough(), interactive: false, cwd };
-  await writeNewPrivateFile(io, "backup.json", "encrypted");
-  expect(readFileSync(path.join(cwd, "backup.json"), "utf8")).toBe("encrypted");
-  expect(statSync(path.join(cwd, "backup.json")).mode & 0o777).toBe(0o600);
-  expect(synced).toEqual([path.join(cwd, "backup.json"), cwd]);
+  await writePublicFile(io, "public.json", "public");
+  expect(readFileSync(path.join(cwd, "public.json"), "utf8")).toBe("public");
+  expect(statSync(path.join(cwd, "public.json")).mode & 0o777).toBe(0o600);
+  expect(synced).toEqual([path.join(cwd, "public.json"), cwd]);
   synced.length = 0;
   const home = path.join(cwd, "home");
   const vaultId = crypto.randomUUID();
