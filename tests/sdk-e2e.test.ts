@@ -20,7 +20,7 @@ vi.mock("../sdk/public-runtime", async importOriginal => {
 beforeEach(() => vi.stubEnv("SOLVER_RELEASE_ID", pqbFixture.id));
 afterEach(() => vi.unstubAllEnvs());
 
-it("runs the CLI through a separate external agent, preserves its journal across processes and submits only approved bytes", async () => {
+it.each([false, true])("runs the external-agent CLI with durable authorization and approved submission (uncertain=%s)", async uncertain => {
   // Hermetic chain/miner and public planner double: this is not a real GPU solve or mainnet spend.
   const w = world(), owner = wallet(w.chain), manager = await managedProviders(w, owner);
   const descriptor = await manager.generate("PQB");
@@ -88,8 +88,10 @@ console.log(JSON.stringify({ result }));
   expect(w.requests.length).toBe(before);
   const signed = JSON.parse(assembled.out);
   expect((await run("withdraw", "submit", "--signed", "signed.json", "--approve-txid", "00".repeat(32))).code).toBe(1);
+  w.lost.withdrawal = uncertain;
   const submitted = await run("withdraw", "submit", "--signed", "signed.json", "--approve-txid", signed.txid);
-  expect(submitted.code, submitted.err).toBe(0);
+  expect(submitted.code, submitted.err).toBe(uncertain ? 1 : 0);
+  expect(JSON.parse(submitted.out).status).toBe(uncertain ? "uncertain" : "submitted");
   expect(submitted.err).toContain("Payout:"); expect(submitted.err).toContain("Fee:");
   expect(existsSync(path.join(cwd, "public-state/session.json"))).toBe(false);
   const state = manager.state.get(descriptor.scriptHash)!;

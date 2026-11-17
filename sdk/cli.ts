@@ -123,11 +123,13 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       }
       case "withdraw submit": {
         arity(2); const signed = JSON.parse(await readTextFile(io, need(v.signed, "--signed")));
-        print(await client.withdrawals.submit(signed, { approve: async review => {
+        const result = await client.withdrawals.submit(signed, { approve: async review => {
           io.stderr.write(`Mainnet withdrawal ${review.txid}\nDestination: ${review.destination}\nPayout: ${review.outputValue} sats\nFee: ${review.fee} sats (${review.feeRate} sat/vB)\n`);
           if (v["approve-txid"]) { io.stderr.write("Non-interactive approval: your external approval gate must have approved these exact bytes.\n"); return v["approve-txid"]; }
           return prompts.line("Type the exact transaction ID to submit: ");
-        } })); return 0;
+        } });
+        print(result);
+        return result.status === "uncertain" ? 1 : 0;
       }
       default: throw new UsageError("Unknown command. See --help.");
     }
