@@ -16,7 +16,10 @@ const sources = new URL("../public/qsb/", import.meta.url);
 export function publicRuntime() {
   let loaded: ReturnType<typeof startQsbRuntime> | undefined;
   const start = () => (loaded ??= loadPyodide({ stdout: () => {}, stderr: () => {} }).then(py =>
-    startQsbRuntime(py, async file => new Uint8Array(await readFile(new URL(file, sources))))));
+    startQsbRuntime(py, async file => new Uint8Array(await readFile(new URL(file, sources))))).catch(error => {
+      loaded = undefined;
+      throw error;
+    }));
   const run = async (method: "setup_from_commitments" | "prepare" | "finish", args: string[] = []) => {
     const runtime = await start();
     try { return runtime.call(method, args); }
