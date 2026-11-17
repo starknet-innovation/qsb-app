@@ -68,6 +68,16 @@ export async function startQsbRuntime(
     "import sys\nsys.path.insert(0, '.')\nimport hashlib\nimport qsb_hash\nimport secp256k1\nsecp256k1.ripemd160 = lambda data: bytes.fromhex(qsb_hash.ripemd(data.hex()))\nsecp256k1.hash160 = lambda data: secp256k1.ripemd160(hashlib.sha256(data).digest())\nimport bridge",
   );
   return {
+    /** Exact Python integer/field comparison for public descriptors; never accepts recovery secrets. */
+    validatePublicState(text: string): void {
+      const bridge = py.pyimport("bridge");
+      try {
+        const checked = bridge.public_state(text);
+        checked.destroy();
+      } finally {
+        bridge.destroy();
+      }
+    },
     call(method: QsbMethod, args: string[]): string {
       // The browser worker passes on whatever name its message holds.
       if (!(QSB_METHODS as readonly string[]).includes(method))

@@ -13,7 +13,10 @@ export function externalAgent(executable: string, options: {
     let size = 0, failed = false;
     const fail = () => {
       if (failed) return;
-      failed = true; child.kill();
+      failed = true;
+      child.kill("SIGKILL");
+      child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();
+      child.unref();
       reject(new Error(`External agent failed (${operation}). Check the agent locally; no response details are logged.`));
     };
     const timer = setTimeout(fail, 120000);

@@ -6,7 +6,7 @@ import { canonical } from "../src/lib/provenance";
 import { validatePublicState, type PublicVault, type Job, type Withdrawal } from "../src/lib/model";
 import { checkPqbHit, pqbHitsSchema, pqbPacket, pqbSelection, pqbTransaction } from "../src/lib/pqb";
 import { parseScript, serializeTx } from "../src/pqb-core/tx";
-import { hex, hash160 } from "../src/pqb-core/primitives";
+import { hex, fromHex, sha256, hash160 } from "../src/pqb-core/primitives";
 import * as btc from "@scure/btc-signer";
 import { verifyPqbWitness } from "./verify-pqb-witness";
 import { pinFields } from "../src/pqb-core/spend";
@@ -15,10 +15,10 @@ const sources = new URL("../public/qsb/", import.meta.url);
 /** Only public inputs are accepted by this facade. No generator, recovery import or secret assembler. */
 export function publicRuntime() {
   let loaded: ReturnType<typeof startQsbRuntime> | undefined;
+  const start = () => (loaded ??= loadPyodide({ stdout: () => {}, stderr: () => {} }).then(py =>
+    startQsbRuntime(py, async file => new Uint8Array(await readFile(new URL(file, sources))))));
   const run = async (method: "setup_from_commitments" | "prepare" | "finish", args: string[] = []) => {
-    loaded ??= loadPyodide({ stdout: () => {}, stderr: () => {} }).then(py =>
-      startQsbRuntime(py, async file => new Uint8Array(await readFile(new URL(file, sources)))));
-    const runtime = await loaded;
+    const runtime = await start();
     try { return runtime.call(method, args); }
     catch { throw new Error("Public Config A validation failed."); }
   };
@@ -47,11 +47,13 @@ export function publicRuntime() {
       const state = JSON.parse(vault.publicStateJson);
       if (state.config !== vault.config || state.full_script_hex !== vault.scriptHex)
         throw new Error("Public state does not match the vault script.");
+      if (hex(sha256(fromHex(vault.scriptHex))) !== vault.scriptHash)
+        throw new Error("Public descriptor script hash mismatch.");
       if (vault.config === "A") {
-        const rebuilt = await operations.setupFromCommitments(state.hors_commitments);
-        if (rebuilt.scriptHash !== vault.scriptHash || rebuilt.scriptHex !== vault.scriptHex ||
-          canonical(JSON.parse(rebuilt.publicStateJson)) !== canonical(state))
-          throw new Error("Public state does not match its commitments.");
+        // JSON.parse rounds the ECDSA integers. Check ORIGINAL text against the canonical Python
+        // public state, so a rounded descriptor cannot pass registration and fail withdrawal later.
+        try { (await start()).validatePublicState(vault.publicStateJson); }
+        catch { throw new Error("Public state does not exactly match its commitments."); }
       }
     },
     async prepare(vault: PublicVault, manifest: Withdrawal, solution: NonNullable<Job["solution"]>) {
