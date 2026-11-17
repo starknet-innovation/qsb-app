@@ -114,3 +114,29 @@ it("reads the row again after five minutes, so a replaced distribution reaches a
   vi.setSystemTime(new Date("2026-10-02T00:05:01.000Z"));
   expect((await challenge(app)).origin).toBe(`Origin: ${replaced}`);
 });
+
+it("allows the GitHub Pages origin for CORS, even before the row exists, but names only the app's origin", async () => {
+  process.env.AWS_LAMBDA_FUNCTION_NAME = "qsb-test-api";
+  const pages = "https://starknet-innovation.github.io";
+  const preflight = (app: ReturnType<typeof createApp>, origin: string) =>
+    app.request("/v1/auth/challenge", {
+      method: "OPTIONS",
+      headers: { origin, "access-control-request-method": "POST", "access-control-request-headers": "content-type" },
+    });
+  const store = new MemoryStore();
+  const early = createApp(store, { versionedAlias: true });
+  expect((await preflight(early, pages)).headers.get("access-control-allow-origin")).toBe(pages);
+  expect((await preflight(early, deployed)).headers.get("access-control-allow-origin")).toBeNull();
+  await store.put({ pk: "SYSTEM#DEPLOYMENT", sk: "APP_ORIGIN", version: 0, origin: deployed });
+  const app = createApp(store, { versionedAlias: true });
+  expect((await preflight(app, pages)).headers.get("access-control-allow-origin")).toBe(pages);
+  expect((await preflight(app, deployed)).headers.get("access-control-allow-origin")).toBe(deployed);
+  expect((await preflight(app, "https://evil.github.io")).headers.get("access-control-allow-origin")).toBeNull();
+  const signIn = await app.request("/v1/auth/challenge", {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: pages },
+    body: JSON.stringify({ address: owner }),
+  });
+  expect(signIn.headers.get("access-control-allow-origin")).toBe(pages);
+  expect((await signIn.json()).message.split("\n")[1]).toBe(`Origin: ${deployed}`);
+});
