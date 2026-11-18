@@ -8,7 +8,7 @@ READS = {
     's3': {'get_object', 'head_object', 'list_buckets', 'list_objects_v2'},
     'logs': {'filter_log_events', 'describe_log_groups', 'list_tags_log_group'},
     'iam': {'get_role', 'get_role_policy', 'get_policy', 'get_policy_version', 'get_instance_profile', 'list_role_policies', 'list_attached_role_policies'},
-    'ec2': {'describe_instances', 'describe_volumes', 'describe_images', 'describe_vpcs', 'describe_subnets',
+    'ec2': {'describe_capacity_reservations', 'describe_instances', 'describe_volumes', 'describe_images', 'describe_vpcs', 'describe_subnets',
             'describe_instance_type_offerings', 'describe_security_groups', 'describe_launch_templates', 'describe_launch_template_versions'},
     'ecr': {'describe_repositories', 'get_authorization_token'},
     'scheduler': {'get_schedule'},

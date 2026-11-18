@@ -10,7 +10,7 @@ import shutil
 import time
 import uuid
 
-from control import ACTIVE, Campaign, ROOT, clean_source, dump, persist
+from control import ACTIVE, Campaign, ROOT, fixed_deadline, clean_source, dump, persist
 
 
 def sha(path): return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -60,15 +60,29 @@ def check_baseline(c, require_idle=False):
 
 def inspect(c):
     from capacity import PROFILE
+    sizing = PROFILE['usEast1'] if c.region == 'us-east-1' else PROFILE
     identity = require_mode(c); check_baseline(c, True)
     ec2 = c.client('ec2')
     vpcs = ec2.describe_vpcs(Filters=[{'Name': 'is-default', 'Values': ['true']}])['Vpcs']
     if len(vpcs) != 1 or vpcs[0]['State'] != 'available': raise RuntimeError('One available default VPC required')
     vpc = vpcs[0]['VpcId']
     offered = {r['Location'] for p in ec2.get_paginator('describe_instance_type_offerings').paginate(
-        LocationType='availability-zone', Filters=[{'Name': 'instance-type', 'Values': [PROFILE['instanceType']]}]) for r in p['InstanceTypeOfferings']}
+        LocationType='availability-zone', Filters=[{'Name': 'instance-type', 'Values': [sizing['instanceType']]}]) for r in p['InstanceTypeOfferings']}
     subnets = [s for s in ec2.describe_subnets(Filters=[{'Name': 'vpc-id', 'Values': [vpc]},
         {'Name': 'default-for-az', 'Values': ['true']}])['Subnets'] if s['AvailabilityZone'] in offered]
+    if c.region == 'us-east-1':
+        binding = json.loads((c.directory / 'capacity-scope.json').read_bytes())
+        if binding['deadline'] != c.config.get('notAfter'):
+            raise RuntimeError('Reservation deadline differs from campaign')
+        held = ec2.describe_capacity_reservations(Filters=[
+            {'Name': 'tag:PqbValidation', 'Values': [binding['name']]},
+            {'Name': 'state', 'Values': ['active']}])['CapacityReservations']
+        if sum(h['AvailableInstanceCount'] for h in held) != 2 or any(
+                h['OwnerId'] != c.account or h['InstanceType'] != sizing['instanceType']
+                or h['InstanceMatchCriteria'] != 'open' or h['EndDate'].timestamp() != binding['deadline']
+                for h in held):
+            raise RuntimeError('Two available A10G reservations required')
+        subnets = [s for s in subnets if s['AvailabilityZone'] in {h['AvailabilityZone'] for h in held}]
     if not subnets or any(s['State'] != 'available' or not s['MapPublicIpOnLaunch'] for s in subnets):
         raise RuntimeError('Available public default subnets supporting selected instance required')
     image_id = json.loads((c.directory / 'host-image.json').read_text())['imageId']
@@ -76,7 +90,7 @@ def inspect(c):
     if len(images) != 1 or images[0]['State'] != 'available' or images[0]['Architecture'] != 'x86_64' or images[0].get('ImageOwnerAlias') != 'amazon' or 'ecs-gpu' not in images[0]['Name']:
         raise RuntimeError('Pinned Amazon ECS GPU x86_64 image required')
     quota = c.client('service-quotas').get_service_quota(ServiceCode='ec2', QuotaCode='L-DB2E81BA')['Quota']
-    if quota['Value'] < PROFILE['vcpusPerHost']: raise RuntimeError('Insufficient quota for native preflight')
+    if quota['Value'] < sizing['vcpusPerHost']: raise RuntimeError('Insufficient quota for native preflight')
     try: repo = c.client('ecr').describe_repositories(repositoryNames=['qsb-solver'])['repositories'][0]
     except c.client('ecr').exceptions.RepositoryNotFoundException: repo = None
     reference = json.loads((c.directory / 'reference-runtime.json').read_text())
@@ -95,7 +109,7 @@ def prepare(c, source, fixture, manifest):
         raise RuntimeError('Fresh unchanged isolated-account inputs required')
     name = 'qsb-pqb-v-' + uuid.uuid4().hex[:12]; created = int(time.time())
     c.state = {'format': 'pqb-serving-campaign-v1', 'name': name, 'sourceCommit': source,
-        'operatorHash': hashlib.sha256(dump(c.config).encode()).hexdigest(), 'createdAt': created, 'deadline': created + 14400,
+        'operatorHash': hashlib.sha256(dump(c.config).encode()).hexdigest(), 'createdAt': created, 'deadline': fixed_deadline(c.config, created, False),
         'reservedUsd': 200, 'reservationStatus': 'reserved', 'preflightGpuSeconds': 900, 'solveGpuSeconds': 540000,
         'fixtureSha256': sha(c.directory / 'public-fixture.json'), 'coordinatorSha256': manifest['files']['coordinator.zip'],
         'apiArtifactSha256': manifest['files']['api.zip'], 'descriptor': fixture['descriptor'],
@@ -145,8 +159,9 @@ def worker_policies(c):
 def compute_resources(c, snapshot):
     from capacity import PROFILE
     b = c.state['snfBootstrap']
-    return {'type': 'EC2', 'allocationStrategy': PROFILE['allocationStrategy'], 'instanceTypes': [PROFILE['instanceType']],
-        'minvCpus': 0, 'desiredvCpus': 0, 'maxvCpus': PROFILE['maxVcpus'],
+    sizing = PROFILE['usEast1'] if c.region == 'us-east-1' else PROFILE
+    return {'type': 'EC2', 'allocationStrategy': PROFILE['allocationStrategy'], 'instanceTypes': [sizing['instanceType']],
+        'minvCpus': 0, 'desiredvCpus': 0, 'maxvCpus': sizing['maxVcpus'],
         'subnets': sorted(s['SubnetId'] for s in snapshot['subnets']), 'securityGroupIds': [b['securityGroup']],
         'instanceRole': b['instanceProfileArn'], 'launchTemplate': {'launchTemplateId': b['launchTemplate'], 'version': '1', 'overrides': []},
         'ec2Configuration': [{'imageType': 'ECS_AL2023_NVIDIA', 'imageIdOverride': snapshot['image']['ImageId']}]}

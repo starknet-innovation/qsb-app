@@ -62,14 +62,21 @@ def persist(path, value, exclusive=False):
 
 def check_operator_config(config):
     allowed = json.loads((ROOT / 'server/aws-batch-validation.json').read_text())['regions'] if config.get('snfIsolation') is True else ['eu-west-2']
-    if ('notAfter' in config and (type(config['notAfter']) is not int or config.get('snfIsolation'))
+    if ('notAfter' in config and (type(config['notAfter']) is not int or (config.get('snfIsolation') and config.get('region') != 'us-east-1'))
+        or (config.get('region') == 'us-east-1' and 'notAfter' not in config)
         or (set(config) - {'notAfter'}) not in ({'profile', 'account', 'region'}, {'profile', 'account', 'region', 'snfIsolation'})
         or ('snfIsolation' in config and config['snfIsolation'] is not True) or config.get('region') not in allowed):
         raise RuntimeError('Use the scoped operator profile, account and explicitly supported region')
 
 
 def fixed_deadline(config, created, shared_pool):
-    latest = created + campaign_seconds(shared_pool)
+    if config.get('snfIsolation') and config.get('region') == 'us-east-1':
+        if 'notAfter' not in config:
+            raise RuntimeError('Two-worker run requires the fixed capacity reservation deadline')
+        hours = json.loads((ROOT / 'server/aws-batch-validation.json').read_bytes())['usEast1']['campaignHours']
+        latest = created + hours * 3600
+    else:
+        latest = created + campaign_seconds(shared_pool)
     deadline = min(latest, config.get('notAfter', latest))
     if deadline <= created:
         raise RuntimeError('Campaign deadline already elapsed')
