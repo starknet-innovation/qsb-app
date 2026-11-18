@@ -184,7 +184,8 @@ def bootstrap(c):
     snapshot = json.loads((c.directory / 'snf-inspect.json').read_text()); n = c.state['name']; b = c.state['snfBootstrap']
     if sha(c.directory / 'snf-inspect.json') != b['inspectSha256']: raise RuntimeError('Bootstrap inputs changed')
     target = c.directory / 'capacity'; target.mkdir(exist_ok=True)
-    c.mutate('snf-bucket', 's3', 'create_bucket', Bucket=c.state['bucket'], CreateBucketConfiguration={'LocationConstraint': c.region})
+    bucket_args = {} if c.region == 'us-east-1' else {'CreateBucketConfiguration': {'LocationConstraint': c.region}}
+    c.mutate('snf-bucket', 's3', 'create_bucket', Bucket=c.state['bucket'], **bucket_args)
     c.mutate('snf-bucket-tags', 's3', 'put_bucket_tagging', Bucket=c.state['bucket'], Tagging={'TagSet': tag_list(c)})
     c.mutate('snf-bucket-private', 's3', 'put_public_access_block', Bucket=c.state['bucket'], PublicAccessBlockConfiguration={k: True for k in ['BlockPublicAcls', 'IgnorePublicAcls', 'BlockPublicPolicy', 'RestrictPublicBuckets']})
     c.mutate('snf-bucket-encryption', 's3', 'put_bucket_encryption', Bucket=c.state['bucket'], ServerSideEncryptionConfiguration={'Rules': [{'ApplyServerSideEncryptionByDefault': {'SSEAlgorithm': 'AES256'}}]})
