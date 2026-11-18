@@ -15,8 +15,8 @@ const MIN_LOCKTIME = 500000000;
 const MAX_LOCKTIME = 1744599999;
 
 /**
- * Fields the public CPU handler balances, plus the verified solution's sequence and locktime.
- * That handler is Config A only, which always has a helper: the service refuses one without.
+ * The approved inputs, output and fee, plus the verified solution's sequence and locktime.
+ * `helper` is absent for a one-input PQB withdrawal; Config A always has one.
  */
 export type StoredSpendRecord = {
   /** Absent for a one-input PQB withdrawal, whose only input is the vault. */
