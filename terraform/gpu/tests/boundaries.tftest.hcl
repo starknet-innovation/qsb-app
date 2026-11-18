@@ -27,7 +27,7 @@ run "every_gpu_role_is_bounded" {
     error_message = "All four GPU roles must carry the required GPU boundary on the operator-managed path."
   }
   assert {
-    condition     = aws_batch_compute_environment.gpu.compute_resources[0].min_vcpus == 0 && output.gpu_capacity.vcpuCeiling == 7 * jsondecode(file("../../server/gpu-spend.json")).workersMax && aws_batch_compute_environment.gpu.compute_resources[0].max_vcpus + 16 == output.gpu_capacity.vcpuCeiling
+    condition     = aws_batch_compute_environment.gpu.compute_resources[0].min_vcpus == 0 && output.gpu_capacity.vcpuCeiling == 4 * jsondecode(file("../../server/gpu-spend.json")).workersMax && aws_batch_compute_environment.gpu.compute_resources[0].max_vcpus + 16 == output.gpu_capacity.vcpuCeiling
     error_message = "Boundary enrollment must not change zero idle capacity or the total vCPU ceiling including one-host overshoot."
   }
 }
@@ -135,7 +135,7 @@ run "reject_image_from_another_region" {
 run "fallback_stays_within_total_vcpu_budget" {
   command = plan
   assert {
-    condition     = output.gpu_capacity.maxVcpus == 96 && output.gpu_capacity.vcpuCeiling == 112 && output.gpu_capacity.parallelSlots == 6 && aws_batch_compute_environment.gpu.compute_resources[0].max_vcpus == output.gpu_capacity.maxVcpus
-    error_message = "The fallback pool must leave 16 vCPUs for one-host overshoot and limit queued parallel chunks to six."
+    condition     = output.gpu_capacity.maxVcpus == 48 && output.gpu_capacity.vcpuCeiling == 64 && output.gpu_capacity.parallelSlots == 3 && aws_batch_compute_environment.gpu.compute_resources[0].max_vcpus == output.gpu_capacity.maxVcpus
+    error_message = "The fallback pool must leave 16 vCPUs for one-host overshoot and limit queued parallel chunks to three."
   }
 }

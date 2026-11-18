@@ -28,7 +28,7 @@ A web app, API and SDK for quantum-safe Bitcoin (QSB Config A and PQB) vaults: v
 
 A PQB vault uses the same flow with PQB-specific problem construction and local witness assembly. Choose its protocol when creating it; a withdrawal requires the deployment to serve an enrolled solver for that protocol. PQB v0.2.0 includes the Fireblocks `82c7cba` CUDA update and passed native A10G range tests and qsb-app CPU replay. See the [per-release evidence](docs/PQB.md#source-enrollment-and-evidence).
 
-The production AWS Batch pool automatically falls back across the reviewed single-A10G sizes `g5.xlarge`, `g5.2xlarge` and `g5.4xlarge`. The coordinator permits six concurrent work units, with a 96-vCPU nominal pool maximum and a 112-vCPU total ceiling including AWS's possible one-host overshoot. Review regional On-Demand G/VT quota headroom before deploying this capacity; GPU-time spend allowances still apply. See [automatic A10G fallback](terraform/gpu/README.md#automatic-a10g-capacity-fallback).
+The production AWS Batch pool automatically falls back across the reviewed single-A10G sizes `g5.xlarge`, `g5.2xlarge` and `g5.4xlarge`. The coordinator bounds concurrent work for the largest allowed host and reserves AWS's one-host vCPU overshoot allowance inside the existing capacity ceiling. See [automatic A10G fallback](terraform/gpu/README.md#automatic-a10g-capacity-fallback).
 
 The deployed API Lambda (`server/lambda.ts`) serves mainnet only. The deploy-time switches `mainnet_enabled` and `exact_submit_enabled` gate funding, search and submission ([runbook](docs/OPERATIONAL-RUNBOOK.md#deploy-time-mainnet-and-submit-switches)).
 

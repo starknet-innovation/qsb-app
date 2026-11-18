@@ -6,7 +6,7 @@ afterEach(() => { workers.value = 16; });
 it("offers all reviewed A10G sizes with one-host overshoot headroom", () => {
   expect(productionCapacity()).toEqual({
     instanceTypes: ["g5.xlarge", "g5.2xlarge", "g5.4xlarge"],
-    allocationStrategy: "BEST_FIT_PROGRESSIVE", maxVcpus: 96, vcpuCeiling: 112, parallelismLimit: 6,
+    allocationStrategy: "BEST_FIT_PROGRESSIVE", maxVcpus: 48, vcpuCeiling: 64, parallelismLimit: 3,
   });
 });
 it.each(Array.from({ length: 16 }, (_, i) => i + 1))("keeps host and chunk bounds within a %i-worker budget", count => {
@@ -15,7 +15,7 @@ it.each(Array.from({ length: 16 }, (_, i) => i + 1))("keeps host and chunk bound
   const sizes: Record<string, number> = { "g5.xlarge": 4, "g5.2xlarge": 8, "g5.4xlarge": 16 };
   const largest = Math.max(...c.instanceTypes.map(t => sizes[t]));
   const overshoot = c.allocationStrategy === "BEST_FIT_PROGRESSIVE" ? largest : 0;
-  expect(c.maxVcpus + overshoot).toBeLessThanOrEqual(count * 7);
+  expect(c.maxVcpus + overshoot).toBeLessThanOrEqual(count * 4);
   expect(c.parallelismLimit).toBeGreaterThanOrEqual(1);
   expect(c.parallelismLimit).toBeLessThanOrEqual(count);
   expect(c.parallelismLimit * largest).toBeLessThanOrEqual(c.maxVcpus);

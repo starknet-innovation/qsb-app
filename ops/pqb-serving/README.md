@@ -140,7 +140,7 @@ assess earlier full-pipeline evidence separately against the actual bundle bytes
 ## Operator sequence
 
 Use a fresh directory outside every checkout. Its `operator.json` contains only
-`profile`, `account` and `region` (`eu-west-2` for the app-account operator), never credentials. The connected AWS
+`profile`, `account` and `region` (`eu-west-2` for the app-account operator), never credentials. For an app-account attempt sharing an earlier deadline, set `notAfter` to that absolute Unix timestamp before preparation. The controller freezes the earlier of that timestamp and its ordinary deadline. The connected AWS
 MCP session should be used when it targets the deployment account; the explicit
 local profile is the SDK fallback when that connector is bound to another account.
 Provisioning mutations use the SDK with one attempt and retain an exclusive intent

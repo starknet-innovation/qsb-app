@@ -2,7 +2,7 @@ import { BatchClient } from "@aws-sdk/client-batch";
 import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
 import command from "../server/aws-batch-command.json";
-// One GPU per withdrawal (7 nominal vCPUs); parallel tests cover production.
+// One GPU per withdrawal (maxvCpus 4); tests/aws-batch-parallel.test.ts covers more.
 vi.mock("../server/gpu-spend", async (importOriginal) => {
   const actual = await importOriginal<any>();
   return { ...actual, gpuSpendLimits: { ...actual.gpuSpendLimits, workersMax: 1 } };
@@ -57,7 +57,7 @@ function setup(realSubmit = false) {
       type: "EC2",
       allocationStrategy: "BEST_FIT",
       minvCpus: 0,
-      maxvCpus: 7,
+      maxvCpus: 4,
       instanceTypes: ["g5.xlarge"],
     },
   };
