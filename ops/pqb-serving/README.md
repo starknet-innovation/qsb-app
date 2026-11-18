@@ -150,9 +150,9 @@ pause and revision-scoped drain; the independent scheduled drain is logged in Cl
 From a clean pushed checkout with locked dependencies installed:
 
 ```sh
-QSB_NETWORK=mainnet node --import tsx ops/pqb-serving/fixture.ts prepare "$EVIDENCE"
+release_id=$(node -p 'require("./src/lib/releases/qsb-solver-pqb-aws-sm86-v0-2-0.json").id')
+QSB_NETWORK=mainnet node --import tsx ops/pqb-serving/fixture.ts prepare "$EVIDENCE" "$release_id"
 python3 ops/pqb-serving/control.py inspect "$EVIDENCE"
-release_id=$(node -p 'require("./src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json").id')
 node terraform/scripts/build.mjs --network=mainnet --solver-release="$release_id"
 # Optional temporary pool: generate the baseline and scope it against the
 # administrator-requested policy kept outside Git. AWS_ACCOUNT_ID comes from

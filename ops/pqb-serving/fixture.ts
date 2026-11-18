@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, openSync, fsyncSync, closeSync, readdirSyn
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import fixture from "../../tests/fixtures/pqb-reference.json";
-import descriptor from "../../src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json";
+import originalRelease from "../../src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json";
 import { adoptPqb } from "../../src/lib/pqb";
 import { publicVaultSchema, canonicalManifest, type Job } from "../../src/lib/model";
 import { withVaultConfiguration, pinSolver, solverRelease, canonical } from "../../src/lib/provenance";
@@ -19,6 +19,10 @@ const [mode, directory, indexName] = process.argv.slice(2);
 if (!["prepare", "validate", "verify", "audit", "preflight-input", "input-template"].includes(mode) || !directory) throw Error("Use prepare|validate|audit|verify EXTERNAL_DIRECTORY");
 const dir = path.resolve(directory);
 if (dir === process.cwd() || dir.startsWith(process.cwd() + path.sep)) throw Error("Keep evidence outside Git");
+const releaseId = mode === "prepare" ? (indexName ?? originalRelease.id)
+  : JSON.parse(readFileSync(path.join(dir, "public-fixture.json"), "utf8")).descriptor.id;
+const descriptor = solverRelease(releaseId);
+if (descriptor.protocol !== "pqb-v1") throw Error("Public fixture requires an enrolled PQB solver");
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 function save(name: string, value: unknown) {
   const fd = openSync(path.join(dir, name), "wx", 0o600);

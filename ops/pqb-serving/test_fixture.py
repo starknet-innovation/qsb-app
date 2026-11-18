@@ -27,6 +27,21 @@ class FixtureTests(unittest.TestCase):
             (d / 'public-fixture.json').write_text(json.dumps(data))
             self.assertNotEqual(fixture('validate', d).returncode, 0)
 
+    def test_new_enrolled_release_is_bound_to_the_public_job(self):
+        releases = ROOT / 'src/lib/releases'
+        candidate = json.loads((releases / 'qsb-solver-pqb-aws-sm86-v0-2-0.json').read_bytes())
+        previous = json.loads((releases / 'qsb-solver-pqb-aws-sm86-v0-1-0.json').read_bytes())
+        with TemporaryDirectory() as directory:
+            d = Path(directory)
+            self.assertEqual(fixture('prepare', d, candidate['id']).returncode, 0)
+            self.assertEqual(fixture('validate', d).returncode, 0)
+            path = d / 'public-fixture.json'
+            data = json.loads(path.read_bytes())
+            self.assertEqual(data['descriptor'], candidate)
+            data['descriptor'] = previous
+            path.write_text(json.dumps(data))
+            self.assertNotEqual(fixture('validate', d).returncode, 0)
+
     def test_empty_native_inventory_cannot_pass(self):
         with TemporaryDirectory() as directory:
             d = Path(directory)

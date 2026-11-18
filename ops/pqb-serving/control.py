@@ -252,8 +252,8 @@ class Campaign:
         manifest = json.loads((ROOT / 'terraform/.build/manifest.json').read_text())
         if manifest['commit'] != source or not manifest['clean'] or manifest['identities']['solver']['id'] != fixture['descriptor']['id']:
             raise RuntimeError('Clean exact PQB build manifest required')
-        enrolled = json.loads((ROOT / 'src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json').read_text())
-        if fixture['descriptor'] != enrolled:
+        enrolled = [json.loads(path.read_bytes()) for path in (ROOT / 'src/lib/releases').glob('*.json')]
+        if fixture['descriptor'].get('protocol') != 'pqb-v1' or enrolled.count(fixture['descriptor']) != 1:
             raise RuntimeError('Fixture descriptor differs from the enrolled immutable release')
         for name, digest in manifest['files'].items():
             if hashlib.sha256((ROOT / 'terraform/.build' / name).read_bytes()).hexdigest() != digest:
