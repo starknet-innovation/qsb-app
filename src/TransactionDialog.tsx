@@ -26,6 +26,7 @@ import {
   withdrawalVsize,
   verifySignedPsbt,
   verifyWithdrawalCommitment,
+  assertVaultPrevious,
   outputScript,
   type FundingInput,
 } from "./lib/transactions";
@@ -43,7 +44,8 @@ import {
   rebuildWithdrawalFromSolvedResult,
   signedCoordinatorResult,
 } from "./mainnet/localSignature";
-import type { CoordinatorSignedResult } from "./mainnet/coordinatorResult";
+import { coordinatorSignedResultSchema, type CoordinatorSignedResult } from "./mainnet/coordinatorResult";
+import * as bitcoin from "@scure/btc-signer";
 import {
   parseBtc,
   formatBtc,
@@ -155,7 +157,9 @@ export default function TransactionDialog({
     if (!job) throw Error("Withdrawal job is missing.");
     check();
     setSignedReview({rawTxHex, txid, manifest: structuredClone(job.manifest), generation: generation.current, epoch: readSessionEpoch()});
-    setResult("Signed locally in Xverse. Nothing was broadcast. Review the exact transaction before submitting.");
+    setResult(job.manifest.helper
+      ? "Signed locally in Xverse. Nothing was broadcast. Review the exact transaction before submitting."
+      : "Authorized locally: the vault is the only input, so there is no wallet signature. Nothing was broadcast. Review the exact transaction before submitting.");
     try {
       const config = await api<{exactSubmitEnabled?: boolean}>("/config");
       check();
@@ -777,10 +781,10 @@ export default function TransactionDialog({
         const { previousTxHex } = await api<{ previousTxHex: string }>(
           `/vaults/${vault.id}/funding`,
         );
-        if (!job.manifest.helper)
-          throw Error("This withdrawal has no helper input. Authorize it with the custody that holds its vault.");
-        const helper = await input(job.manifest.helper);
-        const local = solvedResult !== undefined ? await rebuildWithdrawalFromSolvedResult({
+        // A PQB withdrawal created without a helper (SDK/API): the vault is the only input, and its
+        // co-signature fixes the outputs and fee. There is no wallet step.
+        const helper = job.manifest.helper ? await input(job.manifest.helper) : undefined;
+        const local = solvedResult !== undefined && helper ? await rebuildWithdrawalFromSolvedResult({
           solved: solvedResult,
           job,
           stateJson: unlocked.stateJson,
@@ -795,6 +799,9 @@ export default function TransactionDialog({
           job.solution,
         );
         if (!local) verifyWithdrawalCommitment(raw, job.manifest, job.solution);
+        if (!helper)
+          assertVaultPrevious(bitcoin.Transaction.fromRaw(hex.decode(raw), { allowUnknownInputs: true,
+            allowUnknownOutputs: true }), 0, previousTxHex, { value: job.manifest.funding.value, scriptHex: vault.scriptHex });
         const solution = local ? local.solved.solution : job.solution;
         const bound = await bindRecoveryAssembly(unlocked, solution, raw);
         const assemblyKey = `qsb-assembly:${vault.scriptHash}`;
@@ -820,6 +827,18 @@ export default function TransactionDialog({
           return;
         }
         await assertRecoveryAssembly(unlocked, solution, raw);
+        if (!helper) {
+          const txid = bitcoin.Transaction.fromRaw(hex.decode(raw), { allowUnknownInputs: true,
+            allowUnknownOutputs: true }).id;
+          const published: CoordinatorSignedResult = coordinatorSignedResultSchema.parse({
+            format: "qsb-coordinator-public-signed-result-v1", network: "mainnet", jobId: job.id,
+            vaultId: job.vaultId, manifestHash: job.manifestHash, rawTxHex: raw, txid });
+          const publicText = JSON.stringify(published);
+          setSignedDownload(publicText);
+          downloadPublicResult(publicText, published.jobId);
+          await reviewSigned(raw, txid, check);
+          return;
+        }
         const expected = local
           ? local.transaction
           : helperPsbt(raw, helper, previousTxHex, {

@@ -53,7 +53,7 @@ Generated native files are build artifacts, not committed source.
 
 `QSB_TEST_CONSENSUS_BINARY=/absolute/path/qsb-consensus npm test -- tests/consensus.test.ts`
 runs real signed synthetic SegWit, Taproot, and mixed SegWit/legacy-P2SH
-two-input transactions against the
+two-input transactions, and a one-input legacy-P2SH transaction, against the
 interpreter, accepting the original and rejecting destination, amount/fee,
 extra-output and signature mutations. These have nonexistent funding and are
 never broadcast. Without that environment variable the native cases are

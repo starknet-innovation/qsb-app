@@ -864,7 +864,8 @@ export class QsbClient {
       // One input: the custody's transaction is complete. Check it like the two-input assembly.
       verifyWithdrawalCommitment(raw, manifest, request.solved.solution);
       const returnedTx = btc.Transaction.fromRaw(hex.decode(raw), opts);
-      if (returnedTx.getInput(0).finalScriptWitness?.length)
+      // Legacy serialization only: segwit-flagged bytes would pass these checks and fail Core at submit.
+      if (returnedTx.getInput(0).finalScriptWitness?.length || hex.encode(returnedTx.toBytes(true, false)) !== raw)
         throw new Error("External vault authorization must use a legacy vault scriptSig.");
       assertVaultPrevious(returnedTx, 0, request.fundingPreviousTxHex,
         { value: manifest.funding.value, scriptHex: request.vault.scriptHex });
