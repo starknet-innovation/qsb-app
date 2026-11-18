@@ -1,6 +1,6 @@
 # Status
 
-PQB's TLS-fixed [`pqb-aws-sm86-v0.1.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/pqb-aws-sm86-v0.1.0) descriptor is enrolled for explicit adoption. Its registry digest and original build provenance verify; qualification retains native evidence only for the byte-identical compute stack, with fresh TLS/S3 checks. No new GPU timing, served Step Functions solve, solved-spend Core/miner acceptance or end-to-end PQB withdrawal is claimed. Enrollment does not select the served release or enable mainnet switches. The deployed app still serves Config A. See [PQB evidence and adoption limits](PQB.md#source-enrollment-and-evidence).
+PQB sm86 v0.2.0 is enrolled for explicit deployment selection. The production rollout of this digest is pending. All 14 native A10G correctness cases and one full range per stage passed. qsb-app independently verified the one partial candidate. A served full solve and end-to-end withdrawal with v0.2.0 remain unmeasured. The v0.1.0 descriptor remains available for rollback. [Published v0.2.0 release](https://github.com/starknet-innovation/qsb-solver/releases/tag/pqb-aws-sm86-v0.2.0) · [PQB evidence and adoption limits](PQB.md#source-enrollment-and-evidence)
 
 As of 23 October 2026. #8, the plan to a first mainnet withdrawal, is complete; what's open is listed below.
 

@@ -10,7 +10,8 @@ The descriptors in `src/lib/releases` (see [its README](../src/lib/releases/READ
 
 | Descriptor | Release | Use |
 | --- | --- | --- |
-| `qsb-solver-pqb-aws-sm86-v0-1-0.json` | [`pqb-aws-sm86-v0.1.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/pqb-aws-sm86-v0.1.0), ID `pqb-ranked-v2-cfd99e384469-edce7a14b554` | Enrolled for explicit adoption, not selected by this change. PQB protocol, `pqb-ranked-v2`; exact compute applicability plus fresh TLS/S3 evidence. No previous qualified PQB rollback. |
+| `qsb-solver-pqb-aws-sm86-v0-2-0.json` | [`pqb-aws-sm86-v0.2.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/pqb-aws-sm86-v0.2.0), ID `pqb-ranked-v2-80d306ec74b0-bcc69b5d33ac` | PQB CUDA worker with the Fireblocks `82c7cba` import. Passed the three full A10G ranges and independent CPU replay. The v0.1.0 descriptor remains available for rollback. |
+| `qsb-solver-pqb-aws-sm86-v0-1-0.json` | [`pqb-aws-sm86-v0.1.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/pqb-aws-sm86-v0.1.0), ID `pqb-ranked-v2-cfd99e384469-edce7a14b554` | Enrolled for explicit adoption, not selected by this change. PQB protocol, `pqb-ranked-v2`; exact compute applicability plus fresh TLS/S3 evidence. Available for v0.2.0 rollback. |
 | `qsb-solver-combined-aws-sm86-v0-3-0.json` | [`combined-aws-sm86-v0.3.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/combined-aws-sm86-v0.3.0), ID `qsb-ranked-v2-40b5d9f9f741-6b4ac63b897c` | **Served** since 2 October 2026. The same pinning and subset executables as `combined-aws-sm86-v0.2.0`, on a runtime with Ubuntu updates applied at build; its 1 October 2026 release scan found no fixable findings. It is the already tested image from source `40b5d9f9…` (`candidate.yml`, tag `candidate-sm86-20261001-1`), not rebuilt. Its native A10G component checks are recorded in qsb-solver#11. |
 | `qsb-solver-combined-aws-sm86-v0-2-0.json` | [`combined-aws-sm86-v0.2.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/combined-aws-sm86-v0.2.0), ID `qsb-ranked-v2-43c77084648a-e22afc720df1` | Enrolled, not served; kept for rollback. The optimized subset kernel with the repaired pinning, from qsb-solver#2: the already tested image from source `43c77084…` (`candidate.yml`, tag `candidate-sm86-20260925-1`), not rebuilt. On an A10G, subset round 1 is about 31–32% faster than `aws-v0.1.0`, round 2 about 1.6–1.7%, and pinning unchanged. |
 | `qsb-solver-aws-v0-1-0.json` | [`aws-v0.1.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/aws-v0.1.0) | The historical two-stage worker built for AWS (`sm_86`). Enrolled, not served. |
@@ -37,6 +38,18 @@ Enrolling a descriptor doesn't serve it, publish an image or change a job defini
 The [published PQB release](https://github.com/starknet-innovation/qsb-solver/releases/tag/pqb-aws-sm86-v0.1.0) is enrolled for explicit adoption; see [evidence and operational limits](PQB.md#source-enrollment-and-evidence). Its original signed qualification build identifies merged source `cfd99e3844698f59679e4c15cf567db2976b9ffc`, workflow `pqb-qualify.yml`, branch `codex/pqb-qualify-tls-20261112` and run `43205074943`. Publication copies that archive without rebuilding. The [assessment](https://github.com/starknet-innovation/qsb-solver/blob/7694d68d34092ee4aa3c58f3220011bbfff75a1b/docs/pqb/2026-11-12-tls-replacement.md) carries forward native A10G evidence only for the byte-identical compute stack and records fresh installed TLS/S3 transport checks. There is no new GPU execution or timing measurement. All 20 unfixed Critical package matches remain disclosed: four are mitigated on the supported S3 path; the other exploit preconditions are outside the supported one-shot Linux workload. This is not a global Python patch or a full security audit.
 
 ```sh
+# pqb-aws-sm86-v0.2.0: verify both registry-stored and GitHub API provenance
+for source in --bundle-from-oci ''; do
+  gh attestation verify "oci://$(node -p 'require("./src/lib/releases/qsb-solver-pqb-aws-sm86-v0-2-0.json").image')" $source \
+    --repo starknet-innovation/qsb-solver \
+    --signer-workflow starknet-innovation/qsb-solver/.github/workflows/pqb-qualify.yml \
+    --source-ref refs/heads/codex/pqb-qualify-82c7cba \
+    --source-digest "$(node -p 'require("./src/lib/releases/qsb-solver-pqb-aws-sm86-v0-2-0.json").solverCommit')" \
+    --deny-self-hosted-runners
+done
+gh release download pqb-aws-sm86-v0.2.0 -R starknet-innovation/qsb-solver -p solver.json -O - \
+  | cmp - src/lib/releases/qsb-solver-pqb-aws-sm86-v0-2-0.json
+
 # pqb-aws-sm86-v0.1.0: verify both registry-stored and GitHub API provenance
 for source in --bundle-from-oci ''; do
   gh attestation verify "oci://$(node -p 'require("./src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json").image')" $source \
