@@ -173,11 +173,21 @@ class CapacityTests(unittest.TestCase):
         with patch.dict('sys.modules', {'botocore.exceptions': exceptions}):
             with self.assertRaisesRegex(RuntimeError, 'capacity remains'): pool.verify_removed()
             pool.scaling_groups.return_value = []; pool.c.state['capacity']['instanceIds'] = ['i-owned']
-            pool.c.client.return_value.describe_instances.return_value = {'Reservations': []}
-            with self.assertRaisesRegex(RuntimeError, 'inventory incomplete'): pool.verify_removed()
-            pool.c.client.return_value.describe_instances.return_value = {'Reservations': [{'Instances': [{'InstanceId': 'i-owned', 'State': {'Name': 'running'}}]}]}
+            pages = pool.c.client.return_value.get_paginator.return_value.paginate
+            pages.return_value = [{'Reservations': []}]
+            with TemporaryDirectory() as directory:
+                pool.c.directory = Path(directory)
+                with self.assertRaisesRegex(RuntimeError, 'without archived terminal evidence'): pool.verify_removed()
+                history = pool.c.directory / 'capacity/instance-history'
+                history.mkdir(parents=True)
+                receipt = {'Reservations': [{'OwnerId':pool.c.account, 'Instances':[{
+                    'InstanceId':'i-owned','State':{'Name':'terminated'},'Placement':{'AvailabilityZone':pool.c.region+'a'}}]}]}
+                (history / 'explicit-1.json').write_text(json.dumps(receipt))
+                self.assertEqual(pool.recorded_instances(['i-owned']),receipt)
+                with self.assertRaisesRegex(RuntimeError, 'without archived terminal evidence'): pool.recorded_instances(['i-other'])
+            pages.return_value = [{'Reservations': [{'Instances': [{'InstanceId':'i-owned','State':{'Name':'running'}}]}]}]
             with self.assertRaisesRegex(RuntimeError, 'not terminated'): pool.verify_removed()
-            pool.c.client.return_value.describe_instances.return_value = {'Reservations': [{'Instances': [{'InstanceId': 'i-owned', 'State': {'Name': 'terminated'}}]}]}
+            pages.return_value = [{'Reservations': [{'Instances': [{'InstanceId':'i-owned','State':{'Name':'terminated'}}]}]}]
             pool.c.state['capacity']['volumeIds'] = ['vol-retained']
             with self.assertRaisesRegex(RuntimeError, 'volume remains'): pool.verify_removed()
 

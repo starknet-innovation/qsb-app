@@ -379,6 +379,33 @@ class Capacity:
             or (terminal and (any(j['status'] in ACTIVE for j in jobs) or sorted(current) != self.c.state.get('knownJobIds', [])))):
             raise RuntimeError('Isolated work changed or remains active; collect/reconcile before deletion')
 
+    def recorded_instances(self, ids):
+        if not ids:
+            return {'Reservations': []}
+        wanted = set(ids)
+        # A filter returns an empty result after EC2 expires a terminated ID.
+        # Absence alone is never proof of termination.
+        ec2 = self.c.client('ec2')
+        rows = [reservation for page in ec2.get_paginator('describe_instances').paginate(
+            Filters=[{'Name': 'instance-id', 'Values': sorted(wanted)}]) for reservation in page['Reservations']]
+        missing = wanted - {i['InstanceId'] for reservation in rows for i in reservation['Instances']}
+        if missing:
+            history = self.c.directory / 'capacity/instance-history'
+            for path in sorted(history.glob('explicit-*.json'), reverse=True):
+                for reservation in json.loads(path.read_bytes())['Reservations']:
+                    if reservation.get('OwnerId') != self.c.account:
+                        continue
+                    for i in reservation['Instances']:
+                        if (i['InstanceId'] in missing and i['State']['Name'] == 'terminated'
+                            and i['Placement']['AvailabilityZone'].startswith(self.c.region)):
+                            rows.append({**reservation, 'Instances': [i]})
+                            missing.remove(i['InstanceId'])
+                if not missing:
+                    break
+        if missing:
+            raise RuntimeError('Recorded host missing without archived terminal evidence: ' + ', '.join(sorted(missing)))
+        return {'Reservations': rows}
+
     def collect(self, stamp):
         target = self.c.directory / 'capacity'; target.mkdir(exist_ok=True)
         pool, queue = self.pool(), self.queue(); hosts = []
@@ -395,7 +422,7 @@ class Capacity:
         tagged = self.c.client('ec2').describe_instances(Filters=[{'Name': 'tag:PqbValidation', 'Values': [self.c.state['name']]}])
         hosts.extend(i['InstanceId'] for r in tagged['Reservations'] for i in r['Instances'])
         hosts = sorted(set(hosts) | set(self.c.state['capacity'].get('instanceIds', [])))
-        instances = self.c.client('ec2').describe_instances(InstanceIds=hosts) if hosts else {'Reservations': []}
+        instances = self.recorded_instances(hosts)
         if sorted(i['InstanceId'] for r in instances['Reservations'] for i in r['Instances']) != hosts:
             raise RuntimeError('Recorded host inventory incomplete; retain and reconcile')
         volumes = {b['Ebs']['VolumeId'] for r in instances['Reservations'] for i in r['Instances'] for b in i.get('BlockDeviceMappings', []) if 'Ebs' in b}
@@ -460,7 +487,7 @@ class Capacity:
         self.production_unchanged()
         if self.pool() or self.queue() or self.scaling_groups(): raise RuntimeError('Isolated capacity remains')
         ids = self.c.state['capacity'].get('instanceIds', [])
-        instances = self.c.client('ec2').describe_instances(InstanceIds=ids)['Reservations'] if ids else []
+        instances = self.recorded_instances(ids)['Reservations']
         if sorted(i['InstanceId'] for r in instances for i in r['Instances']) != sorted(ids):
             raise RuntimeError('Recorded host inventory incomplete; no cleanup credit')
         if any(i['State']['Name'] != 'terminated' for r in instances for i in r['Instances']): raise RuntimeError('Recorded hosts not terminated')
