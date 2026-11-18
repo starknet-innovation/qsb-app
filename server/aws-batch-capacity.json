@@ -1,5 +1,5 @@
 {
-  "vcpusPerWorkerBudget": 4,
+  "vcpusPerWorkerBudget": 7,
   "instanceTypes": {
     "g5.xlarge": {
       "vcpus": 4
