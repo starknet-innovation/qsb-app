@@ -14,7 +14,10 @@ const MIN_SEQUENCE = 0x80000000;
 const MIN_LOCKTIME = 500000000;
 const MAX_LOCKTIME = 1744599999;
 
-/** Fields the public CPU handler balances, plus the verified solution's sequence and locktime. */
+/**
+ * Fields the public CPU handler balances, plus the verified solution's sequence and locktime.
+ * That handler is Config A only, which always has a helper: the service refuses one without.
+ */
 export type StoredSpendRecord = {
   /** Absent for a one-input PQB withdrawal, whose only input is the vault. */
   helper?: { txid: string; vout: number; valueSats: string };

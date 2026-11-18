@@ -838,6 +838,7 @@ export class QsbClient {
     verifyWithdrawalCommitment(raw, manifest, solved.solution);
     const vaultPrevious = { value: manifest.funding.value, scriptHex: vault.scriptHex };
     if (!manifest.helper) {
+      if (vault.config !== "PQB") throw new Error("Only a PQB withdrawal can omit the helper input.");
       assertVaultPrevious(template, 0, funding.previousTxHex, vaultPrevious);
       return { format: "qsb-external-signing-request-v1", vault, solved, ...prepared, ...pqb,
         fundingPreviousTxHex: funding.previousTxHex };
