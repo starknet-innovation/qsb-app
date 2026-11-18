@@ -90,7 +90,7 @@ function withdrawal(vault: PublicVault) {
   };
   const record = buildStoredSpendRecord(job);
   const tx = new btc.Transaction({ version: 1, lockTime: record.locktime, ...opts });
-  tx.addInput({ txid: record.helper.txid, index: record.helper.vout, sequence: 0xfffffffe });
+  tx.addInput({ txid: record.helper!.txid, index: record.helper!.vout, sequence: 0xfffffffe });
   tx.addInput({ txid: record.funding.txid, index: record.funding.vout, sequence: record.sequence });
   tx.addOutput({ script: hex.decode(record.outputScript), amount: BigInt(record.outputValue) });
   tx.updateInput(0, { finalScriptWitness: [Uint8Array.of(0x30, 0x01), Uint8Array.of(0x02)] }, true);

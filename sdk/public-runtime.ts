@@ -3,7 +3,7 @@ import { loadPyodide } from "pyodide";
 import { startQsbRuntime } from "../src/lib/qsb-runtime";
 import { commitmentOperations } from "../src/lib/qsb-operations";
 import { canonical } from "../src/lib/provenance";
-import { validatePublicState, type PublicVault, type Job, type Withdrawal } from "../src/lib/model";
+import { validatePublicState, vaultInputIndex, type PublicVault, type Job, type Withdrawal } from "../src/lib/model";
 import { checkPqbHit, pqbHitsSchema, pqbPacket, pqbSelection, pqbTransaction } from "../src/lib/pqb";
 import { parseScript, serializeTx } from "../src/pqb-core/tx";
 import { hex, fromHex, sha256, hash160 } from "../src/pqb-core/primitives";
@@ -31,7 +31,7 @@ export function publicRuntime() {
   });
   return {
     async verify(vault: PublicVault, manifest: Withdrawal, solution: NonNullable<Job["solution"]>, raw: string) {
-      if (vault.config === "PQB") return verifyPqbWitness(raw, vault.scriptHex);
+      if (vault.config === "PQB") return verifyPqbWitness(raw, vault.scriptHex, vaultInputIndex(manifest));
       const prepared = await operations.prepareAssembly(vault.publicStateJson, manifest, solution);
       const tx = btc.Transaction.fromRaw(Uint8Array.from(raw.match(/../g) ?? [], v => parseInt(v, 16)),
         { allowUnknownInputs: true, allowUnknownOutputs: true });

@@ -14,8 +14,9 @@ Bitcoin Core **27.2** is used because the official release still ships
 `libbitcoinconsensus`, API version 2. Core 27 deprecated the library and Core 28
 removed it. It is not sufficient to call `verify_script_with_amount`: Taproot
 needs `bitcoinconsensus_verify_script_with_spent_outputs`, including every
-input's previous output. This adapter uses that function for each of the two QSB
-inputs and requires both success and `ERR_OK`.
+input's previous output. This adapter uses that function for each input of the
+withdrawal, one (a PQB vault alone) or two (a helper, then the vault), and requires
+every one to succeed with `ERR_OK`.
 
 `VERIFY_ALL` in that header comprises P2SH, DERSIG, NULLDUMMY,
 CHECKLOCKTIMEVERIFY, CHECKSEQUENCEVERIFY, WITNESS and TAPROOT. These are the

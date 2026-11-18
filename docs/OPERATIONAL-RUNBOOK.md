@@ -183,7 +183,7 @@ The served release can stop a pinning work unit on `QSB_RANGE_INCOMPLETE`, a hit
   - The repaired pinning stops before publishing when a single batch overflows, so a genuine overflow normally lands here.
 - **Paused, "GPU candidates failed independent CPU verification"**: `/api/jobs/:id/resume` refuses it, because it needs operator review. The repaired pinning publishes hits batch by batch, so a later batch can still fail after an earlier one has published. A candidate that passes CPU verification is credited as a hit as usual.
 - **Failed, "GPU hit output exceeds supported capacity"**, where at least `HOST_HIT_CAPACITY` (64) records were published in total (checked in `server/coordinator.ts`): this is terminal in this app. `/api/jobs/:id/resume` accepts only paused jobs, and there is no reviewed recovery path.
-  - The withdrawal's funding and helper outpoint reservations stay in place, because the app role can only create `OUTPOINT#` rows, never delete them. So that deposit can't be withdrawn through the app until a reviewed recovery change lands. The funds aren't lost: they stay in the vault.
+  - The withdrawal's funding and any helper outpoint reservations stay in place, because the app role can only create `OUTPOINT#` rows, never delete them. So that deposit can't be withdrawn through the app until a reviewed recovery change lands. The funds aren't lost: they stay in the vault.
   - Stop and preserve the evidence.
   - Don't work around it by hand. A recovery path needs its own reviewed change.
 
@@ -251,7 +251,7 @@ This is an operator procedure, not automatic revision migration. It has not been
 
 ## Reconcile an uncertain withdrawal (TX#)
 
-This is separate from AWS Batch reconciliation. Never use the compute `--not-submitted` action for a signed withdrawal. Keep **both the vault funding and helper outpoints reserved** and tell the user to keep the helper UTXO unspent while the result is uncertain: spending it elsewhere makes the withdrawal unable to confirm. Never request another signature or accept replacement bytes for the vault. [EXACT-SUBMIT.md](EXACT-SUBMIT.md) describes how the intent binds the bytes.
+This is separate from AWS Batch reconciliation. Never use the compute `--not-submitted` action for a signed withdrawal. Keep **the vault funding outpoint and any helper outpoint reserved** and tell the user to keep the helper UTXO, if any, unspent while the result is uncertain: spending it elsewhere makes the withdrawal unable to confirm. Never request another signature or accept replacement bytes for the vault. [EXACT-SUBMIT.md](EXACT-SUBMIT.md) describes how the intent binds the bytes.
 
 1. Inspect `GET /api/transactions/:originalTxid/status` and its miner observation. Confirmation is established from the funding outpoint's actual spender and expected spend, not solely from the original txid. An unspent funding outpoint is not proof the miner never received the POST. Investigate a foreign-spend alert immediately; it is not a successful withdrawal.
 2. In an [operator session](#operator-session), set `TABLE_NAME`, `AWS_REGION` and `QSB_NETWORK=mainnet`, then run:

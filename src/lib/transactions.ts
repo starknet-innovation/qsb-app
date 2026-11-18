@@ -2,7 +2,15 @@ import { PQB_MAX_SCRIPTSIG } from "./pqb";
 import { BITCOIN_NETWORK } from "./network";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import { withdrawalSchema, type Withdrawal, type Job } from "./model";
+import {
+  withdrawalSchema,
+  withdrawalInputs,
+  withdrawalInputValue,
+  vaultInputIndex,
+  helperIsFunding,
+  type Withdrawal,
+  type Job,
+} from "./model";
 import type { ServiceFeeOutput } from "./service-fee";
 export type FundingInput = {
   txid: string;
@@ -211,27 +219,29 @@ export const QSB_CONFIG_A_MAX_SCRIPTSIG = 1185;
 /** Each protocol derives or documents its maximum witness size before quoting a fee. */
 export const vaultScriptSigBound = (config: "A" | "PQB") => config === "PQB" ? PQB_MAX_SCRIPTSIG : QSB_CONFIG_A_MAX_SCRIPTSIG;
 /**
- * Virtual size of a signed two-input QSB withdrawal: input 0 is the wallet's helper payment
- * output (P2WPKH or nested SegWit, witness counted at the 72-byte DER maximum), input 1 is
- * the legacy QSB input whose scriptSig is at most QSB_CONFIG_A_MAX_SCRIPTSIG, and the single
- * output pays the destination script. With the default scriptSig bound it's an upper bound.
+ * Virtual size of a signed withdrawal. With a helper (`nestedHelper` a boolean), input 0 is the
+ * wallet's helper payment output (P2WPKH or nested SegWit, witness counted at the 72-byte DER
+ * maximum) and input 1 the legacy vault input. With `nestedHelper` null (a one-input PQB
+ * withdrawal) the vault is the only input and there is no witness. The vault scriptSig is at most
+ * `scriptSigLength` (QSB_CONFIG_A_MAX_SCRIPTSIG by default) and the single output pays the
+ * destination script. With the default scriptSig bound it's an upper bound.
  */
 export function withdrawalVsize(
-  nestedHelper: boolean,
+  nestedHelper: boolean | null,
   outputScriptLength: number,
   scriptSigLength = QSB_CONFIG_A_MAX_SCRIPTSIG,
 ): number {
-  const base =
-    4 + 1 + 41 + (nestedHelper ? 23 : 0) +
-    32 + 4 + varintSize(scriptSigLength) + scriptSigLength + 4 +
-    1 + 8 + varintSize(outputScriptLength) + outputScriptLength + 4;
+  const vault = 32 + 4 + varintSize(scriptSigLength) + scriptSigLength + 4;
+  const tail = 1 + 8 + varintSize(outputScriptLength) + outputScriptLength + 4;
+  if (nestedHelper === null) return 4 + 1 + vault + tail;
+  const base = 4 + 1 + 41 + (nestedHelper ? 23 : 0) + vault + tail;
   // Segwit marker and flag, the helper's witness, and the QSB input's empty witness.
   const witness = 2 + (1 + 1 + 72 + 1 + 33) + 1;
   return Math.ceil((base * 4 + witness) / 4);
 }
 /** Withdrawal miner fee for a sat/vB rate: rate × the upper-bound vsize, rounded up. */
 export function withdrawalFeeForRate(
-  nestedHelper: boolean,
+  nestedHelper: boolean | null,
   outputScriptLength: number,
   milliSatPerVb: bigint,
   config: "A" | "PQB" = "A",
@@ -287,6 +297,33 @@ export function verifySignedPsbt(
 }
 /** What the manifest says the vault input is; checked against the previous transaction's bytes. */
 export type QsbPreviousOutput = { value: bigint | string; scriptHex: string };
+/**
+ * Bind the vault input at `index` to its previous transaction and the manifest's amount and
+ * script, and require its authorization. The vault scriptSig doesn't commit to its amount, so an
+ * understated manifest value would still assemble, with the difference going to the miner fee.
+ */
+export function assertVaultPrevious(
+  tx: btc.Transaction,
+  index: number,
+  previousTxHex: string,
+  previous: QsbPreviousOutput,
+): btc.Transaction {
+  const prev = btc.Transaction.fromRaw(hex.decode(previousTxHex), opts),
+    input = tx.getInput(index);
+  if (!input.txid || hex.encode(input.txid) !== prev.id)
+    throw new Error("QSB previous transaction mismatch.");
+  if (input.index === undefined || !prev.getOutput(input.index).script)
+    throw new Error("QSB previous output missing.");
+  const output = prev.getOutput(input.index);
+  if (
+    output.amount !== BigInt(previous.value) ||
+    hex.encode(output.script!) !== previous.scriptHex.toLowerCase()
+  )
+    throw new Error("QSB previous output amount or script mismatch.");
+  if (!input.finalScriptSig?.length)
+    throw new Error("QSB authorization is missing.");
+  return prev;
+}
 export function helperPsbt(
   rawQsbTxHex: string,
   helper: FundingInput,
@@ -311,29 +348,14 @@ export function helperPsbt(
     prev.getOutput(helper.vout).amount !== helper.value
   )
     throw new Error("Helper previous output mismatch.");
-  const qsbPrev = btc.Transaction.fromRaw(hex.decode(qsbPreviousTxHex), opts),
-    qsbInput = tx.getInput(1);
-  if (!qsbInput.txid || hex.encode(qsbInput.txid) !== qsbPrev.id)
-    throw new Error("QSB previous transaction mismatch.");
   const wpkh = btc.p2wpkh(hex.decode(helper.publicKey), BITCOIN_NETWORK);
   if (
     helper.address !== wpkh.address &&
     helper.address !== btc.p2sh(wpkh, BITCOIN_NETWORK).address
   )
     throw new Error("Unsupported helper payment key or address.");
-  if (qsbInput.index === undefined || !qsbPrev.getOutput(qsbInput.index).script)
-    throw new Error("QSB previous output missing.");
-  // The QSB input's scriptSig doesn't commit to its amount, so an understated
-  // manifest value would still assemble, with the difference going to the miner
-  // fee. Bind the manifest to the previous output's real amount and script.
-  const qsbOutput = qsbPrev.getOutput(qsbInput.index);
-  if (
-    qsbOutput.amount !== BigInt(qsbPrevious.value) ||
-    hex.encode(qsbOutput.script!) !== qsbPrevious.scriptHex.toLowerCase()
-  )
-    throw new Error("QSB previous output amount or script mismatch.");
-  if (!qsbInput.finalScriptSig?.length)
-    throw new Error("QSB authorization is missing.");
+  const qsbPrev = assertVaultPrevious(tx, 1, qsbPreviousTxHex, qsbPrevious),
+    qsbInput = tx.getInput(1);
   if (helperTxid === qsbPrev.id && helper.vout === qsbInput.index)
     throw new Error("Helper and QSB input must be different outputs.");
   const script = outputScript(helper.address);
@@ -367,20 +389,22 @@ export function verifyWithdrawalCommitment(
   const fail = () => {
     throw new Error("Assembled withdrawal differs from the approved intent.");
   };
+  const inputs = withdrawalInputs(manifest),
+    vault = vaultInputIndex(manifest);
   if (
     tx.version !== 1 ||
     tx.lockTime !== solution.locktime ||
-    tx.inputsLength !== 2 ||
+    tx.inputsLength !== inputs.length ||
     tx.outputsLength !== 1
   )
     fail();
-  for (const [index, point] of [manifest.helper, manifest.funding].entries()) {
+  for (const [index, point] of inputs.entries()) {
     const input = tx.getInput(index);
     if (
       !input.txid ||
       hex.encode(input.txid) !== point.txid.toLowerCase() ||
       input.index !== point.vout ||
-      input.sequence !== (index === 0 ? 0xfffffffe : solution.sequence)
+      input.sequence !== (index === vault ? solution.sequence : 0xfffffffe)
     )
       fail();
   }
@@ -393,17 +417,9 @@ export function verifyWithdrawalCommitment(
     output.amount !== BigInt(manifest.outputValue) ||
     output.amount <= 0n ||
     BigInt(manifest.fee) <= 0n ||
-    BigInt(manifest.helper.value) +
-      BigInt(manifest.funding.value) -
-      output.amount !==
-      BigInt(manifest.fee)
+    withdrawalInputValue(manifest) - output.amount !== BigInt(manifest.fee)
   )
     fail();
-  if (
-    manifest.helper.txid.toLowerCase() ===
-      manifest.funding.txid.toLowerCase() &&
-    manifest.helper.vout === manifest.funding.vout
-  )
-    fail();
-  if (!tx.getInput(1).finalScriptSig?.length) fail();
+  if (helperIsFunding(manifest)) fail();
+  if (!tx.getInput(vault).finalScriptSig?.length) fail();
 }

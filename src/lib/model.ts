@@ -131,7 +131,8 @@ export const withdrawalSchema = z
   .object({
     vaultId: z.string().uuid(),
     funding: outpoint,
-    helper: outpoint,
+    /** The wallet output spent first. PQB may omit it: the vault is then the only input. */
+    helper: outpoint.optional(),
     destination: z.string().min(14).max(100),
     outputScript: hex.max(200),
     outputValue: sats,
@@ -145,6 +146,22 @@ export const withdrawalSchema = z
   })
   .strict();
 export type Withdrawal = z.infer<typeof withdrawalSchema>;
+/** A two-input withdrawal: the browser app's, whose helper the wallet signs. */
+export const helperWithdrawalSchema = withdrawalSchema.required({ helper: true });
+type WithdrawalInputs = Pick<Withdrawal, "funding" | "helper">;
+/** The withdrawal's inputs in transaction order: the helper when there is one, then the vault. */
+export const withdrawalInputs = (m: WithdrawalInputs) =>
+  m.helper ? [m.helper, m.funding] : [m.funding];
+/** Index of the vault input: 1 after a helper, 0 when the vault is the only input. */
+export const vaultInputIndex = (m: WithdrawalInputs) => (m.helper ? 1 : 0);
+/** Sum of the input values: the output and the fee are paid from it. */
+export const withdrawalInputValue = (m: WithdrawalInputs) =>
+  withdrawalInputs(m).reduce((sum, point) => sum + BigInt(point.value), 0n);
+/** A helper that is the vault outpoint itself would spend one output twice. */
+export const helperIsFunding = (m: WithdrawalInputs) =>
+  m.helper !== undefined &&
+  m.helper.txid.toLowerCase() === m.funding.txid.toLowerCase() &&
+  m.helper.vout === m.funding.vout;
 /**
  * manifestHash is taken over the schema-ordered JSON at creation. Stored
  * copies can come back with keys reordered (DynamoDB maps keep no order),

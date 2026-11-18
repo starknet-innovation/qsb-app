@@ -116,7 +116,7 @@ const strayPayments = component(
 component(
   "Withdrawal",
   withdrawalSchema,
-  "A withdrawal manifest: the vault's funding outpoint, the owner's helper outpoint, the single output and the fee. `idempotencyKey` becomes the job id.",
+  "A withdrawal manifest: the vault's funding outpoint, the owner's helper outpoint, the single output and the fee. A PQB vault may omit `helper`: the vault is then the only input and pays the fee. `idempotencyKey` becomes the job id.",
 );
 component(
   "MinerRates",

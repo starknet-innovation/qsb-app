@@ -20,8 +20,9 @@ No backups, passphrases, seeds, raw keys or session caches are accepted by this 
                   [--service-fee <max sats>]
   deposit submit --prepared <file> --signed <PSBT file> --accept-costs
   deposit status <vault> | deposit resubmit <vault>
-  withdraw create <vault> --helper <txid:vout> --destination <address> --fee-rate <sat/vB> --accept-costs
+  withdraw create <vault> [--helper <txid:vout>] --destination <address> --fee-rate <sat/vB> --accept-costs
                   [--solver <id>]
+                  --helper is required for a Config A vault. Without it a PQB vault is the only input.
                   Retry with the vault id and --accept-costs only: the agent retains the exact intent.
   withdraw list | withdraw status <job> | withdraw pause <job> | withdraw resume <job>
   withdraw prepare <job> --out <public signing request JSON>

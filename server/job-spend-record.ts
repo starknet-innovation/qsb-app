@@ -1,6 +1,11 @@
 import { solutionSchema } from "../src/lib/solution";
 import { hex } from "@scure/base";
-import { withdrawalSchema, type Job } from "../src/lib/model";
+import {
+  withdrawalSchema,
+  withdrawalInputValue,
+  helperIsFunding,
+  type Job,
+} from "../src/lib/model";
 import { outputScript } from "../src/lib/transactions";
 import { MinerInclusionError } from "./miner-inclusion";
 import { assertWithdrawalSpendAgainstJob } from "./transaction-checks";
@@ -11,7 +16,8 @@ const MAX_LOCKTIME = 1744599999;
 
 /** Fields the public CPU handler balances, plus the verified solution's sequence and locktime. */
 export type StoredSpendRecord = {
-  helper: { txid: string; vout: number; valueSats: string };
+  /** Absent for a one-input PQB withdrawal, whose only input is the vault. */
+  helper?: { txid: string; vout: number; valueSats: string };
   funding: { txid: string; vout: number; valueSats: string };
   outputScript: string;
   outputValue: string;
@@ -55,30 +61,28 @@ export function buildStoredSpendRecord(job: Job): StoredSpendRecord {
   }
   const outputScriptHex = manifest.outputScript.toLowerCase();
   if (destinationScript !== outputScriptHex) mismatch();
-  const helperValue = BigInt(manifest.helper.value);
   const fundingValue = BigInt(manifest.funding.value);
   const outputValue = BigInt(manifest.outputValue);
   const fee = BigInt(manifest.fee);
   if (
-    helperValue <= 0n ||
+    (manifest.helper && BigInt(manifest.helper.value) <= 0n) ||
     fundingValue <= 0n ||
     outputValue <= 0n ||
     fee <= 0n ||
-    helperValue + fundingValue !== outputValue + fee
+    withdrawalInputValue(manifest) !== outputValue + fee
   )
     mismatch();
-  if (
-    manifest.helper.txid.toLowerCase() ===
-      manifest.funding.txid.toLowerCase() &&
-    manifest.helper.vout === manifest.funding.vout
-  )
-    mismatch();
+  if (helperIsFunding(manifest)) mismatch();
   return {
-    helper: {
-      txid: manifest.helper.txid.toLowerCase(),
-      vout: manifest.helper.vout,
-      valueSats: manifest.helper.value,
-    },
+    ...(manifest.helper
+      ? {
+          helper: {
+            txid: manifest.helper.txid.toLowerCase(),
+            vout: manifest.helper.vout,
+            valueSats: manifest.helper.value,
+          },
+        }
+      : {}),
     funding: {
       txid: manifest.funding.txid.toLowerCase(),
       vout: manifest.funding.vout,

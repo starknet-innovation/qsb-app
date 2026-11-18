@@ -43,7 +43,9 @@ function sameManifest(left: Withdrawal, right: Withdrawal): boolean {
     left.costAccepted === true &&
     right.costAccepted === true &&
     samePoint(left.funding, right.funding) &&
-    samePoint(left.helper, right.helper)
+    (left.helper && right.helper
+      ? samePoint(left.helper, right.helper)
+      : left.helper === right.helper)
   );
 }
 

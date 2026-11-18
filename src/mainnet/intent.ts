@@ -2,14 +2,14 @@
 import * as btc from '@scure/btc-signer';
 import {hex} from '@scure/base';
 import {z} from 'zod';
-import {withdrawalSchema} from '../lib/model';
+import {helperWithdrawalSchema} from '../lib/model';
 import {fingerprint} from '../lib/provenance';
 const opts={allowUnknownInputs:true,allowUnknownOutputs:true};
 const bytes=z.string().regex(/^(?:[a-f0-9]{2})+$/).max(8000000);
 export const contractSchema=z.object({
  format:z.literal('qsb-mainnet-signing-intent-v1'), network:z.literal('mainnet'),
  genesisHash:z.literal('000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f'),
- manifest:withdrawalSchema, assembledTxHex:bytes,
+ manifest:helperWithdrawalSchema, assembledTxHex:bytes,
  fundingPreviousTxHex:bytes, helperPreviousTxHex:bytes,
  vaultScriptHex:bytes.max(20000), helperPublicKey:bytes.max(66), helperAddress:z.string(),
  sequence:z.number().int().min(0).max(0xffffffff),locktime:z.number().int().min(0).max(0xffffffff),

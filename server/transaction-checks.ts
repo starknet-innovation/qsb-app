@@ -1,6 +1,13 @@
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import { withdrawalSchema, type PublicVault, type Job } from "../src/lib/model";
+import {
+  withdrawalSchema,
+  withdrawalInputs,
+  withdrawalInputValue,
+  vaultInputIndex,
+  type PublicVault,
+  type Job,
+} from "../src/lib/model";
 import { outputScript } from "../src/lib/transactions";
 import { ChainError, type Esplora } from "./chain";
 import { MinerInclusionError } from "./miner-inclusion";
@@ -84,34 +91,33 @@ export function assertWithdrawalSpendAgainstJob(job: Job, raw: string): void {
     throw new MinerInclusionError("ExactSpendMismatch");
   }
   try {
+    const inputs = withdrawalInputs(m),
+      vault = vaultInputIndex(m);
     if (
       tx.version !== 1 ||
       tx.lockTime !== hit.locktime ||
-      tx.inputsLength !== 2 ||
+      tx.inputsLength !== inputs.length ||
       tx.outputsLength !== 1
     )
       throw new ChainError("Withdrawal layout or locktime changed.");
-    for (const [index, point, sequence] of [
-      [0, m.helper, HELPER_SEQUENCE],
-      [1, m.funding, hit.sequence],
-    ] as const) {
+    for (const [index, point] of inputs.entries()) {
       const input = tx.getInput(index);
       // Parsed txids are lowercase; a stored manifest may not be.
       if (
         hex.encode(input.txid!) !== point.txid.toLowerCase() ||
         input.index !== point.vout ||
-        input.sequence !== sequence
+        input.sequence !== (index === vault ? hit.sequence : HELPER_SEQUENCE)
       )
         throw new ChainError("Withdrawal input changed.");
     }
     if (
-      !tx.getInput(1).finalScriptSig?.length ||
-      !tx.getInput(0).finalScriptWitness?.length
+      !tx.getInput(vault).finalScriptSig?.length ||
+      (m.helper && !tx.getInput(0).finalScriptWitness?.length)
     )
       throw new ChainError(
         "Withdrawal authorization or wallet signature missing.",
       );
-    helperSighashAll(tx.getInput(0));
+    if (m.helper) helperSighashAll(tx.getInput(0));
     assertOutput(tx, 0, BigInt(m.outputValue), m.outputScript);
     let outputTotal = 0n;
     for (let index = 0; index < tx.outputsLength; index += 1) {
@@ -120,14 +126,12 @@ export function assertWithdrawalSpendAgainstJob(job: Job, raw: string): void {
         throw new ChainError("Withdrawal destination or fee mismatch.");
       outputTotal += amount;
     }
-    const txFee =
-      BigInt(m.funding.value) + BigInt(m.helper.value) - outputTotal;
+    const txFee = withdrawalInputValue(m) - outputTotal;
     if (txFee !== BigInt(m.fee))
       throw new ChainError("Withdrawal destination or fee mismatch.");
     if (
       hex.encode(outputScript(m.destination)) !== m.outputScript ||
-      BigInt(m.outputValue) + BigInt(m.fee) !==
-        BigInt(m.funding.value) + BigInt(m.helper.value)
+      BigInt(m.outputValue) + BigInt(m.fee) !== withdrawalInputValue(m)
     )
       throw new ChainError("Withdrawal destination or fee mismatch.");
   } catch (error) {
@@ -190,7 +194,9 @@ export async function checkWithdrawal(
   const m = withdrawalSchema.parse(job.manifest);
   await Promise.all([
     chain.unspent(m.funding, vault.scriptHex),
-    chain.unspent(m.helper, hex.encode(outputScript(vault.paymentAddress))),
+    ...(m.helper
+      ? [chain.unspent(m.helper, hex.encode(outputScript(vault.paymentAddress)))]
+      : []),
   ]);
   const tx = parse(raw);
   return { txid: tx.id };

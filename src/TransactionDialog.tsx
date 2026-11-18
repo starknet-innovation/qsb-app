@@ -49,6 +49,7 @@ import {
   formatBtc,
   canonicalManifest,
   withdrawalSchema,
+  helperWithdrawalSchema,
   type PublicVault,
   type Recovery,
   type Withdrawal,
@@ -371,7 +372,7 @@ export default function TransactionDialog({
   const savedIntent = (() => {
     if (deposit || !unlocked?.authorization) return undefined;
     try {
-      return withdrawalSchema.parse(JSON.parse(unlocked.authorization.manifestJson));
+      return helperWithdrawalSchema.parse(JSON.parse(unlocked.authorization.manifestJson));
     } catch {
       return undefined;
     }
@@ -776,6 +777,8 @@ export default function TransactionDialog({
         const { previousTxHex } = await api<{ previousTxHex: string }>(
           `/vaults/${vault.id}/funding`,
         );
+        if (!job.manifest.helper)
+          throw Error("This withdrawal has no helper input. Authorize it with the custody that holds its vault.");
         const helper = await input(job.manifest.helper);
         const local = solvedResult !== undefined ? await rebuildWithdrawalFromSolvedResult({
           solved: solvedResult,

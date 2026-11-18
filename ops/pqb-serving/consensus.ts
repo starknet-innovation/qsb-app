@@ -30,7 +30,7 @@ if (execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim() 
 const retained = retainedMode ? retainedContext(dir, campaign, job, commit) : undefined;
 coordinatorPublicSolvedResult(job);
 if (job.manifestHash !== original.rows[1].job.manifestHash || job.manifest.funding.txid !== "11".repeat(32)
-  || job.manifest.helper.txid !== "22".repeat(32)) throw Error("Only the unfunded public intent is accepted");
+  || job.manifest.helper?.txid !== "22".repeat(32)) throw Error("Only the unfunded public intent is accepted");
 // This seed is committed public test data, never wallet or operator recovery material.
 const state = JSON.stringify({ config: "PQB", seed: fixture.seed });
 const native = path.resolve("terraform/.build/api/native"), build = path.resolve("terraform/.build");
@@ -77,7 +77,7 @@ save("offline-consensus-intent.json", JSON.stringify({ ...provenance, sourceComm
   binarySha256: sha(readFileSync(path.join(native, "qsb-consensus"))),
   librarySha256: sha(readFileSync(path.join(native, "libbitcoinconsensus.so.0"))) }, null, 2) + "\n");
 function run(label: string, transaction: string, valid: boolean, vaultScript = generated.scriptHex) {
-  const input = [transaction, "2", job.manifest.helper.value, "51", job.manifest.funding.value, vaultScript].join("\n") + "\n";
+  const input = [transaction, "2", job.manifest.helper!.value, "51", job.manifest.funding.value, vaultScript].join("\n") + "\n";
   save(`offline-core-${label}.stdin`, input);
   const result = spawnSync("docker", args, { input, encoding: "utf8", timeout: 30000, maxBuffer: 4096 });
   const accepted = result.status === 0 && result.stdout === "core-27.2-api2-all-inputs-valid\n";

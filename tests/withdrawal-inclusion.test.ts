@@ -34,7 +34,7 @@ function transaction(
     allowUnknownOutputs: true,
   });
   tx.addInput({
-    txid: options.wrongInput ? "33".repeat(32) : manifest.helper.txid,
+    txid: options.wrongInput ? "33".repeat(32) : manifest.helper!.txid,
     index: 1,
   });
   tx.addInput({ txid: manifest.funding.txid, index: 3 });

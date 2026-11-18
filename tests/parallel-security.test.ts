@@ -77,8 +77,8 @@ function assembled() {
     allowUnknownOutputs: true,
   });
   tx.addInput({
-    txid: manifest.helper.txid,
-    index: manifest.helper.vout,
+    txid: manifest.helper!.txid,
+    index: manifest.helper!.vout,
     sequence: 0xfffffffe,
   });
   tx.addInput({

@@ -10,7 +10,7 @@ import {
 import { fromHex, hex } from "../pqb-core/primitives";
 import { parseScript, serializeTx, type Tx } from "../pqb-core/tx";
 import { pinFields, pinNonceOf } from "../pqb-core/spend";
-import type { Job, Withdrawal } from "./model";
+import { helperIsFunding, vaultInputIndex, withdrawalInputValue, type Job, type Withdrawal } from "./model";
 
 const hexBytes = z.string().regex(/^(?:[0-9a-f]{2})+$/);
 const menu = z.object({
@@ -115,16 +115,18 @@ export function generatePqb() {
     ...(LATEST_VERSION === PQB_LEGACY_CONSTRUCTION ? {} : { version: LATEST_VERSION }) }));
 }
 
-/** Same two-input, single-output intent as QSB: helper first, legacy vault second. */
+/**
+ * Version 1, one output. With a helper: helper first, legacy vault second, as QSB. Without one
+ * (a device-held vault): the vault is the only input and pays the fee.
+ */
 export function pqbTransaction(m: Withdrawal, sequence = 0x80000000, locktime = 500000000): Tx {
-  if (BigInt(m.helper.value) + BigInt(m.funding.value) !== BigInt(m.outputValue) + BigInt(m.fee)
-    || BigInt(m.outputValue) <= 0n || BigInt(m.fee) <= 0n
-    || (m.helper.txid.toLowerCase() === m.funding.txid.toLowerCase() && m.helper.vout === m.funding.vout))
+  if (withdrawalInputValue(m) !== BigInt(m.outputValue) + BigInt(m.fee)
+    || BigInt(m.outputValue) <= 0n || BigInt(m.fee) <= 0n || helperIsFunding(m))
     throw new Error("Invalid PQB spend amounts or inputs");
-  return { version: 1, locktime, vin: [
-    { txid: m.helper.txid, vout: m.helper.vout, sequence: 0xfffffffe, scriptSig: new Uint8Array() },
-    { txid: m.funding.txid, vout: m.funding.vout, sequence, scriptSig: new Uint8Array() },
-  ], vout: [{ value: BigInt(m.outputValue), script: fromHex(m.outputScript) }] };
+  const vault = { txid: m.funding.txid, vout: m.funding.vout, sequence, scriptSig: new Uint8Array() };
+  return { version: 1, locktime, vin: m.helper
+    ? [{ txid: m.helper.txid, vout: m.helper.vout, sequence: 0xfffffffe, scriptSig: new Uint8Array() }, vault]
+    : [vault], vout: [{ value: BigInt(m.outputValue), script: fromHex(m.outputScript) }] };
 }
 
 /** Rebuild the public problem from the approved manifest, never from worker-supplied bytes. */
@@ -141,7 +143,7 @@ export function pqbPacket(publicStateJson: string, m: Withdrawal, stage: number,
   const live = Array.from({ length: 109 }, (_, j) => j).filter(j => !used.includes(j));
   return { stage, kind: stage ? "round" : "pinning", predicate: "sha256", sha1_chain: false,
     scriptpubkey: s.full_script_hex, tx_template: hex(serializeTx(pqbTransaction(m, seq, lt))),
-    n_in: 1, hashtype: 1, only_33_byte_keys: stage === 2, ladder_levels: 0, verify_form: false,
+    n_in: vaultInputIndex(m), hashtype: 1, only_33_byte_keys: stage === 2, ladder_levels: 0, verify_form: false,
     menu: s.stages[stage].menu, ...(stage ? { round_table: s.round_table, live_slots: live,
       used_slots: used, table_n: live.length, t: stage === 1 ? 8 : 9, deletions_before: [], pin_nonce: nonce.toString() } : {}),
   };
@@ -170,6 +172,20 @@ export function pqbSelection(packet: Packet, line: string): number[] {
   return roundSelection(packet, parseHit(packet, line).nonce);
 }
 
+/**
+ * The solved fields a device-held vault takes to rebuild its one-input withdrawal (the PQB Ledger
+ * app's WITHDRAW START): the pinned nSequence and nLockTime, the 8 round-0 and 9 round-1 table
+ * indices in ascending order, and the menu entry each of the three stages picked.
+ */
+export function pqbStart(publicStateJson: string, m: Withdrawal, solution: NonNullable<Job["solution"]>) {
+  const hits = pqbHitsSchema.parse(solution.pqb);
+  if (!hits.round0 || !hits.round1) throw new Error("Incomplete PQB solution");
+  const picks = [hits.pinning, hits.round0, hits.round1]
+    .map((line, stage) => parseHit(pqbPacket(publicStateJson, m, stage, solution), line).menuIndex);
+  return { sequence: solution.sequence, locktime: solution.locktime,
+    round0: solution.round1, round1: solution.round2, picks };
+}
+
 /** Recheck all three public solutions locally before producing any witness or co-signature. */
 export function assemblePqb(stateJson: string, m: Withdrawal, solution: NonNullable<Job["solution"]>): string {
   const state = recovery.parse(JSON.parse(stateJson));
@@ -189,7 +205,7 @@ export function assemblePqb(stateJson: string, m: Withdrawal, solution: NonNulla
     throw new Error("PQB solution changed");
   const tx = pqbTransaction(m, seq, lt);
   const out = assemble(lock, { txid: m.funding.txid, vout: m.funding.vout, amount: Number(m.funding.value) },
-    [], { ...plan, pinNonce: plan.pinNonce!, transaction: tx, inputIndex: 1 });
+    [], { ...plan, pinNonce: plan.pinNonce!, transaction: tx, inputIndex: vaultInputIndex(m) });
   if (out.simError) throw new Error("PQB witness construction failed: " + out.simError);
   return out.hex;
 }

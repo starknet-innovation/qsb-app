@@ -43,6 +43,9 @@ import { z } from "zod";
 import {
   publicVaultSchema,
   withdrawalSchema,
+  withdrawalInputs,
+  withdrawalInputValue,
+  helperIsFunding,
   validatePublicState,
   release,
   type Job,
@@ -134,12 +137,14 @@ type Env = { Variables: { owner: string } };
  * the manifest that way so a job created through the API can always be submitted.
  */
 function lowercaseOutpoints<
-  T extends { funding: { txid: string }; helper: { txid: string } },
+  T extends { funding: { txid: string }; helper?: { txid: string } },
 >(manifest: T): T {
   return {
     ...manifest,
     funding: { ...manifest.funding, txid: manifest.funding.txid.toLowerCase() },
-    helper: { ...manifest.helper, txid: manifest.helper.txid.toLowerCase() },
+    ...(manifest.helper
+      ? { helper: { ...manifest.helper, txid: manifest.helper.txid.toLowerCase() } }
+      : {}),
   };
 }
 export type AuthenticatedJobRoutes = Pick<Hono<Env>, "get">;
@@ -1187,8 +1192,23 @@ export function createApp(
         "withdrawal_invalid",
         "Output and fee must be positive.",
       );
+    // Only a PQB vault's co-signature fixes the outputs and fee; Config A relies on the helper's.
+    if (!manifest.helper && v.config !== "PQB")
+      return apiError(
+        c,
+        400,
+        "withdrawal_invalid",
+        "A Config A withdrawal needs a helper input.",
+      );
+    if (helperIsFunding(manifest))
+      return apiError(
+        c,
+        400,
+        "withdrawal_invalid",
+        "The helper input is the vault outpoint.",
+      );
     if (
-      BigInt(manifest.funding.value) + BigInt(manifest.helper.value) !==
+      withdrawalInputValue(manifest) !==
       BigInt(manifest.outputValue) + BigInt(manifest.fee)
     )
       return apiError(
@@ -1213,7 +1233,8 @@ export function createApp(
       );
     }
     await ledger.unspent(manifest.funding, v.scriptHex);
-    await ledger.unspent(manifest.helper, hex.encode(outputScript(owner)));
+    if (manifest.helper)
+      await ledger.unspent(manifest.helper, hex.encode(outputScript(owner)));
     const now = new Date().toISOString();
     const job: Job = {
       id,
@@ -1253,7 +1274,7 @@ export function createApp(
       ...(budget ? [budget.creationFence()] : []),
       ...(await canonicalReservationWrites(
         store,
-        [manifest.funding, manifest.helper].map((point) => ({
+        withdrawalInputs(manifest).map((point) => ({
           owner,
           jobId: id,
           txid: point.txid,
