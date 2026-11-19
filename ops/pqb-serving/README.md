@@ -38,7 +38,7 @@ image and partition contract, and a separately recorded allowance. The first
 reservation is retained in campaign accounting. Neither execution is resumed or
 replayed after an unknown submission.
 
-When the ordinary `g5.xlarge` pool has no capacity, `capacity.py` prepares an
+For European validation when the ordinary pool has no capacity, `capacity.py` prepares an
 isolated `qsb-gpu-validation` queue and compute environment using `g5.4xlarge`
 NVIDIA A10G hosts. It copies the reviewed host AMI, immutable launch-template version,
 network and instance profile. The pool uses `BEST_FIT_PROGRESSIVE`, minimum zero
@@ -140,7 +140,7 @@ assess earlier full-pipeline evidence separately against the actual bundle bytes
 ## Operator sequence
 
 Use a fresh directory outside every checkout. Its `operator.json` contains only
-`profile`, `account` and `region` (`eu-west-2` for the app-account operator), never credentials. The connected AWS
+`profile`, `account` and `region` (`eu-west-2` for the app-account operator), never credentials. For an app-account attempt sharing an earlier deadline, set `notAfter` to that absolute Unix timestamp before preparation. The controller freezes the earlier of that timestamp and its ordinary deadline. The connected AWS
 MCP session should be used when it targets the deployment account; the explicit
 local profile is the SDK fallback when that connector is bound to another account.
 Provisioning mutations use the SDK with one attempt and retain an exclusive intent
@@ -150,9 +150,9 @@ pause and revision-scoped drain; the independent scheduled drain is logged in Cl
 From a clean pushed checkout with locked dependencies installed:
 
 ```sh
-QSB_NETWORK=mainnet node --import tsx ops/pqb-serving/fixture.ts prepare "$EVIDENCE"
+release_id=$(node -p 'require("./src/lib/releases/qsb-solver-pqb-aws-sm86-v0-2-0.json").id')
+QSB_NETWORK=mainnet node --import tsx ops/pqb-serving/fixture.ts prepare "$EVIDENCE" "$release_id"
 python3 ops/pqb-serving/control.py inspect "$EVIDENCE"
-release_id=$(node -p 'require("./src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json").id')
 node terraform/scripts/build.mjs --network=mainnet --solver-release="$release_id"
 # Optional temporary pool: generate the baseline and scope it against the
 # administrator-requested policy kept outside Git. AWS_ACCOUNT_ID comes from
@@ -189,8 +189,8 @@ Omit the `capacity.py` and Autopilot commands when using the original pool.
 Call `collect` regularly during each execution; it retains snapshots rather than
 rewriting originals. Each campaign reserves $200 operationally and permits at most 900 + 540,000
 reserved GPU-seconds across the two public jobs. The original and isolated pool
-modes freeze four hours; the explicitly bound shared-pool replacement freezes six. The ordinary provider keeps its 16-slot cap; the isolated provider
-keeps four. The account quota applies across both pools.
+modes freeze four hours in Europe; Virginia uses its earlier fixed reservation expiry, up to twelve hours. The explicitly bound shared-pool replacement freezes six. The ordinary London provider limits concurrency to six GPU slots; the isolated provider
+keeps four in Europe and two in Virginia. The account quota applies across both pools.
 This is an assessment
 reservation, not a guaranteed billing limit. Current regional pricing must be
 recorded independently before preparing a new campaign.
@@ -269,7 +269,7 @@ The current-status collector pauses and drains the campaign immediately when it 
 ## Explicit SNF account isolation
 
 `operator.json` may explicitly add `"snfIsolation": true` for a separately authorized
-root session in an otherwise empty Ireland or London GPU/Batch account. This creates an isolated
+root session in an otherwise empty Ireland, London or Virginia GPU/Batch account. This creates an isolated
 consumer stack, not a production app deployment. Root credentials remain local; the
 coordinator and workers receive only generated runtime roles. No API, wallet or miner
 path is created. The same enrolled image, clean consumer bundle, workflow, public
@@ -285,7 +285,7 @@ fresh quota. The quota may bound actual concurrency below the configured ceiling
 record both and never infer allocated GPUs from submitted jobs.
 
 Use `uv run --no-project --with-requirements ops/pqb-serving/requirements.txt python` for this profile's AWS
-login credential provider. Isolated mode permits `eu-west-1` or `eu-west-2`; ordinary
+login credential provider. Isolated mode permits `eu-west-1`, `eu-west-2` or `us-east-1`; ordinary
 app-account mode remains London only. Select and freeze the region before preparation. After building and local public-fixture preparation:
 
 ```sh
@@ -302,8 +302,8 @@ python ops/pqb-serving/snf.py capture "$EVIDENCE"
 python ops/pqb-serving/control.py deploy "$EVIDENCE"
 ```
 
-Preparation freezes one $200 reservation and four-hour deadline before infrastructure
-creation. Bootstrap creates only named, tagged public-data resources: a private
+Preparation freezes one $200 reservation and a deadline before infrastructure
+creation. European isolated profiles allow four hours. Virginia allows at most twelve hours and requires a fixed reservation expiry in notAfter. Bootstrap creates only named, tagged public-data resources: a private
 TLS-only artifact bucket, no-ingress HTTPS-only host group, immutable host template,
 worker roles/profile, initial definition/log group and a campaign runtime boundary.
 The boundary expires one hour after the fixed deadline to allow scheduled draining.
@@ -473,3 +473,25 @@ recorded host termination and recorded volume deletion. Release the reservation
 only after its fresh receipt reports every check passed. Preserve original receipts
 and report estimated costs separately from provider billing. Never retry an
 uncertain paid trigger or extend the frozen deadline.
+
+
+## Two-worker Virginia validation
+
+Explicit isolated mode supports us-east-1 with two g5.xlarge A10Gs and an 8-vCPU
+maximum. Freeze notAfter in operator.json before preparation, at most 12 hours
+away. Retain capacity-scope.json containing the reservation tag name and the same
+Unix deadline. Inspection requires two available, open, account-owned g5.xlarge
+reservation slots with that expiry. It selects default public subnets in their
+zones. Reservation time is chargeable while idle and counts toward the approved
+cumulative budget. The coordinator derives its two-worker limit from the regional
+validation sizing. Production keeps its independent London configuration.
+
+The controller accepts any exact enrolled PQB descriptor selected in the fixture.
+Optional notAfter shortens ordinary London campaigns before preparation.
+Prepared deadlines and operator bindings remain frozen. Virginia S3 bootstrap
+uses the default bucket location required by us-east-1.
+
+The collector preserves explicit terminal EC2 observations. After EC2 expires an
+instance record, a matching account/region terminal receipt can reconcile its ID.
+Missing IDs without terminal evidence stop collection and cleanup for operator
+reconciliation. See the [v0.2.0 public receipts](../../docs/pqb-v020-validation/README.md).

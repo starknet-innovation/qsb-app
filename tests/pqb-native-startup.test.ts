@@ -38,6 +38,6 @@ it.each(validation.regions)("audits validation startup in %s", (region) => {
 });
 
 it("rejects unsupported validation regions and keeps ordinary-queue audit in London", () => {
-  expect(() => nativeStartup([device, isolation], queue.replace("eu-west-2", "us-east-1"))).toThrow("receipt missing");
+  expect(() => nativeStartup([device, isolation], queue.replace("eu-west-2", "us-west-2"))).toThrow("receipt missing");
   expect(() => nativeStartup([device, isolation], queue.replace(validation.name, "qsb-gpu").replace("eu-west-2", "eu-west-1"))).toThrow("receipt missing");
 });

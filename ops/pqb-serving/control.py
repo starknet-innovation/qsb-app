@@ -62,9 +62,25 @@ def persist(path, value, exclusive=False):
 
 def check_operator_config(config):
     allowed = json.loads((ROOT / 'server/aws-batch-validation.json').read_text())['regions'] if config.get('snfIsolation') is True else ['eu-west-2']
-    if (set(config) not in ({'profile', 'account', 'region'}, {'profile', 'account', 'region', 'snfIsolation'})
+    if ('notAfter' in config and (type(config['notAfter']) is not int or (config.get('snfIsolation') and config.get('region') != 'us-east-1'))
+        or (config.get('region') == 'us-east-1' and 'notAfter' not in config)
+        or (set(config) - {'notAfter'}) not in ({'profile', 'account', 'region'}, {'profile', 'account', 'region', 'snfIsolation'})
         or ('snfIsolation' in config and config['snfIsolation'] is not True) or config.get('region') not in allowed):
         raise RuntimeError('Use the scoped operator profile, account and explicitly supported region')
+
+
+def fixed_deadline(config, created, shared_pool):
+    if config.get('snfIsolation') and config.get('region') == 'us-east-1':
+        if 'notAfter' not in config:
+            raise RuntimeError('Two-worker run requires the fixed capacity reservation deadline')
+        hours = json.loads((ROOT / 'server/aws-batch-validation.json').read_bytes())['usEast1']['campaignHours']
+        latest = created + hours * 3600
+    else:
+        latest = created + campaign_seconds(shared_pool)
+    deadline = min(latest, config.get('notAfter', latest))
+    if deadline <= created:
+        raise RuntimeError('Campaign deadline already elapsed')
+    return deadline
 
 
 def clean_source():
@@ -104,7 +120,7 @@ class Campaign:
 
     def validate_scope(self):
         name = self.state['name']
-        if self.state['deadline'] != self.state['createdAt'] + campaign_seconds(bool(self.state.get('sharedPoolReplacement'))) or self.state['reservedUsd'] != 200 or self.state['preflightGpuSeconds'] != 900 or self.state['solveGpuSeconds'] != 540000:
+        if self.state['deadline'] != fixed_deadline(self.config, self.state['createdAt'], bool(self.state.get('sharedPoolReplacement'))) or self.state['reservedUsd'] != 200 or self.state['preflightGpuSeconds'] != 900 or self.state['solveGpuSeconds'] != 540000:
             raise RuntimeError('Campaign deadline or reserved budget changed')
         if not re.fullmatch(r'qsb-pqb-v-[a-f0-9]{12}', name):
             raise RuntimeError('Invalid dedicated campaign name')
@@ -252,8 +268,8 @@ class Campaign:
         manifest = json.loads((ROOT / 'terraform/.build/manifest.json').read_text())
         if manifest['commit'] != source or not manifest['clean'] or manifest['identities']['solver']['id'] != fixture['descriptor']['id']:
             raise RuntimeError('Clean exact PQB build manifest required')
-        enrolled = json.loads((ROOT / 'src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json').read_text())
-        if fixture['descriptor'] != enrolled:
+        enrolled = [json.loads(path.read_bytes()) for path in (ROOT / 'src/lib/releases').glob('*.json')]
+        if fixture['descriptor'].get('protocol') != 'pqb-v1' or enrolled.count(fixture['descriptor']) != 1:
             raise RuntimeError('Fixture descriptor differs from the enrolled immutable release')
         for name, digest in manifest['files'].items():
             if hashlib.sha256((ROOT / 'terraform/.build' / name).read_bytes()).hexdigest() != digest:
@@ -295,7 +311,7 @@ class Campaign:
         prepared_at = int(time.time())
         self.state = {'format': 'pqb-serving-campaign-v1', 'name': name, 'sourceCommit': source,
             'operatorHash': hashlib.sha256(dump(self.config).encode()).hexdigest(), 'createdAt': prepared_at,
-            'deadline': prepared_at + campaign_seconds(bool(shared_binding)), 'reservedUsd': 200, 'reservationStatus': 'reserved',
+            'deadline': fixed_deadline(self.config, prepared_at, bool(shared_binding)), 'reservedUsd': 200, 'reservationStatus': 'reserved',
             'preflightGpuSeconds': 900, 'solveGpuSeconds': 540000, 'fixtureSha256': hashlib.sha256((self.directory / 'public-fixture.json').read_bytes()).hexdigest(),
             'coordinatorSha256': manifest['files']['coordinator.zip'], 'apiArtifactSha256': manifest['files']['api.zip'], 'descriptor': fixture['descriptor'],
             'queue': snapshot['coordinatorEnv']['AWS_BATCH_JOB_QUEUE'], 'bucket': snapshot['coordinatorEnv']['AWS_BATCH_JOB_BUCKET'],

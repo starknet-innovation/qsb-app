@@ -1,0 +1,123 @@
+{
+  "checkedAt": 1795070324.030302,
+  "passed": true,
+  "checks": [
+    {
+      "check": "schedule",
+      "passed": true
+    },
+    {
+      "check": "workflow",
+      "passed": true
+    },
+    {
+      "check": "function qsb-pqb-v-85884787ca09-coordinator",
+      "passed": true
+    },
+    {
+      "check": "function qsb-pqb-v-85884787ca09-deadline",
+      "passed": true
+    },
+    {
+      "check": "table qsb-pqb-v-85884787ca09-preflight",
+      "passed": true
+    },
+    {
+      "check": "table qsb-pqb-v-85884787ca09-solve",
+      "passed": true
+    },
+    {
+      "check": "role qsb-pqb-v-85884787ca09-coordinator",
+      "passed": true
+    },
+    {
+      "check": "role qsb-pqb-v-85884787ca09-workflow",
+      "passed": true
+    },
+    {
+      "check": "role qsb-pqb-v-85884787ca09-deadline",
+      "passed": true
+    },
+    {
+      "check": "role qsb-pqb-v-85884787ca09-scheduler",
+      "passed": true
+    },
+    {
+      "check": "log /aws/lambda/qsb-pqb-v-85884787ca09-coordinator",
+      "passed": true
+    },
+    {
+      "check": "log /aws/lambda/qsb-pqb-v-85884787ca09-deadline",
+      "passed": true
+    },
+    {
+      "check": "log /aws/vendedlogs/states/qsb-pqb-v-85884787ca09",
+      "passed": true
+    },
+    {
+      "check": "permanent revision preserved",
+      "passed": true
+    },
+    {
+      "check": "rollback revision active",
+      "passed": true
+    },
+    {
+      "check": "previous solver qsb-app-api",
+      "passed": true
+    },
+    {
+      "check": "previous solver qsb-app-coordinator",
+      "passed": true
+    },
+    {
+      "check": "queue SUBMITTED",
+      "passed": true
+    },
+    {
+      "check": "queue PENDING",
+      "passed": true
+    },
+    {
+      "check": "queue RUNNABLE",
+      "passed": true
+    },
+    {
+      "check": "queue STARTING",
+      "passed": true
+    },
+    {
+      "check": "queue RUNNING",
+      "passed": true
+    },
+    {
+      "check": "host i-007096812987b8aa1",
+      "passed": true
+    },
+    {
+      "check": "volume vol-0052d1dcc5fb9772a",
+      "passed": true
+    },
+    {
+      "check": "object outputs/422467ae-3f24-4226-9540-7e2aea0dec1e.json",
+      "passed": true
+    },
+    {
+      "check": "object inputs/8245e64a-d11c-4e7b-aefa-9fdf6b59b945.json",
+      "passed": true
+    },
+    {
+      "check": "object outputs/422467ae-3f24-4226-9540-7e2aea0dec1e.json.head.json",
+      "passed": true
+    },
+    {
+      "check": "object inputs/8245e64a-d11c-4e7b-aefa-9fdf6b59b945.json.head.json",
+      "passed": true
+    }
+  ],
+  "gpuSubmissions": 1,
+  "reservationReleased": true,
+  "originalReceiptSha256": "d3aa9e38ff4219f703978108aa84f5a6ecf12565bba7f29f0895244d312c0f4e",
+  "recordedHosts": 1,
+  "recordedVolumes": 1
+}

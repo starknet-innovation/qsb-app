@@ -79,3 +79,5 @@ can temporarily test the larger A10G profile in the existing subnets and restore
 the original pool afterward. Production release selection is independent.
 The committed watcher checks metadata readiness, handles Batch status transitions
 without duplicate descriptions, and records verified stops and terminal hosts.
+
+The served PQB v0.2.0 worker has [public consumer qualification and promotion receipts](docs/pqb-v020-validation/README.md).

@@ -102,9 +102,12 @@ export class AwsBatch implements ComputeProvider {
   private get validationProfile() {
     return this.sharedValidationProfile || this.queue.endsWith(`:job-queue/${validation.name}`);
   }
+  private get validationSizing() {
+    return this.queue.split(":")[3] === "us-east-1" ? validation.usEast1 : validation;
+  }
   get parallelismLimit() {
     return this.validationProfile
-      ? Math.min(gpuSpendLimits.workersMax, Math.floor(validation.maxVcpus / validation.vcpusPerHost))
+      ? Math.min(gpuSpendLimits.workersMax, Math.floor(this.validationSizing.maxVcpus / this.validationSizing.vcpusPerHost))
       : productionCapacity().parallelismLimit;
   }
   constructor(
@@ -242,10 +245,10 @@ export class AwsBatch implements ComputeProvider {
       c?.type !== "EC2" ||
       c.allocationStrategy !== (this.validationProfile ? validation.allocationStrategy : capacity!.allocationStrategy) ||
       c.minvCpus !== 0 ||
-      c.maxvCpus !== (this.validationProfile ? validation.maxVcpus : capacity!.maxVcpus) ||
+      c.maxvCpus !== (this.validationProfile ? this.validationSizing.maxVcpus : capacity!.maxVcpus) ||
       (!c.instanceTypes || c.instanceTypes.length !== (this.validationProfile ? 1 : capacity!.instanceTypes.length)
         || new Set(c.instanceTypes).size !== c.instanceTypes.length
-        || c.instanceTypes.some(type => !(this.validationProfile ? [validation.instanceType] : capacity!.instanceTypes).includes(type))) ||
+        || c.instanceTypes.some(type => !(this.validationProfile ? [this.validationSizing.instanceType] : capacity!.instanceTypes).includes(type))) ||
       (this.validationProfile && ((!this.sharedValidationProfile && e.tags?.PqbValidation !== validationCampaign) || e.tags?.Project !== "qsb-gpu"
         || e.computeEnvironmentArn !== this.queue.replace(":job-queue/", ":compute-environment/")
         || q.computeEnvironmentOrder[0].computeEnvironment !== e.computeEnvironmentArn))

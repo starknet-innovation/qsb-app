@@ -1,0 +1,56 @@
+{
+  "solveWallSeconds": 23992.12599992752,
+  "virginiaReservationEstimateUsd": 24.127792222222222,
+  "previousCampaignEstimateUsd": 1.9662815944444443,
+  "cumulativeEc2EstimateUsd": 26.094073816666665,
+  "scope": "On-demand reservation pricing includes Virginia reserved time through expiry, and prior campaign EC2. Excludes non-EC2 costs and taxes; provider billing not confirmed.",
+  "cpuVerification": true,
+  "upstreamFullHits": 3,
+  "offlineConsensusPassed": true,
+  "cleanupPassed": true,
+  "sourceCommit": "e8232556118069d06da294d14d4301dde7b25eb3",
+  "nativeJobs": 106,
+  "format": "pqb-v020-consumer-qualification-v1",
+  "descriptor": {
+    "generatorCommit": "eccdd09772edf14ab37fc63992b0626ad7ff2221",
+    "id": "pqb-ranked-v2-80d306ec74b0-bcc69b5d33ac",
+    "image": "ghcr.io/starknet-innovation/qsb-solver@sha256:bcc69b5d33ac7ddbabd5a8822081acef275c02cf0232f93bd04fab0865a16f78",
+    "kernelCommit": "80d306ec74b0c5f5a8bd95a2c94ab047bafd2a28",
+    "protocol": "pqb-v1",
+    "schemaVersion": 3,
+    "searchContract": "5217daa6415b83dcce2d85159130df4994ab0e9bb67910c7bdf00e5804f4ee71",
+    "searchVersion": "pqb-ranked-v2",
+    "solverCommit": "80d306ec74b0c5f5a8bd95a2c94ab047bafd2a28",
+    "solverRepository": "https://github.com/starknet-innovation/qsb-solver"
+  },
+  "nativeConsumerSourceCommit": "e8232556118069d06da294d14d4301dde7b25eb3",
+  "productionSourceCommit": "72f7d67a0be99079a0c0496f28f799eb1a7864a7",
+  "runtime": {
+    "region": "us-east-1",
+    "instanceType": "g5.xlarge",
+    "gpu": "A10G",
+    "workers": 2
+  },
+  "production": {
+    "preflightNativeSeconds": 492.888,
+    "londonConservativeEc2EstimateUsd": 0.32990241547637517,
+    "cumulativeEc2EstimateUsd": 26.423976232176376,
+    "cleanupPassed": true,
+    "productionRelease": "v0.2.0",
+    "permanentBatchRevision": 16,
+    "billing": "Estimate uses launch to independently verified cleanup, including startup and idle time. Excludes ancillary charges and taxes."
+  },
+  "limits": [
+    "Public synthetic fixture with nonexistent outpoints and public OP_TRUE helper",
+    "Offline Core script checks exclude chain, UTXO, wallet and miner acceptance",
+    "No transaction broadcast",
+    "Full solve uses isolated validation sizing; London permanent preflight covers one native unit",
+    "Estimates exclude ancillary charges and taxes",
+    "No matched full-solve performance comparison"
+  ],
+  "cleanup": {
+    "virginia": true,
+    "london": true,
+    "expiredInstanceReconciliation": "CloudTrail accepted termination plus current EC2 absence and recorded volume deletion"
+  }
+}

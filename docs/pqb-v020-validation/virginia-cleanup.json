@@ -1,0 +1,147 @@
+{
+  "checkedAt": 1795068196.091945,
+  "passed": true,
+  "checks": [
+    {
+      "check": "qsb-pqb-v-00b233c76074-watchdog",
+      "passed": true
+    },
+    {
+      "check": "qsb-pqb-v-00b233c76074-deadline",
+      "passed": true
+    },
+    {
+      "check": "workflow",
+      "passed": true
+    },
+    {
+      "check": "qsb-pqb-v-00b233c76074-coordinator",
+      "passed": true
+    },
+    {
+      "check": "qsb-pqb-v-00b233c76074-preflight",
+      "passed": true
+    },
+    {
+      "check": "qsb-pqb-v-00b233c76074-solve",
+      "passed": true
+    },
+    {
+      "check": "qsb-pqb-v-00b233c76074-workflow",
+      "passed": true
+    },
+    {
+      "check": "qsb-pqb-v-00b233c76074-scheduler",
+      "passed": true
+    },
+    {
+      "check": "qsb-pqb-v-00b233c76074-host",
+      "passed": true
+    },
+    {
+      "check": "qsb-pqb-v-00b233c76074-task",
+      "passed": true
+    },
+    {
+      "check": "qsb-pqb-v-00b233c76074-execute",
+      "passed": true
+    },
+    {
+      "check": "profile",
+      "passed": true
+    },
+    {
+      "check": "boundary",
+      "passed": true
+    },
+    {
+      "check": "artifact bucket",
+      "passed": true
+    },
+    {
+      "check": "log /aws/lambda/qsb-pqb-v-00b233c76074-coordinator",
+      "passed": true
+    },
+    {
+      "check": "log /aws/lambda/qsb-pqb-v-00b233c76074-deadline",
+      "passed": true
+    },
+    {
+      "check": "log /aws/vendedlogs/states/qsb-pqb-v-00b233c76074",
+      "passed": true
+    },
+    {
+      "check": "log /aws/batch/qsb-pqb-v-00b233c76074",
+      "passed": true
+    },
+    {
+      "check": "network security group",
+      "passed": true
+    },
+    {
+      "check": "launch template",
+      "passed": true
+    },
+    {
+      "check": "queue",
+      "passed": true
+    },
+    {
+      "check": "compute environment",
+      "passed": true
+    },
+    {
+      "check": "inactive arn:aws:batch:us-east-1:ACCOUNT:job-definition/qsb-gpu-solver:4",
+      "passed": true
+    },
+    {
+      "check": "inactive arn:aws:batch:us-east-1:ACCOUNT:job-definition/qsb-gpu-solver:3",
+      "passed": true
+    },
+    {
+      "check": "i-07b87dc7c79d4eba8",
+      "passed": true
+    },
+    {
+      "check": "i-064355e53066ba3a2",
+      "passed": true
+    },
+    {
+      "check": "i-0aa2af1b6d1fabe04",
+      "passed": true
+    },
+    {
+      "check": "vol-09f2066088b5a3ac3",
+      "passed": true
+    },
+    {
+      "check": "vol-058113e5842f7a188",
+      "passed": true
+    },
+    {
+      "check": "vol-002ff0d1e162c825a",
+      "passed": true
+    },
+    {
+      "check": "cr-0164e6c084e9de4b3",
+      "passed": true
+    },
+    {
+      "check": "cr-08a364b7c6e88b22b",
+      "passed": true
+    },
+    {
+      "check": "terminal jobs 0",
+      "passed": true
+    },
+    {
+      "check": "terminal jobs 100",
+      "passed": true
+    }
+  ],
+  "gpuSubmissions": 106,
+  "reservationReleased": true,
+  "originalReceiptSha256": "282233fb641f68dd5ed3530110489b91b14ddfdecc0e721b8ea8367d25e68516",
+  "recordedHosts": 3,
+  "recordedVolumes": 3
+}
