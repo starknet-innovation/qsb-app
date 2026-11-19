@@ -126,6 +126,8 @@ describe("one-input PQB transaction and problems", () => {
   });
 });
 
+/** A placeholder vault scriptSig shaped like PQB's top: a SIGHASH_ALL co-signature, then its key. */
+const cosigned = (hashtype = "01") => "09" + "aa".repeat(8) + hashtype + "21" + "02" + "bb".repeat(32);
 /** A signed-shaped one-input spend: the scriptSig is a placeholder, the checks bind its layout. */
 function oneInputRaw(change: { locktime?: number; sequence?: number; amount?: bigint; extra?: "input" | "output";
   scriptSig?: string } = {}) {
@@ -135,7 +137,7 @@ function oneInputRaw(change: { locktime?: number; sequence?: number; amount?: bi
   tx.addInput({ txid: oneInput.funding.txid, index: oneInput.funding.vout, sequence: change.sequence ?? sequence });
   tx.addOutput({ script: hex.decode(oneInput.outputScript), amount: change.amount ?? 99000n });
   if (change.extra === "output") tx.addOutput({ script: hex.decode(oneInput.outputScript), amount: 1n });
-  tx.updateInput(change.extra === "input" ? 1 : 0, { finalScriptSig: hex.decode(change.scriptSig ?? "0101") }, true);
+  tx.updateInput(change.extra === "input" ? 1 : 0, { finalScriptSig: hex.decode(change.scriptSig ?? cosigned()) }, true);
   return hex.encode(tx.toBytes(true, true));
 }
 const solvedJob = (manifest: Withdrawal = oneInput) => ({ manifest, status: "awaiting_authorization",
@@ -146,7 +148,9 @@ describe("one-input exact-spend binding", () => {
   it("accepts exactly the approved one-input spend and refuses each change", () => {
     expect(() => assertWithdrawalSpendAgainstJob(solvedJob(), oneInputRaw())).not.toThrow();
     for (const change of [{ locktime: locktime + 1 }, { sequence: sequence + 1 }, { amount: 99001n },
-      { amount: 98999n }, { extra: "input" as const }, { extra: "output" as const }])
+      { amount: 98999n }, { extra: "input" as const }, { extra: "output" as const },
+      // A co-signature that doesn't commit to the outputs (SIGHASH_NONE), or none on top.
+      { scriptSig: cosigned("02") }, { scriptSig: cosigned("81") }, { scriptSig: "0101" }])
       expect(() => assertWithdrawalSpendAgainstJob(solvedJob(), oneInputRaw(change))).toThrow("ExactSpendMismatch");
     // A one-input spend never satisfies a two-input intent.
     expect(() => assertWithdrawalSpendAgainstJob(solvedJob({ ...twoInput, outputValue: "109000" }), oneInputRaw()))

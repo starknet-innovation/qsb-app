@@ -207,7 +207,9 @@ export function localQsb() {
       if (m.helper) tx.addInput({ txid: m.helper.txid, index: m.helper.vout, sequence: 0xfffffffe });
       tx.addInput({ txid: m.funding.txid, index: m.funding.vout, sequence: hit.sequence });
       tx.addOutput({ script: hex.decode(m.outputScript), amount: BigInt(m.outputValue) });
-      tx.updateInput(m.helper ? 1 : 0, { finalScriptSig: hex.decode("0101") }, true);
+      // Without a helper the server requires a SIGHASH_ALL co-signature (and its key) on top.
+      tx.updateInput(m.helper ? 1 : 0, { finalScriptSig: hex.decode(m.helper ? "0101"
+        : "09" + "aa".repeat(8) + "01" + "21" + "02" + "bb".repeat(32)) }, true);
       return hex.encode(tx.toBytes(true, true));
     },
   };

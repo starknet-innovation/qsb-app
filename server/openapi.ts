@@ -578,6 +578,8 @@ export const unreachedErrorSites: Record<string, string> = {
     "It rethrows these as exact_spend_mismatch.",
   "transaction-checks.ts | helperSighashAll":
     "Only assertWithdrawalSpendAgainstJob calls it, which rethrows as exact_spend_mismatch.",
+  "transaction-checks.ts | vaultCosignatureSighashAll":
+    "Only assertWithdrawalSpendAgainstJob calls it, which rethrows as exact_spend_mismatch.",
   "transaction-checks.ts | assertOutput":
     "assertWithdrawalSpendAgainstJob rethrows it as exact_spend_mismatch; checkFunding isn't called by a route.",
   "transaction-checks.ts | parse":

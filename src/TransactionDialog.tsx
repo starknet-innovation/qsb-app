@@ -427,6 +427,9 @@ export default function TransactionDialog({
         (await validateRecovery(r.stateJson)) !== vault.scriptHash
       )
         throw Error("This backup belongs to a different vault.");
+      // The web app only authorizes withdrawals it started, which always have a helper.
+      if (job && !job.manifest.helper)
+        throw Error("This withdrawal has no helper input. Authorize it with the custody that holds its vault.");
       // Authorizing needs the backup saved when the search started; an earlier one can't sign.
       if (job && !r.authorization)
         throw Error(`This backup has no withdrawal intent. Select ${recoveryBackupFilename(`${vault.id}-withdrawal`)}, or the -signing backup if you saved one.`);

@@ -185,6 +185,8 @@
   "transaction-checks.ts | parse | ChainError | chain_error | Duplicate transaction input.",
   "transaction-checks.ts | assertOutput | ChainError | chain_error | Transaction output does not match the approved intent.",
   "transaction-checks.ts | invalid | ChainError | funding_transaction_invalid | message",
+  "transaction-checks.ts | vaultCosignatureSighashAll | ChainError | chain_error | Withdrawal authorization missing.",
+  "transaction-checks.ts | vaultCosignatureSighashAll | ChainError | chain_error | Withdrawal authorization missing.",
   "transaction-checks.ts | helperSighashAll | ChainError | chain_error | Withdrawal authorization or wallet signature missing.",
   "transaction-checks.ts | assertWithdrawalSpendAgainstJob | MinerInclusionError | exact_spend_mismatch | ExactSpendMismatch",
   "transaction-checks.ts | assertWithdrawalSpendAgainstJob | MinerInclusionError | exact_spend_mismatch | ExactSpendMismatch",

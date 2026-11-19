@@ -67,6 +67,32 @@ export function matchVaultFunding(
   return { vout: 0, value: amount.toString() };
 }
 
+/**
+ * Without a helper, the PQB co-signature alone fixes the outputs and fee. It is the last
+ * signature pushed (under its public key), and the script doesn't constrain its hashtype,
+ * so require SIGHASH_ALL here, as the SDK verifier does.
+ */
+function vaultCosignatureSighashAll(
+  input: ReturnType<btc.Transaction["getInput"]>,
+): void {
+  let pushes: unknown[];
+  try {
+    pushes = btc.Script.decode(input.finalScriptSig!);
+  } catch {
+    throw new ChainError("Withdrawal authorization missing.");
+  }
+  const signature = pushes.at(-2),
+    key = pushes.at(-1);
+  if (
+    !(signature instanceof Uint8Array) ||
+    !(key instanceof Uint8Array) ||
+    key.length !== 33 ||
+    signature.length < 9 ||
+    signature[signature.length - 1] !== 0x01
+  )
+    throw new ChainError("Withdrawal authorization missing.");
+}
+
 function helperSighashAll(
   input: ReturnType<btc.Transaction["getInput"]>,
 ): void {
@@ -118,6 +144,7 @@ export function assertWithdrawalSpendAgainstJob(job: Job, raw: string): void {
         "Withdrawal authorization or wallet signature missing.",
       );
     if (m.helper) helperSighashAll(tx.getInput(0));
+    else vaultCosignatureSighashAll(tx.getInput(vault));
     assertOutput(tx, 0, BigInt(m.outputValue), m.outputScript);
     let outputTotal = 0n;
     for (let index = 0; index < tx.outputsLength; index += 1) {
