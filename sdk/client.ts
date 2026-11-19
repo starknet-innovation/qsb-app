@@ -233,7 +233,10 @@ function sharingSecrets(vaults: PublicVault[], publicStateJson: string): PublicV
   const state = JSON.parse(publicStateJson);
   if (state.config === "PQB")
     // A reused seed pushes the same HORS commitments under any construction, even where the scripts differ.
-    return vaults.find(v => v.config === "PQB" && pqbSharesSecrets(v.publicStateJson, publicStateJson));
+    // A stored row that no longer parses is skipped, as on the server.
+    return vaults.find(v => {
+      try { return v.config === "PQB" && pqbSharesSecrets(v.publicStateJson, publicStateJson); } catch { return false; }
+    });
   const { hors_commitments: rounds } = state as { hors_commitments: string[][] };
   // Each commitment is a 20-byte push. A chance match elsewhere in a script would only refuse.
   const pushes = rounds.flat().map((commitment) => `14${commitment}`);
