@@ -4,8 +4,13 @@
   "final-cpu-verification.json": "61c0854041eef27bb6c316e5f4f78e7d73799face02bf78c0de897d4919233be",
   "final-job.json": "c0a85eed8b75d3ac8179ab45c12fa8dbb9f2a947c981871b225f1ec2471eca6e",
   "independent-native-check.json": "e4ddb0b952806a27eed40a468f975752c6adcd1d0e3351498e645cdb136b17ac",
+  "london-cleanup.json": "16c2a00d8459df202b21977635fdedf38b995cb66a7a386bd1d3557e526e506c",
+  "london-native-audit.json.gz": "2a6d13c06944589c4e6d74512fe2558eb36b23a09ba2480478e4e5a8cb64ab7c",
+  "london-native-objects.json.gz": "19847c1ef917d1b38a660765afba464fa01c2c63131a68a4545b732fc7fcdfd4",
   "native-accounting-audit.json.gz": "8f66dff9fd678ff6b99548db3f2d923fffbcc58df08feae85ee9526e20513477",
   "native-requests-and-results.json.gz": "de82855803c5a0bd19bcd8a38f3a01f24c7c7784f969dfc8c45bee1f8fddf279",
   "offline-consensus.json": "3efddc2fd1fea6ce4e8fa9006297ac6d735dbb798f4a6827232d989b59a2d2f1",
-  "public-fixture.json": "43e83e47793e1f5112882d71f4535ca9e2227444f2cf3bfb39c56b06550f83c2"
+  "promotion-readback.json": "bfe2fcc310a5059577725256540fd03a87bc31ab62ace7d3de360cdd6043e362",
+  "public-fixture.json": "43e83e47793e1f5112882d71f4535ca9e2227444f2cf3bfb39c56b06550f83c2",
+  "virginia-cleanup.json": "969e1a4657519e9e009347254b6bed3fb3e25cd98c8e93c8736a8a67d5e25e90"
 }

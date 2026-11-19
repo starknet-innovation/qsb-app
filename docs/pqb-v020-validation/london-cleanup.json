@@ -1,0 +1,123 @@
+{
+  "checkedAt": 1795070324.030302,
+  "passed": true,
+  "checks": [
+    {
+      "checkIndex": 0,
+      "passed": true
+    },
+    {
+      "checkIndex": 1,
+      "passed": true
+    },
+    {
+      "checkIndex": 2,
+      "passed": true
+    },
+    {
+      "checkIndex": 3,
+      "passed": true
+    },
+    {
+      "checkIndex": 4,
+      "passed": true
+    },
+    {
+      "checkIndex": 5,
+      "passed": true
+    },
+    {
+      "checkIndex": 6,
+      "passed": true
+    },
+    {
+      "checkIndex": 7,
+      "passed": true
+    },
+    {
+      "checkIndex": 8,
+      "passed": true
+    },
+    {
+      "checkIndex": 9,
+      "passed": true
+    },
+    {
+      "checkIndex": 10,
+      "passed": true
+    },
+    {
+      "checkIndex": 11,
+      "passed": true
+    },
+    {
+      "checkIndex": 12,
+      "passed": true
+    },
+    {
+      "checkIndex": 13,
+      "passed": true
+    },
+    {
+      "checkIndex": 14,
+      "passed": true
+    },
+    {
+      "checkIndex": 15,
+      "passed": true
+    },
+    {
+      "checkIndex": 16,
+      "passed": true
+    },
+    {
+      "checkIndex": 17,
+      "passed": true
+    },
+    {
+      "checkIndex": 18,
+      "passed": true
+    },
+    {
+      "checkIndex": 19,
+      "passed": true
+    },
+    {
+      "checkIndex": 20,
+      "passed": true
+    },
+    {
+      "checkIndex": 21,
+      "passed": true
+    },
+    {
+      "checkIndex": 22,
+      "passed": true
+    },
+    {
+      "checkIndex": 23,
+      "passed": true
+    },
+    {
+      "checkIndex": 24,
+      "passed": true
+    },
+    {
+      "checkIndex": 25,
+      "passed": true
+    },
+    {
+      "checkIndex": 26,
+      "passed": true
+    },
+    {
+      "checkIndex": 27,
+      "passed": true
+    }
+  ],
+  "gpuSubmissions": 1,
+  "reservationReleased": true,
+  "originalReceiptSha256": "d3aa9e38ff4219f703978108aa84f5a6ecf12565bba7f29f0895244d312c0f4e",
+  "recordedHosts": 1,
+  "recordedVolumes": 1
+}
