@@ -1,5 +1,5 @@
 import { solverSearchContracts } from "./search-contracts.generated";
-import { PQB_GENERATOR_COMMIT } from "./pqb-identity";
+import { PQB_CONSTRUCTION_COMMITS, isPqbGeneratorCommit, pqbConstructionOf } from "./pqb-identity";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import publishedV2 from "./releases/qsb-solver-v0-1-0.json";
@@ -29,7 +29,7 @@ export const externalSolverDescriptorSchema = z
       .regex(/^ghcr\.io\/starknet-innovation\/qsb-solver@sha256:[a-f0-9]{64}$/),
   })
   .strict().superRefine((d, ctx) => {
-    if (d.generatorCommit !== (d.protocol === "pqb-v1" ? PQB_GENERATOR_COMMIT : "2c9172051d5c150ef0a994ca6b988a08a3ef9e85")
+    if (!(d.protocol === "pqb-v1" ? isPqbGeneratorCommit(d.generatorCommit) : d.generatorCommit === "2c9172051d5c150ef0a994ca6b988a08a3ef9e85")
       || d.searchVersion !== (d.protocol === "pqb-v1" ? "pqb-ranked-v2" : "ranked-v2"))
       ctx.addIssue({ code: "custom", message: "Incompatible solver protocol, generator or search version" });
   });
@@ -105,7 +105,10 @@ export function vaultConfiguration(v: VaultInput) {
   const network = v.network;
   return {
     protocol: v.config === "PQB" ? "pqb-v1" as const : "qsb-config-a-v1" as const,
-    generatorCommit: v.config === "PQB" ? PQB_GENERATOR_COMMIT : "2c9172051d5c150ef0a994ca6b988a08a3ef9e85",
+    // A PQB vault's generator is the commit of its own construction.
+    generatorCommit: v.config === "PQB"
+      ? PQB_CONSTRUCTION_COMMITS[pqbConstructionOf(JSON.parse(v.publicStateJson))]
+      : "2c9172051d5c150ef0a994ca6b988a08a3ef9e85",
     network,
     config: v.config as "A" | "PQB",
     scriptHash: v.scriptHash,
@@ -133,6 +136,19 @@ export function assertVaultConfiguration(
     throw new Error("VaultConfigurationMismatch");
   return expected;
 }
+/**
+ * Whether a solver release can search a vault: the same protocol and, for PQB, any generator of
+ * the compatible set (pqb-identity.ts); for Config A, the same generator.
+ */
+export function solverServesVault(
+  descriptor: Pick<SolverDescriptor, "protocol" | "generatorCommit">,
+  configuration: { protocol: string; generatorCommit: string },
+): boolean {
+  if (descriptor.protocol !== configuration.protocol) return false;
+  return descriptor.protocol === "pqb-v1"
+    ? isPqbGeneratorCommit(descriptor.generatorCommit) && isPqbGeneratorCommit(configuration.generatorCommit)
+    : descriptor.generatorCommit === configuration.generatorCommit;
+}
 export function pinSolver(
   v: VaultInput & { configuration?: unknown },
   solverId = currentSolverId,
@@ -140,7 +156,7 @@ export function pinSolver(
   const configuration = assertVaultConfiguration(v);
   if (v.config !== "A" && v.config !== "PQB") throw new Error("UnsupportedVaultProtocol");
   const descriptor = solverRelease(solverId);
-  if (descriptor.protocol !== configuration.protocol || descriptor.generatorCommit !== configuration.generatorCommit)
+  if (!solverServesVault(descriptor, configuration))
     throw new Error("SolverVaultProtocolMismatch");
   return {
     descriptor,
@@ -160,7 +176,7 @@ export function assertSolverPin(
   )
     throw new Error("SolverReleaseMismatch");
   const config = assertVaultConfiguration(v);
-  if (descriptor.protocol !== config.protocol || descriptor.generatorCommit !== config.generatorCommit)
+  if (!solverServesVault(descriptor, config))
     throw new Error("SolverVaultProtocolMismatch");
   if (pin.vaultConfigurationHash !== fingerprint(config))
     throw new Error("SolverVaultMismatch");

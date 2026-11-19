@@ -1,6 +1,7 @@
-import config from "../pqb-core/configs.json" with { type: "json" };
+import configs from "../pqb-core/configs.json" with { type: "json" };
 import { z } from "zod";
-import { buildLock, type Lock } from "../pqb-core/lock";
+import { buildLock, LATEST_VERSION, VERSIONS, versionParams, type Lock } from "../pqb-core/lock";
+import { pqbConstructionOf, PQB_LEGACY_CONSTRUCTION, type PqbConstruction } from "./pqb-identity";
 import { assemble } from "../pqb-core/spend";
 import {
   stagesFromLock, problemFromPacket, problemTxt, evaluate, solves, parseHit,
@@ -20,8 +21,12 @@ const menu = z.object({
   }).strict()).min(2).max(4),
 }).strict();
 const publicStage = z.object({ menu }).strict();
+/** A construction other than v0, which a vault without `version` uses. */
+const laterConstruction = z.enum(VERSIONS as [PqbConstruction, ...PqbConstruction[]])
+  .refine(v => v !== PQB_LEGACY_CONSTRUCTION, "v0 is written as no version");
 export const pqbPublicStateSchema = z.object({
   config: z.literal("PQB"),
+  version: laterConstruction.optional(),
   full_script_hex: hexBytes.max(20000),
   round_table: z.array(z.string().regex(/^[0-9a-f]{18}$/)).length(109),
   stages: z.tuple([publicStage, publicStage, publicStage]),
@@ -35,19 +40,23 @@ export const pqbPublicStateSchema = z.object({
     ctx.addIssue({ code: "custom", message: "Duplicate PQB table entry" });
 });
 
-/** Bind the ordered shared table to the generator's D/F/C stride-3 pushes in the actual script. */
+/**
+ * Bind the ordered shared table to the generator's pushes in the actual script: after the
+ * TSENT, D_j then C_j (the pick2 gadget) or D_j, F_j=1, C_j (stride-3), per the construction.
+ */
 export function validatePqbPublicState(text: string) {
   const state = pqbPublicStateSchema.parse(JSON.parse(text));
+  const stride3 = versionParams(pqbConstructionOf(state)).gadget === "stride3", step = stride3 ? 3 : 2;
   const tokens = parseScript(fromHex(state.full_script_hex));
   const one = (i: number) => tokens[i]?.[1] === 0x51 ||
     (tokens[i]?.[2]?.length === 1 && tokens[i][2]![0] === 1);
   const candidates: string[][] = [];
-  for (let start = 1; start + state.round_table.length * 3 <= tokens.length; start++) {
-    if (!one(start - 1)) continue; // TSENT, followed by D_j, F_j=1, C_j in setup order.
+  for (let start = 1; start + state.round_table.length * step <= tokens.length; start++) {
+    if (!one(start - 1)) continue; // TSENT, followed by the table in setup order.
     const table: string[] = [];
     for (let j = 0; j < state.round_table.length; j++) {
-      const pos = start + 3 * j, signature = tokens[pos]?.[2], commitment = tokens[pos + 2]?.[2];
-      if (signature?.length !== 9 || !one(pos + 1) || commitment?.length !== 20) break;
+      const pos = start + step * j, signature = tokens[pos]?.[2], commitment = tokens[pos + step - 1]?.[2];
+      if (signature?.length !== 9 || (stride3 && !one(pos + 1)) || commitment?.length !== 20) break;
       table.push(hex(signature));
     }
     if (table.length === state.round_table.length) candidates.push(table);
@@ -57,14 +66,18 @@ export function validatePqbPublicState(text: string) {
   return state;
 }
 
-const recovery = z.object({ config: z.literal("PQB"), seed: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
+const recovery = z.object({ config: z.literal("PQB"), seed: z.string().regex(/^[0-9a-f]{64}$/),
+  version: laterConstruction.optional() }).strict();
+/** The vault's lock, built with the construction its recovery state names (v0 when none). */
+const recoveryLock = (state: z.infer<typeof recovery>) =>
+  buildLock("PQB", fromHex(state.seed), { version: state.version ?? PQB_LEGACY_CONSTRUCTION });
 const hit = z.string().min(1).max(200);
 export const pqbHitsSchema = z.object({ pinning: hit, round0: hit.optional(), round1: hit.optional() }).strict();
 export type PqbHits = z.infer<typeof pqbHitsSchema>;
 
 function publicState(lock: Lock): string {
   return JSON.stringify(pqbPublicStateSchema.parse({
-    config: "PQB", full_script_hex: hex(lock.script), round_table: lock.detail.dsig.map(hex),
+    config: "PQB", ...(lock.version === PQB_LEGACY_CONSTRUCTION ? {} : { version: lock.version }), full_script_hex: hex(lock.script), round_table: lock.detail.dsig.map(hex),
     stages: stagesFromLock(lock).map(st => ({ menu: {
       r_inv: st.menuR!.r_inv.toString(),
       variants: st.menuR!.variants.map(v => ({ add_n: v.add_n, odd: v.odd, points: v.points })),
@@ -74,15 +87,17 @@ function publicState(lock: Lock): string {
 
 export function adoptPqb(stateJson: string) {
   const state = recovery.parse(JSON.parse(stateJson));
-  const lock = buildLock("PQB", fromHex(state.seed));
+  const lock = recoveryLock(state);
   if (!lock.detail.realPuzzles || lock.script.length > 10000 || lock.detail.ops > 201)
     throw new Error("Invalid PQB lock");
   return { stateJson: JSON.stringify(state), publicStateJson: publicState(lock),
     scriptHex: hex(lock.script), scriptHash: lock.sha256 };
 }
 
+/** A new vault uses the latest construction. */
 export function generatePqb() {
-  return adoptPqb(JSON.stringify({ config: "PQB", seed: hex(crypto.getRandomValues(new Uint8Array(32))) }));
+  return adoptPqb(JSON.stringify({ config: "PQB", seed: hex(crypto.getRandomValues(new Uint8Array(32))),
+    ...(LATEST_VERSION === PQB_LEGACY_CONSTRUCTION ? {} : { version: LATEST_VERSION }) }));
 }
 
 /** Same two-input, single-output intent as QSB: helper first, legacy vault second. */
@@ -143,7 +158,7 @@ export function pqbSelection(packet: Packet, line: string): number[] {
 /** Recheck all three public solutions locally before producing any witness or co-signature. */
 export function assemblePqb(stateJson: string, m: Withdrawal, solution: NonNullable<Job["solution"]>): string {
   const state = recovery.parse(JSON.parse(stateJson));
-  const lock = buildLock("PQB", fromHex(state.seed));
+  const lock = recoveryLock(state);
   const pub = publicState(lock), hits = pqbHitsSchema.parse(solution.pqb);
   if (!hits.round0 || !hits.round1) throw new Error("Incomplete PQB solution");
   const packets = new Map<number, Packet>(), solved = new Map<number, SolvedStage>();
@@ -165,13 +180,17 @@ export function assemblePqb(stateJson: string, m: Withdrawal, solution: NonNulla
 }
 
 /** Upper bound from the generator's witness layout; script numbers stay below the 1,000-item limit. */
-const picks = config.PQB.t_list;
-export const PQB_MAX_SCRIPTSIG =
-  // Puzzle keys use each stage's allowed encoding; dummy signature keys are compressed.
-  config.PQB.m_list.reduce((sum, m) => sum + (m === 2 || m === 4 ? 34 : 66), 0)
-  + picks.reduce((sum, t) => sum + t * 34, 0)
-  // Shared chained HORS: first-round preimages have the configured width, later ones are SHA-256.
-  + picks.reduce((sum, t, r) => sum + t * (1 + (r === 0 ? config.PQB.hors_secret_bytes : 32)), 0)
-  + (picks.reduce((sum, t) => sum + t, 0) + config.PQB.K.length) * 3
-  // Every menu entry and the co-signature are <=73 bytes, each with its one-byte push; cosig key is compressed.
-  + (config.PQB.K.length + 1) * 74 + 34;
+function maxScriptSig(c: (typeof configs.versions)[PqbConstruction]["params"]) {
+  const picks = c.t_list;
+  return (
+    // Puzzle keys use each stage's allowed encoding; dummy signature keys are compressed.
+    c.m_list.reduce((sum, m) => sum + (m === 2 || m === 4 ? 34 : 66), 0)
+    + picks.reduce((sum, t) => sum + t * 34, 0)
+    // Shared chained HORS: first-round preimages have the configured width, later ones are SHA-256.
+    + picks.reduce((sum, t, r) => sum + t * (1 + (r === 0 ? c.hors_secret_bytes : 32)), 0)
+    + (picks.reduce((sum, t) => sum + t, 0) + c.K.length) * 3
+    // Every menu entry and the co-signature are <=73 bytes, each with its one-byte push; cosig key is compressed.
+    + (c.K.length + 1) * 74 + 34);
+}
+/** The largest bound over every construction: a fee quote doesn't depend on the vault's. */
+export const PQB_MAX_SCRIPTSIG = Math.max(...VERSIONS.map(v => maxScriptSig(configs.versions[v].params)));

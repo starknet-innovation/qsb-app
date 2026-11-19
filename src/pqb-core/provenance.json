@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/fireblocks-labs/pqb",
-  "commit": "eccdd09772edf14ab37fc63992b0626ad7ff2221",
+  "commit": "82c7cba684899e5a069f5f1baf4931c59111d345",
   "files": [
     "js/src/address.ts",
     "js/src/lock.ts",
@@ -15,6 +15,11 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "adaptations": {
-    "spend.ts": "Allow the caller to supply a two-input transaction and its vault input index. All witness and signature construction stays upstream."
+    "spend.ts": "Allow the caller to supply the exact transaction and its vault input index. All witness and signature construction stays upstream.",
+    "configs.json": "Add construction v0: the PQB parameters of commit eccdd09772edf14ab37fc63992b0626ad7ff2221, whose vaults this generator still builds byte for byte. Upstream v1 is unchanged and stays the latest."
+  },
+  "constructions": {
+    "v0": "eccdd09772edf14ab37fc63992b0626ad7ff2221",
+    "v1": "82c7cba684899e5a069f5f1baf4931c59111d345"
   }
 }

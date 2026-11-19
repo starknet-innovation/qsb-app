@@ -28,7 +28,7 @@ import {
   verifyRequest,
   webhookRequest,
 } from "./api-schemas";
-import { assertVaultConfiguration, pinSolver } from "../src/lib/provenance";
+import { assertVaultConfiguration, pinSolver, solverServesVault } from "../src/lib/provenance";
 import { Hono } from "hono";
 import { BODY_HASH_HEADER, CREDENTIAL_HEADER } from "../src/lib/session";
 import { getPath } from "hono/utils/url";
@@ -1187,7 +1187,7 @@ export function createApp(
     try {
       selectedSolver = deployedSolver(manifest.solverReleaseId);
       const configuration = assertVaultConfiguration(v);
-      if (selectedSolver.protocol !== configuration.protocol || selectedSolver.generatorCommit !== configuration.generatorCommit)
+      if (!solverServesVault(selectedSolver, configuration))
         throw new Error("SolverVaultProtocolMismatch");
     }
     catch {

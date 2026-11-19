@@ -84,7 +84,7 @@ describe("PQB generator and independent Python reference", () => {
 
   it("constructs the two-input witness with a real SIGHASH_ALL co-signature within the fee bound", () => {
     // Witness assembly only: these default subsets do not solve the real hash puzzles.
-    const lock = buildLock("PQB", fromHex(reference.seed));
+    const lock = buildLock("PQB", fromHex(reference.seed), { version: "v0" });
     const tx = pqbTransaction(manifest, sequence, locktime);
     const out = assemble(lock, { txid: manifest.funding.txid, vout: 0, amount: 100000 }, [], {
       transaction: tx, inputIndex: 1, selection: [reference.priorSelection, [0, 1, 2, 4, 5, 6, 7, 8, 10]],

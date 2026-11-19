@@ -2,7 +2,7 @@ import { parseHit, type Packet } from "../src/pqb-core/grind";
 import { z } from "zod";
 import type { Job, PublicVault } from "../src/lib/model";
 import { release } from "../src/lib/model";
-import { PQB_GENERATOR_COMMIT, PQB_SEARCH_VERSION } from "../src/lib/pqb-identity";
+import { isPqbGeneratorCommit, PQB_SEARCH_VERSION } from "../src/lib/pqb-identity";
 import type { SolverDescriptor } from "../src/lib/provenance";
 import { canonical } from "../src/lib/provenance";
 import { pqbWorkerStage } from "./pqb-search";
@@ -12,7 +12,7 @@ import { workRange } from "./search-ranges";
 export function assertSolverRuntime(selected: SolverDescriptor) {
   const pqb = selected.protocol === "pqb-v1";
   if (selected.searchVersion !== (pqb ? PQB_SEARCH_VERSION : "ranked-v2")
-    || selected.generatorCommit !== (pqb ? PQB_GENERATOR_COMMIT : release.qsbCommit))
+    || !(pqb ? isPqbGeneratorCommit(selected.generatorCommit) : selected.generatorCommit === release.qsbCommit))
     throw new Error("SolverRuntimeMismatch");
 }
 

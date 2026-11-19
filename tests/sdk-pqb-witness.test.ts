@@ -44,7 +44,7 @@ it("checks multisignatures, null dummy and push-only authorization", () => {
   expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script))).toThrow("push-only");
 });
 it("rejects a real PQB-layout witness with a valid co-signature but unsolved puzzle signatures", () => {
-  const lock = buildLock("PQB", Uint8Array.from(reference.seed.match(/../g)!, s => parseInt(s, 16)));
+  const lock = buildLock("PQB", Uint8Array.from(reference.seed.match(/../g)!, s => parseInt(s, 16)), { version: "v0" });
   const [lt, seq] = pinFields(BigInt(reference.pinNonce));
   const manifest = withdrawalSchema.parse(reference.manifest);
   const out = assemble(lock, { txid: manifest.funding.txid, vout: 0, amount: 100000 }, [], {

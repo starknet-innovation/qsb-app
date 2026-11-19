@@ -36,7 +36,14 @@ export interface Packet {
   nonce_space?: string | number;
   pin_nonce?: string | number | null;
   pqb_packet_sha256?: string;
+  pqb_packet?: number;
+  /** v3: rules.filter_needed for this stage. Only an explicit `false` turns the filter off. */
+  single_class_filter?: boolean;
+  /** v3: the OP_0 OP_CHECKSIG that makes `single_class_filter` false, re-checked on the bytes */
+  puzzle_tail?: PuzzleTail | null;
 }
+
+export interface PuzzleTail { checksig_offset: number; pubkey: 'OP_0'; result: 'dropped' | 'unread' }
 
 const big = (v: string | number | bigint): bigint => {
   if (typeof v === 'bigint') return v;
@@ -173,12 +180,69 @@ export function derPrefixBytes(d: Bytes): number {
 }
 
 /** A solved digest becomes a signature; its last byte becomes the hashtype. One in 32 lands in
- *  the SIGHASH_SINGLE class, which is demonstrated theft (rules.is_spendable_der). */
+ *  the SIGHASH_SINGLE class, which is demonstrated theft wherever that signature's sighash is
+ *  computed and its check matters (rules.is_spendable_der). `packetFilterNeeded` says where. */
 export const isSpendableDer = (d: Bytes): boolean => (d[d.length - 1] & 0x1f) !== 3;
+
+// ------------------------------------------------------------------------------ the SINGLE filter
+// Port of rules.tail_shape / rules.packet_filter_needed. A DER-only tail `OP_0 OP_CHECKSIG`
+// fails in Core's CheckECDSASignature on the empty pubkey before the hashtype byte is read, so a
+// SINGLE-class digest there selects no sighash; the false is then dropped (rounds) or never read
+// (pinning). Anything else keeps the filter on: fail closed.
+const OP_0 = 0x00, OP_CHECKSIG = 0xac, OP_DROP = 0x75;
+
+/** 'dropped' for `OP_0 OP_CHECKSIG OP_DROP` at byte `off`, 'bare' for `OP_0 OP_CHECKSIG` then
+ *  anything else, null when there is no OP_CHECKSIG on an empty pubkey there. */
+export function tailShape(script: Bytes, off: number): 'dropped' | 'bare' | null {
+  const toks = parseScript(script);
+  const i = toks.findIndex((t) => t[0] === off);
+  if (i <= 0) return null;
+  const [prev, tok, nxt] = [toks[i - 1], toks[i], toks[i + 1]];
+  if (tok[1] !== OP_CHECKSIG || prev[1] !== OP_0 || prev[0] !== off - 1) return null;
+  return nxt !== undefined && nxt[1] === OP_DROP ? 'dropped' : 'bare';
+}
+
+/** rules.packet_filter_needed: off only when the packet says so AND its script bytes agree. */
+export function packetFilterNeeded(p: Packet): boolean {
+  try {
+    if (p.single_class_filter !== false || p.verify_form !== false) return true;
+    const t = p.puzzle_tail;
+    if (!t || typeof t !== 'object' || t.pubkey !== 'OP_0') return true;
+    if (typeof t.checksig_offset !== 'number' || !Number.isInteger(t.checksig_offset)) return true;
+    const shape = tailShape(fromHex(p.scriptpubkey), t.checksig_offset);
+    if (t.result === 'dropped') return shape !== 'dropped';
+    if (t.result === 'unread') return !(p.kind === 'pinning' && shape === 'bare');
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+/** rules.der_tails / packet_tail, for a lock built here: the k-th DER-only stage owns the k-th
+ *  OP_CHECKSIG. The port builds only the gate-last pinning stage whose false is left unread
+ *  (l1gen.build refuses anything else), so a bare stage-0 tail is that unread result. */
+export function puzzleTails(lock: Lock): (PuzzleTail | null)[] {
+  const d = lock.detail;
+  const S = d.derOnly.length;
+  const out: (PuzzleTail | null)[] = Array(S).fill(null);
+  if (!d.realPuzzles) return out;
+  const cs = parseScript(lock.script).filter((t) => t[1] === OP_CHECKSIG).map((t) => t[0]);
+  const der = d.derOnly.map((x, i) => (x ? i : -1)).filter((i) => i >= 0);
+  if (cs.length !== der.length) return out;
+  der.forEach((stage, k) => {
+    const shape = tailShape(lock.script, cs[k]);
+    if (shape === 'dropped') out[stage] = { checksig_offset: cs[k], pubkey: 'OP_0', result: 'dropped' };
+    else if (shape === 'bare' && stage === 0)
+      out[stage] = { checksig_offset: cs[k], pubkey: 'OP_0', result: 'unread' };
+  });
+  return out;
+}
+
+export const hashtypeOk = (d: Bytes, needed: boolean): boolean => !needed || isSpendableDer(d);
 
 export function solves(p: Packet, digest: Bytes, z: bigint): boolean {
   const rs = parseStrictDer(digest);
-  if (rs === null || !isSpendableDer(digest)) return false;
+  if (rs === null || !hashtypeOk(digest, packetFilterNeeded(p))) return false;
   if (!p.verify_form) return true;
   return (recoverPubkey(rs[0], rs[1], z, 0) ?? recoverPubkey(rs[0], rs[1], z, 1)) !== null;
 }
@@ -620,7 +684,7 @@ export class HitChecker {
 /** The result file `pqb grind verify` reads, for a solved stage. */
 export function resultJson(p: Packet, c: Candidate, searched: bigint, gateBits = DEFAULT_GATE_BITS) {
   return {
-    pqb_result: 2, stage: p.stage, kind: p.kind,
+    pqb_result: 3, stage: p.stage, kind: p.kind,
     packet_sha256: p.pqb_packet_sha256,
     searched: searched.toString(),
     solution: {
@@ -636,7 +700,8 @@ export function resultJson(p: Packet, c: Candidate, searched: bigint, gateBits =
 // Making the work packets, and turning solved stages back into a witness. Ports of
 // grind.stages_from_lock, grind.packets_for_lock and grind.witness_plan.
 
-export const PACKET_VERSION = 2;
+/** v3: per-stage `single_class_filter` and `puzzle_tail` (grind.PACKET_VERSION). */
+export const PACKET_VERSION = 3;
 
 export interface Stage {
   index: number; predicate: string; m: number; ladderLevels: number; sha1Chain: boolean;
@@ -718,11 +783,13 @@ function packetForStage(lock: Lock, st: Stage, txHex: string, nIn: number, o: {
   const liveN = o.liveSlots?.length;
   const nTotal = pinning ? PIN_NONCE_SPACE : comb(liveN ?? st.tableN, st.t!);
   const tx = templateTx(txHex, pinning ? 0n : o.pinNonce!, nIn);
+  const tail = puzzleTails(lock)[st.index];
   // A caller may hand in an assembled spend, whose scriptSig IS the witness. Blanking it keeps
   // contains_no_secret true and does not move the sighash (preimageOf rewrites every scriptSig).
   tx.vin.forEach((v) => { v.scriptSig = new Uint8Array(0); });
   const raw: Record<string, unknown> = {
-    pqb_packet: PACKET_VERSION, config: lock.config, script_sha256: lock.sha256,
+    pqb_packet: PACKET_VERSION, config: lock.config, version: lock.version,
+    script_sha256: lock.sha256,
     scriptpubkey: hex(lock.script), stage: st.index, kind: pinning ? 'pinning' : 'round',
     tx_template: hex(serializeTx(tx)), n_in: nIn, hashtype: 1,
     nonce_field: pinning ? 'nSequence+nLockTime' : 'subset_rank',
@@ -730,7 +797,7 @@ function packetForStage(lock: Lock, st: Stage, txHex: string, nIn: number, o: {
     predicate: st.predicate.replace('_der', ''), verify_form: st.verifyForm,
     ladder_levels: st.ladderLevels, sha1_chain: st.sha1Chain, only_33_byte_keys: st.only33,
     recovery_points_wanted: st.nPoints, tries_per_nonce: st.triesPerZ,
-    single_class_filter: true, menu: st.menuR, fixed_sig: st.fixedSig,
+    single_class_filter: tail === null, puzzle_tail: tail, menu: st.menuR, fixed_sig: st.fixedSig,
     table_n: liveN ?? st.tableN, t: st.t,
     deletions_before: o.deletionsBefore ?? [], round_table: o.roundTable ?? null,
     live_slots: o.liveSlots ?? null, used_slots: o.usedSlots ?? null,

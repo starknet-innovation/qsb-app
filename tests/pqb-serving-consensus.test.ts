@@ -9,7 +9,7 @@ import { parseScript } from "../src/pqb-core/tx";
 
 import { retainedOnlyChanges } from "../ops/pqb-serving/consensus-retained";
 
-const lock = buildLock("PQB", fromHex(reference.seed));
+const lock = buildLock("PQB", fromHex(reference.seed), { version: "v0" });
 const earlier = cosigSign(lock.detail.cosig.d, 123n);
 const sig = cosigSign(lock.detail.cosig.d, 456n);
 const pk = lock.detail.cosig.pk;
