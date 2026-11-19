@@ -1,0 +1,104 @@
+{
+  "version": 4581,
+  "job": {
+    "attempt": 0,
+    "completedAttempts": [],
+    "computeProvider": "aws-batch",
+    "computeSeconds": "45326.325",
+    "createdAt": "2026-11-18T15:06:54.712Z",
+    "gpuBudgetReservedSeconds": 94500,
+    "gpuSubmissions": 105,
+    "id": "7a940c8d-2928-412f-9ff9-04c327302896",
+    "manifest": {
+      "costAccepted": true,
+      "destination": "bc1qxvenxvenxvenxvenxvenxvenxvenxven2ymjt8",
+      "fee": "1000",
+      "funding": {
+        "txid": "1111111111111111111111111111111111111111111111111111111111111111",
+        "value": "100000",
+        "vout": 0
+      },
+      "helper": {
+        "txid": "2222222222222222222222222222222222222222222222222222222222222222",
+        "value": "10000",
+        "vout": 1
+      },
+      "idempotencyKey": "7a940c8d-2928-412f-9ff9-04c327302896",
+      "outputScript": "00143333333333333333333333333333333333333333",
+      "outputValue": "109000",
+      "solverReleaseId": "pqb-ranked-v2-80d306ec74b0-bcc69b5d33ac",
+      "vaultId": "98735a8d-e1b1-4b36-8733-95b32799f708"
+    },
+    "manifestHash": "4829d732144a6119bf63a9d2248f23756aa072892e2730cefc99a8cbc9f94db7",
+    "owner": "bc1qxvenxvenxvenxvenxvenxvenxvenxven2ymjt8",
+    "ownerGpuChargedSeconds": 94500,
+    "parallelSlots": [],
+    "parameterHashes": {
+      "[0,\"pinning\",null]": "2a504ce0e1aac7af84cf568c84185e8ff81e2dd74e942e0b338f29a7ec4d4931",
+      "[0,\"round1\",{\"locktime\":1546952476,\"pqb\":{\"pinning\":\"2147483965 1546952476 9 0 0 1\"},\"round1\":[],\"round2\":[],\"sequence\":2147483965}]": "9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "[0,\"round1\",{\"sequence\":2147483965,\"locktime\":1546952476,\"round1\":[],\"round2\":[],\"pqb\":{\"pinning\":\"2147483965 1546952476 9 0 0 1\"}}]": "9e0e51b70825d84c463e00e1b5de44ef48e1dd835c628dd1a761571517a2ddc3",
+      "[0,\"round2\",{\"locktime\":1546952476,\"pqb\":{\"pinning\":\"2147483965 1546952476 9 0 0 1\",\"round0\":\"13,20,25,48,52,71,83,88 4 1 2 1\"},\"round1\":[13,20,25,48,52,71,83,88],\"round2\":[],\"sequence\":2147483965}]": "7a41a4caefb7d871d391a9de8111fcb6cf6cc355b7900a500c02fd36b489e38e"
+    },
+    "pqbNextPinAttempt": 24,
+    "revision": 0,
+    "solution": {
+      "locktime": 1546952476,
+      "pqb": {
+        "pinning": "2147483965 1546952476 9 0 0 1",
+        "round0": "13,20,25,48,52,71,83,88 4 1 2 1",
+        "round1": "2,19,48,50,56,57,58,86,100 2 0 0 1"
+      },
+      "round1": [
+        13,
+        20,
+        25,
+        48,
+        52,
+        71,
+        83,
+        88
+      ],
+      "round2": [
+        2,
+        21,
+        53,
+        55,
+        61,
+        62,
+        63,
+        94,
+        108
+      ],
+      "sequence": 2147483965
+    },
+    "solver": {
+      "descriptor": {
+        "generatorCommit": "eccdd09772edf14ab37fc63992b0626ad7ff2221",
+        "id": "pqb-ranked-v2-80d306ec74b0-bcc69b5d33ac",
+        "image": "ghcr.io/starknet-innovation/qsb-solver@sha256:bcc69b5d33ac7ddbabd5a8822081acef275c02cf0232f93bd04fab0865a16f78",
+        "kernelCommit": "80d306ec74b0c5f5a8bd95a2c94ab047bafd2a28",
+        "protocol": "pqb-v1",
+        "schemaVersion": 3,
+        "searchContract": "5217daa6415b83dcce2d85159130df4994ab0e9bb67910c7bdf00e5804f4ee71",
+        "searchVersion": "pqb-ranked-v2",
+        "solverCommit": "80d306ec74b0c5f5a8bd95a2c94ab047bafd2a28",
+        "solverRepository": "https://github.com/starknet-innovation/qsb-solver"
+      },
+      "releaseHash": "7cc431511193bfa736316acf4f60ab032f9f1af74ad3eb07c102a7386b86bae4",
+      "vaultConfigurationHash": "7de3190fb760366744baa037c856b0a083c682c8545dfbdb0c88f64abdccdc19"
+    },
+    "stage": "verification",
+    "status": "awaiting_authorization",
+    "updatedAt": "2026-11-18T22:04:28.416Z",
+    "usage": {
+      "chunks": 105,
+      "failed": 3,
+      "queueMs": 1458639,
+      "runMs": 46092898,
+      "unmeasured": 0
+    },
+    "vaultId": "98735a8d-e1b1-4b36-8733-95b32799f708"
+  },
+  "pk": "OWNER#bc1qxvenxvenxvenxvenxvenxvenxvenxven2ymjt8",
+  "sk": "JOB#7a940c8d-2928-412f-9ff9-04c327302896"
+}

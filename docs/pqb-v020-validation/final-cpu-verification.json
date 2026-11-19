@@ -1,0 +1,59 @@
+{
+  "passed": true,
+  "checked": [
+    {
+      "stage": "pinning",
+      "candidate": "2147483965 1546952476 9 0 0 1",
+      "verdict": {
+        "valid": true,
+        "sequence": 2147483965,
+        "locktime": 1546952476,
+        "candidate": "2147483965 1546952476 9 0 0 1"
+      }
+    },
+    {
+      "stage": "round1",
+      "candidate": "13,20,25,48,52,71,83,88 4 1 2 1",
+      "verdict": {
+        "valid": true,
+        "sequence": 2147483965,
+        "locktime": 1546952476,
+        "candidate": "13,20,25,48,52,71,83,88 4 1 2 1",
+        "indices": [
+          13,
+          20,
+          25,
+          48,
+          52,
+          71,
+          83,
+          88
+        ]
+      }
+    },
+    {
+      "stage": "round2",
+      "candidate": "2,19,48,50,56,57,58,86,100 2 0 0 1",
+      "verdict": {
+        "valid": true,
+        "sequence": 2147483965,
+        "locktime": 1546952476,
+        "candidate": "2,19,48,50,56,57,58,86,100 2 0 0 1",
+        "indices": [
+          2,
+          21,
+          53,
+          55,
+          61,
+          62,
+          63,
+          94,
+          108
+        ]
+      }
+    }
+  ],
+  "simulatedGrinder": false,
+  "broadcast": false,
+  "fundedOutputs": false
+}
