@@ -110,3 +110,14 @@ test("rejects an alternate solution when restoring an already-bound signing back
   );
   expect(await calls(page)).toBe(0);
 });
+test("tells a helper-less withdrawal to use its custody before asking for any backup", async ({ page }) => {
+  await page.route("**/v1/config", (route) => route.fulfill({ json: { network: "mainnet", operationsEnabled: true } }));
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const path = "/tests/authorization-harness.tsx";
+    await (await import(path)).mount(false, false, true);
+  });
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("This withdrawal has no helper input");
+  await expect(dialog.getByLabel("Recovery backup", { exact: true })).toHaveCount(0);
+});

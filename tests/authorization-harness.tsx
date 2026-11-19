@@ -10,7 +10,7 @@ import type { Recovery, Job, PublicVault, Withdrawal } from "../src/lib/model";
 import { withVaultConfiguration } from "../src/lib/provenance";
 import { coordinatorPublicSolvedResult } from "../src/mainnet/coordinatorResult";
 const password = "browser authorization passphrase";
-export async function mount(changedSolution = false, localSolved = false) {
+export async function mount(changedSolution = false, localSolved = false, helperless = false) {
   const signingKey = new Uint8Array(32).fill(1);
   const publicKey = localSolved
     ? hex.encode(secp256k1.getPublicKey(signingKey))
@@ -94,7 +94,8 @@ export async function mount(changedSolution = false, localSolved = false) {
     updatedAt: vault.createdAt,
     status: "awaiting_authorization",
     stage: "verification",
-    manifest,
+    // A PQB withdrawal created through the SDK or API without a helper.
+    manifest: helperless ? (({ helper: _helper, ...rest }) => rest)(manifest) : manifest,
     manifestHash,
     attempt: 0,
     computeSeconds: 0,

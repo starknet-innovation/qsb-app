@@ -7,14 +7,27 @@ export type WithdrawalSigningRequest = {
   format: "qsb-external-signing-request-v1";
   vault: PublicVault;
   solved: CoordinatorSolvedResult;
-  /** Both input scripts and all witnesses are empty. */
+  /** Every input script and witness is empty. */
   transaction: string;
   fundingPreviousTxHex: string;
-  helperPreviousTxHex: string;
-  helperAddress: string;
-  helperPublicKey: string;
+  /** The helper's previous transaction, address and key. Absent when the vault is the only input. */
+  helperPreviousTxHex?: string;
+  helperAddress?: string;
+  helperPublicKey?: string;
   /** Config A: 8 + 7; PQB: 8 + 9, in signing order. */
   selection: number[][];
+  /**
+   * PQB only: the solved fields a device rebuilds the transaction from (the PQB Ledger app's
+   * WITHDRAW START): nSequence, nLockTime, the 8 round-0 and 9 round-1 table indices in ascending
+   * order, and the menu entry picked at the pinning stage and each round.
+   */
+  pqbStart?: {
+    sequence: number;
+    locktime: number;
+    round0: number[];
+    round1: number[];
+    picks: number[];
+  };
 };
 
 /**
@@ -26,8 +39,10 @@ export interface ExternalCustody {
   confirmVault(vault: PublicVault): Promise<void>;
   /**
    * Independently verify the solution and exact spend, durably bind this vault to ONE intent and
-   * assembly before revealing anything, then return the transaction with vault input 1 authorized.
-   * Input 0 stays unsigned. Repeated identical requests must return the same bytes after a crash.
+   * assembly before revealing anything, then return the transaction with the vault input
+   * authorized. With a helper, that is input 1 and input 0 stays unsigned. Without one, the vault
+   * is input 0 and the returned transaction is complete. Repeated identical requests must return
+   * the same bytes after a crash.
    */
   authorizeWithdrawal(request: WithdrawalSigningRequest): Promise<string>;
 }

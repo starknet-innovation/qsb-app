@@ -155,16 +155,16 @@
     <div class="holds"><span class="chip secret">wallet private key</span></div>
   </div>
   <div class="cell wallet">
-    <div class="step">Signs the sign-in challenge (BIP-322). The same address later funds the deposit and provides the withdrawal's helper input.</div>
+    <div class="step">Signs the sign-in challenge (BIP-322). The same address later funds the deposit and provides the withdrawal's helper input, when it has one.</div>
   </div>
   <div class="cell wallet">
     <div class="step">Signs the deposit PSBT. Broadcast is off: the app submits the signed bytes itself.</div>
   </div>
   <div class="cell wallet">
-    <div class="step">Controls the helper UTXO selected for the withdrawal; signs helper input 0 later. The service supplies the available public outpoints.</div>
+    <div class="step">Controls the helper UTXO selected for the withdrawal; signs helper input 0 later. The service supplies the available public outpoints. A PQB withdrawal may have no helper; the wallet then signs nothing for it.</div>
   </div>
   <div class="cell wallet lane-end">
-    <div class="step">Signs helper input 0 with <b>SIGHASH_ALL</b>, which fixes the destination, amount and fee.</div>
+    <div class="step">Signs helper input 0 with <b>SIGHASH_ALL</b>, which fixes the destination, amount and fee. Without a helper (one-input PQB), the vault's co-signature fixes them instead.</div>
   </div>
 
   <!-- wallet <-> browser -->
@@ -193,20 +193,20 @@
     <div class="step">Builds a deposit paying the vault script. If the user opts in, it also pays the service fee as output 1. Each vault takes exactly one deposit.</div>
   </div>
   <div class="cell browser">
-    <div class="step"><b>Browser:</b> unlocks its backup. Both flows: you choose a destination, helper output and fee rate. Payout = full funding value + helper value − fee; no independent amount choice.</div>
+    <div class="step"><b>Browser:</b> unlocks its backup. Both flows: you choose a destination, helper output and fee rate. Payout = full funding value + helper value − fee; no independent amount choice. <b>SDK:</b> a PQB withdrawal may omit the helper; payout = funding value − fee.</div>
     <div class="step">Saves a <b>-withdrawal</b> backup that binds that backup copy to this intent. The web app uses device-local localStorage reminders. <b>SDK:</b> required shared durable journal atomically binds the exact public intent before paid work. All devices must share it; never expire or roll back claims. Browser reminders do not bind earlier unbound backup copies.<br><span class="chip enc">-withdrawal backup</span></div>
   </div>
   <div class="cell browser lane-end">
-    <div class="step"><b>Browser:</b> unlocks and assembles locally. <b>SDK:</b> external manager independently approves exact previous outputs, transaction, fee and solution; durably binds one assembly before release, revealing Config A's <b>15 of 300</b> secrets, or PQB's <b>17 HORS preimages and three menu signatures</b> (vault input 1). PQB's ECDSA SIGHASH_ALL co-signature is made by the browser or external manager; its private key never enters SDK/CLI.</div>
+    <div class="step"><b>Browser:</b> unlocks and assembles locally. <b>SDK:</b> external manager independently approves exact previous outputs, transaction, fee and solution; durably binds one assembly before release, revealing Config A's <b>15 of 300</b> secrets, or PQB's <b>17 HORS preimages and three menu signatures</b> (vault input 1, or input 0 when the vault is the only input). PQB's ECDSA SIGHASH_ALL co-signature is made by the browser or external manager; its private key never enters SDK/CLI.</div>
     <div class="step"><b>Browser:</b> saves a <b>-signing</b> backup binding the solution and assembled withdrawal hash <b>before</b> wallet signing. Final signed bytes are a separate signed-result download.<br><span class="chip enc">-signing backup</span></div>
-    <div class="step">Browser only: HORS state remains in memory through signed-transaction review until dialog effect cleanup calls lockQsb(). <b>SDK/CLI:</b> verifies every public hit, exact spend and returned witness before helper signing; records template/solution before disclosure and returned bytes before helper signing. Core remains the service consensus oracle. Locking drops runtime references, not a guarantee of memory zeroization. Never reuse the one-time keys.</div>
+    <div class="step">Browser only: HORS state remains in memory through signed-transaction review until dialog effect cleanup calls lockQsb(). <b>SDK/CLI:</b> verifies every public hit, exact spend and returned witness before helper signing, or before accepting a complete one-input PQB transaction; records template/solution before disclosure and returned bytes before helper signing. Core remains the service consensus oracle. Locking drops runtime references, not a guarantee of memory zeroization. Never reuse the one-time keys.</div>
   </div>
 
   <!-- TRUST BOUNDARY -->
   <div class="boundary-row" style="display:flex"><div class="boundary-label">Trust boundary<br><span style="font-weight:500">public data, proofs, credentials and signed txs</span></div></div>
   <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>BIP-322 sign-in proof</span><span class="pill"><span class="a">↓</span>bearer token / API key</span><span class="pill"><span class="a">↓</span>public vault: script, hash, commitments/curve points, address</span><span class="pill"><span class="a">↑</span>session token (1 h)</span></div></div>
   <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>bearer token / API key</span><span class="pill"><span class="a">↓</span>signed deposit transaction</span></div></div>
-  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↑</span>/payment-utxos: helper candidates</span><span class="pill"><span class="a">↓</span>bearer token / API key</span><span class="pill"><span class="a">↓</span>manifest: destination, amount, fee, outpoints</span><span class="pill"><span class="a">↑</span>solution: sequence, locktime, indices</span></div></div>
+  <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↑</span>/payment-utxos: helper candidates</span><span class="pill"><span class="a">↓</span>bearer token / API key</span><span class="pill"><span class="a">↓</span>manifest: destination, amount, fee, vault and any helper outpoint</span><span class="pill"><span class="a">↑</span>solution: sequence, locktime, indices</span></div></div>
   <div class="boundary-row"><div class="conn"><span class="pill"><span class="a">↓</span>bearer token / API key</span><span class="pill"><span class="a">↓</span>signed withdrawal + disclosed witness</span></div></div>
 
   <!-- SERVICE LANE -->
@@ -230,7 +230,7 @@
     <div class="step">Reads the optional MARA credential from Secrets Manager; only the API function can, with the credentials Lambda issues to it.<br><span class="chip cred">MARA Slipstream credential</span></div>
   </div>
   <div class="cell service">
-    <div class="step">Reserves both outpoints atomically, then the coordinator runs the search.</div>
+    <div class="step">Reserves the vault and any helper outpoint atomically, then the coordinator runs the search.</div>
     <div class="step">A hit used as a solution must pass independent CPU verification. Config A stops at the first valid candidate. PQB's coordinator CPU re-derives every returned hit through the canonical transaction and FindAndDelete before selecting a full solution.<br><span class="chip pub">solution</span></div>
   </div>
   <div class="cell service lane-end">
@@ -284,7 +284,7 @@
   <div class="panel">
     <h3>Who can do what</h3>
     <div class="who">
-      <div><b>User</b><span>Web app: backup, passphrase and original wallet. SDK/CLI: external manager, durable journal and original wallet. The script does not bind that wallet; decrypted recovery state can enable an outside-service spend with another controlled helper.</span></div>
+      <div><b>User</b><span>Web app: backup, passphrase and original wallet. SDK/CLI: external manager, durable journal and original wallet. The script does not bind that wallet; decrypted recovery state can enable an outside-service spend with another controlled helper, or for PQB none.</span></div>
       <div><b>QSB service</b><span>Can refuse or delay a withdrawal, but not redirect it: the destination is fixed by signatures made on the user's machine.</span></div>
       <div><b>GPU solver</b><span>Untrusted compute on public data. Only independently CPU-verified hits can be used as solutions; verification does not necessarily examine every returned hit.</span></div>
       <div><b>Operator</b><span>MFA-backed role that reconciles records after an unknown outcome and writes missing script reservations. It can't sign, and its tools never resubmit.</span></div>

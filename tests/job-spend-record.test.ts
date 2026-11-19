@@ -84,8 +84,8 @@ function signedTx(
   } = {},
 ): string {
   const helperInput = {
-    txid: change.helperTxid ?? record.helper.txid,
-    index: record.helper.vout,
+    txid: change.helperTxid ?? record.helper!.txid,
+    index: record.helper!.vout,
     sequence: change.helperSequence ?? 0xfffffffe,
   };
   const fundingInput = {
@@ -165,11 +165,11 @@ describe("stored withdrawal spend record", () => {
     const stored = job({
       manifest: {
         ...manifest,
-        helper: { ...manifest.helper, txid: "ab".repeat(32).toUpperCase() },
+        helper: { ...manifest.helper!, txid: "ab".repeat(32).toUpperCase() },
       },
     });
     const record = buildStoredSpendRecord(stored);
-    expect(record.helper.txid).toBe("ab".repeat(32));
+    expect(record.helper!.txid).toBe("ab".repeat(32));
     expect(() => assertStoredJobSpend(stored, signedTx(record))).not.toThrow();
     expect(() =>
       assertWithdrawalSpendAgainstJob(stored, signedTx(record)),

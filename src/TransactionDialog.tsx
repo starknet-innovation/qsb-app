@@ -49,6 +49,7 @@ import {
   formatBtc,
   canonicalManifest,
   withdrawalSchema,
+  helperWithdrawalSchema,
   type PublicVault,
   type Recovery,
   type Withdrawal,
@@ -371,7 +372,7 @@ export default function TransactionDialog({
   const savedIntent = (() => {
     if (deposit || !unlocked?.authorization) return undefined;
     try {
-      return withdrawalSchema.parse(JSON.parse(unlocked.authorization.manifestJson));
+      return helperWithdrawalSchema.parse(JSON.parse(unlocked.authorization.manifestJson));
     } catch {
       return undefined;
     }
@@ -426,6 +427,9 @@ export default function TransactionDialog({
         (await validateRecovery(r.stateJson)) !== vault.scriptHash
       )
         throw Error("This backup belongs to a different vault.");
+      // The web app only authorizes withdrawals it started, which always have a helper.
+      if (job && !job.manifest.helper)
+        throw Error("This withdrawal has no helper input. Authorize it with the custody that holds its vault.");
       // Authorizing needs the backup saved when the search started; an earlier one can't sign.
       if (job && !r.authorization)
         throw Error(`This backup has no withdrawal intent. Select ${recoveryBackupFilename(`${vault.id}-withdrawal`)}, or the -signing backup if you saved one.`);
@@ -776,6 +780,8 @@ export default function TransactionDialog({
         const { previousTxHex } = await api<{ previousTxHex: string }>(
           `/vaults/${vault.id}/funding`,
         );
+        if (!job.manifest.helper)
+          throw Error("This withdrawal has no helper input. Authorize it with the custody that holds its vault.");
         const helper = await input(job.manifest.helper);
         const local = solvedResult !== undefined ? await rebuildWithdrawalFromSolvedResult({
           solved: solvedResult,
@@ -1100,6 +1106,19 @@ export default function TransactionDialog({
                 )}
               </div>
             )}
+          </>
+        ) : job && !job.manifest.helper ? (
+          // A helper-less withdrawal comes from the SDK or API; the web app never made a backup for it.
+          <>
+            <p>
+              This withdrawal has no helper input. Authorize it with the custody that holds its vault;
+              this app can't sign it.
+            </p>
+            <div className="dialog-actions">
+              <button className="secondary" onClick={onClose}>
+                Close
+              </button>
+            </div>
           </>
         ) : stage === "unlock" || !unlocked ? (
           <>

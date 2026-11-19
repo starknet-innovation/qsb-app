@@ -27,21 +27,21 @@ function signedFixture(multisig = false) {
 }
 it("cryptographically verifies SIGHASH_ALL co-signatures and rejects transaction/signature edits", () => {
   const f = signedFixture();
-  expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script))).not.toThrow();
+  expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script), 1)).not.toThrow();
   f.tx.vout[0].value++;
-  expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script))).toThrow("Invalid PQB signature");
+  expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script), 1)).toThrow("Invalid PQB signature");
   f.tx.vout[0].value--;
   f.sig[f.sig.length - 1] = 3;
   f.tx.vin[1].scriptSig = concat(pushData(f.sig), pushData(f.pk));
-  expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script))).toThrow("SIGHASH_ALL");
+  expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script), 1)).toThrow("SIGHASH_ALL");
 });
 it("checks multisignatures, null dummy and push-only authorization", () => {
   const f = signedFixture(true);
-  expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script))).not.toThrow();
+  expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script), 1)).not.toThrow();
   f.tx.vin[1].scriptSig = concat([0x51], pushData(f.sig));
-  expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script))).toThrow("dummy");
+  expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script), 1)).toThrow("dummy");
   f.tx.vin[1].scriptSig = Uint8Array.of(0x76);
-  expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script))).toThrow("push-only");
+  expect(() => verifyPqbWitness(f.raw(), hex.encode(f.script), 1)).toThrow("push-only");
 });
 it("rejects a real PQB-layout witness with a valid co-signature but unsolved puzzle signatures", () => {
   const lock = buildLock("PQB", Uint8Array.from(reference.seed.match(/../g)!, s => parseInt(s, 16)), { version: "v0" });
@@ -53,7 +53,7 @@ it("rejects a real PQB-layout witness with a valid co-signature but unsolved puz
   });
   // The upstream simulator permits signature opcodes. The SDK verifier must not.
   expect(out.simError).toBeNull();
-  expect(() => verifyPqbWitness(out.hex, reference.scriptHex)).toThrow(/signature|SIGHASH_ALL/);
+  expect(() => verifyPqbWitness(out.hex, reference.scriptHex, 1)).toThrow(/signature|SIGHASH_ALL/);
 });
 it("does not expose secret-handling public runtime operations", () => {
   expect(Object.keys(publicRuntime()).sort()).toEqual(["prepare", "validate", "verify"]);

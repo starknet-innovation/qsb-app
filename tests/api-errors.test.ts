@@ -110,7 +110,7 @@ function job(overrides: Partial<Job> & Record<string, unknown> = {}): Job {
 /** The withdrawal the stored job approves, with placeholder witness bytes. */
 function signedWithdrawal(record: StoredSpendRecord): string {
   const tx = new btc.Transaction({ ...opts, version: 1, lockTime: record.locktime });
-  tx.addInput({ txid: record.helper.txid, index: record.helper.vout, sequence: 0xfffffffe });
+  tx.addInput({ txid: record.helper!.txid, index: record.helper!.vout, sequence: 0xfffffffe });
   tx.addInput({ txid: record.funding.txid, index: record.funding.vout, sequence: record.sequence });
   tx.addOutput({ script: hex.decode(record.outputScript), amount: BigInt(record.outputValue) });
   tx.updateInput(0, { finalScriptWitness: [Uint8Array.of(0x30, 0x01), Uint8Array.of(0x02)] }, true);
@@ -961,7 +961,7 @@ describe("provider failures on the funds path", () => {
     const body = await readyToSubmit(f);
     vi.mocked(f.chain.unspent).mockRestore();
     genesis(f);
-    for (const point of [manifest.funding, manifest.helper]) f.routes.set(`/tx/${point.txid}/hex`, hexAnswer);
+    for (const point of [manifest.funding, manifest.helper]) f.routes.set(`/tx/${point!.txid}/hex`, hexAnswer);
     await expectFailure(await f.call("POST", `/jobs/${jobId}/submit`, body), status, code);
     expect(f.miner.credential).not.toHaveBeenCalled();
     expect(f.miner.submit).not.toHaveBeenCalled();

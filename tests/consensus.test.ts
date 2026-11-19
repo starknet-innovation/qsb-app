@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it, expect, vi } from "vitest";
@@ -8,7 +8,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { CoreConsensus } from "../server/consensus";
 import { Esplora } from "../server/chain";
 
-function fixture(taproot: boolean | "legacy") {
+function fixture(taproot: boolean | "legacy", oneInput = false) {
   // Public, synthetic test key and nonexistent funding only. Never broadcast.
   const key = new Uint8Array(32).fill(7),
     pub = secp256k1.getPublicKey(key);
@@ -19,7 +19,8 @@ function fixture(taproot: boolean | "legacy") {
   previous.addOutput({ script: payment.script, amount: 100000n });
   previous.addOutput({ script: vault.script, amount: 200000n });
   const tx = new btc.Transaction();
-  for (let i = 0; i < 2; i++)
+  // A one-input withdrawal spends only the vault output.
+  for (let i = oneInput ? 1 : 0; i < 2; i++)
     tx.addInput({
       txid: previous.id,
       index: i,
@@ -35,7 +36,7 @@ function fixture(taproot: boolean | "legacy") {
           }
         : {}),
     });
-  tx.addOutput({ script: btc.p2wpkh(pub).script, amount: 290000n });
+  tx.addOutput({ script: btc.p2wpkh(pub).script, amount: oneInput ? 190000n : 290000n });
   tx.sign(key);
   tx.finalize();
   const chain = new Esplora();
@@ -87,6 +88,39 @@ it("starts both previous-output reads together while preserving ordered input ve
   expect(
     vi.mocked(chain.unspent).mock.calls.map((call) => call[0].vout),
   ).toEqual([0, 1]);
+});
+it("passes a one-input withdrawal's single spent output, and refuses three inputs before launch", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "qsb-consensus-inputs-"));
+  const executable = path.join(dir, "fake"),
+    stdin = path.join(dir, "stdin");
+  writeFileSync(
+    executable,
+    "#!/bin/sh\ncat >'" + stdin + "'\nprintf 'core-27.2-api2-all-inputs-valid\\n'\n",
+    { mode: 0o700 },
+  );
+  try {
+    const verifier = new CoreConsensus(executable);
+    const { tx, chain, previous } = fixture("legacy", true);
+    await verifier.verify(hex.encode(tx.extract()), chain);
+    const lines = readFileSync(stdin, "utf8").trim().split("\n");
+    expect(lines.slice(1)).toEqual([
+      "1",
+      "200000",
+      hex.encode(previous.getOutput(1).script!),
+    ]);
+    rmSync(stdin);
+    const decoded = btc.RawTx.decode(tx.extract());
+    decoded.inputs.push(
+      { ...decoded.inputs[0], index: 0 },
+      { ...decoded.inputs[0], txid: hex.decode("22".repeat(32)) },
+    );
+    await expect(
+      verifier.verify(hex.encode(btc.RawTx.encode(decoded)), chain),
+    ).rejects.toThrow("consensus");
+    expect(existsSync(stdin)).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 // Fake executable only observes that contextual guards precede interpreter launch.
 // These tests do not claim cryptographic verification.
@@ -151,6 +185,28 @@ it("rejects money-range and immature coinbase inputs before interpreter launch",
 // Opt-in real native gate. The ordinary unit suite never pretends a mock is Core.
 const native = process.env.QSB_TEST_CONSENSUS_BINARY;
 describe.skipIf(!native)("real Core script interpreter", () => {
+  it("accepts a signed one-input legacy vault spend and rejects its output/amount/fee/signature mutations", async () => {
+    const { tx, chain } = fixture("legacy", true),
+      verifier = new CoreConsensus(native);
+    const raw = hex.encode(tx.extract());
+    await verifier.verify(raw, chain);
+    expect(chain.unspent).toHaveBeenCalledTimes(1);
+    for (const mode of ["destination", "amount", "fee", "extra-output", "signature"]) {
+      const decoded = btc.RawTx.decode(hex.decode(raw));
+      if (mode === "destination")
+        decoded.outputs[0].script = btc.p2wpkh(
+          secp256k1.getPublicKey(new Uint8Array(32).fill(8)),
+        ).script;
+      if (mode === "amount") decoded.outputs[0].amount += 1n;
+      if (mode === "fee") decoded.outputs[0].amount -= 1n;
+      if (mode === "extra-output")
+        decoded.outputs.push({ amount: 0n, script: new Uint8Array([0x51]) });
+      if (mode === "signature") decoded.inputs[0].finalScriptSig[10] ^= 1;
+      await expect(
+        verifier.verify(hex.encode(btc.RawTx.encode(decoded)), chain),
+      ).rejects.toThrow("consensus");
+    }
+  });
   for (const taproot of [false, true, "legacy"] as const)
     it(`${taproot === "legacy" ? "SegWit plus legacy P2SH" : taproot ? "Taproot" : "SegWit"} accepts signed original and rejects output/amount/fee/add-output mutations`, async () => {
       const { tx, chain, previous } = fixture(taproot),

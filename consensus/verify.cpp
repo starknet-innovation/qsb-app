@@ -17,19 +17,21 @@ int main() {
     if(bitcoinconsensus_version()!=2)throw std::runtime_error("API");
     std::string line; if(!std::getline(std::cin,line))return 2;
     auto tx=unhex(line); if(tx.empty())return 2;
-    if(!std::getline(std::cin,line) || line!="2")return 2; // exact two-input QSB withdrawal
+    // A QSB or PQB withdrawal: one input (the vault) or two (a helper, then the vault).
+    if(!std::getline(std::cin,line) || (line!="1" && line!="2"))return 2;
+    const unsigned int n=line=="1"?1:2;
     std::vector<std::vector<unsigned char>> scripts;
     std::vector<int64_t> amounts;
-    for(int i=0;i<2;i++) {
+    for(unsigned int i=0;i<n;i++) {
       if(!std::getline(std::cin,line)||line.empty()||line.find_first_not_of("0123456789")!=std::string::npos)return 2;
       auto amount=std::stoll(line);if(amount<0||amount>2100000000000000LL)return 2;amounts.push_back(amount);
       if(!std::getline(std::cin,line))return 2;scripts.push_back(unhex(line));
     }
     if(std::getline(std::cin,line))return 2;
-    UTXO outputs[2];for(int i=0;i<2;i++)outputs[i]={scripts[i].data(),(unsigned int)scripts[i].size(),amounts[i]};
-    for(unsigned int i=0;i<2;i++) {
+    UTXO outputs[2];for(unsigned int i=0;i<n;i++)outputs[i]={scripts[i].data(),(unsigned int)scripts[i].size(),amounts[i]};
+    for(unsigned int i=0;i<n;i++) {
       bitcoinconsensus_error error=bitcoinconsensus_ERR_TX_DESERIALIZE;
-      int valid=bitcoinconsensus_verify_script_with_spent_outputs(outputs[i].scriptPubKey,outputs[i].scriptPubKeySize,outputs[i].value,tx.data(),tx.size(),outputs,2,i,bitcoinconsensus_SCRIPT_FLAGS_VERIFY_ALL,&error);
+      int valid=bitcoinconsensus_verify_script_with_spent_outputs(outputs[i].scriptPubKey,outputs[i].scriptPubKeySize,outputs[i].value,tx.data(),tx.size(),outputs,n,i,bitcoinconsensus_SCRIPT_FLAGS_VERIFY_ALL,&error);
       if(valid!=1||error!=bitcoinconsensus_ERR_OK)return 1;
     }
     std::cout<<"core-27.2-api2-all-inputs-valid\n";return 0;

@@ -76,9 +76,9 @@ function solvedJob() {
     error: secretState,
   } as Job;
   const helper: FundingInput = {
-    txid: manifest.helper.txid,
-    vout: manifest.helper.vout,
-    value: BigInt(manifest.helper.value),
+    txid: manifest.helper!.txid,
+    vout: manifest.helper!.vout,
+    value: BigInt(manifest.helper!.value),
     previousTxHex,
     publicKey,
     address,
@@ -241,7 +241,7 @@ it("delivers the solved result when the stored manifest comes back with keys reo
   const manifest = reverse({
     ...fixture.job.manifest,
     funding: reverse(fixture.job.manifest.funding),
-    helper: reverse(fixture.job.manifest.helper),
+    helper: reverse(fixture.job.manifest.helper!),
   }) as Withdrawal;
   expect(digest(JSON.stringify(manifest))).not.toBe(fixture.job.manifestHash);
   const job = { ...fixture.job, manifest };

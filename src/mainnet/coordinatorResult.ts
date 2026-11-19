@@ -30,10 +30,15 @@ export const coordinatorSignedResultSchema = z
     manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
     rawTxHex: z.string().regex(/^(?:[a-f0-9]{2})+$/),
     txid: z.string().regex(/^[a-f0-9]{64}$/),
-    helperSighash: z.literal("SIGHASH_ALL"),
-    helperSignatureVerified: z.literal(true),
+    /** Present together for a two-input withdrawal; absent when the vault is the only input. */
+    helperSighash: z.literal("SIGHASH_ALL").optional(),
+    helperSignatureVerified: z.literal(true).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (r) => (r.helperSighash === undefined) === (r.helperSignatureVerified === undefined),
+    "Helper signature fields go together.",
+  );
 
 export type CoordinatorSignedResult = z.infer<
   typeof coordinatorSignedResultSchema

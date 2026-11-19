@@ -203,10 +203,13 @@ export function localQsb() {
       const m = manifest as Withdrawal, hit = solution as NonNullable<Job["solution"]>;
       assembled.push({ state, manifest: m, solution: hit });
       const tx = new btc.Transaction({ ...opts, version: 1, lockTime: hit.locktime });
-      tx.addInput({ txid: m.helper.txid, index: m.helper.vout, sequence: 0xfffffffe });
+      // Without a helper the vault is the only input, as a device-held PQB vault spends it.
+      if (m.helper) tx.addInput({ txid: m.helper.txid, index: m.helper.vout, sequence: 0xfffffffe });
       tx.addInput({ txid: m.funding.txid, index: m.funding.vout, sequence: hit.sequence });
       tx.addOutput({ script: hex.decode(m.outputScript), amount: BigInt(m.outputValue) });
-      tx.updateInput(1, { finalScriptSig: hex.decode("0101") }, true);
+      // Without a helper the server requires a SIGHASH_ALL co-signature (and its key) on top.
+      tx.updateInput(m.helper ? 1 : 0, { finalScriptSig: hex.decode(m.helper ? "0101"
+        : "09" + "aa".repeat(8) + "01" + "21" + "02" + "bb".repeat(32)) }, true);
       return hex.encode(tx.toBytes(true, true));
     },
   };

@@ -6,6 +6,8 @@ import {
   outpoint,
   txid,
   withdrawalSchema,
+  withdrawalInputs,
+  withdrawalInputValue,
   type Withdrawal,
 } from "../src/lib/model";
 
@@ -134,7 +136,8 @@ export class Esplora {
       };
     // raw() binds the response bytes to the provider's actual spender txid.
     const { tx } = await this.raw(spent.txid);
-    if (tx.inputsLength !== 2 || spent.vin >= tx.inputsLength)
+    const approvedInputs = withdrawalInputs(approved);
+    if (tx.inputsLength !== approvedInputs.length || spent.vin >= tx.inputsLength)
       throw new WithdrawalConflict("Withdrawal spender input mismatch.");
     const fundingInput = tx.getInput(spent.vin);
     if (
@@ -143,17 +146,17 @@ export class Esplora {
       fundingInput.index !== approved.funding.vout
     )
       throw new WithdrawalConflict("Withdrawal spender input mismatch.");
-    const expected = [approved.helper, approved.funding]
+    const expected = approvedInputs
       .map((point) => `${point.txid.toLowerCase()}:${point.vout}`)
       .sort();
-    const actual = [0, 1]
-      .map((index) => {
+    const actual = approvedInputs
+      .map((_, index) => {
         const input = tx.getInput(index);
         return `${input.txid ? hex.encode(input.txid) : ""}:${input.index}`;
       })
       .sort();
     if (
-      expected[0] === expected[1] ||
+      new Set(expected).size !== expected.length ||
       expected.some((point, index) => point !== actual[index])
     )
       throw new WithdrawalConflict("Withdrawal spender input mismatch.");
@@ -166,10 +169,7 @@ export class Esplora {
       hex.encode(outputScript(approved.destination)) !==
         approved.outputScript.toLowerCase() ||
       output.amount !== BigInt(approved.outputValue) ||
-      BigInt(approved.helper.value) +
-        BigInt(approved.funding.value) -
-        output.amount !==
-        BigInt(approved.fee)
+      withdrawalInputValue(approved) - output.amount !== BigInt(approved.fee)
     )
       throw new WithdrawalConflict("Withdrawal spender output mismatch.");
     // Do not accept the outspend endpoint's supplied status: status() separately

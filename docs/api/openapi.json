@@ -7779,7 +7779,6 @@
         "required": [
           "vaultId",
           "funding",
-          "helper",
           "destination",
           "outputScript",
           "outputValue",
@@ -7788,7 +7787,7 @@
           "costAccepted"
         ],
         "additionalProperties": false,
-        "description": "A withdrawal manifest: the vault's funding outpoint, the owner's helper outpoint, the single output and the fee. `idempotencyKey` becomes the job id."
+        "description": "A withdrawal manifest: the vault's funding outpoint, the owner's helper outpoint, the single output and the fee. A PQB vault may omit `helper`: the vault is then the only input and pays the fee. `idempotencyKey` becomes the job id."
       },
       "WithdrawalObservation": {
         "type": "object",

@@ -48,7 +48,7 @@ describe("PQB generator and independent Python reference", () => {
   it("binds every public problem to the exact inputs, output, amount and fee", () => {
     const base = pqbProblem(generated.publicStateJson, manifest, 0);
     for (const altered of [
-      { ...manifest, helper: { ...manifest.helper, vout: 2 } },
+      { ...manifest, helper: { ...manifest.helper!, vout: 2 } },
       { ...manifest, funding: { ...manifest.funding, txid: "44".repeat(32) } },
       { ...manifest, outputScript: "0014" + "55".repeat(20) },
       { ...manifest, outputValue: "108000", fee: "2000" },

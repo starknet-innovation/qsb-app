@@ -8,12 +8,13 @@ import { pushData, scriptnumBytes } from "../src/pqb-core/l1gen";
 import { cloneTx, findAndDelete, parseScript, serializeTx, type Tx } from "../src/pqb-core/tx";
 
 /**
- * Check the returned PQB stack, hashes and signature opcodes before helper signing. This
+ * Check the returned PQB stack, hashes and signature opcodes of the vault input at `inputIndex`
+ * before helper signing or, for a one-input withdrawal, before the transaction is accepted. This
  * deliberately supports only PQB's emitted opcode set. Bitcoin Core remains the consensus oracle.
  * The upstream layout simulator treats signatures permissively; intercept them here and verify
  * against the actual transaction with Bitcoin's legacy FindAndDelete rules.
  */
-export function verifyPqbWitness(rawHex: string, scriptHex: string): void {
+export function verifyPqbWitness(rawHex: string, scriptHex: string, inputIndex: number): void {
   const opts = { allowUnknownInputs: true, allowUnknownOutputs: true };
   const parsed = btc.Transaction.fromRaw(hex.decode(rawHex), opts);
   const tx: Tx = { version: parsed.version, locktime: parsed.lockTime,
@@ -24,7 +25,9 @@ export function verifyPqbWitness(rawHex: string, scriptHex: string): void {
       const v = parsed.getOutput(i); return { value: v.amount!, script: v.script! };
     }) };
   const script = hex.decode(scriptHex);
-  const stack = parseScript(parsed.getInput(1).finalScriptSig!).map(([, op, data]) => {
+  if (!Number.isInteger(inputIndex) || inputIndex < 0 || inputIndex >= tx.vin.length)
+    throw new Error("PQB vault input is missing.");
+  const stack = parseScript(parsed.getInput(inputIndex).finalScriptSig ?? new Uint8Array()).map(([, op, data]) => {
     if (data !== null && data.length <= 520) return new Item(data);
     if (op >= 0x51 && op <= 0x60) return new Item(scriptnumBytes(op - 0x50));
     if (op === 0x4f) return new Item(scriptnumBytes(-1));
@@ -35,14 +38,15 @@ export function verifyPqbWitness(rawHex: string, scriptHex: string): void {
   const sighash = (code: Uint8Array, type: number) => {
     // Core legacy hashing, including unknown ALL-like types and the SINGLE historical bug.
     const t = cloneTx(tx), base = type & 0x1f;
-    if (base === 3 && 1 >= t.vout.length) { const one = new Uint8Array(32); one[0] = 1; return one; }
+    if (base === 3 && inputIndex >= t.vout.length) { const one = new Uint8Array(32); one[0] = 1; return one; }
     t.vin.forEach((v, i) => {
-      v.scriptSig = i === 1 ? code : new Uint8Array();
-      if (i !== 1 && (base === 2 || base === 3)) v.sequence = 0;
+      v.scriptSig = i === inputIndex ? code : new Uint8Array();
+      if (i !== inputIndex && (base === 2 || base === 3)) v.sequence = 0;
     });
     if (base === 2) t.vout = [];
-    if (base === 3) t.vout = [{ value: 0xffffffffffffffffn, script: new Uint8Array() }, t.vout[1]];
-    if (type & 0x80) t.vin = [t.vin[1]];
+    if (base === 3) t.vout = [...Array.from({ length: inputIndex },
+      () => ({ value: 0xffffffffffffffffn, script: new Uint8Array() })), t.vout[inputIndex]];
+    if (type & 0x80) t.vin = [t.vin[inputIndex]];
     return hash256(concat(serializeTx(t), u32le(type)));
   };
   let firstSignature = true;

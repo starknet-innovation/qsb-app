@@ -83,8 +83,8 @@ function signedTx(
   } = {},
 ): string {
   const helperInput = {
-    txid: change.helperTxid ?? record.helper.txid,
-    index: record.helper.vout,
+    txid: change.helperTxid ?? record.helper!.txid,
+    index: record.helper!.vout,
     sequence: change.helperSequence ?? 0xfffffffe,
   };
   const fundingInput = {

@@ -15,6 +15,7 @@ import {
   sats,
   txid,
   validatePublicState,
+  vaultInputIndex,
   withdrawalSchema,
   type Job,
   type PublicVault,
@@ -22,6 +23,7 @@ import {
   type Withdrawal,
 } from "../src/lib/model";
 import {
+  assertVaultPrevious,
   belowMinerFloor,
   fundingFeeForRate,
   fundingPsbt,
@@ -48,7 +50,7 @@ import {
   type CoordinatorSignedResult,
 } from "../src/mainnet/coordinatorResult";
 import { publicRuntime } from "./public-runtime";
-import { pqbSharesSecrets } from "../src/lib/pqb";
+import { pqbSharesSecrets, pqbStart } from "../src/lib/pqb";
 import type { AuthorizationStore, CreateWithdrawal, Credentials, ExternalCustody, VaultDescriptor, WithdrawalSigningRequest } from "./custody";
 export type { AuthorizationStore } from "./custody";
 import {
@@ -408,7 +410,10 @@ export class QsbClient {
     },
     /** Public solution, exact spend and verified previous outputs for an external vault signer. */
     prepare: (jobId: string) => this.prepareWithdrawal(jobId),
-    /** External vault authorization followed by verified helper signing. No seed enters the SDK. */
+    /**
+     * External vault authorization, then verified helper signing. Without a helper (a one-input PQB
+     * withdrawal) the custody's transaction is complete and is verified as returned. No seed enters the SDK.
+     */
     assemble: (jobId: string) => this.assembleWithdrawal(jobId),
     /** Submit only after `approve` returns this exact transaction's txid. */
     submit: (signed: CoordinatorSignedResult, input: { approve: ApproveWithdrawal }) =>
@@ -756,7 +761,7 @@ export class QsbClient {
       if (
         (input.destination !== undefined && input.destination !== saved.destination) ||
         (input.helper !== undefined &&
-          (input.helper.txid.toLowerCase() !== saved.helper.txid || input.helper.vout !== saved.helper.vout)) ||
+          (!saved.helper || input.helper.txid.toLowerCase() !== saved.helper.txid || input.helper.vout !== saved.helper.vout)) ||
         input.feeRate !== undefined
       )
         throw new Error("This vault already authorizes a withdrawal. Resume it unchanged; do not reuse its one-time keys.");
@@ -764,24 +769,27 @@ export class QsbClient {
         throw new Error("The saved intent uses a different solver. Keep its external authorization and contact the operator; do not create a new intent.");
       if ((["txid", "vout", "value"] as const).some((field) => saved.funding[field] !== funding[field]))
         throw new Error("The saved intent spends a different deposit.");
-      const vsize = withdrawalVsize(nested, saved.outputScript.length / 2, vaultScriptSigBound(vault.config));
+      const vsize = withdrawalVsize(saved.helper ? nested : null, saved.outputScript.length / 2, vaultScriptSigBound(vault.config));
       await this.assertMinerFloor((BigInt(saved.fee) * 1000n) / BigInt(vsize));
       manifest = saved;
       await this.authorizations.claim(this.intentKey(vault), JSON.stringify(canonicalManifest(saved)));
     } else {
-      if (!input.helper || !input.destination || !input.feeRate)
-        throw new Error("Choose a helper output, a destination and a fee rate.");
-      const [helper] = await this.selectUtxos([input.helper]);
+      // A PQB vault may be the only input: its co-signature then fixes the outputs and the fee.
+      if (!input.destination || !input.feeRate || (!input.helper && vault.config !== "PQB"))
+        throw new Error(vault.config === "PQB"
+          ? "Choose a destination and a fee rate."
+          : "Choose a helper output, a destination and a fee rate.");
+      const helper = input.helper ? (await this.selectUtxos([input.helper]))[0] : undefined;
       const script = outputScript(input.destination);
       const rate = parseFeeRate(input.feeRate);
       await this.assertMinerFloor(rate);
-      const fee = withdrawalFeeForRate(nested, script.length, rate, vault.config).fee;
-      const outputValue = BigInt(funding.value) + BigInt(helper.value) - fee;
+      const fee = withdrawalFeeForRate(helper ? nested : null, script.length, rate, vault.config).fee;
+      const outputValue = BigInt(funding.value) + BigInt(helper?.value ?? 0) - fee;
       if (outputValue <= 0n) throw new Error("The miner fee exceeds the available amount.");
       manifest = withdrawalSchema.parse({
         vaultId: vault.id,
         funding,
-        helper,
+        ...(helper ? { helper } : {}),
         destination: input.destination,
         outputScript: hex.encode(script),
         outputValue: outputValue.toString(),
@@ -816,20 +824,29 @@ export class QsbClient {
     const manifest = canonicalManifest(solved.manifest);
     if (await this.authorizations.get(this.intentKey(vault)) !== JSON.stringify(manifest))
       throw new Error("The job differs from the externally authorized withdrawal intent.");
-    const helper = await this.fundingInput(manifest.helper);
     const prepared = await this.runtime.prepare(vault, manifest, solved.solution);
-    // Validate both previous outputs and the exact transaction BEFORE asking for one-time material.
-    // helperPsbt requires a vault scriptSig; a temporary public placeholder is discarded immediately.
+    const pqb = vault.config === "PQB"
+      ? { pqbStart: pqbStart(vault.publicStateJson, manifest, solved.solution) } : {};
+    // Validate the previous outputs and the exact transaction BEFORE asking for one-time material.
+    // The checks need a vault scriptSig; a temporary public placeholder is discarded immediately.
     const template = btc.Transaction.fromRaw(hex.decode(prepared.transaction), opts);
-    if (template.getInput(0).finalScriptSig?.length || template.getInput(1).finalScriptSig?.length ||
-      template.getInput(0).finalScriptWitness?.length || template.getInput(1).finalScriptWitness?.length)
-      throw new Error("Signing template must be unsigned.");
-    template.updateInput(1, { finalScriptSig: new Uint8Array([0]) }, true);
+    for (let i = 0; i < template.inputsLength; i++)
+      if (template.getInput(i).finalScriptSig?.length || template.getInput(i).finalScriptWitness?.length)
+        throw new Error("Signing template must be unsigned.");
+    template.updateInput(vaultInputIndex(manifest), { finalScriptSig: new Uint8Array([0]) }, true);
     const raw = hex.encode(template.toBytes(true, true));
     verifyWithdrawalCommitment(raw, manifest, solved.solution);
+    const vaultPrevious = { value: manifest.funding.value, scriptHex: vault.scriptHex };
+    if (!manifest.helper) {
+      if (vault.config !== "PQB") throw new Error("Only a PQB withdrawal can omit the helper input.");
+      assertVaultPrevious(template, 0, funding.previousTxHex, vaultPrevious);
+      return { format: "qsb-external-signing-request-v1", vault, solved, ...prepared, ...pqb,
+        fundingPreviousTxHex: funding.previousTxHex };
+    }
+    const helper = await this.fundingInput(manifest.helper);
     // This validates previous txids, values, scripts and helper ownership.
-    helperPsbt(raw, helper, funding.previousTxHex, { value: manifest.funding.value, scriptHex: vault.scriptHex });
-    return { format: "qsb-external-signing-request-v1", vault, solved, ...prepared,
+    helperPsbt(raw, helper, funding.previousTxHex, vaultPrevious);
+    return { format: "qsb-external-signing-request-v1", vault, solved, ...prepared, ...pqb,
       fundingPreviousTxHex: funding.previousTxHex, helperPreviousTxHex: helper.previousTxHex,
       helperAddress: this.wallet.address, helperPublicKey: this.wallet.publicKey };
   }
@@ -843,12 +860,30 @@ export class QsbClient {
     await this.authorizations.claim(key, binding);
     const response = await this.custody.authorizeWithdrawal(structuredClone(request));
     const raw = hex.encode(hex.decode(z.string().regex(/^(?:[0-9a-f]{2})+$/i).max(3000000).parse(response)));
+    const { manifest } = request.solved;
+    if (!manifest.helper) {
+      // One input: the custody's transaction is complete. Check it like the two-input assembly.
+      verifyWithdrawalCommitment(raw, manifest, request.solved.solution);
+      const returnedTx = btc.Transaction.fromRaw(hex.decode(raw), opts);
+      // Legacy serialization only: segwit-flagged bytes would pass these checks and fail Core at submit.
+      if (returnedTx.getInput(0).finalScriptWitness?.length || hex.encode(returnedTx.toBytes(true, false)) !== raw)
+        throw new Error("External vault authorization must use a legacy vault scriptSig.");
+      assertVaultPrevious(returnedTx, 0, request.fundingPreviousTxHex,
+        { value: manifest.funding.value, scriptHex: request.vault.scriptHex });
+      await this.runtime.verify(request.vault, manifest, request.solved.solution, raw);
+      await this.authorizations.claim(`${key}:raw`, digest(raw));
+      return coordinatorSignedResultSchema.parse({
+        format: "qsb-coordinator-public-signed-result-v1", network: NETWORK_ID,
+        jobId: request.solved.jobId, vaultId: request.solved.vaultId,
+        manifestHash: request.solved.manifestHash, rawTxHex: raw, txid: returnedTx.id,
+      });
+    }
     // A crash/retry may request authorization again, but can never use a different returned assembly.
     const local = await rebuildWithdrawalFromSolvedResult({ solved: request.solved,
       job: { id: request.solved.jobId, vaultId: request.vault.id, manifestHash: request.solved.manifestHash,
         manifest: request.solved.manifest, solution: request.solved.solution } as Job,
-      stateJson: "", helper: { ...request.solved.manifest.helper, value: BigInt(request.solved.manifest.helper.value),
-        previousTxHex: request.helperPreviousTxHex, address: this.wallet.address, publicKey: this.wallet.publicKey },
+      stateJson: "", helper: { ...manifest.helper, value: BigInt(manifest.helper.value),
+        previousTxHex: request.helperPreviousTxHex!, address: this.wallet.address, publicKey: this.wallet.publicKey },
       fundingPreviousTxHex: request.fundingPreviousTxHex, vaultScriptHex: request.vault.scriptHex,
       assemble: async () => raw });
     const returnedTx = btc.Transaction.fromRaw(hex.decode(raw), opts);
@@ -898,25 +933,38 @@ export class QsbClient {
     const actual = btc.Transaction.fromRaw(hex.decode(signed.rawTxHex), opts);
     if (actual.id !== signed.txid)
       throw new Error("The signed result's txid differs from its transaction. Nothing was submitted.");
-    // Recreate the exact assembly before helper signing, to validate an imported signed file too.
-    const assembly = new btc.Transaction({ ...opts, version: actual.version, lockTime: actual.lockTime });
-    for (let i = 0; i < actual.inputsLength; i++) {
-      const v = actual.getInput(i);
-      assembly.addInput({ txid: v.txid, index: v.index, sequence: v.sequence });
+    if (!manifest.helper) {
+      // One input: the bound assembly is the complete transaction. Re-check an imported file too.
+      if (signed.helperSighash !== undefined ||
+        await this.authorizations.get(`${this.assemblyKey(request.vault)}:raw`) !== digest(signed.rawTxHex))
+        throw new Error("The signed result differs from the externally bound assembly.");
+      assertVaultPrevious(actual, 0, request.fundingPreviousTxHex,
+        { value: manifest.funding.value, scriptHex: request.vault.scriptHex });
+      await this.runtime.verify(request.vault, manifest, job.solution, signed.rawTxHex);
+    } else {
+      if (signed.helperSighash === undefined)
+        throw new Error("The signed result is missing its helper signature check.");
+      // Recreate the exact assembly before helper signing, to validate an imported signed file too.
+      const vault = vaultInputIndex(manifest);
+      const assembly = new btc.Transaction({ ...opts, version: actual.version, lockTime: actual.lockTime });
+      for (let i = 0; i < actual.inputsLength; i++) {
+        const v = actual.getInput(i);
+        assembly.addInput({ txid: v.txid, index: v.index, sequence: v.sequence });
+      }
+      assembly.addOutput(actual.getOutput(0));
+      assembly.updateInput(vault, { finalScriptSig: actual.getInput(vault).finalScriptSig }, true);
+      const raw = hex.encode(assembly.toBytes(true, true));
+      if (await this.authorizations.get(`${this.assemblyKey(request.vault)}:raw`) !== digest(raw))
+        throw new Error("The signed result differs from the externally bound assembly.");
+      const expected = helperPsbt(raw, { ...manifest.helper, value: BigInt(manifest.helper.value),
+        previousTxHex: request.helperPreviousTxHex!, address: this.wallet.address, publicKey: this.wallet.publicKey },
+        request.fundingPreviousTxHex, { value: manifest.funding.value, scriptHex: request.vault.scriptHex });
+      const returned = expected.clone();
+      returned.updateInput(0, { finalScriptSig: actual.getInput(0).finalScriptSig,
+        finalScriptWitness: actual.getInput(0).finalScriptWitness }, true);
+      if (signedCoordinatorResult(request.solved, expected, returned.toPSBT(), this.wallet).rawTxHex !== signed.rawTxHex)
+        throw new Error("The imported signed result failed helper verification.");
     }
-    assembly.addOutput(actual.getOutput(0));
-    assembly.updateInput(1, { finalScriptSig: actual.getInput(1).finalScriptSig }, true);
-    const raw = hex.encode(assembly.toBytes(true, true));
-    if (await this.authorizations.get(`${this.assemblyKey(request.vault)}:raw`) !== digest(raw))
-      throw new Error("The signed result differs from the externally bound assembly.");
-    const expected = helperPsbt(raw, { ...manifest.helper, value: BigInt(manifest.helper.value),
-      previousTxHex: request.helperPreviousTxHex, address: this.wallet.address, publicKey: this.wallet.publicKey },
-      request.fundingPreviousTxHex, { value: manifest.funding.value, scriptHex: request.vault.scriptHex });
-    const returned = expected.clone();
-    returned.updateInput(0, { finalScriptSig: actual.getInput(0).finalScriptSig,
-      finalScriptWitness: actual.getInput(0).finalScriptWitness }, true);
-    if (signedCoordinatorResult(request.solved, expected, returned.toPSBT(), this.wallet).rawTxHex !== signed.rawTxHex)
-      throw new Error("The imported signed result failed helper verification.");
     const vsize = transactionVsize(signed.rawTxHex);
     const milliSatPerVb = (BigInt(manifest.fee) * 1000n) / BigInt(vsize);
     const floor = await this.minerFloor();
@@ -953,7 +1001,7 @@ export class QsbClient {
     // The funding outpoint was spent by another transaction, so this one can never confirm.
     if (response.txid === signed.txid && response.status === "conflict")
       throw new Error(
-        "Funding outpoint was spent by a different transaction. Contact the operator; do not resubmit or spend the helper output.",
+        "Funding outpoint was spent by a different transaction. Contact the operator; do not resubmit or spend the helper output, if it has one.",
       );
     if (response.txid !== signed.txid || !["submitted", "uncertain", "confirmed"].includes(response.status))
       throw new Error("Unexpected submission response. Check withdrawals.status; do not submit again.");

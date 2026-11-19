@@ -28,7 +28,8 @@ export class CoreConsensus implements ConsensusVerifier {
         allowUnknownInputs: true,
         allowUnknownOutputs: true,
       });
-      if (tx.inputsLength !== 2 || tx.outputsLength === 0)
+      // One input (a PQB vault alone) or two (a helper, then the vault).
+      if (tx.inputsLength < 1 || tx.inputsLength > 2 || tx.outputsLength === 0)
         throw new ConsensusError();
       const maxMoney = 2100000000000000n;
       let outputTotal = 0n,

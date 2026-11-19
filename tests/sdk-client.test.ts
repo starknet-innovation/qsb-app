@@ -30,7 +30,7 @@ describe("withdrawals.submit approval", () => {
     // What the callback sees is derived from the signed bytes and the stored job, not from the file.
     const tx = btc.Transaction.fromRaw(hex.decode(signed.rawTxHex), opts);
     const output = tx.getOutput(0);
-    const fee = BigInt(s.job.manifest.funding.value) + BigInt(s.job.manifest.helper.value) - output.amount!;
+    const fee = BigInt(s.job.manifest.funding.value) + BigInt(s.job.manifest.helper!.value) - output.amount!;
     const vsize = transactionVsize(signed.rawTxHex);
     const seen: WithdrawalReview[] = [];
     const result = await s.client.withdrawals.submit(signed, {

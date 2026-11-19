@@ -116,7 +116,7 @@ const strayPayments = component(
 component(
   "Withdrawal",
   withdrawalSchema,
-  "A withdrawal manifest: the vault's funding outpoint, the owner's helper outpoint, the single output and the fee. `idempotencyKey` becomes the job id.",
+  "A withdrawal manifest: the vault's funding outpoint, the owner's helper outpoint, the single output and the fee. A PQB vault may omit `helper`: the vault is then the only input and pays the fee. `idempotencyKey` becomes the job id.",
 );
 component(
   "MinerRates",
@@ -577,6 +577,8 @@ export const unreachedErrorSites: Record<string, string> = {
   "transaction-checks.ts | assertWithdrawalSpendAgainstJob | ChainError":
     "It rethrows these as exact_spend_mismatch.",
   "transaction-checks.ts | helperSighashAll":
+    "Only assertWithdrawalSpendAgainstJob calls it, which rethrows as exact_spend_mismatch.",
+  "transaction-checks.ts | vaultCosignatureSighashAll":
     "Only assertWithdrawalSpendAgainstJob calls it, which rethrows as exact_spend_mismatch.",
   "transaction-checks.ts | assertOutput":
     "assertWithdrawalSpendAgainstJob rethrows it as exact_spend_mismatch; checkFunding isn't called by a route.",
