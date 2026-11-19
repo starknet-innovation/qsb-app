@@ -38,7 +38,7 @@ image and partition contract, and a separately recorded allowance. The first
 reservation is retained in campaign accounting. Neither execution is resumed or
 replayed after an unknown submission.
 
-When the ordinary `g5.xlarge` pool has no capacity, `capacity.py` prepares an
+For European validation when the ordinary pool has no capacity, `capacity.py` prepares an
 isolated `qsb-gpu-validation` queue and compute environment using `g5.4xlarge`
 NVIDIA A10G hosts. It copies the reviewed host AMI, immutable launch-template version,
 network and instance profile. The pool uses `BEST_FIT_PROGRESSIVE`, minimum zero
@@ -189,7 +189,7 @@ Omit the `capacity.py` and Autopilot commands when using the original pool.
 Call `collect` regularly during each execution; it retains snapshots rather than
 rewriting originals. Each campaign reserves $200 operationally and permits at most 900 + 540,000
 reserved GPU-seconds across the two public jobs. The original and isolated pool
-modes freeze four hours in Europe; Virginia uses its earlier fixed reservation expiry, up to twelve hours. The explicitly bound shared-pool replacement freezes six. The ordinary provider keeps its 16-slot cap; the isolated provider
+modes freeze four hours in Europe; Virginia uses its earlier fixed reservation expiry, up to twelve hours. The explicitly bound shared-pool replacement freezes six. The ordinary London provider limits concurrency to six GPU slots; the isolated provider
 keeps four in Europe and two in Virginia. The account quota applies across both pools.
 This is an assessment
 reservation, not a guaranteed billing limit. Current regional pricing must be
@@ -269,7 +269,7 @@ The current-status collector pauses and drains the campaign immediately when it 
 ## Explicit SNF account isolation
 
 `operator.json` may explicitly add `"snfIsolation": true` for a separately authorized
-root session in an otherwise empty Ireland or London GPU/Batch account. This creates an isolated
+root session in an otherwise empty Ireland, London or Virginia GPU/Batch account. This creates an isolated
 consumer stack, not a production app deployment. Root credentials remain local; the
 coordinator and workers receive only generated runtime roles. No API, wallet or miner
 path is created. The same enrolled image, clean consumer bundle, workflow, public
