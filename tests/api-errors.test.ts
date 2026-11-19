@@ -334,7 +334,12 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
         publicStateJson: g.publicStateJson });
     };
     await f.putVault(pqbVault());
-    return f.call("POST", "/vaults", pqbVault("v1", other));
+    const reused = pqbVault("v1", other);
+    genesis(f);
+    f.routes.set(`/scripthash/${reused.scriptHash}`, () =>
+      Response.json({ chain_stats: { funded_txo_count: 0 }, mempool_stats: { funded_txo_count: 0 } }),
+    );
+    return f.call("POST", "/vaults", reused);
   }],
   ["vault_script_paid", 409, (f) => {
     genesis(f);

@@ -103,7 +103,7 @@ describe("compatible solver set", () => {
   it("lets a PQB release naming either generator serve vaults of either construction", () => {
     for (const seedState of [state(v0.seed), state(v1.seed, "v1")]) {
       const configuration = vaultConfiguration(vaultOf(adoptPqb(seedState)));
-      // The enrolled v0.2.0 release names eccdd09.
+      // The enrolled v0.2.0 release names eccdd09 as its generator; its CUDA import is a separate matter.
       expect(solverServesVault(pqbV020, configuration)).toBe(true);
       expect(solverServesVault({ ...pqbV020, generatorCommit: PQB_CONSTRUCTION_COMMITS.v1 }, configuration)).toBe(true);
       expect(solverServesVault({ ...pqbV020, generatorCommit: "ab".repeat(20) }, configuration)).toBe(false);
