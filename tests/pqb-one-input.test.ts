@@ -306,6 +306,14 @@ describe("SDK one-input withdrawal", () => {
     const submissions = w.minerSubmissions.length;
     await expect(client.withdrawals.submit({ ...signed, helperSighash: "SIGHASH_ALL", helperSignatureVerified: true },
       { approve })).rejects.toThrow("externally bound assembly");
+    // Other vault authorization bytes for the same approved spend: they match the intent, but not
+    // the assembly the journal bound, so they are refused too.
+    const other = btc.Transaction.fromRaw(hex.decode(signed.rawTxHex), { allowUnknownInputs: true, allowUnknownOutputs: true });
+    other.updateInput(0, { finalScriptSig: hex.decode("09" + "cc".repeat(8) + "01" + "21" + "02" + "bb".repeat(32)) }, true);
+    const otherRaw = hex.encode(other.toBytes(true, false));
+    expect(otherRaw).not.toBe(signed.rawTxHex);
+    await expect(client.withdrawals.submit({ ...signed, rawTxHex: otherRaw, txid: other.id }, { approve }))
+      .rejects.toThrow("externally bound assembly");
     expect(w.minerSubmissions).toHaveLength(submissions);
     const result = await client.withdrawals.submit(signed, { approve });
     expect(result).toEqual({ txid: signed.txid, status: "submitted" });
