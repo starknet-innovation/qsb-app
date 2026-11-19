@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
-from control import Campaign, check_operator_config
+from control import fixed_deadline, Campaign, check_operator_config
 
 
 class Throttled(Exception): pass
@@ -63,6 +63,18 @@ class LogCollectionTests(unittest.TestCase):
         for changed in [dict(base, region='eu-west-1'), dict(base, snfIsolation=False),
                         dict(base, region='us-east-1', snfIsolation=True), dict(base, extra=True)]:
             with self.assertRaises(RuntimeError): check_operator_config(changed)
+
+    def test_virginia_deadline_is_required_and_bounded_by_reservation(self):
+        config = dict(profile='selected', account='123456789012', region='us-east-1', snfIsolation=True, notAfter=50000)
+        check_operator_config(config)
+        self.assertEqual(fixed_deadline(config, 10000, False), 50000)
+        self.assertEqual(fixed_deadline(dict(config, notAfter=60000), 10000, False), 53200)
+        with self.assertRaises(RuntimeError): fixed_deadline(dict(config, notAfter=9999), 10000, False)
+        with self.assertRaises(RuntimeError): check_operator_config(dict(config, notAfter=True))
+        with self.assertRaises(RuntimeError): check_operator_config(dict(config, snfIsolation=False))
+        london = dict(profile='selected', account='123456789012', region='eu-west-2', notAfter=11000)
+        check_operator_config(london)
+        self.assertEqual(fixed_deadline(london, 10000, False), 11000)
 
 
 if __name__ == '__main__': unittest.main()
