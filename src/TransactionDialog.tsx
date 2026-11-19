@@ -1107,6 +1107,19 @@ export default function TransactionDialog({
               </div>
             )}
           </>
+        ) : job && !job.manifest.helper ? (
+          // A helper-less withdrawal comes from the SDK or API; the web app never made a backup for it.
+          <>
+            <p>
+              This withdrawal has no helper input. Authorize it with the custody that holds its vault;
+              this app can't sign it.
+            </p>
+            <div className="dialog-actions">
+              <button className="secondary" onClick={onClose}>
+                Close
+              </button>
+            </div>
+          </>
         ) : stage === "unlock" || !unlocked ? (
           <>
             {pendingNotice}
