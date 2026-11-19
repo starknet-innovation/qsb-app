@@ -11,9 +11,13 @@ credential, funded output, miner request or transaction submission path. The
 production app's release, functions, table, queue settings and switches stay under
 their ordinary reviewed deployment process.
 
-`fixture.ts prepare EXTERNAL_DIRECTORY` derives the public vault locally and
+`fixture.ts prepare EXTERNAL_DIRECTORY [RELEASE_ID [VARIANT]]` derives the public vault locally and
 writes only public vault/job rows and a public workflow event with fresh identifiers. It never writes the
-fixture seed to its output. A native audit requires every successful Batch job’s immutable input, completed
+fixture seed to its output. `VARIANT` is `two-input-v0` (the default: a public OP_TRUE helper, then a
+construction-v0 vault) or `one-input-v1` (the same vault output and payee with no helper, under construction
+v1, the PQB Ledger app's; the vault pays the same fee). A non-default variant is recorded as `variant` in
+`public-fixture.json`, and `validate`, `verify` and `consensus.ts` use it; `consensus.ts` then gives Core one
+spent output and mutates input 0. A native audit requires every successful Batch job’s immutable input, completed
 output, the configured GPU model/driver and process-isolation startup logs. It re-derives all stage
 packets from the public intent and CPU-checked predecessor hits, then rechecks every
 emitted candidate, including superseded work.
