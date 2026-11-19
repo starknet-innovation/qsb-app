@@ -140,7 +140,7 @@ its own reviewed deployment decision. The previous Config A descriptor/image and
 deployment stay available for rollback; they cannot spend PQB vaults or resume PQB
 jobs. There is no separately qualified prior PQB release for that purpose.
 
-The test uses nonexistent public outpoints and an OP_TRUE helper. It does not test
+The test uses nonexistent public outpoints and, for a two-input fixture, an OP_TRUE helper; a `one-input-v1` fixture spends the vault alone. It does not test
 a helper-wallet signature, real UTXO/chain acceptance, miner policy/inclusion or
 broadcast. Legacy signatures do not bind prior-output amounts; production chain
 and exact-spend checks remain required. No funded output or wallet material enters

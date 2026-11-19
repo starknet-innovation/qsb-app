@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import { fixtureVariant, preparedVariant } from "./variant";
+import { fixtureVariant, positiveCheckLabel, preparedVariant } from "./variant";
 import { adoptPqb, assemblePqb } from "../../src/lib/pqb";
 import { coordinatorPublicSolvedResult } from "../../src/mainnet/coordinatorResult";
 import type { Job } from "../../src/lib/model";
@@ -91,7 +91,7 @@ function run(label: string, transaction: string, valid: boolean, vaultScript = g
   if (result.error || result.signal || accepted !== valid || (!valid && result.status !== 1))
     throw Error("Offline Core check failed: " + label);
 }
-run(oneInput ? "solved-pqb-one-input" : "solved-pqb-with-public-OP_TRUE-helper", raw, true);
+run(positiveCheckLabel(variant), raw, true);
 type Raw = ReturnType<typeof btc.RawTx.decode>;
 const vault = oneInput ? 0 : 1;
 const mutations: Array<[string, (tx: Raw) => void]> = [
@@ -99,11 +99,10 @@ const mutations: Array<[string, (tx: Raw) => void]> = [
   ["output-amount", t => { t.outputs[0].amount += 1n; }],
   ["fee", t => { t.outputs[0].amount -= 1n; }],
   ["extra-output", t => { t.outputs.push({ amount: 0n, script: new Uint8Array([0x51]) }); }],
-  ...(oneInput ? [] : [
-    ["helper-outpoint", (t: Raw) => { t.inputs[0].txid[0] ^= 1; }],
-    ["helper-sequence", (t: Raw) => { t.inputs[0].sequence = (t.inputs[0].sequence ^ 1) >>> 0; }],
-  ] as Array<[string, (tx: Raw) => void]>),
+  // The two-input order is unchanged, so its combined receipt stays byte-identical.
+  ...(oneInput ? [] : [["helper-outpoint", (t: Raw) => { t.inputs[0].txid[0] ^= 1; }]] as Array<[string, (tx: Raw) => void]>),
   ["vault-outpoint", t => { t.inputs[vault].txid[0] ^= 1; }],
+  ...(oneInput ? [] : [["helper-sequence", (t: Raw) => { t.inputs[0].sequence = (t.inputs[0].sequence ^ 1) >>> 0; }]] as Array<[string, (tx: Raw) => void]>),
   ["vault-sequence", t => { t.inputs[vault].sequence = (t.inputs[vault].sequence ^ 1) >>> 0; }],
   ["locktime", t => { t.lockTime ^= 1; }],
   ["version", t => { t.version += 1; }],

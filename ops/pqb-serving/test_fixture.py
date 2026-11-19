@@ -64,6 +64,15 @@ class FixtureTests(unittest.TestCase):
             self.assertNotEqual(fixture('validate', d).returncode, 0)
         with TemporaryDirectory() as directory:
             self.assertNotEqual(fixture('prepare', Path(directory), candidate['id'], 'three-input').returncode, 0)
+        # A two-input fixture labelled one-input-v1, or labelled with the default, is refused.
+        with TemporaryDirectory() as directory:
+            d = Path(directory)
+            self.assertEqual(fixture('prepare', d, candidate['id']).returncode, 0)
+            path = d / 'public-fixture.json'
+            original = json.loads(path.read_bytes())
+            for label in ['one-input-v1', 'two-input-v0']:
+                path.write_text(json.dumps({**original, 'variant': label}))
+                self.assertNotEqual(fixture('validate', d).returncode, 0)
 
     def test_empty_native_inventory_cannot_pass(self):
         with TemporaryDirectory() as directory:

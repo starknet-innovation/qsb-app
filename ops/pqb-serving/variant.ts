@@ -30,3 +30,7 @@ export function preparedVariant(prepared: { variant?: unknown }): Variant {
     throw Error("Unknown public fixture variant");
   return variant as Variant;
 }
+
+/** The offline Core positive check's label, which names its receipt files. */
+export const positiveCheckLabel = (variant: Variant) =>
+  variant === "one-input-v1" ? "solved-pqb-one-input" : "solved-pqb-with-public-OP_TRUE-helper";

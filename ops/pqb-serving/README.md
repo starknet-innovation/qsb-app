@@ -16,8 +16,8 @@ writes only public vault/job rows and a public workflow event with fresh identif
 fixture seed to its output. `VARIANT` is `two-input-v0` (the default: a public OP_TRUE helper, then a
 construction-v0 vault) or `one-input-v1` (the same vault output and payee with no helper, under construction
 v1, the PQB Ledger app's; the vault pays the same fee). A non-default variant is recorded as `variant` in
-`public-fixture.json`, and `validate`, `verify` and `consensus.ts` use it; `consensus.ts` then gives Core one
-spent output and mutates input 0. A native audit requires every successful Batch job’s immutable input, completed
+`public-fixture.json`, and `validate` and `consensus.ts` (including its retained follow-up) use it; for
+`one-input-v1`, `consensus.ts` gives Core one spent output and mutates input 0. A native audit requires every successful Batch job’s immutable input, completed
 output, the configured GPU model/driver and process-isolation startup logs. It re-derives all stage
 packets from the public intent and CPU-checked predecessor hits, then rechecks every
 emitted candidate, including superseded work.
@@ -248,9 +248,9 @@ It uses only the committed public test seed and nonexistent outpoints, checks th
 three full solutions again during real witness/co-signature assembly, and invokes
 the exact packaged Bitcoin Core 27.2 interpreter/library in network-disabled,
 read-only containers. It requires one accepted PQB spend and rejection of twelve
-transaction/witness mutations, retaining binary, library and container identities.
-The helper previous output is deliberately OP_TRUE: this tests the solved PQB
-script, not a wallet signature, chain/UTXO acceptance, miner policy or broadcast.
+transaction/witness mutations (ten for `one-input-v1`, which has no helper input to mutate), retaining binary,
+library and container identities. A two-input fixture's helper previous output is deliberately OP_TRUE: this
+tests the solved PQB script, not a wallet signature, chain/UTXO acceptance, miner policy or broadcast.
 Legacy signatures do not commit previous-output amounts; the production chain and
 exact-spend checks retain that responsibility. No wallet material is accepted.
 
