@@ -31,6 +31,7 @@
   "app.ts | POST /api/vaults | 400 | vault_invalid | Vault script does not match its commitment.",
   "app.ts | POST /api/vaults | 409 | vault_script_paid | This script has already been paid on chain, so it can't be a new vault.",
   "app.ts | POST /api/vaults | 409 | vault_script_registered | Another vault on this deployment already has this script.",
+  "app.ts | POST /api/vaults | 409 | vault_secrets_reused | Another of this wallet's vaults uses the same one-time secrets.",
   "app.ts | POST /api/vaults | 409 | vault_script_registered | Another vault on this deployment already has this script.",
   "app.ts | POST /api/vaults/:id/fund | 503 | operations_disabled | `${NETWORK_ID} funding is disabled pending validation and operator configuration.`",
   "app.ts | POST /api/vaults/:id/fund | 403 | owner_not_allowlisted | This wallet is not on this deployment's allowlist.",

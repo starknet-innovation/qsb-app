@@ -28,7 +28,8 @@ import {
   verifyRequest,
   webhookRequest,
 } from "./api-schemas";
-import { assertVaultConfiguration, pinSolver } from "../src/lib/provenance";
+import { assertVaultConfiguration, pinSolver, solverServesVault } from "../src/lib/provenance";
+import { pqbSharesSecrets } from "../src/lib/pqb";
 import { Hono } from "hono";
 import { BODY_HASH_HEADER, CREDENTIAL_HEADER } from "../src/lib/session";
 import { getPath } from "hono/utils/url";
@@ -736,6 +737,19 @@ export function createApp(
       return apiError(c, 409, "vault_script_paid", "This script has already been paid on chain, so it can't be a new vault.");
     if (elsewhere(held))
       return apiError(c, 409, "vault_script_registered", "Another vault on this deployment already has this script.");
+    // The same PQB seed under another construction is another script with the same one-time
+    // material: refuse it among this wallet's registered vaults. Not atomic with a concurrent
+    // registration; across wallets, custody must prevent reuse. A stored row that no longer
+    // parses is skipped rather than blocking the owner.
+    if (vault.config === "PQB") {
+      const shares = (other: PublicVault) => {
+        try { return pqbSharesSecrets(other.publicStateJson, vault.publicStateJson); } catch { return false; }
+      };
+      const mine = await store.list(`OWNER#${owner}`, "VAULT#");
+      if (mine.some(({ vault: other }) => (other as PublicVault).id !== vault.id
+        && (other as PublicVault).config === "PQB" && shares(other as PublicVault)))
+        return apiError(c, 409, "vault_secrets_reused", "Another of this wallet's vaults uses the same one-time secrets.");
+    }
     try {
       await store.atomicPut([
         { row: { pk: `OWNER#${owner}`, sk: `VAULT#${vault.id}`, version: 0, vault } },
@@ -1187,7 +1201,7 @@ export function createApp(
     try {
       selectedSolver = deployedSolver(manifest.solverReleaseId);
       const configuration = assertVaultConfiguration(v);
-      if (selectedSolver.protocol !== configuration.protocol || selectedSolver.generatorCommit !== configuration.generatorCommit)
+      if (!solverServesVault(selectedSolver, configuration))
         throw new Error("SolverVaultProtocolMismatch");
     }
     catch {

@@ -14,6 +14,10 @@ export function registrationError(error: unknown): unknown {
     return new Error(
       "Something has already paid this vault's script on chain, so it can't be a new vault and nothing was saved. Keep the backup you downloaded: it holds the secrets that can spend what was paid. Don't pay into this script.",
     );
+  if (code === "vault_secrets_reused")
+    return new Error(
+      "Another of your vaults already uses this vault's one-time secrets, so nothing was saved. Don't pay into this script, and keep the backup you downloaded.",
+    );
   if (code === "vault_script_registered")
     return new Error(
       "Another vault on this server already has this script, so nothing was saved. Don't pay into this script for a new vault, and keep the backup you downloaded.",

@@ -22,7 +22,9 @@ test("PQB generation and encrypted recovery stay local and work in a fresh brows
         network: "mainnet", config: "PQB", scriptHex: g.scriptHex, scriptHash: g.scriptHash,
         paymentAddress: "bc1qunfundedpublicfixtureonly000000000", publicStateJson: g.publicStateJson, status: "unfunded",
       }) };
-      if (g.scriptHex.length !== 9816 || g.publicStateJson.includes(JSON.parse(g.stateJson).seed)) throw Error("Invalid PQB public state");
+      // New vaults use construction v1 (4,696-byte script), recorded in recovery and public state.
+      if (g.scriptHex.length !== 9392 || JSON.parse(g.publicStateJson).version !== "v1" || JSON.parse(g.stateJson).version !== "v1"
+        || g.publicStateJson.includes(JSON.parse(g.stateJson).seed)) throw Error("Invalid PQB public state");
       const encrypted = await backup.encryptRecovery(r, "disposable browser PQB passphrase");
       runtime.lockQsb(); return { backup: encrypted, hash: g.scriptHash };
     });

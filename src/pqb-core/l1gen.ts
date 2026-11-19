@@ -1,11 +1,13 @@
 // A line-for-line port of pqb/_research/l1gen.py `build()` for the configuration pqb ships:
-// shared chained HORS table, stride-3 gadget, depth guard, gated pinning and round menus,
+// shared chained HORS table with the pick2 gadget (PQB v1) or the older stride-3 one, menu
+// sentinels or none (no_msent), depth guard, gated pinning and round menus,
 // 'none' / 'sound10' selector ladders, DER-only or full-key puzzle tails, independent menu
 // scalars, and the ECDSA co-signature. Any other option throws rather than guess.
 //
 // The output must be BYTE-identical to the Python: test/vectors.json (tools/js_vectors.py) pins
 // every script's sha256, the published artefacts included. The emitter keeps the same live stack
 // model as the Python, because every OP_ROLL depth in the script is read off it.
+import { parseScript } from './tx.js';
 import {
   Bytes, N, P, concat, fromHex, fromInt, hash160, hex, liftX, minimalBE, pubkeyOf, ripemd160, sha1,
   sha256, toInt, utf8,
@@ -14,9 +16,10 @@ import {
 export const OP = {
   ZERO: 0x00, TRUE: 0x51, DEPTH: 0x74, VERIFY: 0x69, DROP: 0x75, TWODROP: 0x6d, TWODUP: 0x6e,
   DUP: 0x76,
-  OVER: 0x78, ROLL: 0x7a, SWAP: 0x7c, TUCK: 0x7d, SIZE: 0x82, EQUAL: 0x87, EQUALVERIFY: 0x88,
+  OVER: 0x78, PICK: 0x79, ROLL: 0x7a, SWAP: 0x7c, TUCK: 0x7d, SIZE: 0x82, EQUAL: 0x87, EQUALVERIFY: 0x88,
   MIN: 0xa3, RIPEMD160: 0xa6, SHA1: 0xa7, SHA256: 0xa8, HASH160: 0xa9, HASH256: 0xaa,
-  CHECKSIG: 0xac, CHECKSIGVERIFY: 0xad, CHECKMULTISIGVERIFY: 0xaf, IF: 0x63, ELSE: 0x67,
+  CHECKSIG: 0xac, CHECKSIGVERIFY: 0xad, CHECKMULTISIG: 0xae, CHECKMULTISIGVERIFY: 0xaf, IF: 0x63,
+  ELSE: 0x67,
   ENDIF: 0x68,
 } as const;
 const HASHOP: Record<string, number> = {
@@ -83,6 +86,43 @@ export function derEncode(r: bigint, s: bigint): Bytes {
 
 export const derSig = (r: bigint, s: bigint, ht = 1): Bytes => concat(derEncode(r, s), [ht]);
 
+/** Bitcoin Core's IsValidSignatureEncoding (interpreter.cpp), on a signature WITH its hashtype
+ *  byte: the check DERSIG applies to every non-empty signature at consensus (l1gen.is_strict_der). */
+export function isStrictDer(sig: Bytes): boolean {
+  const n = sig.length;
+  if (n < 9 || n > 73 || sig[0] !== 0x30 || sig[1] !== n - 3) return false;
+  const lr = sig[3];
+  if (5 + lr >= n) return false;
+  const ls = sig[5 + lr];
+  if (lr + ls + 7 !== n || sig[2] !== 0x02 || lr === 0 || sig[4] & 0x80) return false;
+  if (lr > 1 && sig[4] === 0 && !(sig[5] & 0x80)) return false;
+  if (sig[lr + 4] !== 0x02 || ls === 0 || sig[lr + 6] & 0x80) return false;
+  if (ls > 1 && sig[lr + 6] === 0 && !(sig[lr + 7] & 0x80)) return false;
+  return true;
+}
+
+/** A script constant the pick2 gadget may hand to OP_CHECKMULTISIG as a signature parses as
+ *  strict DER (~2^-40 per 20-byte push): re-derive the key material. */
+export class DERCollisionError extends Error {
+  constructor(msg: string) { super(msg); this.name = 'DERCollisionError'; }
+}
+
+export interface DerHit { off: number | null; data: string; why: string }
+
+/** The pick2 soundness condition on the script bytes (l1gen.der_screen): every 20-byte push, and
+ *  the item directly under the table (`underTable`, its bytes), that parses as strict DER.
+ *  Empty = sound. OP_PICK leaves C_j in place, so a forger who re-selects C_j makes the ROLL hand
+ *  C_{j-1} (or, at the bottom, the item under the table) to CHECKMULTISIG as a signature. */
+export function derScreen(script: Bytes, underTable: Bytes | null = null): DerHit[] {
+  const hits: DerHit[] = [];
+  for (const [off, , data] of parseScript(script))
+    if (data !== null && data.length === 20 && isStrictDer(data))
+      hits.push({ off, data: hex(data), why: '20-byte push' });
+  if (underTable !== null && isStrictDer(underTable))
+    hits.push({ off: null, data: hex(underTable), why: 'item directly under the table' });
+  return hits;
+}
+
 let _XOK: number[] | null = null;
 /** 1-byte r values that are real x-coordinates (l1gen._XOK). */
 export function xok(): number[] {
@@ -126,12 +166,19 @@ export interface Menu {
   sigs: Bytes[]; comm: Bytes[]; r: bigint; s: bigint[]; hashname: string; hashop: number;
 }
 
-export function makeMenu(tag: string, K: number, hashname: string, smallR: boolean,
+/** `smallR`: false for a 32-byte r; true for the smallest 4-recovery-point r outside the dummy
+ *  pool (m = 4 or 12); 'r1' for r = 1, which has two recovery points (x = 1 is on the curve and
+ *  1 + n is not) and a 1-byte DER integer: the pinning menu from construction v1 on. */
+export function makeMenu(tag: string, K: number, hashname: string, smallR: boolean | 'r1',
   masterSeed: Bytes | null): Menu {
   if (hashname !== 'sha1') throw new Error('only the default SHA-1 menu commitment is ported');
   const seed = secret(masterSeed, 'r2f-menu-' + tag);
   let r: bigint | null = null;
-  if (smallR) {
+  if (smallR === 'r1') {
+    if (liftX(1n) === null || (1n + N < P && liftX(1n + N) !== null))
+      throw new Error('r = 1 must have exactly two recovery points');
+    r = 1n;
+  } else if (smallR) {
     const x = xok();
     for (let cand = 2; cand < 200; cand++) {
       const c = BigInt(cand);
@@ -172,6 +219,7 @@ export function makeMenu(tag: string, K: number, hashname: string, smallR: boole
 class Emit {
   st: string[];
   buf: number[] = [];
+  data = new Map<string, Bytes>();
   nops = 0;
   peak: number;
 
@@ -190,6 +238,7 @@ class Emit {
 
   push(slot: string, data: Bytes) {
     for (const x of pushData(data)) this.buf.push(x);
+    this.data.set(slot, data);
     this.st.push(slot);
     this.touch();
   }
@@ -298,7 +347,9 @@ export interface L1Params {
   hsel?: [string, number][] | null; der_only: boolean | boolean[]; sha1_chain: boolean;
   der_pk33: boolean; menu_hash?: string; wpad?: number; real_puzzles?: boolean;
   seed?: Bytes | null; cosig?: string | null; pin_keep_false?: boolean; pin_gate_last?: boolean;
-  hors_secret_bytes?: number;
+  hors_secret_bytes?: number; pin_r1?: boolean; tail_cms?: boolean; no_msent?: boolean;
+  /** Test hook only: replaces rungApply when deriving the table commitments. */
+  _rungApply?: (w: Bytes, k: number) => Bytes;
 }
 
 export interface L1Result {
@@ -309,6 +360,8 @@ export interface L1Result {
   preds: string[]; derOnly: boolean[]; realPuzzles: boolean;
   /** Holds the co-signature's private scalar: never log or serialise it. */
   cosig: Cosig;
+  /** pick2 only (the Python manifest's der_screen): the screen ran and found nothing. */
+  derScreen: { pushes20: number; under_table: string[]; hits: 0 } | null;
 }
 
 export function build(p: L1Params): L1Result {
@@ -325,8 +378,9 @@ export function build(p: L1Params): L1Result {
   if (tl.length !== R || ml.length !== S || Kl.length !== S || hs.length !== S ||
     preds.length !== R + 1 || DO.length !== R + 1) throw new Error('per-stage parameter lengths');
   if (!ml.every((x) => [2, 4, 6, 12].includes(x))) throw new Error('m must be 2, 4, 6 or 12');
-  if (p.sharing !== 'shared_chained' || p.gadget !== 'stride3')
-    throw new Error('only the shared_chained / stride3 layout is ported');
+  const gad = p.gadget;
+  if (p.sharing !== 'shared_chained' || (gad !== 'stride3' && gad !== 'pick2'))
+    throw new Error('only the shared_chained / stride3 or pick2 layouts are ported');
   if (!p.depth_guard) throw new Error('only depth-guarded scripts are ported');
   if (p.gates !== 1) throw new Error('only gated pinning stages are ported');
   if (p.sha1_chain) throw new Error('sha1_chain is not ported');
@@ -348,7 +402,8 @@ export function build(p: L1Params): L1Result {
     wit.push([...cur]);
     cur = cur.map((x) => sha256(x));
   }
-  const comm = Array.from({ length: p.n }, (_, j) => rungApply(wit[0][j], rung[0]));
+  const ra = p._rungApply ?? rungApply;
+  const comm = Array.from({ length: p.n }, (_, j) => ra(wit[0][j], rung[0]));
   const dsig = dummyPool(p.n, 0).map(([a, b]) => derSig(BigInt(a), BigInt(b)));
 
   const ladU: Bytes[][][] = [];
@@ -367,7 +422,9 @@ export function build(p: L1Params): L1Result {
   const cosig: Cosig = { form: 'p2pkh', d: ck.d, pk: ck.pk, h160: hash160(ck.pk), hashtype: 1 };
   const rg = p.round_gates;
   if (!(rg >= 0 && rg <= R)) throw new Error('round_gates must be <= R');
-  const menu = makeMenu('pin', Kl[0], menuHash, [4, 12].includes(ml[0]), seed);
+  if (p.pin_r1 && ![2, 6].includes(ml[0]))
+    throw new Error('pin_r1 needs a gated, 2-recovery-point pinning stage');
+  const menu = makeMenu('pin', Kl[0], menuHash, p.pin_r1 ? 'r1' : [4, 12].includes(ml[0]), seed);
   const rmenu = Array.from({ length: R }, (_, r) =>
     r < rg ? makeMenu('round' + r, Kl[r + 1], menuHash, [4, 12].includes(ml[r + 1]), seed) : null);
   const allc = [menu, ...rmenu].flatMap((m) => (m ? m.comm.map(hex) : []));
@@ -423,34 +480,45 @@ export function build(p: L1Params): L1Result {
   else e.op(OP.EQUAL);               // elided: 1 opcode, 1 byte, the same empty false
   e.drop(2);
   e.st.push('#false'); e.touch();
-  e.push('MSENT', Uint8Array.of(1));
+  // no_msent: no sentinel under the menu commitments; the clamp's reference item is MC_0 itself
+  const msent = !p.no_msent;
+  const gref = (s: string) => (msent ? s : s.replace('MSENT', 'MC') + '_0');
+  const goff = msent ? 1 : 0;
+  if (msent) e.push('MSENT', Uint8Array.of(1));
   menu.comm.forEach((c, i) => e.push('MC_' + i, c));
   e.rollSlot('menu_idx');
   {
     const L = e.st.length;
-    const cap = (L - 1) - 1 - (e.pos('MSENT') + 1);
+    const cap = (L - 1) - 1 - (e.pos(gref('MSENT')) + goff);
     e.constBinop(cap, OP.MIN, '#clamped');
   }
   e.op(OP.ROLL);
-  e.tableFetch('MSENT', 1, 'MC_sel');
+  e.tableFetch(gref('MSENT'), goff, 'MC_sel');
   e.rollSlot('menu_sig');
   e.op(menu.hashop);
   e.op(OP.EQUALVERIFY); e.drop(2);
 
-  // ---- the shared chained table, stride-3
+  // ---- the shared chained table: D_j C_j (pick2) or D_j F_j C_j (stride-3)
   e.push('TSENT', Uint8Array.of(1));
   for (let j = 0; j < p.n; j++) {
     e.push('D_' + j, dsig[j]);
-    e.push('F_' + j, Uint8Array.of(1));
+    if (gad === 'stride3') e.push('F_' + j, Uint8Array.of(1));
     e.push('C_' + j, comm[j]);
   }
   const csent = 'TSENT';
+  // pick2: what sits directly under D_0 (screened as a possible signature below)
+  let underTable: [string | null, Bytes | null] | null = null;
+  if (gad === 'pick2') {
+    const q = e.pos('D_0');
+    const below = q ? e.st[q - 1] : null;
+    underTable = [below, below === null ? null : e.data.get(below) ?? null];
+  }
 
   // ---- rounds
   for (let r = 0; r < R; r++) {
     const rm = rmenu[r];
     if (rm) {
-      e.push('MSENT' + r, Uint8Array.of(1));
+      if (msent) e.push('MSENT' + r, Uint8Array.of(1));
       rm.comm.forEach((c, i) => e.push(`MC${r}_${i}`, c));
     }
     e.push('dummy' + r, new Uint8Array(0));
@@ -459,8 +527,15 @@ export function build(p: L1Params): L1Result {
       e.rollSlot(`i${r}_${a}`);
       // depth guard: no per-selection clamp
       e.op(OP.DUP); e.dup();
-      e.op(OP.ROLL);
-      e.tableFetch(csent, 3, `CSEL${r}_${a}`);
+      if (gad === 'pick2') {
+        // PICK copies C_j and leaves it in place; the ROLL at the same index then reaches the
+        // D_j directly under it
+        e.op(OP.PICK);
+        e.st.pop(); e.st.push(`CSEL${r}_${a}`); e.touch();
+      } else {
+        e.op(OP.ROLL);
+        e.tableFetch(csent, 3, `CSEL${r}_${a}`);
+      }
       e.rollSlot(`pre${r}_${a}`);
       for (const oc of rungOps(rung[r])) e.op(oc);
       e.op(OP.EQUALVERIFY); e.drop(2);
@@ -470,10 +545,11 @@ export function build(p: L1Params): L1Result {
     if (rm) {
       e.rollSlot('midx' + r);
       const L = e.st.length;
-      const cap = (L - 1) - 1 - (e.pos('MSENT' + r) + 1);
+      const ref = gref('MSENT' + r);
+      const cap = (L - 1) - 1 - (e.pos(ref) + goff);
       e.constBinop(cap, OP.MIN, '#clamped');
       e.op(OP.ROLL);
-      e.tableFetch('MSENT' + r, 1, 'MC_sel' + r);
+      e.tableFetch(ref, goff, 'MC_sel' + r);
       e.rollSlot('msig' + r);
       e.tuck();
       e.op(rm.hashop);
@@ -498,15 +574,47 @@ export function build(p: L1Params): L1Result {
     }
     if (!rm) for (let a = 0; a < tl[r]; a++) e.rollSlot(`k${r}_${a}`);
     e.pushConst(M);
-    e.op(OP.CHECKMULTISIGVERIFY, M);
-    e.st.splice(e.st.length - (2 * M + 3), 2 * M + 3);
+    if (p.tail_cms && r === R - 1) {
+      // tail_cms: the script's last opcode. Its result is the final stack top, which
+      // VerifyScript requires to be true, so it is enforced exactly as CHECKMULTISIGVERIFY OP_1.
+      e.op(OP.CHECKMULTISIG, M);
+      e.st.splice(e.st.length - (2 * M + 3), 2 * M + 3);
+      e.st.push('RESULT'); e.touch();
+    } else {
+      e.op(OP.CHECKMULTISIGVERIFY, M);
+      e.st.splice(e.st.length - (2 * M + 3), 2 * M + 3);
+    }
   }
-  // tail: OP_TRUE is a push, not a charged opcode
-  e.buf.push(OP.TRUE);
-  e.st.push('TRUE'); e.touch();
+  if (!p.tail_cms) {
+    // tail: OP_TRUE is a push, not a charged opcode
+    e.buf.push(OP.TRUE);
+    e.st.push('TRUE'); e.touch();
+  }
+
+  const script = Uint8Array.from(e.buf);
+  let derScreenInfo: L1Result['derScreen'] = null;
+  if (underTable) {
+    // REQUIRED (see derScreen): fail loudly on the ~2^-40 event rather than return a script in
+    // which nFound == t no longer proves t distinct openings.
+    const [below, data] = underTable;
+    if (data === null)
+      throw new DERCollisionError(`pick2: the item directly under the table (${below}) is not a ` +
+        'script constant, so it cannot be screened');
+    const hits = derScreen(script, data);
+    if (hits.length)
+      throw new DERCollisionError(`pick2: ${hits.length} script constant(s) parse as strict DER (` +
+        hits.map((h) => `${h.why} at byte ${h.off}`).join(', ') + '); OP_CHECKMULTISIG would ' +
+        'accept one as a signature after a re-selected commitment, so nFound == t would no ' +
+        'longer prove t distinct openings. Re-derive the key material (another seed or wallet ' +
+        'index).');
+    derScreenInfo = {
+      pushes20: parseScript(script).filter(([, , d]) => d !== null && d.length === 20).length,
+      under_table: [below as string], hits: 0,
+    };
+  }
 
   return {
-    script: Uint8Array.from(e.buf), slots, W, ops: e.nops, peak: e.peak, wit, comm, dsig,
+    script, derScreen: derScreenInfo, slots, W, ops: e.nops, peak: e.peak, wit, comm, dsig,
     sigNonce, pinSig, menu, rmenu, rung, ladU, ladCU, tl, ml, Kl, hs, preds, derOnly: DO,
     realPuzzles: real, cosig,
   };

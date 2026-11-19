@@ -34,6 +34,7 @@ import { BITCOIN_NETWORK, NETWORK_CONFIG } from "../src/lib/network";
 import { outputScript } from "../src/lib/transactions";
 import type { Job, PublicVault, Withdrawal } from "../src/lib/model";
 import { withVaultConfiguration } from "../src/lib/provenance";
+import { adoptPqb } from "../src/lib/pqb";
 import { GPU_SECONDS_SK, type OwnerLimits } from "../server/owner-limits";
 import servedRelease from "../src/lib/releases/qsb-solver-aws-v0-1-0.json";
 
@@ -324,6 +325,21 @@ const cases: [ApiErrorCode, number, (f: Fixture) => Response | Promise<Response>
     );
     await f.store.put(scriptReservation("bc1qanotherowner", { id: other, scriptHash: registrable().scriptHash }));
     return f.call("POST", "/vaults", registrable());
+  }],
+  ["vault_secrets_reused", 409, async (f) => {
+    // One public synthetic seed under v0 (registered) and v1 (refused): the same HORS commitments.
+    const pqbVault = (version?: string, id = vaultId) => {
+      const g = adoptPqb(JSON.stringify({ config: "PQB", seed: "11".repeat(32), ...(version ? { version } : {}) }));
+      return withVaultConfiguration({ ...vault(), id, config: "PQB", scriptHex: g.scriptHex, scriptHash: g.scriptHash,
+        publicStateJson: g.publicStateJson });
+    };
+    await f.putVault(pqbVault());
+    const reused = pqbVault("v1", other);
+    genesis(f);
+    f.routes.set(`/scripthash/${reused.scriptHash}`, () =>
+      Response.json({ chain_stats: { funded_txo_count: 0 }, mempool_stats: { funded_txo_count: 0 } }),
+    );
+    return f.call("POST", "/vaults", reused);
   }],
   ["vault_script_paid", 409, (f) => {
     genesis(f);

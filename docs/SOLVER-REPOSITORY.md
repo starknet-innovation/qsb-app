@@ -18,7 +18,7 @@ The descriptors in `src/lib/releases` (see [its README](../src/lib/releases/READ
 | `qsb-solver-v0-1-0.json` | [`v0.1.0`](https://github.com/starknet-innovation/qsb-solver/releases/tag/v0.1.0) | Schema 2, with no search-contract binding, so it is refused for new paid submissions. Kept byte-identical for inspecting jobs. |
 | `qsb-config-a-ranked-v2.json` | archived | The descriptor from before the split. Its image names a placeholder account (`000000000000`) and is not deployable. Kept byte-identical; never edit it. |
 
-The three Config A AWS releases use the same protocol, generator commit and `ranked-v2` search contract, so vaults are unaffected by which one is served.
+The three Config A AWS releases use the same protocol, generator commit and `ranked-v2` search contract, so vaults are unaffected by which one is served. A PQB release may name the commit of any PQB construction. It serves `v0` vaults, and `v1` vaults too when its kernel searches the pick2 table: v0.2.0 or a release naming `82c7cba`, not v0.1.0 ([constructions](PQB.md#constructions)).
 
 ## Search contract
 

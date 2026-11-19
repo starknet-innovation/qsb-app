@@ -15,7 +15,7 @@ import fixture from "./fixtures/pqb-reference.json";
 import { adoptPqb } from "../src/lib/pqb";
 import { publicVaultSchema, type Job, type PublicVault } from "../src/lib/model";
 import { pinSolver, withVaultConfiguration, solverRegistry, fingerprint } from "../src/lib/provenance";
-import { PQB_GENERATOR_COMMIT } from "../src/lib/pqb-identity";
+import { PQB_CONSTRUCTION_COMMITS } from "../src/lib/pqb-identity";
 import { deployedSolver } from "../server/solver-deployment";
 import { MemoryStore } from "../server/store";
 import { parallelTick } from "../server/parallel-search";
@@ -83,7 +83,8 @@ it("enrolls only the matching PQB contract/generator and never pins a QSB releas
   for (const change of [{ searchContract: servedFixture.searchContract }, { generatorCommit: servedFixture.generatorCommit },
     { searchVersion: "ranked-v2" }, { image: "ghcr.io/starknet-innovation/qsb-solver:latest" }])
     expect(() => solverRegistry([{ ...pqbFixture, ...change }])).toThrow();
-  expect(vault.configuration.generatorCommit).toBe(PQB_GENERATOR_COMMIT);
+  // The synthetic reference vault predates versioned constructions: its generator is v0's.
+  expect(vault.configuration.generatorCommit).toBe(PQB_CONSTRUCTION_COMMITS.v0);
 });
 
 it("sends exactly the PQB worker request, with the CPU-derived problem and a durable reservation", async () => {
