@@ -48,6 +48,7 @@ import {
   type CoordinatorSignedResult,
 } from "../src/mainnet/coordinatorResult";
 import { publicRuntime } from "./public-runtime";
+import { pqbSharesSecrets } from "../src/lib/pqb";
 import type { AuthorizationStore, CreateWithdrawal, Credentials, ExternalCustody, VaultDescriptor, WithdrawalSigningRequest } from "./custody";
 export type { AuthorizationStore } from "./custody";
 import {
@@ -230,10 +231,9 @@ function assertOwnerAllowed(config: ApiConfig) {
  */
 function sharingSecrets(vaults: PublicVault[], publicStateJson: string): PublicVault | undefined {
   const state = JSON.parse(publicStateJson);
-  if (state.config === "PQB") {
-    // The seed fixes every commitment and co-signature key; a reused seed rebuilds this script.
-    return vaults.find(v => v.scriptHex === state.full_script_hex);
-  }
+  if (state.config === "PQB")
+    // A reused seed pushes the same HORS commitments under any construction, even where the scripts differ.
+    return vaults.find(v => v.config === "PQB" && pqbSharesSecrets(v.publicStateJson, publicStateJson));
   const { hors_commitments: rounds } = state as { hors_commitments: string[][] };
   // Each commitment is a 20-byte push. A chance match elsewhere in a script would only refuse.
   const pushes = rounds.flat().map((commitment) => `14${commitment}`);

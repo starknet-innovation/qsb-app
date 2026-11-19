@@ -45,25 +45,40 @@ export const pqbPublicStateSchema = z.object({
  * TSENT, D_j then C_j (the pick2 gadget) or D_j, F_j=1, C_j (stride-3), per the construction.
  */
 export function validatePqbPublicState(text: string) {
+  return boundTable(text).state;
+}
+
+/** The validated state and the HORS commitment the script pushes after each table entry. */
+function boundTable(text: string) {
   const state = pqbPublicStateSchema.parse(JSON.parse(text));
   const stride3 = versionParams(pqbConstructionOf(state)).gadget === "stride3", step = stride3 ? 3 : 2;
   const tokens = parseScript(fromHex(state.full_script_hex));
   const one = (i: number) => tokens[i]?.[1] === 0x51 ||
     (tokens[i]?.[2]?.length === 1 && tokens[i][2]![0] === 1);
-  const candidates: string[][] = [];
+  const candidates: { table: string[]; commitments: string[] }[] = [];
   for (let start = 1; start + state.round_table.length * step <= tokens.length; start++) {
     if (!one(start - 1)) continue; // TSENT, followed by the table in setup order.
-    const table: string[] = [];
+    const table: string[] = [], commitments: string[] = [];
     for (let j = 0; j < state.round_table.length; j++) {
       const pos = start + step * j, signature = tokens[pos]?.[2], commitment = tokens[pos + step - 1]?.[2];
       if (signature?.length !== 9 || (stride3 && !one(pos + 1)) || commitment?.length !== 20) break;
-      table.push(hex(signature));
+      table.push(hex(signature)); commitments.push(hex(commitment));
     }
-    if (table.length === state.round_table.length) candidates.push(table);
+    if (table.length === state.round_table.length) candidates.push({ table, commitments });
   }
-  if (candidates.length !== 1 || candidates[0].some((sig, i) => sig !== state.round_table[i]))
+  if (candidates.length !== 1 || candidates[0].table.some((sig, i) => sig !== state.round_table[i]))
     throw new Error("PQB round table does not match the ordered table in its locking script.");
-  return state;
+  return { state, commitments: candidates[0].commitments };
+}
+
+/**
+ * Whether two PQB vaults share one-time material. A seed fixes the HORS secrets whatever the
+ * construction, so the same seed under v0 and v1 gives two scripts that push the same 109 HORS
+ * commitments, read here from each script's bound table. A chance match would only refuse.
+ */
+export function pqbSharesSecrets(a: string, b: string): boolean {
+  const commitments = new Set(boundTable(a).commitments);
+  return boundTable(b).commitments.some(c => commitments.has(c));
 }
 
 const recovery = z.object({ config: z.literal("PQB"), seed: z.string().regex(/^[0-9a-f]{64}$/),

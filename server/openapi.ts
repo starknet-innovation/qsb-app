@@ -894,7 +894,7 @@ export const apiRoutes: readonly ApiRoute[] = [
     },
     errors: merge(writes, allowlisted, chainRead, {
       400: ["vault_invalid"],
-      409: ["vault_script_registered", "vault_script_paid"],
+      409: ["vault_script_registered", "vault_script_paid", "vault_secrets_reused"],
     }),
   },
   {

@@ -1,5 +1,5 @@
 import { solverSearchContracts } from "../src/lib/search-contracts.generated";
-import { PQB_GENERATOR_COMMIT } from "../src/lib/pqb-identity";
+import { PQB_CONSTRUCTION_COMMITS } from "../src/lib/pqb-identity";
 import { createHash } from "node:crypto";
 import contract from "../contracts/ranked-v2.json";
 import archived from "../src/lib/releases/qsb-config-a-ranked-v2.json";
@@ -21,6 +21,6 @@ export const otherFixture = {...servedFixture,id:"external-test",kernelCommit:"b
 export const fixtureVault = {publicStateJson:"{}",network:"mainnet",config:"A",scriptHex:"51",scriptHash:createHash("sha256").update(Buffer.from("51","hex")).digest("hex")};
 
 export const pqbFixture = {
-  ...servedFixture, id: "pqb-served-test", protocol: "pqb-v1", generatorCommit: PQB_GENERATOR_COMMIT,
+  ...servedFixture, id: "pqb-served-test", protocol: "pqb-v1", generatorCommit: PQB_CONSTRUCTION_COMMITS.v1,
   searchVersion: "pqb-ranked-v2", searchContract: solverSearchContracts["pqb-v1"],
 };

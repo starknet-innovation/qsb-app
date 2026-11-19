@@ -1,8 +1,6 @@
 import source from "../pqb-core/provenance.json";
 
 export const PQB_PROTOCOL = "pqb-v1" as const;
-/** The vendored generator. It builds every construction listed in `source.constructions`. */
-export const PQB_GENERATOR_COMMIT = source.commit;
 export const PQB_SEARCH_VERSION = "pqb-ranked-v2" as const;
 export type PqbConstruction = keyof typeof source.constructions;
 /** Vaults made before constructions were versioned carry no version: they are v0. */

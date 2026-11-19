@@ -29,6 +29,7 @@ import {
   webhookRequest,
 } from "./api-schemas";
 import { assertVaultConfiguration, pinSolver, solverServesVault } from "../src/lib/provenance";
+import { pqbSharesSecrets } from "../src/lib/pqb";
 import { Hono } from "hono";
 import { BODY_HASH_HEADER, CREDENTIAL_HEADER } from "../src/lib/session";
 import { getPath } from "hono/utils/url";
@@ -717,6 +718,14 @@ export function createApp(
         "vault_invalid",
         "Vault script does not match its commitment.",
       );
+    // The same PQB seed under another construction is another script with the same one-time
+    // material: refuse it among this wallet's vaults. Across wallets, custody must prevent reuse.
+    if (vault.config === "PQB") {
+      const mine = await store.list(`OWNER#${c.get("owner")}`, "VAULT#");
+      if (mine.some(({ vault: other }) => (other as PublicVault).id !== vault.id && (other as PublicVault).config === "PQB"
+        && pqbSharesSecrets((other as PublicVault).publicStateJson, vault.publicStateJson)))
+        return apiError(c, 409, "vault_secrets_reused", "Another of this wallet's vaults uses the same one-time secrets.");
+    }
     // One vault per script on this deployment, by any address: a second record of a script would
     // let it take a second deposit, which the first withdrawal's disclosed HORS preimages weaken.
     const owner = c.get("owner");

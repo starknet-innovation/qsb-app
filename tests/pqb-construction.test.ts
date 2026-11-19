@@ -1,6 +1,10 @@
 // PQB constructions: v0 (the pre-version eccdd09 vaults) and v1 (upstream 82c7cba, which the PQB
 // Ledger app builds). Public synthetic fixtures from each commit's independent Python reference.
 import { describe, expect, it } from "vitest";
+import { createHash, randomUUID } from "node:crypto";
+import * as btc from "@scure/btc-signer";
+import { createApp } from "../server/app";
+import { MemoryStore } from "../server/store";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import v0 from "./fixtures/pqb-reference.json";
 import v1 from "./fixtures/pqb-reference-v1.json";
@@ -12,11 +16,11 @@ import { evaluate } from "../src/pqb-core/grind";
 import { fromHex, hex } from "../src/pqb-core/primitives";
 import { legacySighashAll, parseScript } from "../src/pqb-core/tx";
 import {
-  adoptPqb, generatePqb, pqbPacket, pqbProblem, pqbTransaction, validatePqbPublicState, PQB_MAX_SCRIPTSIG,
+  adoptPqb, generatePqb, pqbSharesSecrets, pqbPacket, pqbProblem, pqbTransaction, validatePqbPublicState, PQB_MAX_SCRIPTSIG,
 } from "../src/lib/pqb";
 import { withdrawalSchema } from "../src/lib/model";
-import { solverServesVault, vaultConfiguration } from "../src/lib/provenance";
-import { PQB_CONSTRUCTION_COMMITS, PQB_GENERATOR_COMMIT, pqbConstructionOf } from "../src/lib/pqb-identity";
+import { solverServesVault, vaultConfiguration, withVaultConfiguration } from "../src/lib/provenance";
+import { PQB_CONSTRUCTION_COMMITS, pqbConstructionOf } from "../src/lib/pqb-identity";
 import pqbV020 from "../src/lib/releases/qsb-solver-pqb-aws-sm86-v0-2-0.json";
 import { servedFixture } from "./solver-fixture";
 
@@ -27,7 +31,6 @@ const vaultOf = (g: ReturnType<typeof adoptPqb>) => ({ network: "mainnet", confi
 
 describe("vendored constructions", () => {
   it("vendors upstream 82c7cba with v1 latest and v0 kept as eccdd09's parameters", () => {
-    expect(PQB_GENERATOR_COMMIT).toBe(provenance.commit);
     expect(VERSIONS).toEqual(Object.keys(provenance.constructions));
     expect(LATEST_VERSION).toBe("v1");
     expect(PQB_CONSTRUCTION_COMMITS).toEqual({ v0: v0.commit, v1: v1.commit });
@@ -124,5 +127,33 @@ describe("v1 spend", () => {
     const pushes = parseScript(out.scriptSig), sig = pushes.at(-2)![2]!, pk = pushes.at(-1)![2]!;
     expect(secp256k1.verify(sig.subarray(0, -1), legacySighashAll(out.tx, 1, lock.script), pk,
       { format: "der", prehash: false, lowS: true })).toBe(true);
+  });
+});
+
+describe("one seed, two constructions", () => {
+  it("shares the table, so it is the same one-time material", () => {
+    const a = adoptPqb(state(v1.seed)), b = adoptPqb(state(v1.seed, "v1"));
+    expect(a.scriptHash).not.toBe(b.scriptHash);
+    expect(pqbSharesSecrets(a.publicStateJson, b.publicStateJson)).toBe(true);
+    expect(pqbSharesSecrets(a.publicStateJson, generatePqb().publicStateJson)).toBe(false);
+  });
+
+  it("refuses to register it again for the same owner, under either construction", async () => {
+    const store = new MemoryStore(), token = "a".repeat(43);
+    const owner = btc.p2wpkh(secp256k1.getPublicKey(new Uint8Array(32).fill(3), true)).address!;
+    await store.put({ pk: `SESSION#${createHash("sha256").update(token).digest("hex")}`, sk: "AUTH", version: 0,
+      owner, network: "mainnet", expiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    const app = createApp(store, { enabled: true, chain: { scriptFunded: async () => false } as never });
+    const register = (g: ReturnType<typeof adoptPqb>) => app.request("/api/vaults", { method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(withVaultConfiguration({ id: randomUUID(), name: "pqb", createdAt: new Date().toISOString(),
+        network: "mainnet", config: "PQB", scriptHex: g.scriptHex, scriptHash: g.scriptHash,
+        publicStateJson: g.publicStateJson, paymentAddress: owner, status: "unfunded" })) });
+    expect((await register(adoptPqb(state(v1.seed)))).status).toBe(201);
+    const reused = await register(adoptPqb(state(v1.seed, "v1")));
+    expect(reused.status).toBe(409);
+    expect(await reused.json()).toMatchObject({ code: "vault_secrets_reused" });
+    expect((await register(generatePqb())).status).toBe(201);
+    expect((await store.list(`OWNER#${owner}`, "VAULT#"))).toHaveLength(2);
   });
 });
