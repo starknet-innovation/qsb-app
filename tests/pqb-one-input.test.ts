@@ -75,7 +75,7 @@ describe("one-input PQB transaction and problems", () => {
 
   it("assembles the one-input witness with a SIGHASH_ALL co-signature over input 0", () => {
     // Witness assembly only: these default subsets do not solve the real hash puzzles.
-    const lock = buildLock("PQB", fromHex(reference.seed));
+    const lock = buildLock("PQB", fromHex(reference.seed), { version: "v0" });
     const tx = pqbTransaction(oneInput, sequence, locktime);
     const out = assemble(lock, { txid: oneInput.funding.txid, vout: 0, amount: 100000 }, [], {
       transaction: tx, inputIndex: 0, selection: [reference.priorSelection, [0, 1, 2, 4, 5, 6, 7, 8, 10]],
@@ -91,6 +91,28 @@ describe("one-input PQB transaction and problems", () => {
     // The SDK verifier checks input 0 and still refuses unsolved puzzle signatures.
     expect(() => verifyPqbWitness(out.hex, reference.scriptHex, 0)).toThrow(/signature|SIGHASH_ALL/);
     expect(() => verifyPqbWitness(out.hex, reference.scriptHex, 1)).toThrow("vault input is missing");
+  });
+
+  it("builds the one-input problem and witness for a construction-v1 vault too", () => {
+    // The Ledger app's construction. Witness assembly only: default subsets don't solve the puzzles.
+    const v1 = adoptPqb(JSON.stringify({ config: "PQB", seed: reference.seed, version: "v1" }));
+    expect(JSON.parse(v1.publicStateJson).version).toBe("v1");
+    for (const stage of [0, 1, 2]) {
+      expect(pqbPacket(v1.publicStateJson, oneInput, stage, prior).n_in).toBe(0);
+      expect(pqbProblem(v1.publicStateJson, oneInput, stage, prior))
+        .not.toBe(pqbProblem(generated.publicStateJson, oneInput, stage, prior));
+    }
+    const lock = buildLock("PQB", fromHex(reference.seed), { version: "v1" });
+    const out = assemble(lock, { txid: oneInput.funding.txid, vout: 0, amount: 100000 }, [], {
+      transaction: pqbTransaction(oneInput, sequence, locktime), inputIndex: 0,
+      selection: [reference.priorSelection, [0, 1, 2, 4, 5, 6, 7, 8, 10]],
+    });
+    expect(out.simError).toBeNull();
+    expect(out.tx.vin).toHaveLength(1);
+    expect(out.scriptSig.length).toBeLessThanOrEqual(PQB_MAX_SCRIPTSIG);
+    const pushes = parseScript(out.scriptSig), sig = pushes.at(-2)![2]!, pk = pushes.at(-1)![2]!;
+    expect(secp256k1.verify(sig.subarray(0, -1), legacySighashAll(out.tx, 0, lock.script), pk,
+      { format: "der", prehash: false, lowS: true })).toBe(true);
   });
 
   it("verifies a synthetic one-input co-signature at input 0 and rejects an edited output", () => {
