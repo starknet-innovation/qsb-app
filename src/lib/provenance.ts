@@ -4,6 +4,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import publishedV2 from "./releases/qsb-solver-v0-1-0.json";
 import archived from "./releases/qsb-config-a-ranked-v2.json";
+import pqbPick2Release from "./releases/qsb-solver-pqb-aws-sm86-v0-2-0.json";
 import { z } from "zod";
 import externalDescriptors from "./releases/registry.generated";
 import type { PublicVault } from "./model";
@@ -137,17 +138,27 @@ export function assertVaultConfiguration(
   return expected;
 }
 /**
+ * PQB kernels that search the v1 pick2 table, whose deletion boundaries are 21 bytes apart. The
+ * kernel of an eccdd09-only release assumes at least 22 and would skip work on a v1 vault. A
+ * release naming v1's generator qualifies too. The v0.2.0 release carries the 82c7cba CUDA import.
+ */
+const PICK2_KERNELS: ReadonlySet<string> = new Set([pqbPick2Release.kernelCommit]);
+/**
  * Whether a solver release can search a vault: the same protocol and, for PQB, any generator of
- * the compatible set (pqb-identity.ts); for Config A, the same generator.
+ * the compatible set (pqb-identity.ts), with a pick2-capable kernel for a v1 vault; for Config A,
+ * the same generator.
  */
 export function solverServesVault(
-  descriptor: Pick<SolverDescriptor, "protocol" | "generatorCommit">,
+  descriptor: Pick<SolverDescriptor, "protocol" | "generatorCommit"> & { kernelCommit?: string },
   configuration: { protocol: string; generatorCommit: string },
 ): boolean {
   if (descriptor.protocol !== configuration.protocol) return false;
-  return descriptor.protocol === "pqb-v1"
-    ? isPqbGeneratorCommit(descriptor.generatorCommit) && isPqbGeneratorCommit(configuration.generatorCommit)
-    : descriptor.generatorCommit === configuration.generatorCommit;
+  if (descriptor.protocol !== "pqb-v1") return descriptor.generatorCommit === configuration.generatorCommit;
+  if (!isPqbGeneratorCommit(descriptor.generatorCommit) || !isPqbGeneratorCommit(configuration.generatorCommit))
+    return false;
+  return configuration.generatorCommit !== PQB_CONSTRUCTION_COMMITS.v1
+    || descriptor.generatorCommit === PQB_CONSTRUCTION_COMMITS.v1
+    || (descriptor.kernelCommit !== undefined && PICK2_KERNELS.has(descriptor.kernelCommit));
 }
 export function pinSolver(
   v: VaultInput & { configuration?: unknown },

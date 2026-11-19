@@ -22,6 +22,7 @@ import { withdrawalSchema } from "../src/lib/model";
 import { solverServesVault, vaultConfiguration, withVaultConfiguration } from "../src/lib/provenance";
 import { PQB_CONSTRUCTION_COMMITS, pqbConstructionOf } from "../src/lib/pqb-identity";
 import pqbV020 from "../src/lib/releases/qsb-solver-pqb-aws-sm86-v0-2-0.json";
+import pqbV010 from "../src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json";
 import { servedFixture } from "./solver-fixture";
 
 const state = (seed: string, version?: string) =>
@@ -109,6 +110,16 @@ describe("compatible solver set", () => {
       expect(solverServesVault({ ...pqbV020, generatorCommit: "ab".repeat(20) }, configuration)).toBe(false);
       expect(solverServesVault(servedFixture, configuration)).toBe(false);
     }
+  });
+
+  it("serves a v1 vault only with a kernel that searches its pick2 table", () => {
+    const v0Vault = vaultConfiguration(vaultOf(adoptPqb(state(v0.seed))));
+    const v1Vault = vaultConfiguration(vaultOf(adoptPqb(state(v1.seed, "v1"))));
+    // v0.1.0 names eccdd09 and predates the 82c7cba CUDA import: v0 vaults only.
+    expect(solverServesVault(pqbV010, v0Vault)).toBe(true);
+    expect(solverServesVault(pqbV010, v1Vault)).toBe(false);
+    expect(solverServesVault(pqbV020, v1Vault)).toBe(true);
+    expect(solverServesVault({ ...pqbV010, generatorCommit: PQB_CONSTRUCTION_COMMITS.v1 }, v1Vault)).toBe(true);
   });
 });
 
