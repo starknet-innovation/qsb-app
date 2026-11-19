@@ -42,6 +42,38 @@ class FixtureTests(unittest.TestCase):
             path.write_text(json.dumps(data))
             self.assertNotEqual(fixture('validate', d).returncode, 0)
 
+    def test_one_input_v1_variant_is_recorded_and_bound(self):
+        releases = ROOT / 'src/lib/releases'
+        candidate = json.loads((releases / 'qsb-solver-pqb-aws-sm86-v0-2-0.json').read_bytes())
+        with TemporaryDirectory() as directory:
+            d = Path(directory)
+            self.assertEqual(fixture('prepare', d, candidate['id'], 'one-input-v1').returncode, 0)
+            self.assertEqual(fixture('validate', d).returncode, 0)
+            self.assertEqual(fixture('preflight-input', d).returncode, 0)
+            path = d / 'public-fixture.json'
+            data = json.loads(path.read_bytes())
+            self.assertEqual(data['variant'], 'one-input-v1')
+            job, vault = data['rows'][1]['job'], data['rows'][0]['vault']
+            self.assertNotIn('helper', job['manifest'])
+            self.assertEqual(int(job['manifest']['outputValue']) + int(job['manifest']['fee']),
+                             int(job['manifest']['funding']['value']))
+            self.assertEqual(json.loads(vault['publicStateJson'])['version'], 'v1')
+            # Unlabelled, the rows read as the two-input v0 intent and are refused.
+            del data['variant']
+            path.write_text(json.dumps(data))
+            self.assertNotEqual(fixture('validate', d).returncode, 0)
+        with TemporaryDirectory() as directory:
+            self.assertNotEqual(fixture('prepare', Path(directory), candidate['id'], 'three-input').returncode, 0)
+        # A two-input fixture labelled one-input-v1, or labelled with the default, is refused.
+        with TemporaryDirectory() as directory:
+            d = Path(directory)
+            self.assertEqual(fixture('prepare', d, candidate['id']).returncode, 0)
+            path = d / 'public-fixture.json'
+            original = json.loads(path.read_bytes())
+            for label in ['one-input-v1', 'two-input-v0']:
+                path.write_text(json.dumps({**original, 'variant': label}))
+                self.assertNotEqual(fixture('validate', d).returncode, 0)
+
     def test_empty_native_inventory_cannot_pass(self):
         with TemporaryDirectory() as directory:
             d = Path(directory)

@@ -4,6 +4,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import { positiveCheckLabel, preparedVariant } from "./variant";
 
 const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 const allowed = new Set([
@@ -65,7 +66,7 @@ export function retainedContext(dir: string, campaign: any, job: any, currentCom
   if (matches.length !== 1 || !["manifest", "manifestHash", "solution", "solver", "vaultId", "owner"].every(k =>
     isDeepStrictEqual(matches[0].job[k], job[k]))) throw Error("Final job differs from sealed coordinator result");
   const originalRaw = bytes("solved-synthetic-transaction.hex").toString("utf8").trim();
-  const positive = json("offline-core-solved-pqb-with-public-OP_TRUE-helper.json");
+  const positive = json(`offline-core-${positiveCheckLabel(preparedVariant(json("public-fixture.json")))}.json`);
   const intent = json("offline-consensus-intent.json");
   if (positive.accepted !== true || positive.expectedValid !== true
     || positive.transactionSha256 !== sha(Buffer.from(originalRaw, "hex"))

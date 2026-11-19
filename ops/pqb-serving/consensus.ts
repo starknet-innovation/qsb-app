@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import fixture from "../../tests/fixtures/pqb-reference.json";
+import { fixtureVariant, positiveCheckLabel, preparedVariant } from "./variant";
 import { adoptPqb, assemblePqb } from "../../src/lib/pqb";
 import { coordinatorPublicSolvedResult } from "../../src/mainnet/coordinatorResult";
 import type { Job } from "../../src/lib/model";
@@ -29,10 +29,12 @@ if (execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim() 
   throw Error("Require the clean campaign source for offline assembly and verification");
 const retained = retainedMode ? retainedContext(dir, campaign, job, commit) : undefined;
 coordinatorPublicSolvedResult(job);
+const variant = preparedVariant(original), oneInput = variant === "one-input-v1";
 if (job.manifestHash !== original.rows[1].job.manifestHash || job.manifest.funding.txid !== "11".repeat(32)
-  || job.manifest.helper?.txid !== "22".repeat(32)) throw Error("Only the unfunded public intent is accepted");
+  || (oneInput ? job.manifest.helper !== undefined : job.manifest.helper?.txid !== "22".repeat(32)))
+  throw Error("Only the unfunded public intent is accepted");
 // This seed is committed public test data, never wallet or operator recovery material.
-const state = JSON.stringify({ config: "PQB", seed: fixture.seed });
+const state = fixtureVariant(variant).state;
 const native = path.resolve("terraform/.build/api/native"), build = path.resolve("terraform/.build");
 const manifest = JSON.parse(readFileSync(path.join(build, "manifest.json"), "utf8"));
 const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
@@ -77,7 +79,9 @@ save("offline-consensus-intent.json", JSON.stringify({ ...provenance, sourceComm
   binarySha256: sha(readFileSync(path.join(native, "qsb-consensus"))),
   librarySha256: sha(readFileSync(path.join(native, "libbitcoinconsensus.so.0"))) }, null, 2) + "\n");
 function run(label: string, transaction: string, valid: boolean, vaultScript = generated.scriptHex) {
-  const input = [transaction, "2", job.manifest.helper!.value, "51", job.manifest.funding.value, vaultScript].join("\n") + "\n";
+  // Spent outputs in input order: the public OP_TRUE helper first when there is one, then the vault.
+  const input = [transaction, ...(oneInput ? ["1"] : ["2", job.manifest.helper!.value, "51"]),
+    job.manifest.funding.value, vaultScript].join("\n") + "\n";
   save(`offline-core-${label}.stdin`, input);
   const result = spawnSync("docker", args, { input, encoding: "utf8", timeout: 30000, maxBuffer: 4096 });
   const accepted = result.status === 0 && result.stdout === "core-27.2-api2-all-inputs-valid\n";
@@ -87,23 +91,25 @@ function run(label: string, transaction: string, valid: boolean, vaultScript = g
   if (result.error || result.signal || accepted !== valid || (!valid && result.status !== 1))
     throw Error("Offline Core check failed: " + label);
 }
-run("solved-pqb-with-public-OP_TRUE-helper", raw, true);
+run(positiveCheckLabel(variant), raw, true);
 type Raw = ReturnType<typeof btc.RawTx.decode>;
+const vault = oneInput ? 0 : 1;
 const mutations: Array<[string, (tx: Raw) => void]> = [
   ["destination", t => { t.outputs[0].script[2] ^= 1; }],
   ["output-amount", t => { t.outputs[0].amount += 1n; }],
   ["fee", t => { t.outputs[0].amount -= 1n; }],
   ["extra-output", t => { t.outputs.push({ amount: 0n, script: new Uint8Array([0x51]) }); }],
-  ["helper-outpoint", t => { t.inputs[0].txid[0] ^= 1; }],
-  ["vault-outpoint", t => { t.inputs[1].txid[0] ^= 1; }],
-  ["helper-sequence", t => { t.inputs[0].sequence = (t.inputs[0].sequence ^ 1) >>> 0; }],
-  ["vault-sequence", t => { t.inputs[1].sequence = (t.inputs[1].sequence ^ 1) >>> 0; }],
+  // The two-input order is unchanged, so its combined receipt stays byte-identical.
+  ...(oneInput ? [] : [["helper-outpoint", (t: Raw) => { t.inputs[0].txid[0] ^= 1; }]] as Array<[string, (tx: Raw) => void]>),
+  ["vault-outpoint", t => { t.inputs[vault].txid[0] ^= 1; }],
+  ...(oneInput ? [] : [["helper-sequence", (t: Raw) => { t.inputs[0].sequence = (t.inputs[0].sequence ^ 1) >>> 0; }]] as Array<[string, (tx: Raw) => void]>),
+  ["vault-sequence", t => { t.inputs[vault].sequence = (t.inputs[vault].sequence ^ 1) >>> 0; }],
   ["locktime", t => { t.lockTime ^= 1; }],
   ["version", t => { t.version += 1; }],
   ["co-signature", t => {
-    t.inputs[1].finalScriptSig = mutateCoSignature(t.inputs[1].finalScriptSig, hex.decode(generated.scriptHex));
+    t.inputs[vault].finalScriptSig = mutateCoSignature(t.inputs[vault].finalScriptSig, hex.decode(generated.scriptHex));
   }],
-  ["missing-vault-scriptsig", t => { t.inputs[1].finalScriptSig = new Uint8Array(); }],
+  ["missing-vault-scriptsig", t => { t.inputs[vault].finalScriptSig = new Uint8Array(); }],
 ];
 for (const [label, mutate] of mutations) {
   const tx = btc.RawTx.decode(hex.decode(raw)); mutate(tx);
@@ -113,6 +119,7 @@ save("offline-consensus.json", JSON.stringify({ ...provenance, passed: true, sou
   apiArtifactSha256: manifest.files["api.zip"], binarySha256: sha(readFileSync(path.join(native, "qsb-consensus"))),
   librarySha256: sha(readFileSync(path.join(native, "libbitcoinconsensus.so.0"))), runtimeImageId: runtime.Id,
   runtimeRepoDigests: runtime.RepoDigests, checks,
-  limits: ["Public OP_TRUE helper: no helper wallet signature", "No chain/UTXO or miner acceptance", "No broadcast",
+  limits: [oneInput ? "One input: the vault alone, construction v1" : "Public OP_TRUE helper: no helper wallet signature",
+    "No chain/UTXO or miner acceptance", "No broadcast",
     "Legacy input scripts do not commit previous-output amounts; chain and exact-spend checks remain required"] }, null, 2) + "\n");
 console.log(JSON.stringify({ passed: true, positiveChecks: 1, negativeChecks: mutations.length, broadcast: false }));

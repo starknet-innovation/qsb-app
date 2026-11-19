@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync, openSync, fsyncSync, closeSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import fixture from "../../tests/fixtures/pqb-reference.json";
+import { fixtureVariant, preparedVariant, VARIANTS, type Variant } from "./variant";
 import originalRelease from "../../src/lib/releases/qsb-solver-pqb-aws-sm86-v0-1-0.json";
 import { adoptPqb } from "../../src/lib/pqb";
 import { publicVaultSchema, canonicalManifest, type Job } from "../../src/lib/model";
@@ -15,7 +15,7 @@ import { nativeStartup } from "./native-startup";
 import { completedNativeReceipt, supersededCancellation } from "./native-result";
 import { coordinatorPublicSolvedResult } from "../../src/mainnet/coordinatorResult";
 
-const [mode, directory, indexName] = process.argv.slice(2);
+const [mode, directory, indexName, variantArg] = process.argv.slice(2);
 if (!["prepare", "validate", "verify", "audit", "preflight-input", "input-template"].includes(mode) || !directory) throw Error("Use prepare|validate|audit|verify EXTERNAL_DIRECTORY");
 const dir = path.resolve(directory);
 if (dir === process.cwd() || dir.startsWith(process.cwd() + path.sep)) throw Error("Keep evidence outside Git");
@@ -29,11 +29,12 @@ function save(name: string, value: unknown) {
   try { writeFileSync(fd, JSON.stringify(value, null, 2) + "\n"); fsyncSync(fd); } finally { closeSync(fd); }
   const parent = openSync(dir, "r"); try { fsyncSync(parent); } finally { closeSync(parent); }
 }
-if (fixture.manifest.funding.txid !== "11".repeat(32) || fixture.manifest.helper.txid !== "22".repeat(32))
-  throw Error("Fixture must be the committed unfunded synthetic intent");
 if (mode === "prepare") {
-  const generated = adoptPqb(JSON.stringify({ config: "PQB", seed: fixture.seed }));
-  const manifest = canonicalManifest({ ...fixture.manifest, vaultId: randomUUID(), idempotencyKey: randomUUID(),
+  // prepare DIRECTORY [RELEASE_ID [VARIANT]]: the default is the original two-input-v0 intent.
+  if (variantArg !== undefined && !VARIANTS.includes(variantArg as Variant)) throw Error(`Use a variant: ${VARIANTS.join(", ")}`);
+  const variant = (variantArg ?? "two-input-v0") as Variant, intent = fixtureVariant(variant);
+  const generated = adoptPqb(intent.state);
+  const manifest = canonicalManifest({ ...intent.manifest, vaultId: randomUUID(), idempotencyKey: randomUUID(),
     solverReleaseId: descriptor.id });
   const owner = manifest.destination, now = new Date().toISOString();
   const vault = publicVaultSchema.parse(withVaultConfiguration({ id: manifest.vaultId,
@@ -45,10 +46,11 @@ if (mode === "prepare") {
     revision: 0, computeSeconds: 0, gpuBudgetReservedSeconds: 0, gpuSubmissions: 0,
     solver: pinSolver(vault, descriptor.id) };
   save("public-fixture.json", { format: "pqb-serving-public-fixture-v1", descriptor,
+    ...(variant === "two-input-v0" ? {} : { variant }),
     event: { owner, jobId: job.id, revision: 0 }, rows: [
       { pk: `OWNER#${owner}`, sk: `VAULT#${vault.id}`, version: 0, vault },
       { pk: `OWNER#${owner}`, sk: `JOB#${job.id}`, version: 0, job } ] });
-  console.log(JSON.stringify({ prepared: true, release: descriptor.id, manifestHash: job.manifestHash }));
+  console.log(JSON.stringify({ prepared: true, release: descriptor.id, variant, manifestHash: job.manifestHash }));
 } else if (mode === "input-template") {
   const prepared = JSON.parse(readFileSync(path.join(dir, "public-fixture.json"), "utf8"));
   const row = JSON.parse(readFileSync(path.join(dir, "current-public-job.json"), "utf8"));
@@ -73,13 +75,15 @@ if (mode === "prepare") {
   save("preflight-input.json", { input, inputSha256: sha(JSON.stringify({ input })) });
 } else if (mode === "validate") {
   const prepared = JSON.parse(readFileSync(path.join(dir, "public-fixture.json"), "utf8"));
-  if (canonical(Object.keys(prepared).sort()) !== canonical(["descriptor", "event", "format", "rows"]) ||
+  const variant = preparedVariant(prepared), intent = fixtureVariant(variant);
+  if (canonical(Object.keys(prepared).sort()) !== canonical(["descriptor", "event", "format", "rows",
+    ...(variant === "two-input-v0" ? [] : ["variant"])].sort()) ||
     canonical(prepared.descriptor) !== canonical(descriptor) || prepared.rows.length !== 2)
     throw Error("Only the generated public fixture is accepted");
   const [v, j] = prepared.rows, vault = publicVaultSchema.parse(v.vault), job = j.job as Job;
-  const expected = canonicalManifest({ ...fixture.manifest, vaultId: vault.id,
+  const expected = canonicalManifest({ ...intent.manifest, vaultId: vault.id,
     idempotencyKey: job.id, solverReleaseId: descriptor.id });
-  const generated = adoptPqb(JSON.stringify({ config: "PQB", seed: fixture.seed }));
+  const generated = adoptPqb(intent.state);
   if (canonical(vault.publicStateJson) !== canonical(generated.publicStateJson) || vault.scriptHex !== generated.scriptHex
     || canonical(job.manifest) !== canonical(expected) || job.manifestHash !== sha(JSON.stringify(expected))
     || canonical(job.solver) !== canonical(pinSolver(vault, descriptor.id))
@@ -92,7 +96,7 @@ if (mode === "prepare") {
     || v.pk !== `OWNER#${expected.destination}` || j.pk !== v.pk || v.sk !== `VAULT#${vault.id}`
     || j.sk !== `JOB#${job.id}` || v.version !== 0 || j.version !== 0)
     throw Error("Fixture differs from the committed unfunded public input");
-  console.log(JSON.stringify({ publicFixtureValidated: true, manifestHash: job.manifestHash }));
+  console.log(JSON.stringify({ publicFixtureValidated: true, variant, manifestHash: job.manifestHash }));
 } else if (mode === "audit") {
   if (!indexName || !/^native-index-[0-9]+\.json$/.test(indexName)) throw Error("Require a collected native job index");
   const prepared = JSON.parse(readFileSync(path.join(dir, "public-fixture.json"), "utf8"));
